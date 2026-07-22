@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>内容引擎 - 发现 - 今日热点</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@700;800&amp;family=IBM+Plex+Mono:wght@500&amp;family=Noto+Sans:wght@400;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "tertiary-container": "#c83524",
+                        "surface": "#faf8ff",
+                        "tertiary-fixed": "#ffdad4",
+                        "surface-bright": "#faf8ff",
+                        "secondary": "#5b5f64",
+                        "on-primary": "#ffffff",
+                        "primary-container": "#1e5bff",
+                        "surface-container": "#ebedff",
+                        "inverse-on-surface": "#eff0ff",
+                        "outline": "#737688",
+                        "on-error": "#ffffff",
+                        "error": "#ba1a1a",
+                        "on-surface": "#111a35",
+                        "surface-dim": "#d0d9fd",
+                        "on-primary-container": "#ecedff",
+                        "on-tertiary-fixed": "#400100",
+                        "tertiary": "#a51b0e",
+                        "on-tertiary-fixed-variant": "#910802",
+                        "secondary-fixed": "#dfe2e9",
+                        "surface-container-highest": "#dbe1ff",
+                        "on-tertiary": "#ffffff",
+                        "surface-tint": "#004cec",
+                        "on-background": "#111a35",
+                        "on-secondary-fixed-variant": "#43474d",
+                        "surface-container-high": "#e3e7ff",
+                        "on-tertiary-container": "#ffeae6",
+                        "background": "#faf8ff",
+                        "inverse-surface": "#272f4b",
+                        "secondary-container": "#dfe2e9",
+                        "surface-container-lowest": "#ffffff",
+                        "error-container": "#ffdad6",
+                        "primary-fixed": "#dce1ff",
+                        "outline-variant": "#c3c5d9",
+                        "surface-container-low": "#f2f3ff",
+                        "on-primary-fixed": "#001551",
+                        "on-secondary-container": "#61656b",
+                        "inverse-primary": "#b7c4ff",
+                        "on-secondary-fixed": "#181c21",
+                        "on-error-container": "#93000a",
+                        "on-surface-variant": "#434656",
+                        "on-primary-fixed-variant": "#0039b5",
+                        "surface-variant": "#dbe1ff",
+                        "on-secondary": "#ffffff",
+                        "primary": "#0044d3",
+                        "secondary-fixed-dim": "#c3c7cd",
+                        "tertiary-fixed-dim": "#ffb4a7",
+                        "primary-fixed-dim": "#b7c4ff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "unit-lg": "24px",
+                        "sidebar-width": "208px",
+                        "unit-xl": "48px",
+                        "topbar-height": "56px",
+                        "unit-xs": "4px",
+                        "unit-sm": "8px",
+                        "unit-md": "16px"
+                    },
+                    "fontFamily": {
+                        "body-md": ["notoSans"],
+                        "body-lg": ["notoSans"],
+                        "headline-md": ["hankenGrotesk"],
+                        "display-lg": ["hankenGrotesk"],
+                        "label-mono": ["ibmPlexMono"]
+                    },
+                    "fontSize": {
+                        "body-md": ["14px", { "lineHeight": "1.6", "fontWeight": "400" }],
+                        "body-lg": ["16px", { "lineHeight": "1.6", "fontWeight": "400" }],
+                        "headline-md": ["24px", { "lineHeight": "1.4", "fontWeight": "700" }],
+                        "display-lg": ["40px", { "lineHeight": "1.2", "letterSpacing": "-0.02em", "fontWeight": "800" }],
+                        "label-mono": ["12px", { "lineHeight": "1.0", "letterSpacing": "0.05em", "fontWeight": "500" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { background-color: #FFFDF7; color: #111a35; }
+        .editorial-border { border: 1px solid #17203B; }
+        .editorial-border-b { border-bottom: 1px solid #17203B; }
+        .editorial-border-r { border-right: 1px solid #17203B; }
+        .editorial-border-t { border-top: 1px solid #17203B; }
+        .editorial-border-l { border-left: 1px solid #17203B; }
+        .editorial-border-2 { border: 2px solid #17203B; }
+        .editorial-border-l-2 { border-left: 2px solid #17203B; }
+        
+        .newspaper-divider {
+            height: 1px;
+            background-color: #17203B;
+            width: 100%;
+            position: relative;
+        }
+        .newspaper-divider::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 0;
+            width: 100%;
+            height: 1px;
+            background-color: #17203B;
+        }
+        
+        .btn-primary {
+            background-color: #1E5BFF;
+            color: #FFFDF7;
+            border: 1px solid #17203B;
+            transition: all 0.2s;
+        }
+        .btn-primary:hover {
+            box-shadow: 2px 2px 0 0 #F0523D;
+            transform: translate(-1px, -1px);
+        }
+        
+        .btn-secondary {
+            background-color: #FFFDF7;
+            color: #17203B;
+            border: 1px solid #17203B;
+            transition: all 0.2s;
+        }
+        .btn-secondary:hover {
+            background-color: #F2F3FF;
+        }
+        
+        .halftone-bg {
+            background-image: radial-gradient(#17203B 10%, transparent 11%);
+            background-size: 4px 4px;
+            opacity: 0.05;
+        }
+        
+        .tag-yellow { background-color: #FEEA9A; border: 1px solid #17203B; position: relative; }
+        .tag-mint { background-color: #A3E5C7; border: 1px solid #17203B; position: relative; }
+        .tag-yellow::before, .tag-mint::before {
+            content: ''; position: absolute; inset: 0;
+            background-image: radial-gradient(#000 10%, transparent 11%);
+            background-size: 3px 3px; opacity: 0.1;
+        }
+        
+        .drawer-shadow {
+            box-shadow: -4px 0 0 0 #17203B;
+        }
+    </style>
+</head>
+<body class="font-body-md text-body-md overflow-hidden">
+<!-- TopNavBar -->
+<header class="fixed top-0 left-0 w-full h-[56px] bg-surface flex justify-between items-center px-unit-lg z-50 editorial-border-b">
+<div class="flex items-center gap-4">
+<span class="font-headline-md text-headline-md font-bold text-on-surface">知行内容实验室</span>
+</div>
+<div class="flex-1 max-w-md mx-8">
+<div class="relative flex items-center editorial-border bg-surface-lowest">
+<span class="material-symbols-outlined ml-2 text-on-surface-variant">search</span>
+<input class="w-full bg-transparent border-none focus:ring-0 font-label-mono text-label-mono p-2" placeholder="Masthead Search..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<button class="material-symbols-outlined hover:bg-surface-container-high transition-colors p-1">notifications</button>
+<button class="material-symbols-outlined hover:bg-surface-container-high transition-colors p-1">sync</button>
+<button class="btn-primary px-4 py-1 text-label-mono font-label-mono">新建</button>
+<img alt="User Avatar" class="w-8 h-8 rounded-full editorial-border object-cover" data-alt="A minimalist professional user avatar portrait in a high-key lighting studio, wearing smart casual attire, set against a stark white background. The style is crisp, clean, and suited for a modern editorial SaaS interface." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCyY1I5SbbVYD8N4e7wBIZT4XhpJRYWBPPIiRGTjjwfx00zZ9bf-00C7SJzAjtS0IKPVTOWWT71PFymJuAxV266QrriSlfx2nLQ58_OZ3MIi8XayEqAI1tJTxq3E6i2lJTeQE0-0l8YtrGDu3qWVtrDGdRemWWQEb1U3W34GKHaIiHf5pmjWhKf72CVaG3mq4qLhCkY_IS5GLv13X_-zYokzZjpWeV9HrbgOucM-UH8phMsfRen3c8lpg"/>
+</div>
+</header>
+<!-- SideNavBar -->
+<nav class="fixed left-0 top-[56px] w-[208px] h-[calc(100vh-56px)] bg-surface-container-low flex flex-col py-unit-md gap-unit-sm z-40 editorial-border-r">
+<div class="px-4 mb-6">
+<div class="flex items-center gap-2 mb-1">
+<img alt="Content Engine Logo" class="w-6 h-6 editorial-border object-cover" data-alt="A stark, brutalist style logo icon featuring geometric shapes in deep ink blue and cobalt, representing a digital content engine. The background is a warm off-white." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAp54wR_KRih_ifselGaWbvXzCAIyIL2lT9UlKn6w3Sw0LfEY1Pm3gEqR-sIOPyM_8H-nDYMS2JIv65CFMFeUlnhBX3IN_6gICtGJOQ-QFhgCyLV4eMVdtxkxXpx-SwIaEubEKU-bD2_MVp2nZFvudb_O6r0rBYON1qXDobNe9II6oGF5W6thkJabSVpURGqV_wXbmX8T4O3_aXO8Lz6NuuDlwIQjITjaQg8vW4dVe5N4LG5fOfqQ2lXQ"/>
+<h2 class="font-headline-md text-headline-md font-black text-on-surface">内容引擎</h2>
+</div>
+<span class="font-label-mono text-label-mono text-on-surface-variant">V2.0</span>
+</div>
+<div class="px-4 mb-4">
+<button class="w-full btn-primary py-2 text-center font-label-mono text-label-mono">新建选题</button>
+</div>
+<div class="flex-1 flex flex-col gap-1 overflow-y-auto px-2">
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all" href="#"><span class="material-symbols-outlined">today</span>今天</a>
+<a class="flex items-center gap-3 px-3 py-2 bg-[#1E5BFF] text-on-primary border-l-4 border-[#F0523D]" href="#"><span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">explore</span>发现</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all" href="#"><span class="material-symbols-outlined">event_note</span>规划</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all" href="#"><span class="material-symbols-outlined">edit_note</span>创作</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all" href="#"><span class="material-symbols-outlined">publish</span>发布</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all" href="#"><span class="material-symbols-outlined">analytics</span>复盘</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all" href="#"><span class="material-symbols-outlined">inventory_2</span>素材库</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all" href="#"><span class="material-symbols-outlined">bolt</span>自动化</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all" href="#"><span class="material-symbols-outlined">settings</span>设置</a>
+</div>
+<div class="px-2 mt-auto">
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all" href="#"><span class="material-symbols-outlined">help</span>帮助中心</a>
+</div>
+</nav>
+<!-- Main Canvas -->
+<main class="ml-[208px] mt-[56px] h-[calc(100vh-56px)] overflow-y-auto p-unit-lg flex flex-col gap-6 relative">
+<div class="absolute inset-0 halftone-bg pointer-events-none -z-10"></div>
+<!-- Filters Header -->
+<div class="flex justify-between items-end pb-4 editorial-border-b">
+<div>
+<h1 class="font-headline-md text-[32px] font-black uppercase tracking-tight mb-4">今日热点</h1>
+<div class="flex gap-6 font-label-mono text-label-mono">
+<div class="flex gap-2 items-center">
+<span class="text-on-surface-variant">GENRE:</span>
+<div class="flex gap-2">
+<button class="bg-[#17203B] text-surface px-2 py-1 editorial-border">全部</button>
+<button class="btn-secondary px-2 py-1">AI</button>
+<button class="btn-secondary px-2 py-1">财经</button>
+<button class="btn-secondary px-2 py-1">历史</button>
+<button class="btn-secondary px-2 py-1">人文</button>
+<button class="btn-secondary px-2 py-1">国学</button>
+</div>
+</div>
+<div class="flex gap-2 items-center pl-6 editorial-border-l">
+<span class="text-on-surface-variant">TIME:</span>
+<div class="flex gap-2">
+<button class="bg-[#17203B] text-surface px-2 py-1 editorial-border">今天</button>
+<button class="btn-secondary px-2 py-1">近 7 天</button>
+</div>
+</div>
+</div>
+</div>
+<button class="btn-primary flex items-center gap-2 px-4 py-2 font-label-mono text-label-mono">
+<span class="material-symbols-outlined text-[18px]">refresh</span>
+                刷新热点
+            </button>
+</div>
+<!-- Vertical List -->
+<div class="flex flex-col gap-4 max-w-5xl">
+<!-- Item 1 -->
+<div class="p-4 bg-surface editorial-border flex gap-4 hover:bg-surface-container-low transition-colors cursor-pointer group" onclick="document.getElementById('detail-drawer').classList.remove('translate-x-full')">
+<div class="w-12 h-12 bg-surface-container flex items-center justify-center editorial-border shrink-0 group-hover:bg-[#1E5BFF] group-hover:text-surface transition-colors">
+<span class="material-symbols-outlined">newspaper</span>
+</div>
+<div class="flex-1 flex flex-col justify-between">
+<div>
+<div class="flex justify-between items-start mb-1">
+<h3 class="font-body-lg font-bold">OpenAI Releases New Sora Features Amidst Growing Competition</h3>
+<div class="flex gap-2">
+<span class="tag-mint px-2 py-0.5 text-xs font-label-mono">High Reliability</span>
+<span class="bg-[#F0523D] text-surface px-2 py-0.5 text-xs font-label-mono border border-[#17203B]">98° HEAT</span>
+</div>
+</div>
+<p class="text-on-surface-variant line-clamp-2">The latest update to the text-to-video model includes enhanced temporal consistency and higher resolution outputs, pressuring rivals in the generative AI space.</p>
+</div>
+<div class="flex gap-4 mt-2 font-label-mono text-label-mono text-on-surface-variant text-[10px]">
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">schedule</span> 10:42 AM</span>
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">sell</span> AI</span>
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">link</span> TechCrunch</span>
+</div>
+</div>
+</div>
+<div class="newspaper-divider my-2 w-1/2"></div>
+<!-- Item 2 -->
+<div class="p-4 bg-surface editorial-border flex gap-4 hover:bg-surface-container-low transition-colors cursor-pointer group" onclick="document.getElementById('detail-drawer').classList.remove('translate-x-full')">
+<div class="w-12 h-12 bg-surface-container flex items-center justify-center editorial-border shrink-0 group-hover:bg-[#1E5BFF] group-hover:text-surface transition-colors">
+<span class="material-symbols-outlined">timeline</span>
+</div>
+<div class="flex-1 flex flex-col justify-between">
+<div>
+<div class="flex justify-between items-start mb-1">
+<h3 class="font-body-lg font-bold">Global Markets React to Unexpected Interest Rate Hikes</h3>
+<div class="flex gap-2">
+<span class="tag-yellow px-2 py-0.5 text-xs font-label-mono">Verified</span>
+<span class="bg-surface-variant text-on-surface px-2 py-0.5 text-xs font-label-mono border border-[#17203B]">85° HEAT</span>
+</div>
+</div>
+<p class="text-on-surface-variant line-clamp-2">Central banks across multiple nations announced sudden rate increases today, leading to significant volatility in Asian and European trading sessions.</p>
+</div>
+<div class="flex gap-4 mt-2 font-label-mono text-label-mono text-on-surface-variant text-[10px]">
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">schedule</span> 09:15 AM</span>
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">sell</span> 财经</span>
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">link</span> Bloomberg</span>
+</div>
+</div>
+</div>
+<div class="newspaper-divider my-2 w-1/2"></div>
+<!-- Item 3 -->
+<div class="p-4 bg-surface editorial-border flex gap-4 hover:bg-surface-container-low transition-colors cursor-pointer group" onclick="document.getElementById('detail-drawer').classList.remove('translate-x-full')">
+<div class="w-12 h-12 bg-surface-container flex items-center justify-center editorial-border shrink-0 group-hover:bg-[#1E5BFF] group-hover:text-surface transition-colors">
+<span class="material-symbols-outlined">menu_book</span>
+</div>
+<div class="flex-1 flex flex-col justify-between">
+<div>
+<div class="flex justify-between items-start mb-1">
+<h3 class="font-body-lg font-bold">Newly Discovered Han Dynasty Tombs Reveal Silk Road Secrets</h3>
+<div class="flex gap-2">
+<span class="tag-mint px-2 py-0.5 text-xs font-label-mono">High Reliability</span>
+<span class="bg-surface-variant text-on-surface px-2 py-0.5 text-xs font-label-mono border border-[#17203B]">72° HEAT</span>
+</div>
+</div>
+<p class="text-on-surface-variant line-clamp-2">Archaeologists have unearthed a complex of tombs in western China containing remarkably preserved artifacts that shed new light on early trade routes.</p>
+</div>
+<div class="flex gap-4 mt-2 font-label-mono text-label-mono text-on-surface-variant text-[10px]">
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">schedule</span> Yesterday</span>
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">sell</span> 历史</span>
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">link</span> NatGeo</span>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Detail Drawer (Right) -->
+<div class="fixed right-0 top-[56px] w-[500px] h-[calc(100vh-56px)] bg-[#EEF1F8] editorial-border-l-2 drawer-shadow transform translate-x-full transition-transform duration-300 ease-in-out z-50 flex flex-col" id="detail-drawer">
+<div class="p-4 editorial-border-b flex justify-between items-center bg-surface">
+<h2 class="font-headline-md text-headline-md font-bold">详情抽屉 (Details)</h2>
+<button class="material-symbols-outlined p-1 hover:bg-surface-container-high editorial-border" onclick="document.getElementById('detail-drawer').classList.add('translate-x-full')">close</button>
+</div>
+<div class="flex-1 overflow-y-auto p-6 flex flex-col gap-6 relative">
+<div class="absolute inset-0 halftone-bg pointer-events-none"></div>
+<!-- Original Source Section -->
+<div class="bg-surface p-4 editorial-border">
+<h4 class="font-label-mono text-label-mono text-on-surface-variant mb-2 uppercase">Original Source</h4>
+<a class="font-body-lg font-bold text-[#1E5BFF] hover:underline flex items-center gap-1" href="#">
+                    OpenAI Releases New Sora Features <span class="material-symbols-outlined text-[16px]">open_in_new</span>
+</a>
+<p class="text-sm mt-2 text-on-surface-variant">Published by TechCrunch on 10:42 AM, Today.</p>
+</div>
+<!-- AI Summary Section -->
+<div class="bg-surface p-4 editorial-border">
+<h4 class="font-label-mono text-label-mono text-on-surface-variant mb-2 uppercase flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">smart_toy</span> AI Summary
+                 </h4>
+<div class="font-body-md leading-relaxed">
+<p>OpenAI has rolled out a significant update to its Sora video generation model. The update focuses on improving temporal consistency—meaning objects remain stable across frames—and increasing the overall resolution of the generated videos. This move is seen as a direct response to recent advancements by competitors like Runway and Pika.</p>
+</div>
+</div>
+<!-- Angles Section -->
+<div>
+<h4 class="font-label-mono text-label-mono text-on-surface-variant mb-3 uppercase">Suggested Angles</h4>
+<div class="flex flex-col gap-3">
+<div class="p-3 bg-surface editorial-border flex gap-3">
+<span class="font-headline-md text-tertiary">01</span>
+<div>
+<strong class="block mb-1">The Tech Race</strong>
+<span class="text-sm">Analyze how this update shifts the competitive landscape among generative video startups.</span>
+</div>
+</div>
+<div class="p-3 bg-surface editorial-border flex gap-3">
+<span class="font-headline-md text-tertiary">02</span>
+<div>
+<strong class="block mb-1">Creator Impact</strong>
+<span class="text-sm">Discuss what these specific technical improvements mean for independent filmmakers and content creators.</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="p-4 editorial-border-t bg-surface flex justify-end gap-4">
+<button class="btn-secondary px-6 py-2 font-label-mono" onclick="document.getElementById('detail-drawer').classList.add('translate-x-full')">取消</button>
+<button class="btn-primary px-6 py-2 font-label-mono flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">add</span> 创建选题
+             </button>
+</div>
+</div>
+</body></html>

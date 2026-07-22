@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>知行内容实验室 - 创作</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        @import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@700;800&family=IBM+Plex+Mono:wght@500&family=Noto+Sans:wght@400;700&display=swap');
+        
+        .halftone-overlay {
+            background-image: radial-gradient(rgba(17, 26, 53, 0.1) 1px, transparent 1px);
+            background-size: 4px 4px;
+        }
+        
+        .newspaper-divider {
+            border-top: 1px solid #111a35;
+            border-bottom: 1px solid #111a35;
+            height: 4px;
+            box-sizing: border-box;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "tertiary-container": "#c83524",
+                      "surface": "#faf8ff",
+                      "tertiary-fixed": "#ffdad4",
+                      "surface-bright": "#faf8ff",
+                      "secondary": "#5b5f64",
+                      "on-primary": "#ffffff",
+                      "primary-container": "#1e5bff",
+                      "surface-container": "#ebedff",
+                      "inverse-on-surface": "#eff0ff",
+                      "outline": "#737688",
+                      "on-error": "#ffffff",
+                      "error": "#ba1a1a",
+                      "on-surface": "#111a35",
+                      "surface-dim": "#d0d9fd",
+                      "on-primary-container": "#ecedff",
+                      "on-tertiary-fixed": "#400100",
+                      "tertiary": "#a51b0e",
+                      "on-tertiary-fixed-variant": "#910802",
+                      "secondary-fixed": "#dfe2e9",
+                      "surface-container-highest": "#dbe1ff",
+                      "on-tertiary": "#ffffff",
+                      "surface-tint": "#004cec",
+                      "on-background": "#111a35",
+                      "on-secondary-fixed-variant": "#43474d",
+                      "surface-container-high": "#e3e7ff",
+                      "on-tertiary-container": "#ffeae6",
+                      "background": "#faf8ff",
+                      "inverse-surface": "#272f4b",
+                      "secondary-container": "#dfe2e9",
+                      "surface-container-lowest": "#ffffff",
+                      "error-container": "#ffdad6",
+                      "primary-fixed": "#dce1ff",
+                      "outline-variant": "#c3c5d9",
+                      "surface-container-low": "#f2f3ff",
+                      "on-primary-fixed": "#001551",
+                      "on-secondary-container": "#61656b",
+                      "inverse-primary": "#b7c4ff",
+                      "on-secondary-fixed": "#181c21",
+                      "on-error-container": "#93000a",
+                      "on-surface-variant": "#434656",
+                      "on-primary-fixed-variant": "#0039b5",
+                      "surface-variant": "#dbe1ff",
+                      "on-secondary": "#ffffff",
+                      "primary": "#0044d3",
+                      "secondary-fixed-dim": "#c3c7cd",
+                      "tertiary-fixed-dim": "#ffb4a7",
+                      "primary-fixed-dim": "#b7c4ff"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "unit-lg": "24px",
+                      "sidebar-width": "208px",
+                      "unit-xl": "48px",
+                      "topbar-height": "56px",
+                      "unit-xs": "4px",
+                      "unit-sm": "8px",
+                      "unit-md": "16px"
+              },
+              "fontFamily": {
+                      "body-md": [
+                              "Noto Sans"
+                      ],
+                      "body-lg": [
+                              "Noto Sans"
+                      ],
+                      "headline-md": [
+                              "Hanken Grotesk"
+                      ],
+                      "display-lg": [
+                              "Hanken Grotesk"
+                      ],
+                      "label-mono": [
+                              "IBM Plex Mono"
+                      ]
+              },
+              "fontSize": {
+                      "body-md": [
+                              "14px",
+                              {
+                                      "lineHeight": "1.6",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "body-lg": [
+                              "16px",
+                              {
+                                      "lineHeight": "1.6",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "headline-md": [
+                              "24px",
+                              {
+                                      "lineHeight": "1.4",
+                                      "fontWeight": "700"
+                              }
+                      ],
+                      "display-lg": [
+                              "40px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "letterSpacing": "-0.02em",
+                                      "fontWeight": "800"
+                              }
+                      ],
+                      "label-mono": [
+                              "12px",
+                              {
+                                      "lineHeight": "1.0",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "500"
+                              }
+                      ]
+              }
+      },
+          },
+        }
+      </script>
+</head>
+<body class="bg-background text-on-background font-body-md min-h-screen">
+<!-- TopNavBar -->
+<header class="bg-surface dark:bg-surface text-primary dark:text-primary-fixed font-body-md text-body-md fixed top-0 left-0 w-full h-[56px] border-b border-on-surface flat no shadows flex justify-between items-center px-unit-lg h-[56px] z-50">
+<div class="flex items-center gap-4">
+<span class="font-headline-md text-headline-md font-bold text-on-surface dark:text-on-surface tracking-tight">知行内容实验室</span>
+<!-- Search Bar mimicking newspaper masthead -->
+<div class="hidden md:flex items-center border border-on-surface bg-surface px-2 py-1">
+<span class="material-symbols-outlined text-[18px]">search</span>
+<input class="bg-transparent border-none focus:ring-0 text-body-md font-body-md w-48 placeholder:text-on-surface-variant" placeholder="Search archives..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined cursor-pointer hover:bg-surface-container-high transition-colors p-1" data-icon="notifications">notifications</span>
+<span class="material-symbols-outlined cursor-pointer hover:bg-surface-container-high transition-colors p-1" data-icon="sync">sync</span>
+</div>
+<button class="bg-primary text-on-primary border border-on-surface px-4 py-1 font-body-md hover:shadow-[2px_2px_0px_0px_#F0523D] hover:bg-[#1E5BFF] transition-all cursor-pointer active:translate-y-0.5">新建</button>
+<div class="w-8 h-8 rounded-full border border-on-surface overflow-hidden bg-surface-container-high">
+<img alt="User Avatar" class="w-full h-full object-cover" data-alt="A small, stylized avatar portrait of a creative professional in a brightly lit studio. Warm, flat lighting, digital brutalism style, muted colors with a pop of cobalt blue. 1990s editorial aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBqbgg9at7R1QskZ54RxYs42XJ1RsqSKXcFXsg8ZrxWEgJUGJG7xtfDFTk07YceeTV-xeAKHfHxxO46qSNxmB5N4-WIhOv9TymzLh2tul747QwTAsMjjdp2PFFIlADwo7e_bh_nvrlmhc7oBo74Hy2VckhNY9p4ykE2Rn9j2zKUxFoRTdmyNcJX5OCZtqd3FtesBW6qr8bM4QRSdpc4XW15dZgoG3_u92nu-Zlm9C5N-sGluTmnBfrjBQ"/>
+</div>
+</div>
+</header>
+<!-- SideNavBar -->
+<nav class="bg-surface-container-low dark:bg-surface-container text-primary dark:text-primary-fixed font-body-md text-body-md fixed left-0 top-[56px] w-[208px] h-[calc(100vh-56px)] border-r border-on-surface flat no shadows flex flex-col py-unit-md gap-unit-sm w-[208px] hidden md:flex halftone-overlay z-40">
+<div class="px-4 mb-4">
+<div class="font-headline-md text-headline-md font-black text-on-surface tracking-tight uppercase border-b-2 border-on-surface pb-2 inline-block w-full">内容引擎 <span class="text-xs font-label-mono text-on-surface-variant ml-1">V2.0</span></div>
+<button class="mt-4 w-full bg-surface text-on-surface border border-on-surface px-4 py-2 font-body-md hover:shadow-[2px_2px_0px_0px_#F0523D] transition-all text-left flex justify-between items-center group">
+                新建选题 <span class="material-symbols-outlined group-hover:translate-x-1 transition-transform">arrow_forward</span>
+</button>
+</div>
+<div class="flex-1 flex flex-col gap-1 px-2 overflow-y-auto">
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95 border-l-4 border-transparent" href="#"><span class="material-symbols-outlined" data-icon="today">today</span>今天</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95 border-l-4 border-transparent" href="#"><span class="material-symbols-outlined" data-icon="explore">explore</span>发现</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95 border-l-4 border-transparent" href="#"><span class="material-symbols-outlined" data-icon="event_note">event_note</span>规划</a>
+<a class="flex items-center gap-3 px-3 py-2 bg-primary text-on-primary border-l-4 border-[#F0523D] hover:bg-surface-container-highest hover:text-on-surface-variant transition-all active:scale-95" href="#"><span class="material-symbols-outlined" data-icon="edit_note">edit_note</span>创作</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95 border-l-4 border-transparent" href="#"><span class="material-symbols-outlined" data-icon="publish">publish</span>发布</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95 border-l-4 border-transparent" href="#"><span class="material-symbols-outlined" data-icon="analytics">analytics</span>复盘</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95 border-l-4 border-transparent" href="#"><span class="material-symbols-outlined" data-icon="inventory_2">inventory_2</span>素材库</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95 border-l-4 border-transparent" href="#"><span class="material-symbols-outlined" data-icon="bolt">bolt</span>自动化</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95 border-l-4 border-transparent" href="#"><span class="material-symbols-outlined" data-icon="settings">settings</span>设置</a>
+</div>
+<div class="mt-auto px-2 border-t border-on-surface pt-4">
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95 border-l-4 border-transparent" href="#"><span class="material-symbols-outlined" data-icon="help">help</span>帮助中心</a>
+</div>
+</nav>
+<!-- Main Canvas -->
+<main class="pt-[56px] md:pl-[208px] min-h-screen bg-background">
+<div class="p-unit-lg max-w-7xl mx-auto space-y-6">
+<!-- Page Header -->
+<div class="flex justify-between items-end border-b-2 border-on-surface pb-4">
+<div>
+<h1 class="font-display-lg text-display-lg text-on-surface uppercase tracking-tighter">内容项目</h1>
+<p class="font-label-mono text-label-mono text-on-surface-variant mt-2">PRODUCTION_QUEUE // ALL_ITEMS</p>
+</div>
+</div>
+<!-- Tags Filter -->
+<div class="flex flex-wrap gap-2 py-2">
+<button class="px-4 py-1 border border-on-surface bg-on-surface text-surface font-label-mono text-label-mono hover:bg-[#1E5BFF] hover:border-[#1E5BFF] transition-colors">全部</button>
+<button class="px-4 py-1 border border-on-surface bg-surface text-on-surface font-label-mono text-label-mono hover:bg-surface-container-high transition-colors">写作中</button>
+<button class="px-4 py-1 border border-on-surface bg-surface text-on-surface font-label-mono text-label-mono hover:bg-surface-container-high transition-colors">视觉制作中</button>
+<button class="px-4 py-1 border border-on-surface bg-surface text-on-surface font-label-mono text-label-mono hover:bg-surface-container-high transition-colors">视频制作中</button>
+<button class="px-4 py-1 border border-on-surface bg-surface text-on-surface font-label-mono text-label-mono hover:bg-surface-container-high transition-colors">待审核</button>
+<button class="px-4 py-1 border border-on-surface bg-surface text-on-surface font-label-mono text-label-mono hover:bg-surface-container-high transition-colors">已排期</button>
+</div>
+<!-- Project Grid -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-4">
+<!-- Card 1 -->
+<div class="border border-on-surface bg-surface p-6 flex flex-col justify-between group hover:shadow-[4px_4px_0px_0px_#111a35] transition-all relative">
+<div class="absolute top-0 right-0 w-8 h-8 border-l border-b border-on-surface bg-surface-container-low flex items-center justify-center">
+<span class="font-label-mono text-[10px] text-on-surface-variant">01</span>
+</div>
+<div>
+<div class="inline-block px-2 py-0.5 bg-[#fef08a] border border-on-surface font-label-mono text-[10px] uppercase mb-4 halftone-overlay relative">
+                            写作中
+                        </div>
+<h2 class="font-headline-md text-headline-md text-on-surface leading-tight mb-2">How to use AI for video</h2>
+<p class="font-body-md text-body-md text-on-surface-variant mb-6 line-clamp-2">探讨目前市面上主流的AI视频生成工具的工作流，以及如何在实际生产环境中落地应用，避免常见的坑。</p>
+</div>
+<div class="newspaper-divider my-4 w-full"></div>
+<div class="flex justify-between items-end">
+<div class="space-y-1">
+<p class="font-label-mono text-label-mono text-on-surface-variant flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">history</span> 2 Versions</p>
+<p class="font-label-mono text-label-mono text-on-surface-variant flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">edit_calendar</span> Last edit: 2h ago</p>
+</div>
+<button class="bg-surface text-on-surface border border-on-surface px-4 py-1.5 font-label-mono text-label-mono hover:bg-surface-container-high transition-colors flex items-center gap-2">
+                            审阅大纲 <span class="material-symbols-outlined text-[16px]">arrow_forward</span>
+</button>
+</div>
+</div>
+<!-- Card 2 -->
+<div class="border border-on-surface bg-surface p-6 flex flex-col justify-between group hover:shadow-[4px_4px_0px_0px_#111a35] transition-all relative">
+<div class="absolute top-0 right-0 w-8 h-8 border-l border-b border-on-surface bg-surface-container-low flex items-center justify-center">
+<span class="font-label-mono text-[10px] text-on-surface-variant">02</span>
+</div>
+<div>
+<div class="inline-block px-2 py-0.5 bg-[#bbf7d0] border border-on-surface font-label-mono text-[10px] uppercase mb-4 halftone-overlay relative">
+                            待审核
+                        </div>
+<h2 class="font-headline-md text-headline-md text-on-surface leading-tight mb-2">Emotion management in Sinology</h2>
+<p class="font-body-md text-body-md text-on-surface-variant mb-6 line-clamp-2">结合国学经典中的智慧，解析现代人在高压职场环境下的情绪管理策略，偏向心学视角的深度长文。</p>
+</div>
+<div class="newspaper-divider my-4 w-full"></div>
+<div class="flex justify-between items-end">
+<div class="space-y-1">
+<p class="font-label-mono text-label-mono text-on-surface-variant flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">history</span> 5 Versions</p>
+<p class="font-label-mono text-label-mono text-on-surface-variant flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">edit_calendar</span> Last edit: 1d ago</p>
+</div>
+<button class="bg-[#1E5BFF] text-surface border border-on-surface px-4 py-1.5 font-label-mono text-label-mono hover:shadow-[2px_2px_0px_0px_#F0523D] transition-all flex items-center gap-2">
+                            终审确认 <span class="material-symbols-outlined text-[16px]">check_circle</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</main>
+</body></html>

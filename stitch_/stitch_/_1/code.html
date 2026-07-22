@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+
+<html lang="zh"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Creation - Visual Step</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "tertiary-container": "#c83524",
+                    "surface": "#faf8ff",
+                    "tertiary-fixed": "#ffdad4",
+                    "surface-bright": "#faf8ff",
+                    "secondary": "#5b5f64",
+                    "on-primary": "#ffffff",
+                    "primary-container": "#1e5bff",
+                    "surface-container": "#ebedff",
+                    "inverse-on-surface": "#eff0ff",
+                    "outline": "#737688",
+                    "on-error": "#ffffff",
+                    "error": "#ba1a1a",
+                    "on-surface": "#111a35",
+                    "surface-dim": "#d0d9fd",
+                    "on-primary-container": "#ecedff",
+                    "on-tertiary-fixed": "#400100",
+                    "tertiary": "#a51b0e",
+                    "on-tertiary-fixed-variant": "#910802",
+                    "secondary-fixed": "#dfe2e9",
+                    "surface-container-highest": "#dbe1ff",
+                    "on-tertiary": "#ffffff",
+                    "surface-tint": "#004cec",
+                    "on-background": "#111a35",
+                    "on-secondary-fixed-variant": "#43474d",
+                    "surface-container-high": "#e3e7ff",
+                    "on-tertiary-container": "#ffeae6",
+                    "background": "#faf8ff",
+                    "inverse-surface": "#272f4b",
+                    "secondary-container": "#dfe2e9",
+                    "surface-container-lowest": "#ffffff",
+                    "error-container": "#ffdad6",
+                    "primary-fixed": "#dce1ff",
+                    "outline-variant": "#c3c5d9",
+                    "surface-container-low": "#f2f3ff",
+                    "on-primary-fixed": "#001551",
+                    "on-secondary-container": "#61656b",
+                    "inverse-primary": "#b7c4ff",
+                    "on-secondary-fixed": "#181c21",
+                    "on-error-container": "#93000a",
+                    "on-surface-variant": "#434656",
+                    "on-primary-fixed-variant": "#0039b5",
+                    "surface-variant": "#dbe1ff",
+                    "on-secondary": "#ffffff",
+                    "primary": "#0044d3",
+                    "secondary-fixed-dim": "#c3c7cd",
+                    "tertiary-fixed-dim": "#ffb4a7",
+                    "primary-fixed-dim": "#b7c4ff"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "unit-lg": "24px",
+                    "sidebar-width": "208px",
+                    "unit-xl": "48px",
+                    "topbar-height": "56px",
+                    "unit-xs": "4px",
+                    "unit-sm": "8px",
+                    "unit-md": "16px"
+            },
+            "fontFamily": {
+                    "body-md": [
+                            "notoSans"
+                    ],
+                    "body-lg": [
+                            "notoSans"
+                    ],
+                    "headline-md": [
+                            "hankenGrotesk"
+                    ],
+                    "display-lg": [
+                            "hankenGrotesk"
+                    ],
+                    "label-mono": [
+                            "ibmPlexMono"
+                    ]
+            },
+            "fontSize": {
+                    "body-md": [
+                            "14px",
+                            {
+                                    "lineHeight": "1.6",
+                                    "fontWeight": "400"
+                            }
+                    ],
+                    "body-lg": [
+                            "16px",
+                            {
+                                    "lineHeight": "1.6",
+                                    "fontWeight": "400"
+                            }
+                    ],
+                    "headline-md": [
+                            "24px",
+                            {
+                                    "lineHeight": "1.4",
+                                    "fontWeight": "700"
+                            }
+                    ],
+                    "display-lg": [
+                            "40px",
+                            {
+                                    "lineHeight": "1.2",
+                                    "letterSpacing": "-0.02em",
+                                    "fontWeight": "800"
+                            }
+                    ],
+                    "label-mono": [
+                            "12px",
+                            {
+                                    "lineHeight": "1.0",
+                                    "letterSpacing": "0.05em",
+                                    "fontWeight": "500"
+                            }
+                    ]
+            }
+        },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-family: 'Material Symbols Outlined';
+            font-weight: normal;
+            font-style: normal;
+            font-size: 24px;
+            line-height: 1;
+            letter-spacing: normal;
+            text-transform: none;
+            display: inline-block;
+            white-space: nowrap;
+            word-wrap: normal;
+            direction: ltr;
+            -webkit-font-feature-settings: 'liga';
+            -webkit-font-smoothing: antialiased;
+        }
+        
+        /* Halftone Pattern Definition */
+        .bg-halftone {
+            background-image: radial-gradient(theme('colors.on-surface') 15%, transparent 16%), radial-gradient(theme('colors.on-surface') 15%, transparent 16%);
+            background-size: 8px 8px;
+            background-position: 0 0, 4px 4px;
+            opacity: 0.15;
+        }
+        
+        .halftone-overlay {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            background-image: radial-gradient(theme('colors.on-surface') 10%, transparent 11%);
+            background-size: 6px 6px;
+            opacity: 0.2;
+        }
+
+        /* Editorial Solid Shadow */
+        .editorial-shadow {
+            box-shadow: 4px 4px 0px 0px theme('colors.on-surface');
+        }
+        
+        .editorial-shadow-primary {
+            box-shadow: 4px 4px 0px 0px theme('colors.tertiary-container');
+        }
+        
+        .editorial-shadow-active {
+            box-shadow: 4px 4px 0px 0px theme('colors.primary-container');
+        }
+
+        /* Newspaper Divider Checkerboard */
+        .newspaper-divider-center {
+            background: repeating-linear-gradient(90deg, theme('colors.on-surface'), theme('colors.on-surface') 4px, transparent 4px, transparent 8px);
+        }
+    </style>
+</head>
+<body class="bg-surface text-on-surface font-body-md font-body-md h-screen overflow-hidden selection:bg-tertiary-fixed selection:text-on-tertiary-fixed">
+<!-- TopNavBar -->
+<header class="bg-surface dark:bg-surface text-primary dark:text-primary-fixed font-body-md text-body-md fixed top-0 left-0 w-full h-[56px] border-b border-on-surface flex justify-between items-center px-unit-lg z-50">
+<div class="flex items-center gap-unit-md">
+<span class="font-headline-md text-headline-md font-bold text-on-surface dark:text-on-surface tracking-tight">知行内容实验室</span>
+</div>
+<div class="flex-1 flex justify-center px-unit-xl">
+<!-- Masthead Search -->
+<div class="flex items-center border border-on-surface bg-surface-container-low h-8 w-64 px-2 hover:bg-surface-container-high transition-colors cursor-text group">
+<span class="material-symbols-outlined text-[18px] text-on-surface-variant group-focus-within:text-primary">search</span>
+<input class="bg-transparent border-none focus:ring-0 text-body-md font-body-md text-on-surface w-full py-0 h-full placeholder:text-on-surface-variant/50" placeholder="Search..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-unit-md">
+<button class="text-on-surface-variant hover:bg-surface-container-high transition-colors cursor-pointer active:translate-y-0.5 p-1 flex items-center justify-center">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="text-on-surface-variant hover:bg-surface-container-high transition-colors cursor-pointer active:translate-y-0.5 p-1 flex items-center justify-center">
+<span class="material-symbols-outlined">sync</span>
+</button>
+<button class="bg-surface text-on-surface border border-on-surface px-4 py-1.5 font-bold hover:bg-surface-container-high transition-colors cursor-pointer active:translate-y-0.5 editorial-shadow text-sm uppercase tracking-wide">
+                新建
+            </button>
+<div class="w-8 h-8 border border-on-surface bg-surface-container-highest overflow-hidden cursor-pointer ml-2">
+<img class="w-full h-full object-cover" data-alt="A small, stylized digital avatar portrait of a creative professional in a retro-futuristic style, clean lines, high contrast." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDkppkQ4FLgdMZWsjTjigvDP5ZbrePRlnt0eNNSbSgOBkvVo206Ws0rfdTbKJOzJ4BwV6-sgN4vE8ch6y4jd2OmHrP2s0VRY5IxD4QMi-ZlOxp15ntAmRFbS5EqrzBzcq0-XetrT-IQ_f3z5uzoB42SAiJ3h1qQYuIq-DUvbCh-0FwyA-3huAfX5DMOJ7bs9-N9sKKHCo2u8EU0B0BojCPiHx_n4XUZUH2Tk4QI9YMRNzs51xtdYb9Bdg"/>
+</div>
+</div>
+</header>
+<!-- SideNavBar -->
+<nav class="bg-surface-container-low dark:bg-surface-container text-primary dark:text-primary-fixed font-body-md text-body-md fixed left-0 top-[56px] w-[208px] h-[calc(100vh-56px)] border-r border-on-surface flex flex-col py-unit-md gap-unit-sm z-40">
+<div class="px-unit-md pb-unit-md border-b border-on-surface mb-2 flex items-center gap-3">
+<div class="w-10 h-10 border border-on-surface bg-primary-container text-on-primary-container flex items-center justify-center font-bold text-lg font-headline-md">
+                CE
+            </div>
+<div>
+<h2 class="font-headline-md text-headline-md font-black text-on-surface text-lg leading-tight">内容引擎</h2>
+<span class="text-label-mono font-label-mono text-on-surface-variant">V2.0</span>
+</div>
+</div>
+<button class="mx-unit-md mb-2 bg-primary-container text-on-primary-container border border-on-surface py-2 font-bold hover:bg-primary transition-colors active:translate-y-0.5 editorial-shadow-primary flex justify-center items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">add</span>
+            新建选题
+        </button>
+<div class="flex-1 overflow-y-auto flex flex-col gap-1 px-2">
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95" href="#">
+<span class="material-symbols-outlined">today</span>
+<span>今天</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95" href="#">
+<span class="material-symbols-outlined">explore</span>
+<span>发现</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95" href="#">
+<span class="material-symbols-outlined">event_note</span>
+<span>规划</span>
+</a>
+<!-- Active State Navigation -->
+<a class="flex items-center gap-3 px-3 py-2 bg-primary text-on-primary border-l-4 border-tertiary transition-all active:scale-95 relative group" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">edit_note</span>
+<span class="font-bold">创作</span>
+<div class="absolute right-2 w-2 h-2 bg-tertiary rounded-none"></div>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95" href="#">
+<span class="material-symbols-outlined">publish</span>
+<span>发布</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95" href="#">
+<span class="material-symbols-outlined">analytics</span>
+<span>复盘</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95" href="#">
+<span class="material-symbols-outlined">inventory_2</span>
+<span>素材库</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95" href="#">
+<span class="material-symbols-outlined">bolt</span>
+<span>自动化</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span>设置</span>
+</a>
+</div>
+<div class="mt-auto px-2 pt-2 border-t border-on-surface">
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95" href="#">
+<span class="material-symbols-outlined">help</span>
+<span>帮助中心</span>
+</a>
+</div>
+</nav>
+<!-- Main Workspace -->
+<main class="ml-[208px] mt-[56px] h-[calc(100vh-56px)] flex flex-col bg-surface-container-low relative">
+<!-- Editor Header (Newspaper Section Header) -->
+<div class="h-14 border-b-2 border-on-surface bg-surface flex items-center justify-between px-unit-lg shrink-0">
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 bg-on-surface block"></span>
+<h1 class="font-headline-md text-headline-md font-bold uppercase tracking-wide">小红书视觉制作</h1>
+</div>
+<div class="h-4 w-px bg-on-surface"></div>
+<span class="font-label-mono text-label-mono text-on-surface-variant tracking-widest uppercase">第 3 页 / 共 8 页</span>
+</div>
+<div class="flex items-center gap-3">
+<!-- Halftone Status Tag -->
+<div class="relative px-3 py-1 border border-on-surface bg-surface-dim overflow-hidden font-label-mono text-label-mono font-bold uppercase text-on-surface">
+<div class="halftone-overlay"></div>
+<span class="relative z-10 flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-tertiary block animate-pulse"></span>
+                        DRAFTING
+                    </span>
+</div>
+</div>
+</div>
+<!-- Editor Workspace Area -->
+<div class="flex-1 flex overflow-hidden">
+<!-- Left: Thumbnail Strip -->
+<div class="w-28 border-r border-on-surface bg-surface flex flex-col shrink-0">
+<div class="p-2 border-b border-on-surface bg-surface-container-highest text-center">
+<span class="font-label-mono text-label-mono font-bold uppercase text-on-surface">PAGES</span>
+</div>
+<div class="flex-1 overflow-y-auto p-3 space-y-4">
+<!-- Thumb 1 -->
+<div class="aspect-[3/4] border border-on-surface bg-surface-container-lowest relative group cursor-pointer hover:border-primary-container transition-colors">
+<div class="absolute inset-0 bg-surface-container-high opacity-20 group-hover:opacity-0 transition-opacity"></div>
+<span class="absolute top-1 left-1 bg-surface border border-on-surface px-1 font-label-mono text-[10px]">01</span>
+</div>
+<!-- Thumb 2 -->
+<div class="aspect-[3/4] border border-on-surface bg-surface-container-lowest relative group cursor-pointer hover:border-primary-container transition-colors">
+<div class="absolute inset-0 bg-surface-container-high opacity-20 group-hover:opacity-0 transition-opacity"></div>
+<span class="absolute top-1 left-1 bg-surface border border-on-surface px-1 font-label-mono text-[10px]">02</span>
+</div>
+<!-- Thumb 3 (Active) -->
+<div class="aspect-[3/4] border-2 border-primary-container bg-surface-container-lowest relative cursor-pointer editorial-shadow-active">
+<div class="absolute -left-1 -top-1 w-3 h-3 bg-tertiary border border-on-surface z-10"></div>
+<span class="absolute top-1 left-2 bg-primary-container text-on-primary-container border border-on-surface px-1 font-label-mono text-[10px] z-10">03</span>
+<div class="w-full h-full p-1 flex flex-col gap-1">
+<div class="w-full h-1/2 bg-surface-variant border border-on-surface/20"></div>
+<div class="w-full h-2 bg-surface-variant/50"></div>
+<div class="w-3/4 h-2 bg-surface-variant/50"></div>
+</div>
+</div>
+<!-- Thumb 4 -->
+<div class="aspect-[3/4] border border-on-surface bg-surface-container-lowest relative group cursor-pointer hover:border-primary-container transition-colors">
+<div class="absolute inset-0 bg-surface-container-high opacity-20 group-hover:opacity-0 transition-opacity"></div>
+<span class="absolute top-1 left-1 bg-surface border border-on-surface px-1 font-label-mono text-[10px]">04</span>
+</div>
+<button class="w-full aspect-square border border-dashed border-on-surface-variant text-on-surface-variant flex flex-col items-center justify-center hover:bg-surface-container-highest transition-colors cursor-pointer">
+<span class="material-symbols-outlined">add</span>
+</button>
+</div>
+</div>
+<!-- Center: Main Canvas Preview -->
+<div class="flex-1 relative overflow-auto flex items-center justify-center p-8">
+<!-- Halftone background for canvas area -->
+<div class="absolute inset-0 bg-halftone z-0"></div>
+<!-- Knowledge Card Preview (Magazine Style) -->
+<div class="relative z-10 w-full max-w-[400px] aspect-[3/4] bg-surface border border-on-surface editorial-shadow flex flex-col overflow-hidden group">
+<!-- Card Top Graphic -->
+<div class="h-[55%] border-b border-on-surface relative bg-surface-container-highest">
+<img class="w-full h-full object-cover" data-alt="A highly stylized, minimalist graphic illustration of a conceptual workspace, featuring floating geometric shapes, a vintage desk lamp, and bold primary colors, clean offset print aesthetic, vibrant red and deep blue accents on a warm white background." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCYdHp-CwVFSaitCYSWnZJDMY5k91bzDtHGzNBXt1qEHe9ZGo_97vv6__mYuADu74eetNf1wIlG4mxBYkLCQMKe6voQsgorbnnoDUNnV6upBHJuSH6IJsTjtctuO_-sHInIWv8RwuJ2xVkH8-DpXckd04TJszBAXzqjQkFYOuv_sFzsoiTaZryJyZGSqoykZp6jZBfb1ENvNR9qkLfrfgjbbPaDtXngAGLB2gGPxKSMCeZfk2i2x6oUgQ"/>
+<!-- Overlay elements mimicking retro editorial -->
+<div class="absolute top-4 left-4 bg-tertiary text-on-primary border border-on-surface px-2 py-1 font-label-mono text-label-mono font-bold uppercase rotate-[-2deg] editorial-shadow shadow-on-surface">
+                            FOCUS
+                        </div>
+<div class="absolute top-4 right-4 w-12 h-12 border-2 border-on-surface rounded-full flex items-center justify-center">
+<div class="w-10 h-10 border border-on-surface rounded-full bg-primary-container"></div>
+</div>
+</div>
+<!-- Card Content Structure -->
+<div class="flex-1 p-6 flex flex-col justify-between bg-surface-bright relative">
+<!-- Decorative grid background -->
+<div class="absolute inset-0 bg-[linear-gradient(theme('colors.on-surface')_1px,transparent_1px),linear-gradient(90deg,theme('colors.on-surface')_1px,transparent_1px)] bg-[size:20px_20px] opacity-[0.03]"></div>
+<div class="relative z-10 space-y-4">
+<div class="flex items-center gap-2 mb-2">
+<span class="font-label-mono text-[10px] tracking-widest text-on-surface-variant uppercase border-b border-on-surface pb-1">VOL. 03</span>
+</div>
+<h3 class="font-display-lg text-display-lg leading-none font-extrabold text-on-surface tracking-tighter uppercase break-words">
+                                DESIGN<br/>SYSTEM
+                            </h3>
+<div class="w-full h-px newspaper-divider-center my-4"></div>
+<p class="font-body-md text-body-md text-on-surface leading-relaxed text-justify">
+                                建立一个连贯的设计系统不仅仅是关于视觉规范，更是为了建立一套可以在团队中无缝流转的工作语言。保持克制。
+                            </p>
+</div>
+<div class="relative z-10 flex justify-between items-end">
+<div class="w-8 h-8 border border-on-surface bg-surface-dim grid grid-cols-2 grid-rows-2 gap-[1px] p-[1px]">
+<div class="bg-on-surface"></div><div></div><div></div><div class="bg-on-surface"></div>
+</div>
+<span class="font-label-mono text-[10px] font-bold text-on-surface tracking-widest">SWIPE →</span>
+</div>
+</div>
+</div>
+<!-- Zoom controls -->
+<div class="absolute bottom-6 right-6 flex border border-on-surface bg-surface editorial-shadow z-20">
+<button class="p-2 border-r border-on-surface hover:bg-surface-container-highest active:bg-surface-dim"><span class="material-symbols-outlined text-[18px]">remove</span></button>
+<div class="px-3 py-2 font-label-mono text-label-mono font-bold flex items-center">85%</div>
+<button class="p-2 border-l border-on-surface hover:bg-surface-container-highest active:bg-surface-dim"><span class="material-symbols-outlined text-[18px]">add</span></button>
+</div>
+</div>
+<!-- Right: Properties Panel -->
+<div class="w-[340px] border-l border-on-surface bg-surface flex flex-col shrink-0 relative z-30">
+<div class="p-4 border-b border-on-surface bg-surface-container-highest">
+<h3 class="font-headline-md text-body-lg font-bold uppercase tracking-wider flex items-center gap-2">
+<span class="material-symbols-outlined text-[20px]">tune</span>
+                        属性配置 (Properties)
+                    </h3>
+</div>
+<div class="flex-1 overflow-y-auto p-5 space-y-8">
+<!-- Style Template Selection -->
+<div class="space-y-3">
+<label class="font-label-mono text-label-mono font-bold text-on-surface uppercase block flex items-center gap-2">
+<span class="w-1 h-3 bg-tertiary inline-block"></span>
+                            样式模板 (Style Template)
+                        </label>
+<div class="grid grid-cols-3 gap-2">
+<button class="border-2 border-on-surface bg-surface-bright p-2 flex flex-col items-center justify-center gap-2 hover:bg-surface-container-high transition-colors editorial-shadow active:translate-y-1 active:shadow-none">
+<span class="material-symbols-outlined">auto_awesome_mosaic</span>
+<span class="font-label-mono text-[10px] font-bold uppercase">Magazine</span>
+</button>
+<button class="border border-on-surface bg-surface p-2 flex flex-col items-center justify-center gap-2 hover:bg-surface-container-highest transition-colors text-on-surface-variant">
+<span class="material-symbols-outlined">view_stream</span>
+<span class="font-label-mono text-[10px] uppercase">Clean</span>
+</button>
+<button class="border border-on-surface bg-surface p-2 flex flex-col items-center justify-center gap-2 hover:bg-surface-container-highest transition-colors text-on-surface-variant">
+<span class="material-symbols-outlined">cottage</span>
+<span class="font-label-mono text-[10px] uppercase">Retro</span>
+</button>
+</div>
+</div>
+<div class="w-full h-px bg-on-surface/20"></div>
+<!-- Content Inputs -->
+<div class="space-y-5">
+<div class="space-y-2">
+<label class="font-label-mono text-label-mono font-bold text-on-surface uppercase block">大标题 (Title)</label>
+<div class="relative">
+<input class="w-full bg-surface border border-on-surface p-2 font-body-md text-body-md text-on-surface focus:outline-none focus:ring-0 focus:border-primary-container focus:bg-surface-container-lowest transition-colors editorial-shadow-sm placeholder:text-on-surface-variant/50" type="text" value="DESIGN SYSTEM"/>
+</div>
+</div>
+<div class="space-y-2">
+<label class="font-label-mono text-label-mono font-bold text-on-surface uppercase block">正文 (Body Text)</label>
+<div class="relative">
+<textarea class="w-full bg-surface border border-on-surface p-2 font-body-md text-body-md text-on-surface focus:outline-none focus:ring-0 focus:border-primary-container focus:bg-surface-container-lowest transition-colors resize-none placeholder:text-on-surface-variant/50" rows="3">建立一个连贯的设计系统不仅仅是关于视觉规范，更是为了建立一套可以在团队中无缝流转的工作语言。保持克制。</textarea>
+<!-- Fake solid cursor element -->
+<div class="absolute bottom-3 right-3 w-2 h-4 bg-primary-container animate-[pulse_1s_steps(2,start)_infinite]"></div>
+</div>
+</div>
+</div>
+<div class="w-full h-px newspaper-divider-center"></div>
+<!-- Image Prompt AI Area -->
+<div class="space-y-3 bg-surface-container-low border border-on-surface p-4 relative group">
+<div class="absolute -top-3 -right-3">
+<span class="material-symbols-outlined text-tertiary-container bg-surface border border-on-surface rounded-full p-1 editorial-shadow-primary text-[16px]">temp_preferences_custom</span>
+</div>
+<label class="font-label-mono text-label-mono font-bold text-on-surface uppercase block flex items-center justify-between">
+<span>生图提示词 (Image Prompt)</span>
+<span class="text-[10px] bg-primary-container text-on-primary-container px-1 py-0.5 border border-on-surface">AI</span>
+</label>
+<textarea class="w-full bg-surface border border-on-surface border-dashed p-2 font-body-md text-body-md text-on-surface focus:outline-none focus:ring-0 focus:border-solid focus:border-primary-container transition-colors resize-none text-sm leading-relaxed" rows="4">A highly stylized, minimalist graphic illustration of a conceptual workspace, featuring floating geometric shapes, a vintage desk lamp...</textarea>
+<div class="flex justify-end pt-1">
+<button class="text-xs font-label-mono font-bold text-primary hover:text-on-primary-fixed-variant flex items-center gap-1 underline underline-offset-4 decoration-2">
+<span class="material-symbols-outlined text-[14px]">auto_fix</span> 优化提示词
+                            </button>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Editor Footer Actions -->
+<div class="h-16 border-t-2 border-on-surface bg-surface flex items-center justify-between px-6 shrink-0 relative z-40">
+<div class="flex items-center gap-4">
+<button class="bg-surface text-on-surface border border-on-surface px-4 py-2 font-body-md text-body-md font-bold hover:bg-surface-container-high transition-all active:translate-y-0.5 active:shadow-none editorial-shadow flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">imagesmode</span>
+                    生成 3 个变体 (Generate 3 variants)
+                </button>
+<button class="bg-surface text-on-surface border border-transparent hover:border-on-surface px-4 py-2 font-body-md text-body-md transition-all active:bg-surface-container-highest flex items-center gap-2 text-on-surface-variant">
+<span class="material-symbols-outlined text-[18px]">swap_horiz</span>
+                    替换素材 (Replace asset)
+                </button>
+</div>
+<div>
+<button class="bg-primary-container text-on-primary-container border border-on-surface px-8 py-2 font-body-md text-body-lg font-bold hover:bg-primary transition-all active:translate-y-0.5 active:shadow-none editorial-shadow-primary flex items-center gap-2 tracking-wide">
+                    下一步：视频合成 (Next: Video)
+                    <span class="material-symbols-outlined text-[20px]">arrow_forward</span>
+</button>
+</div>
+</div>
+</main>
+</body></html>

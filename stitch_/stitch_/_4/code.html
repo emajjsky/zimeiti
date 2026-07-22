@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+
+<html class="light" lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>创作 - 写作步骤</title>
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;700;800&amp;family=IBM+Plex+Mono:wght@500&amp;family=Noto+Sans:wght@400;700&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Tailwind Config -->
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "tertiary-container": "#c83524",
+                    "surface": "#faf8ff",
+                    "tertiary-fixed": "#ffdad4",
+                    "surface-bright": "#faf8ff",
+                    "secondary": "#5b5f64",
+                    "on-primary": "#ffffff",
+                    "primary-container": "#1e5bff",
+                    "surface-container": "#ebedff",
+                    "inverse-on-surface": "#eff0ff",
+                    "outline": "#737688",
+                    "on-error": "#ffffff",
+                    "error": "#ba1a1a",
+                    "on-surface": "#111a35",
+                    "surface-dim": "#d0d9fd",
+                    "on-primary-container": "#ecedff",
+                    "on-tertiary-fixed": "#400100",
+                    "tertiary": "#a51b0e",
+                    "on-tertiary-fixed-variant": "#910802",
+                    "secondary-fixed": "#dfe2e9",
+                    "surface-container-highest": "#dbe1ff",
+                    "on-tertiary": "#ffffff",
+                    "surface-tint": "#004cec",
+                    "on-background": "#111a35",
+                    "on-secondary-fixed-variant": "#43474d",
+                    "surface-container-high": "#e3e7ff",
+                    "on-tertiary-container": "#ffeae6",
+                    "background": "#faf8ff",
+                    "inverse-surface": "#272f4b",
+                    "secondary-container": "#dfe2e9",
+                    "surface-container-lowest": "#ffffff",
+                    "error-container": "#ffdad6",
+                    "primary-fixed": "#dce1ff",
+                    "outline-variant": "#c3c5d9",
+                    "surface-container-low": "#f2f3ff",
+                    "on-primary-fixed": "#001551",
+                    "on-secondary-container": "#61656b",
+                    "inverse-primary": "#b7c4ff",
+                    "on-secondary-fixed": "#181c21",
+                    "on-error-container": "#93000a",
+                    "on-surface-variant": "#434656",
+                    "on-primary-fixed-variant": "#0039b5",
+                    "surface-variant": "#dbe1ff",
+                    "on-secondary": "#ffffff",
+                    "primary": "#0044d3",
+                    "secondary-fixed-dim": "#c3c7cd",
+                    "tertiary-fixed-dim": "#ffb4a7",
+                    "primary-fixed-dim": "#b7c4ff"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "unit-lg": "24px",
+                    "sidebar-width": "208px",
+                    "unit-xl": "48px",
+                    "topbar-height": "56px",
+                    "unit-xs": "4px",
+                    "unit-sm": "8px",
+                    "unit-md": "16px"
+            },
+            "fontFamily": {
+                    "body-md": ["notoSans"],
+                    "body-lg": ["notoSans"],
+                    "headline-md": ["hankenGrotesk"],
+                    "display-lg": ["hankenGrotesk"],
+                    "label-mono": ["ibmPlexMono"]
+            },
+            "fontSize": {
+                    "body-md": ["14px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                    "body-lg": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                    "headline-md": ["24px", {"lineHeight": "1.4", "fontWeight": "700"}],
+                    "display-lg": ["40px", {"lineHeight": "1.2", "letterSpacing": "-0.02em", "fontWeight": "800"}],
+                    "label-mono": ["12px", {"lineHeight": "1.0", "letterSpacing": "0.05em", "fontWeight": "500"}]
+            }
+          }
+        }
+      }
+    </script>
+<style>
+        .halftone-bg {
+            background-image: radial-gradient(circle, #111a3522 1px, transparent 1px);
+            background-size: 4px 4px;
+        }
+        .halftone-bg-yellow {
+            background-color: #fef08a; /* Soft yellow base */
+            background-image: radial-gradient(circle, #111a3533 1px, transparent 1px);
+            background-size: 4px 4px;
+        }
+        /* Custom Caret for Input */
+        .block-caret {
+            caret-color: transparent;
+            position: relative;
+        }
+        .block-caret:focus::after {
+            content: '';
+            position: absolute;
+            width: 8px;
+            height: 1.2em;
+            background-color: #111a35;
+            animation: none; /* Non-blinking */
+            display: inline-block;
+            vertical-align: text-bottom;
+            margin-left: 2px;
+        }
+        
+        /* Hide scrollbar for clean editor look */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</head>
+<body class="bg-surface text-on-surface font-body-md text-body-md overflow-hidden selection:bg-surface-variant selection:text-on-surface">
+<!-- TopNavBar -->
+<header class="fixed top-0 left-0 w-full h-[56px] bg-surface dark:bg-surface text-primary dark:text-primary-fixed font-body-md text-body-md border-b border-on-surface flex justify-between items-center px-unit-lg z-50">
+<div class="flex items-center gap-4">
+<span class="font-headline-md text-headline-md font-bold text-on-surface dark:text-on-surface">知行内容实验室</span>
+<!-- Search Bar (Masthead Style) -->
+<div class="hidden md:flex items-center border border-on-surface bg-surface-container-lowest h-8 px-2 w-64">
+<span class="material-symbols-outlined text-[18px]">search</span>
+<input class="w-full bg-transparent border-none outline-none focus:ring-0 text-body-md font-body-md px-2 placeholder:text-on-surface-variant" placeholder="Search archives..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<button class="hover:bg-surface-container-high transition-colors p-1 flex items-center justify-center cursor-pointer active:translate-y-0.5">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="hover:bg-surface-container-high transition-colors p-1 flex items-center justify-center cursor-pointer active:translate-y-0.5">
+<span class="material-symbols-outlined">sync</span>
+</button>
+<button class="bg-primary text-on-primary border border-on-surface px-4 py-1.5 font-bold hover:shadow-[2px_2px_0px_#a51b0e] active:translate-y-[1px] active:translate-x-[1px] active:shadow-[1px_1px_0px_#a51b0e] transition-all cursor-pointer">
+                新建
+            </button>
+<div class="w-8 h-8 border border-on-surface bg-surface-variant rounded-full overflow-hidden ml-2">
+<img alt="User Avatar" class="w-full h-full object-cover" data-alt="A minimalist black and white avatar illustration of a person facing forward, clean lines, high contrast." src="https://lh3.googleusercontent.com/aida-public/AB6AXuB4YAvxsVap0_O_bQ26GIxgiCZ6s_toBuyWZ5c3JMxRzmhvwZ8vefGrJ2WOfmbxLCO-EcMgBbQlx-pSLwxDazpqmCIpnyf907rmU4uYEJdUKhPKJrtW_tX1BeqnVEXlZbiCUr8vEjBY9Yss_PrmXTyvZnaPiC10huqd5-prVWKtwQha_-jb7CJUmTDogSlFxnrmFwlBsM73dQ46jXbOoQAr1qeKSDc5X5TN9t6glA1xgppyd2vOl5GLZQ"/>
+</div>
+</div>
+</header>
+<!-- SideNavBar -->
+<nav class="fixed left-0 top-[56px] w-[208px] h-[calc(100vh-56px)] bg-surface-container-low dark:bg-surface-container text-primary dark:text-primary-fixed font-body-md text-body-md border-r border-on-surface flex flex-col py-unit-md gap-unit-sm z-40 halftone-bg">
+<div class="px-4 mb-4 flex items-center gap-3">
+<div class="w-10 h-10 border border-on-surface bg-surface-container-highest flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-on-surface font-bold">menu_book</span>
+</div>
+<div>
+<div class="font-headline-md text-[16px] leading-tight font-black text-on-surface">内容引擎</div>
+<div class="text-[12px] text-on-surface-variant font-label-mono text-label-mono uppercase tracking-wider">V2.0</div>
+</div>
+</div>
+<div class="px-4 mb-4">
+<button class="w-full bg-surface-container-lowest text-on-surface border border-on-surface px-4 py-2 font-bold hover:bg-surface-variant transition-colors flex justify-center items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">add</span>
+                新建选题
+            </button>
+</div>
+<div class="flex-1 overflow-y-auto no-scrollbar flex flex-col gap-1 px-2">
+<!-- Inactive -->
+<button class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95 w-full text-left">
+<span class="material-symbols-outlined text-[20px]">today</span>
+<span>今天</span>
+</button>
+<button class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95 w-full text-left">
+<span class="material-symbols-outlined text-[20px]">explore</span>
+<span>发现</span>
+</button>
+<button class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95 w-full text-left">
+<span class="material-symbols-outlined text-[20px]">event_note</span>
+<span>规划</span>
+</button>
+<!-- Active: 创作 -->
+<button class="flex items-center gap-3 px-3 py-2 bg-primary text-on-primary border-l-4 border-tertiary transition-all active:scale-95 w-full text-left relative">
+<!-- Inner 1px border to maintain brutalist feel even on solid bg -->
+<div class="absolute inset-0 border border-primary-container pointer-events-none"></div>
+<span class="material-symbols-outlined text-[20px] relative z-10">edit_note</span>
+<span class="relative z-10 font-bold">创作</span>
+</button>
+<!-- Inactive -->
+<button class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95 w-full text-left">
+<span class="material-symbols-outlined text-[20px]">publish</span>
+<span>发布</span>
+</button>
+<button class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95 w-full text-left">
+<span class="material-symbols-outlined text-[20px]">analytics</span>
+<span>复盘</span>
+</button>
+<button class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95 w-full text-left">
+<span class="material-symbols-outlined text-[20px]">inventory_2</span>
+<span>素材库</span>
+</button>
+<button class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95 w-full text-left">
+<span class="material-symbols-outlined text-[20px]">bolt</span>
+<span>自动化</span>
+</button>
+<button class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95 w-full text-left">
+<span class="material-symbols-outlined text-[20px]">settings</span>
+<span>设置</span>
+</button>
+</div>
+<div class="px-2 mt-auto pb-4">
+<div class="border-t border-on-surface mb-2"></div>
+<button class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95 w-full text-left">
+<span class="material-symbols-outlined text-[20px]">help</span>
+<span>帮助中心</span>
+</button>
+</div>
+</nav>
+<!-- Main Canvas -->
+<main class="ml-[208px] mt-[56px] h-[calc(100vh-56px)] flex flex-col bg-surface relative">
+<!-- Top: Project & Version Switch -->
+<div class="h-[64px] border-b border-on-surface px-unit-lg flex justify-between items-center shrink-0 bg-surface-container-lowest z-10">
+<div class="flex items-center gap-4">
+<h1 class="font-headline-md text-[20px] font-bold text-on-surface tracking-tight">Project: 2024 Design Trends Report</h1>
+<span class="halftone-bg-yellow border border-on-surface px-2 py-0.5 text-on-surface font-label-mono text-label-mono uppercase">Draft</span>
+</div>
+<!-- Editorial Tabs for Version -->
+<div class="flex border border-on-surface bg-surface-container-low shadow-[2px_2px_0px_#111a35]">
+<button class="px-6 py-1.5 bg-primary text-on-primary font-bold text-body-md border-r border-on-surface">WeChat</button>
+<button class="px-6 py-1.5 text-on-surface hover:bg-surface-container-highest transition-colors font-bold text-body-md border-r border-on-surface">Red</button>
+<button class="px-6 py-1.5 text-on-surface hover:bg-surface-container-highest transition-colors font-bold text-body-md">Video</button>
+</div>
+</div>
+<!-- Layout Body -->
+<div class="flex-1 flex overflow-hidden">
+<!-- Center Column (70% - Editor) -->
+<div class="flex-[7] flex flex-col relative bg-surface-bright">
+<!-- Editor Toolbar (Quiet, sticky) -->
+<div class="border-b border-on-surface bg-surface-container-lowest flex items-center px-4 h-12 gap-2 overflow-x-auto no-scrollbar shrink-0">
+<button class="p-1.5 text-on-surface hover:bg-surface-container-highest border border-transparent hover:border-on-surface transition-all"><span class="material-symbols-outlined text-[20px]">format_h1</span></button>
+<button class="p-1.5 text-on-surface hover:bg-surface-container-highest border border-transparent hover:border-on-surface transition-all"><span class="material-symbols-outlined text-[20px]">format_h2</span></button>
+<div class="w-[1px] h-6 bg-on-surface mx-1"></div>
+<button class="p-1.5 text-on-surface hover:bg-surface-container-highest border border-transparent hover:border-on-surface transition-all"><span class="material-symbols-outlined text-[20px]">format_bold</span></button>
+<button class="p-1.5 text-on-surface hover:bg-surface-container-highest border border-transparent hover:border-on-surface transition-all"><span class="material-symbols-outlined text-[20px]">format_italic</span></button>
+<button class="p-1.5 text-on-surface hover:bg-surface-container-highest border border-transparent hover:border-on-surface transition-all"><span class="material-symbols-outlined text-[20px]">format_list_bulleted</span></button>
+<div class="w-[1px] h-6 bg-on-surface mx-1"></div>
+<button class="p-1.5 text-on-surface hover:bg-surface-container-highest border border-transparent hover:border-on-surface transition-all flex items-center gap-1">
+<span class="material-symbols-outlined text-[20px]">image</span>
+<span class="text-[12px] font-bold">Add Media</span>
+</button>
+</div>
+<!-- Scrollable Editing Canvas -->
+<div class="flex-1 overflow-y-auto p-unit-xl max-w-4xl mx-auto w-full pb-32">
+<!-- Title -->
+<textarea class="w-full bg-transparent border-none outline-none resize-none font-display-lg text-display-lg text-on-surface placeholder:text-on-surface-variant/40 mb-6 p-0 focus:ring-0 overflow-hidden" placeholder="Enter article title..." rows="1"></textarea>
+<!-- Summary Box (Offset print style) -->
+<div class="mb-8 relative group">
+<div class="absolute inset-0 bg-surface-container-highest translate-x-1 translate-y-1 border border-on-surface z-0"></div>
+<div class="relative z-10 bg-surface-container-lowest border border-on-surface p-4 flex flex-col gap-2">
+<label class="font-label-mono text-label-mono text-on-surface-variant flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">notes</span> SUMMARY
+                            </label>
+<textarea class="w-full bg-transparent border-none outline-none resize-none font-body-md text-on-surface placeholder:text-on-surface-variant/50 p-0 focus:ring-0" placeholder="Brief summary of the article..." rows="2"></textarea>
+</div>
+</div>
+<!-- Newspaper Divider -->
+<div class="flex items-center justify-center mb-8 opacity-50">
+<div class="h-[1px] bg-on-surface w-16"></div>
+<div class="w-2 h-2 bg-on-surface mx-2"></div>
+<div class="h-[1px] bg-on-surface w-16"></div>
+</div>
+<!-- Body Content -->
+<div class="font-body-lg text-on-surface leading-relaxed min-h-[400px] outline-none" contenteditable="true">
+<p class="mb-4">The landscape of digital design is undergoing a significant shift in 2024. Moving away from the soft, ethereal gradients that dominated the past few years, we are seeing a strong return to structured, tactile interfaces.</p>
+<p class="mb-4">This aesthetic, often termed 'Digital Brutalism Lite', relies heavily on visible grids, harsh 1px borders, and a monochromatic palette punctuated by stark primary colors. It mimics the physicality of print media—specifically, the high-contrast environment of editorial newsrooms.</p>
+<!-- Image Placeholder -->
+<div class="my-8 border border-on-surface p-2 bg-surface-container-low halftone-bg" contenteditable="false">
+<div class="w-full h-64 bg-surface-container border border-on-surface relative overflow-hidden group cursor-pointer">
+<img class="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" data-alt="A stark, high-contrast digital brutalist interface design featuring sharp 1px borders, a strict grid layout, and vibrant cobalt blue and tomato red accents against an off-white background. The composition is structured like a vintage newspaper." src="https://lh3.googleusercontent.com/aida-public/AB6AXuATkVIENRrHPurrnzc4czUg9MXD-UrmwqIZ4FpGWouPhBLaXtSb7qQm9X6rK3-eD01Z3taAyckUh9wLrjlsAhfvAG4uwu9I8mhgfi37K_pjviMkDldJiw0luJ_OUDWNA6qdZKUo9dkXCElHAcb6ohES0uLLzCfPhWfjw_Y9tgTtHje_ZeYJT8DoOUT8RqfU5aTrS67BgGcxXegwRORtv0TxB_fzwLq642pxkrbA-BzH0jAkF8A743q1cA"/>
+<div class="absolute inset-0 flex items-center justify-center bg-on-surface/10 opacity-0 group-hover:opacity-100 transition-opacity">
+<button class="bg-surface text-on-surface border border-on-surface px-4 py-2 font-bold shadow-[2px_2px_0px_#111a35]">Replace Image</button>
+</div>
+</div>
+<div class="mt-2 text-center text-[12px] font-label-mono text-on-surface-variant">FIG 1.1 - Example of structural grid layouts.</div>
+</div>
+<p class="mb-4">As teams require tools that focus on high-throughput rather than passive consumption, interfaces must evolve to act more like sturdy workbenches. The 'ink' must be clear, and the 'paper' uncluttered.</p>
+</div>
+</div>
+</div>
+<!-- Right Column (30% - Assistant Panel) -->
+<div class="w-[300px] lg:w-[360px] border-l border-on-surface bg-surface-container-low flex flex-col shrink-0 transition-all duration-300" id="assistant-panel">
+<!-- Panel Header -->
+<div class="h-[48px] border-b border-on-surface px-4 flex items-center justify-between bg-surface-container-highest cursor-pointer hover:bg-surface-variant transition-colors" onclick="document.getElementById('assistant-panel').classList.toggle('w-12'); document.getElementById('panel-content').classList.toggle('hidden'); document.getElementById('panel-icon').classList.toggle('-rotate-90');">
+<div class="flex items-center gap-2 overflow-hidden whitespace-nowrap">
+<span class="material-symbols-outlined text-[20px] text-primary">psychology</span>
+<span class="font-bold text-body-md text-on-surface">AI 助手 (Assistant)</span>
+</div>
+<span class="material-symbols-outlined text-[24px] text-on-surface transition-transform duration-300" id="panel-icon">expand_more</span>
+</div>
+<!-- Panel Content -->
+<div class="flex-1 overflow-y-auto p-4 flex flex-col gap-6" id="panel-content">
+<!-- Pending Checks -->
+<section>
+<h3 class="font-label-mono text-label-mono text-on-surface-variant mb-3 flex items-center gap-2">
+<span class="w-2 h-2 bg-tertiary block"></span> PENDING CHECKS
+                        </h3>
+<div class="flex flex-col gap-2">
+<div class="border border-tertiary bg-tertiary-fixed p-3 flex gap-3 relative group">
+<div class="absolute inset-0 halftone-bg opacity-30 pointer-events-none"></div>
+<span class="material-symbols-outlined text-tertiary text-[20px] shrink-0 relative z-10">error</span>
+<div class="relative z-10">
+<p class="text-body-md font-bold text-on-tertiary-fixed-variant leading-tight mb-1">Tone Consistency</p>
+<p class="text-[12px] text-on-surface">The second paragraph shifts to a passive voice which breaks the editorial guideline.</p>
+<button class="mt-2 text-[12px] font-bold text-tertiary underline decoration-tertiary underline-offset-2">Auto-Fix</button>
+</div>
+</div>
+<div class="border border-on-surface bg-surface p-3 flex gap-3">
+<span class="material-symbols-outlined text-on-surface-variant text-[20px] shrink-0">link</span>
+<div>
+<p class="text-body-md font-bold text-on-surface leading-tight mb-1">Missing Citation</p>
+<p class="text-[12px] text-on-surface-variant">Add a link to the 'Digital Brutalism' reference.</p>
+</div>
+</div>
+</div>
+</section>
+<!-- Divider -->
+<div class="border-t border-on-surface border-dashed"></div>
+<!-- Next Step Suggestions -->
+<section>
+<h3 class="font-label-mono text-label-mono text-on-surface-variant mb-3 flex items-center gap-2">
+<span class="w-2 h-2 bg-primary block"></span> SUGGESTIONS
+                        </h3>
+<div class="flex flex-col gap-3">
+<button class="w-full border border-on-surface bg-surface p-3 text-left hover:bg-surface-container-highest hover:-translate-y-0.5 hover:shadow-[2px_2px_0px_#111a35] transition-all group">
+<div class="flex justify-between items-start mb-1">
+<span class="font-bold text-on-surface text-body-md">Expand on 'Sturdy Workbenches'</span>
+<span class="material-symbols-outlined text-[16px] text-primary opacity-0 group-hover:opacity-100 transition-opacity">add_circle</span>
+</div>
+<p class="text-[12px] text-on-surface-variant line-clamp-2">The conclusion is brief. Elaborate on what features make an interface act like a workbench.</p>
+</button>
+<button class="w-full border border-on-surface bg-surface p-3 text-left hover:bg-surface-container-highest hover:-translate-y-0.5 hover:shadow-[2px_2px_0px_#111a35] transition-all group">
+<div class="flex justify-between items-start mb-1">
+<span class="font-bold text-on-surface text-body-md">Generate SEO Meta Tags</span>
+<span class="material-symbols-outlined text-[16px] text-primary opacity-0 group-hover:opacity-100 transition-opacity">add_circle</span>
+</div>
+<p class="text-[12px] text-on-surface-variant">Based on the current title and summary.</p>
+</button>
+</div>
+</section>
+</div>
+</div>
+</div>
+<!-- Bottom Status Bar -->
+<div class="h-[56px] border-t border-on-surface bg-surface-container-lowest flex justify-between items-center px-unit-lg shrink-0 z-20 absolute bottom-0 left-0 right-0">
+<div class="flex items-center gap-6 font-label-mono text-label-mono text-on-surface-variant">
+<div class="flex items-center gap-1.5 text-on-surface">
+<span class="material-symbols-outlined text-[16px] fill-current" style="font-variation-settings: 'FILL' 1;">cloud_done</span>
+<span>Saved 10:42 AM</span>
+</div>
+<div class="hidden sm:flex items-center gap-6 border-l border-on-surface pl-6">
+<div class="flex flex-col">
+<span class="text-[10px] text-on-surface-variant/70 uppercase">Words</span>
+<span class="text-on-surface font-bold text-[14px]">1,204</span>
+</div>
+<div class="flex flex-col">
+<span class="text-[10px] text-on-surface-variant/70 uppercase">Reading Time</span>
+<span class="text-on-surface font-bold text-[14px]">4 min</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<button class="text-on-surface-variant hover:text-on-surface font-bold text-body-md transition-colors underline underline-offset-4 decoration-1">
+                    Preview
+                </button>
+<button class="px-6 py-2 bg-primary text-on-primary border border-on-surface shadow-[2px_2px_0px_#a51b0e] hover:translate-y-[1px] hover:translate-x-[1px] hover:shadow-[1px_1px_0px_#a51b0e] transition-all font-bold text-body-md flex items-center gap-2">
+                    Go to Visual
+                    <span class="material-symbols-outlined text-[18px]">arrow_forward</span>
+</button>
+</div>
+</div>
+</main>
+</body></html>

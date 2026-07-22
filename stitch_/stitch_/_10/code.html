@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>今天 - 内容引擎</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&amp;family=Hanken+Grotesk:wght@700;800&amp;family=IBM+Plex+Mono:wght@500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "tertiary-container": "#c83524",
+                    "surface": "#faf8ff",
+                    "tertiary-fixed": "#ffdad4",
+                    "surface-bright": "#faf8ff",
+                    "secondary": "#5b5f64",
+                    "on-primary": "#ffffff",
+                    "primary-container": "#1e5bff",
+                    "surface-container": "#ebedff",
+                    "inverse-on-surface": "#eff0ff",
+                    "outline": "#737688",
+                    "on-error": "#ffffff",
+                    "error": "#ba1a1a",
+                    "on-surface": "#111a35",
+                    "surface-dim": "#d0d9fd",
+                    "on-primary-container": "#ecedff",
+                    "on-tertiary-fixed": "#400100",
+                    "tertiary": "#a51b0e",
+                    "on-tertiary-fixed-variant": "#910802",
+                    "secondary-fixed": "#dfe2e9",
+                    "surface-container-highest": "#dbe1ff",
+                    "on-tertiary": "#ffffff",
+                    "surface-tint": "#004cec",
+                    "on-background": "#111a35",
+                    "on-secondary-fixed-variant": "#43474d",
+                    "surface-container-high": "#e3e7ff",
+                    "on-tertiary-container": "#ffeae6",
+                    "background": "#faf8ff",
+                    "inverse-surface": "#272f4b",
+                    "secondary-container": "#dfe2e9",
+                    "surface-container-lowest": "#ffffff",
+                    "error-container": "#ffdad6",
+                    "primary-fixed": "#dce1ff",
+                    "outline-variant": "#c3c5d9",
+                    "surface-container-low": "#f2f3ff",
+                    "on-primary-fixed": "#001551",
+                    "on-secondary-container": "#61656b",
+                    "inverse-primary": "#b7c4ff",
+                    "on-secondary-fixed": "#181c21",
+                    "on-error-container": "#93000a",
+                    "on-surface-variant": "#434656",
+                    "on-primary-fixed-variant": "#0039b5",
+                    "surface-variant": "#dbe1ff",
+                    "on-secondary": "#ffffff",
+                    "primary": "#0044d3",
+                    "secondary-fixed-dim": "#c3c7cd",
+                    "tertiary-fixed-dim": "#ffb4a7",
+                    "primary-fixed-dim": "#b7c4ff",
+                    
+                    // Custom Brand Colors based on Style Guidance
+                    "brand-canvas": "#FFFDF7",
+                    "brand-ink": "#17203B",
+                    "brand-cobalt": "#1E5BFF",
+                    "brand-tomato": "#F0523D",
+                    "brand-mint": "#A3E4D7",
+                    "brand-yellow": "#F9E79F"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0px", // Brutalism lite, hard corners
+                    "lg": "0px",
+                    "xl": "0px",
+                    "full": "9999px" // Except for avatars
+            },
+            "spacing": {
+                    "unit-lg": "24px",
+                    "sidebar-width": "208px",
+                    "unit-xl": "48px",
+                    "topbar-height": "56px",
+                    "unit-xs": "4px",
+                    "unit-sm": "8px",
+                    "unit-md": "16px"
+            },
+            "fontFamily": {
+                    "body-md": ["Noto Sans SC", "sans-serif"],
+                    "body-lg": ["Noto Sans SC", "sans-serif"],
+                    "headline-md": ["Hanken Grotesk", "sans-serif"],
+                    "display-lg": ["Hanken Grotesk", "sans-serif"],
+                    "label-mono": ["IBM Plex Mono", "monospace"]
+            },
+            "fontSize": {
+                    "body-md": ["14px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                    "body-lg": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                    "headline-md": ["24px", {"lineHeight": "1.4", "fontWeight": "700"}],
+                    "display-lg": ["40px", {"lineHeight": "1.2", "letterSpacing": "-0.02em", "fontWeight": "800"}],
+                    "label-mono": ["12px", {"lineHeight": "1.0", "letterSpacing": "0.05em", "fontWeight": "500"}]
+            }
+          }
+        }
+      }
+    </script>
+<style>
+        /* Halftone Pattern */
+        .halftone-bg {
+            background-image: radial-gradient(circle, #17203B 1px, transparent 1px);
+            background-size: 4px 4px;
+        }
+        .halftone-light {
+            background-image: radial-gradient(circle, rgba(23, 32, 59, 0.1) 1px, transparent 1px);
+            background-size: 4px 4px;
+        }
+        /* Custom scrollbar for brutalist feel */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #FFFDF7;
+            border-left: 1px solid #17203B;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #17203B;
+        }
+        
+        /* Editorial Buttons */
+        .btn-editorial-primary {
+            background-color: #1E5BFF;
+            color: #FFFDF7;
+            border: 1px solid #17203B;
+            transition: all 0.2s;
+        }
+        .btn-editorial-primary:hover {
+            box-shadow: 2px 2px 0px 0px #F0523D;
+            transform: translate(-2px, -2px);
+        }
+        .btn-editorial-secondary {
+            background-color: #FFFDF7;
+            color: #17203B;
+            border: 1px solid #17203B;
+            transition: all 0.2s;
+        }
+        .btn-editorial-secondary:hover {
+            box-shadow: 2px 2px 0px 0px #1E5BFF;
+            transform: translate(-2px, -2px);
+        }
+        
+        /* Panel style */
+        .panel {
+            border: 1px solid #17203B;
+            background-color: #FFFDF7;
+        }
+        
+        /* Typography overrides to enforce styling */
+        body {
+            background-color: #FFFDF7;
+            color: #17203B;
+        }
+        
+        /* Ink Strike for active state */
+        .ink-strike::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background-color: #F0523D;
+        }
+        
+        /* Newspaper Divider */
+        .newspaper-divider {
+            height: 1px;
+            background-color: #17203B;
+            position: relative;
+            margin: 24px 0;
+        }
+        .newspaper-divider::after {
+            content: '';
+            position: absolute;
+            left: 50%;
+            top: -3px;
+            transform: translateX(-50%);
+            width: 8px;
+            height: 8px;
+            background-color: #17203B;
+        }
+    </style>
+</head>
+<body class="font-body-md bg-brand-canvas text-brand-ink min-h-screen antialiased overflow-x-hidden flex flex-col md:flex-row">
+<!-- TopNavBar (Mobile First, then hidden on md up for SideNav) -->
+<!-- Applying style_ separation logic, brand colors -->
+<header class="md:hidden flex justify-between items-center px-unit-lg h-[56px] z-50 fixed top-0 left-0 w-full border-b border-brand-ink bg-brand-canvas">
+<div class="flex items-center gap-unit-md">
+<span class="font-headline-md text-headline-md font-bold text-brand-ink">知行内容实验室</span>
+</div>
+<div class="flex items-center gap-unit-md">
+<span class="material-symbols-outlined text-brand-ink cursor-pointer">search</span>
+<button class="btn-editorial-primary px-unit-md py-unit-xs font-label-mono text-label-mono">新建</button>
+<span class="material-symbols-outlined text-brand-ink cursor-pointer">notifications</span>
+<span class="material-symbols-outlined text-brand-ink cursor-pointer">sync</span>
+<div class="w-8 h-8 rounded-full border border-brand-ink overflow-hidden bg-brand-mint">
+<img alt="User Avatar" class="w-full h-full object-cover" data-alt="A stylized, vector-art portrait avatar of a young professional in a pop-nostalgia aesthetic, solid flat colors, halftone shading, #1E5BFF background." src="https://lh3.googleusercontent.com/aida-public/AB6AXuD6YK-mFE0DVrAoiw0J_Kz5jBPTC6w3lO9Wo4ugsL4p79VIjRaVRCuW48XtrQKZL5VdlBdUvwMNLET61Sqn2vXN7D8TkU2s9-KSQEEgumY5tOs0J95lGbj-pmj3lLLp3X2ZYBNfE1dsK4kZ3s4-KQaqLVkzd1k1GtvkhX7ucP8jk2ia65GR9hSaQYm8yFeSZj-gIk3GbEwOae4KePF-dAgGLFb4RQWGHVrxEp3BqQo9FAX9qazjcD3GhQ"/>
+</div>
+</div>
+</header>
+<!-- SideNavBar (Hidden on mobile, fixed on Desktop) -->
+<nav class="hidden md:flex flex-col py-unit-md gap-unit-sm w-[208px] fixed left-0 top-0 h-screen border-r border-brand-ink bg-brand-canvas z-40 halftone-light">
+<div class="px-unit-md pb-unit-lg mb-unit-md border-b border-brand-ink flex flex-col items-start gap-unit-sm">
+<div class="flex items-center gap-unit-sm w-full">
+<div class="w-8 h-8 bg-brand-cobalt text-brand-canvas flex items-center justify-center font-bold border border-brand-ink">
+                    C
+                </div>
+<div>
+<h1 class="font-headline-md text-headline-md font-black text-brand-ink leading-none">内容引擎</h1>
+<span class="font-label-mono text-label-mono text-brand-cobalt">V2.0</span>
+</div>
+</div>
+<button class="btn-editorial-primary w-full py-unit-sm mt-unit-sm font-label-mono text-label-mono flex justify-center items-center gap-unit-xs">
+<span class="material-symbols-outlined text-sm">add</span> 新建选题
+            </button>
+</div>
+<div class="flex-1 overflow-y-auto px-unit-sm flex flex-col gap-unit-xs">
+<!-- Active Tab: 今天 -->
+<a class="flex items-center gap-unit-sm px-unit-sm py-unit-sm bg-brand-cobalt text-brand-canvas relative ink-strike font-body-md" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">today</span>
+<span>今天</span>
+</a>
+<a class="flex items-center gap-unit-sm px-unit-sm py-unit-sm text-brand-ink hover:bg-brand-yellow hover:border hover:border-brand-ink transition-all font-body-md border border-transparent" href="#">
+<span class="material-symbols-outlined">explore</span>
+<span>发现</span>
+</a>
+<a class="flex items-center gap-unit-sm px-unit-sm py-unit-sm text-brand-ink hover:bg-brand-yellow hover:border hover:border-brand-ink transition-all font-body-md border border-transparent" href="#">
+<span class="material-symbols-outlined">event_note</span>
+<span>规划</span>
+</a>
+<a class="flex items-center gap-unit-sm px-unit-sm py-unit-sm text-brand-ink hover:bg-brand-yellow hover:border hover:border-brand-ink transition-all font-body-md border border-transparent" href="#">
+<span class="material-symbols-outlined">edit_note</span>
+<span>创作</span>
+</a>
+<a class="flex items-center gap-unit-sm px-unit-sm py-unit-sm text-brand-ink hover:bg-brand-yellow hover:border hover:border-brand-ink transition-all font-body-md border border-transparent" href="#">
+<span class="material-symbols-outlined">publish</span>
+<span>发布</span>
+</a>
+<a class="flex items-center gap-unit-sm px-unit-sm py-unit-sm text-brand-ink hover:bg-brand-yellow hover:border hover:border-brand-ink transition-all font-body-md border border-transparent" href="#">
+<span class="material-symbols-outlined">analytics</span>
+<span>复盘</span>
+</a>
+<div class="my-unit-sm h-px bg-brand-ink w-full"></div>
+<a class="flex items-center gap-unit-sm px-unit-sm py-unit-sm text-brand-ink hover:bg-brand-yellow hover:border hover:border-brand-ink transition-all font-body-md border border-transparent" href="#">
+<span class="material-symbols-outlined">inventory_2</span>
+<span>素材库</span>
+</a>
+<a class="flex items-center gap-unit-sm px-unit-sm py-unit-sm text-brand-ink hover:bg-brand-yellow hover:border hover:border-brand-ink transition-all font-body-md border border-transparent" href="#">
+<span class="material-symbols-outlined">bolt</span>
+<span>自动化</span>
+</a>
+</div>
+<div class="px-unit-sm pb-unit-md mt-auto pt-unit-sm border-t border-brand-ink">
+<a class="flex items-center gap-unit-sm px-unit-sm py-unit-sm text-brand-ink hover:bg-brand-yellow hover:border hover:border-brand-ink transition-all font-body-md border border-transparent" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span>设置</span>
+</a>
+<a class="flex items-center gap-unit-sm px-unit-sm py-unit-sm text-brand-ink hover:bg-brand-yellow hover:border hover:border-brand-ink transition-all font-body-md border border-transparent" href="#">
+<span class="material-symbols-outlined">help</span>
+<span>帮助中心</span>
+</a>
+</div>
+</nav>
+<!-- Main Content Canvas -->
+<main class="flex-1 mt-[56px] md:mt-0 md:ml-[208px] p-unit-lg min-h-screen relative">
+<!-- Header Section -->
+<header class="mb-unit-xl border-b border-brand-ink pb-unit-md flex flex-col md:flex-row md:items-end justify-between gap-unit-md">
+<div>
+<h1 class="font-display-lg text-display-lg font-extrabold text-brand-ink relative inline-block">
+                    今天，7 月 21 日
+                    <!-- Stylized offset shadow block for brutalism effect -->
+<span class="absolute -bottom-2 -right-2 w-full h-full bg-brand-yellow -z-10 border border-brand-ink translate-x-2 translate-y-2"></span>
+</h1>
+<p class="font-headline-md text-headline-md text-brand-cobalt mt-unit-md flex items-center gap-unit-sm">
+<span class="material-symbols-outlined">priority_high</span>
+                    你有 3 件内容工作需要确认
+                </p>
+</div>
+<!-- Global Search Masthead style -->
+<div class="relative w-full md:w-64 border-b-2 border-brand-ink pb-1 flex items-center">
+<span class="material-symbols-outlined text-brand-ink mr-2">search</span>
+<input class="w-full bg-transparent border-none focus:ring-0 p-0 font-label-mono text-label-mono text-brand-ink placeholder:text-brand-ink/50 focus:outline-none" placeholder="搜索内容、素材、项目..." type="text"/>
+<!-- Typewriter cursor effect -->
+<span class="w-2 h-4 bg-brand-cobalt animate-pulse inline-block ml-1"></span>
+</div>
+</header>
+<!-- Modular Layout Grid -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-unit-lg">
+<!-- Left Column: Priority & Projects (8 cols) -->
+<div class="lg:col-span-8 flex flex-col gap-unit-lg">
+<!-- Section 1: 今日优先事项 -->
+<section class="panel p-unit-lg relative overflow-hidden">
+<!-- Subtle background texture -->
+<div class="absolute inset-0 halftone-light opacity-50 pointer-events-none"></div>
+<div class="flex justify-between items-center mb-unit-md relative z-10 border-b border-brand-ink pb-unit-sm">
+<h2 class="font-headline-md text-headline-md font-bold flex items-center gap-unit-sm">
+<div class="w-4 h-4 bg-brand-tomato border border-brand-ink"></div>
+                            今日优先事项
+                        </h2>
+<span class="font-label-mono text-label-mono bg-brand-mint border border-brand-ink px-2 py-1">2 待办</span>
+</div>
+<div class="flex flex-col gap-unit-sm relative z-10">
+<!-- Task 1 -->
+<div class="flex items-start gap-unit-md p-unit-sm border border-brand-ink bg-brand-canvas hover:bg-brand-yellow transition-colors group cursor-pointer">
+<div class="mt-1 w-5 h-5 border-2 border-brand-ink flex-shrink-0 group-hover:bg-brand-cobalt transition-colors"></div>
+<div class="flex-1">
+<p class="font-body-lg text-body-lg font-bold">确认选题：普通人如何用 AI 做知识视频</p>
+<div class="flex gap-2 mt-2">
+<span class="font-label-mono text-label-mono text-brand-tomato border border-brand-tomato px-1">高优先级</span>
+<span class="font-label-mono text-label-mono text-brand-ink border border-brand-ink px-1">小红书</span>
+</div>
+</div>
+<button class="btn-editorial-secondary px-unit-sm py-unit-xs font-label-mono text-label-mono whitespace-nowrap">去确认</button>
+</div>
+<!-- Task 2 -->
+<div class="flex items-start gap-unit-md p-unit-sm border border-brand-ink bg-brand-canvas hover:bg-brand-yellow transition-colors group cursor-pointer">
+<div class="mt-1 w-5 h-5 border-2 border-brand-ink flex-shrink-0 group-hover:bg-brand-cobalt transition-colors"></div>
+<div class="flex-1">
+<p class="font-body-lg text-body-lg font-bold">审核小红书 8 页图文</p>
+<p class="font-body-md text-body-md text-brand-ink/70 mt-1">设计已提交V2版本，需今日定稿</p>
+</div>
+<button class="btn-editorial-secondary px-unit-sm py-unit-xs font-label-mono text-label-mono whitespace-nowrap">审核</button>
+</div>
+</div>
+</section>
+<div class="newspaper-divider"></div>
+<!-- Section 2: 进行中的内容项目 -->
+<section class="panel p-unit-lg">
+<div class="flex justify-between items-center mb-unit-md border-b border-brand-ink pb-unit-sm">
+<h2 class="font-headline-md text-headline-md font-bold flex items-center gap-unit-sm">
+<span class="material-symbols-outlined">edit_square</span>
+                            进行中的内容项目
+                        </h2>
+<a class="font-label-mono text-label-mono text-brand-cobalt hover:underline" href="#">查看全部 -&gt;</a>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-unit-md">
+<!-- Project Card 1 -->
+<div class="border border-brand-ink p-unit-md flex flex-col h-full bg-brand-canvas relative group">
+<!-- Pop hover effect -->
+<div class="absolute inset-0 bg-brand-cobalt -z-10 translate-x-1 translate-y-1 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+<div class="flex justify-between items-start mb-unit-sm">
+<span class="bg-brand-yellow px-2 py-0.5 border border-brand-ink font-label-mono text-label-mono relative overflow-hidden">
+<div class="absolute inset-0 halftone-light pointer-events-none"></div>
+<span class="relative z-10">大纲撰写</span>
+</span>
+<span class="material-symbols-outlined text-brand-ink">more_horiz</span>
+</div>
+<h3 class="font-body-lg text-body-lg font-bold mb-unit-md flex-1">AIGC 行业周报 (第32期)</h3>
+<div class="flex justify-between items-end mt-auto pt-unit-md border-t border-brand-ink border-dashed">
+<div class="font-label-mono text-label-mono">进度: 40%</div>
+<button class="btn-editorial-primary px-unit-sm py-unit-xs font-label-mono text-label-mono">继续编辑</button>
+</div>
+</div>
+<!-- Project Card 2 -->
+<div class="border border-brand-ink p-unit-md flex flex-col h-full bg-brand-canvas relative group">
+<div class="absolute inset-0 bg-brand-mint -z-10 translate-x-1 translate-y-1 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+<div class="flex justify-between items-start mb-unit-sm">
+<span class="bg-brand-mint px-2 py-0.5 border border-brand-ink font-label-mono text-label-mono relative overflow-hidden">
+<div class="absolute inset-0 halftone-light pointer-events-none"></div>
+<span class="relative z-10">视频剪辑</span>
+</span>
+<span class="material-symbols-outlined text-brand-ink">more_horiz</span>
+</div>
+<h3 class="font-body-lg text-body-lg font-bold mb-unit-md flex-1">Notion AI 实战教程</h3>
+<div class="flex justify-between items-end mt-auto pt-unit-md border-t border-brand-ink border-dashed">
+<div class="font-label-mono text-label-mono">进度: 80%</div>
+<button class="btn-editorial-secondary px-unit-sm py-unit-xs font-label-mono text-label-mono">查看预览</button>
+</div>
+</div>
+</div>
+</section>
+</div>
+<!-- Right Column: Discovery & Timeline (4 cols) -->
+<div class="lg:col-span-4 flex flex-col gap-unit-lg">
+<!-- Section 3: 今日发现的热点 -->
+<section class="panel p-unit-md bg-brand-ink text-brand-canvas relative overflow-hidden">
+<!-- Inverse halftone -->
+<div class="absolute inset-0 halftone-bg opacity-30 pointer-events-none bg-brand-ink"></div>
+<div class="relative z-10">
+<div class="flex justify-between items-center mb-unit-md border-b border-brand-canvas/30 pb-unit-sm">
+<h2 class="font-headline-md text-headline-md font-bold flex items-center gap-unit-sm text-brand-yellow">
+<span class="material-symbols-outlined">local_fire_department</span>
+                                今日热点
+                            </h2>
+</div>
+<ul class="flex flex-col gap-unit-md">
+<li class="border-l-2 border-brand-tomato pl-unit-sm hover:translate-x-1 transition-transform cursor-pointer">
+<span class="font-label-mono text-label-mono text-brand-mint mb-1 block">#科技圈</span>
+<p class="font-body-md text-body-md font-bold line-clamp-2">GPT-4V 开放新功能，视觉分析能力大幅提升，引发社区讨论热潮。</p>
+</li>
+<li class="border-l-2 border-brand-tomato pl-unit-sm hover:translate-x-1 transition-transform cursor-pointer">
+<span class="font-label-mono text-label-mono text-brand-mint mb-1 block">#爆款解构</span>
+<p class="font-body-md text-body-md font-bold line-clamp-2">"打工人必看"标签在小红书流量飙升 300%，职场类内容需求增加。</p>
+</li>
+<li class="border-l-2 border-brand-tomato pl-unit-sm hover:translate-x-1 transition-transform cursor-pointer">
+<span class="font-label-mono text-label-mono text-brand-mint mb-1 block">#设计趋势</span>
+<p class="font-body-md text-body-md font-bold line-clamp-2">Brutalism (粗野主义) 在网页设计中回归，注重结构与高对比度。</p>
+</li>
+</ul>
+<button class="w-full mt-unit-md border border-brand-canvas text-brand-canvas py-unit-sm font-label-mono text-label-mono hover:bg-brand-canvas hover:text-brand-ink transition-colors flex justify-center items-center gap-2">
+                            前往发现中心 <span class="material-symbols-outlined text-sm">arrow_forward</span>
+</button>
+</div>
+</section>
+<!-- Section 4: 近期排期 -->
+<section class="panel p-unit-md">
+<div class="flex items-center gap-unit-sm mb-unit-md border-b border-brand-ink pb-unit-sm">
+<span class="material-symbols-outlined">calendar_month</span>
+<h2 class="font-headline-md text-headline-md font-bold">近期排期</h2>
+</div>
+<div class="relative border-l-2 border-brand-ink ml-3 py-2 space-y-unit-md">
+<!-- Day 1 -->
+<div class="relative pl-unit-md">
+<div class="absolute -left-[9px] top-1 w-4 h-4 bg-brand-cobalt border border-brand-ink"></div>
+<div class="font-label-mono text-label-mono text-brand-cobalt font-bold mb-1">今日 (7.21)</div>
+<div class="bg-brand-canvas border border-brand-ink p-2 text-sm">
+                                发布：Notion 教程下集<br/>
+                                平台：B站、小红书
+                            </div>
+</div>
+<!-- Day 2 -->
+<div class="relative pl-unit-md">
+<div class="absolute -left-[9px] top-1 w-4 h-4 bg-brand-canvas border border-brand-ink"></div>
+<div class="font-label-mono text-label-mono text-brand-ink mb-1">明日 (7.22)</div>
+<div class="bg-brand-canvas border border-brand-ink border-dashed p-2 text-sm text-brand-ink/70">
+                                截稿：周报大纲审核
+                            </div>
+</div>
+<!-- Day 3 -->
+<div class="relative pl-unit-md">
+<div class="absolute -left-[9px] top-1 w-4 h-4 bg-brand-canvas border border-brand-ink"></div>
+<div class="font-label-mono text-label-mono text-brand-ink mb-1">后天 (7.23)</div>
+<div class="bg-brand-canvas border border-brand-ink border-dashed p-2 text-sm text-brand-ink/70">
+                                录制：播客第12期
+                            </div>
+</div>
+</div>
+</section>
+</div>
+</div>
+<!-- Bottom right: Tiny overlay for rendering task -->
+<!-- Pop Nostalgia Fresh execution: tactile, rigid, high contrast -->
+<div class="fixed bottom-unit-lg right-unit-lg z-50 bg-brand-canvas border-2 border-brand-ink shadow-[4px_4px_0px_0px_#17203B] p-unit-md w-64 md:w-72">
+<div class="flex justify-between items-start mb-2">
+<div class="flex items-center gap-1 font-label-mono text-label-mono font-bold text-brand-cobalt">
+<span class="material-symbols-outlined text-sm animate-spin" style="animation-duration: 3s;">settings</span>
+                    渲染中
+                </div>
+<span class="material-symbols-outlined text-brand-ink text-sm cursor-pointer hover:text-brand-tomato">close</span>
+</div>
+<p class="font-body-md text-sm truncate mb-3" title="Notion_AI_Tutorial_Final.mp4">Notion_AI_Tutorial_Final.mp4</p>
+<div class="w-full h-4 border border-brand-ink bg-brand-canvas relative overflow-hidden mb-1">
+<!-- Halftone progress bar -->
+<div class="absolute left-0 top-0 h-full bg-brand-cobalt w-[68%] relative">
+<div class="absolute inset-0 halftone-light pointer-events-none mix-blend-overlay"></div>
+</div>
+</div>
+<div class="flex justify-between font-label-mono text-[10px] text-brand-ink">
+<span>68%</span>
+<span>约 12 分钟剩余</span>
+</div>
+</div>
+</main>
+</body></html>

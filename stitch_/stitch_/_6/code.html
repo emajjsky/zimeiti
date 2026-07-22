@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+
+<html class="light" lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>规划 - 选题详情 - 内容引擎</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "tertiary-container": "#c83524",
+                      "surface": "#faf8ff",
+                      "tertiary-fixed": "#ffdad4",
+                      "surface-bright": "#faf8ff",
+                      "secondary": "#5b5f64",
+                      "on-primary": "#ffffff",
+                      "primary-container": "#1e5bff",
+                      "surface-container": "#ebedff",
+                      "inverse-on-surface": "#eff0ff",
+                      "outline": "#737688",
+                      "on-error": "#ffffff",
+                      "error": "#ba1a1a",
+                      "on-surface": "#111a35",
+                      "surface-dim": "#d0d9fd",
+                      "on-primary-container": "#ecedff",
+                      "on-tertiary-fixed": "#400100",
+                      "tertiary": "#a51b0e",
+                      "on-tertiary-fixed-variant": "#910802",
+                      "secondary-fixed": "#dfe2e9",
+                      "surface-container-highest": "#dbe1ff",
+                      "on-tertiary": "#ffffff",
+                      "surface-tint": "#004cec",
+                      "on-background": "#111a35",
+                      "on-secondary-fixed-variant": "#43474d",
+                      "surface-container-high": "#e3e7ff",
+                      "on-tertiary-container": "#ffeae6",
+                      "background": "#faf8ff",
+                      "inverse-surface": "#272f4b",
+                      "secondary-container": "#dfe2e9",
+                      "surface-container-lowest": "#ffffff",
+                      "error-container": "#ffdad6",
+                      "primary-fixed": "#dce1ff",
+                      "outline-variant": "#c3c5d9",
+                      "surface-container-low": "#f2f3ff",
+                      "on-primary-fixed": "#001551",
+                      "on-secondary-container": "#61656b",
+                      "inverse-primary": "#b7c4ff",
+                      "on-secondary-fixed": "#181c21",
+                      "on-error-container": "#93000a",
+                      "on-surface-variant": "#434656",
+                      "on-primary-fixed-variant": "#0039b5",
+                      "surface-variant": "#dbe1ff",
+                      "on-secondary": "#ffffff",
+                      "primary": "#0044d3",
+                      "secondary-fixed-dim": "#c3c7cd",
+                      "tertiary-fixed-dim": "#ffb4a7",
+                      "primary-fixed-dim": "#b7c4ff"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "unit-lg": "24px",
+                      "sidebar-width": "208px",
+                      "unit-xl": "48px",
+                      "topbar-height": "56px",
+                      "unit-xs": "4px",
+                      "unit-sm": "8px",
+                      "unit-md": "16px"
+              },
+              "fontFamily": {
+                      "body-md": [
+                              "notoSans", "sans-serif"
+                      ],
+                      "body-lg": [
+                              "notoSans", "sans-serif"
+                      ],
+                      "headline-md": [
+                              "hankenGrotesk", "sans-serif"
+                      ],
+                      "display-lg": [
+                              "hankenGrotesk", "sans-serif"
+                      ],
+                      "label-mono": [
+                              "ibmPlexMono", "monospace"
+                      ]
+              },
+              "fontSize": {
+                      "body-md": [
+                              "14px",
+                              {
+                                      "lineHeight": "1.6",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "body-lg": [
+                              "16px",
+                              {
+                                      "lineHeight": "1.6",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "headline-md": [
+                              "24px",
+                              {
+                                      "lineHeight": "1.4",
+                                      "fontWeight": "700"
+                              }
+                      ],
+                      "display-lg": [
+                              "40px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "letterSpacing": "-0.02em",
+                                      "fontWeight": "800"
+                              }
+                      ],
+                      "label-mono": [
+                              "12px",
+                              {
+                                      "lineHeight": "1.0",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "500"
+                              }
+                      ]
+              }
+            },
+          },
+        }
+    </script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        /* Digital Brutalism Lite / Pop Nostalgia Fresh Styles */
+        body {
+            background-color: #FFFDF7;
+            color: #111a35;
+        }
+        .border-ink { border-color: #17203B; }
+        .bg-ink { background-color: #17203B; }
+        .text-ink { color: #17203B; }
+        
+        .bg-cobalt { background-color: #1E5BFF; }
+        .text-cobalt { color: #1E5BFF; }
+        .border-cobalt { border-color: #1E5BFF; }
+        
+        .bg-tomato { background-color: #F0523D; }
+        
+        .bg-mint { background-color: #A3DEFE; } /* Approximated mint */
+        .bg-yellow { background-color: #FFD54F; }
+        
+        /* Halftone texture overlay */
+        .halftone-overlay {
+            background-image: radial-gradient(#111a35 1px, transparent 1px);
+            background-size: 4px 4px;
+            opacity: 0.1;
+        }
+
+        /* Newspaper Dividers */
+        .divider-solid {
+            height: 1px;
+            background-color: #17203B;
+            width: 100%;
+        }
+        .divider-double {
+            border-top: 1px solid #17203B;
+            border-bottom: 1px solid #17203B;
+            height: 4px;
+            width: 100%;
+            margin: 16px 0;
+        }
+        .divider-end {
+            display: flex;
+            align-items: center;
+            margin: 24px 0;
+        }
+        .divider-end::before, .divider-end::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background-color: #17203B;
+        }
+        .divider-end .end-mark {
+            width: 8px;
+            height: 8px;
+            background-color: #17203B;
+            margin: 0 8px;
+        }
+
+        /* Editorial Button */
+        .btn-editorial-primary {
+            background-color: #1E5BFF;
+            color: #FFFDF7;
+            border: 1px solid #17203B;
+            transition: all 0.2s;
+            position: relative;
+        }
+        .btn-editorial-primary:hover {
+            box-shadow: 2px 2px 0 #F0523D;
+            transform: translate(-1px, -1px);
+        }
+        .btn-editorial-secondary {
+            background-color: #FFFDF7;
+            color: #17203B;
+            border: 1px solid #17203B;
+            transition: all 0.2s;
+        }
+        .btn-editorial-secondary:hover {
+            background-color: #f2f3ff;
+            box-shadow: 2px 2px 0 #17203B;
+            transform: translate(-1px, -1px);
+        }
+        
+        /* Halftone Tag */
+        .tag-halftone {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 8px;
+            border: 1px solid #17203B;
+            font-family: 'ibmPlexMono', monospace;
+            font-size: 12px;
+            font-weight: 500;
+            overflow: hidden;
+        }
+        .tag-halftone::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background-image: radial-gradient(#111a35 1px, transparent 1px);
+            background-size: 4px 4px;
+            opacity: 0.15;
+            z-index: 0;
+        }
+        .tag-halftone span {
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Panel */
+        .panel {
+            border: 1px solid #17203B;
+            background-color: #FFFDF7;
+        }
+        
+        /* Inputs */
+        .input-brutal {
+            border: none;
+            border-bottom: 1px solid #17203B;
+            background: transparent;
+            font-family: 'ibmPlexMono', monospace;
+        }
+        .input-brutal:focus {
+            outline: none;
+            border-bottom: 2px solid #1E5BFF;
+        }
+    </style>
+</head>
+<body class="flex min-h-screen">
+<!-- TopNavBar -->
+<header class="bg-surface dark:bg-surface text-primary dark:text-primary-fixed font-body-md text-body-md fixed top-0 left-0 w-full h-[56px] border-b border-on-surface flat no shadows flex justify-between items-center px-unit-lg h-[56px] z-50">
+<div class="flex items-center gap-4">
+<span class="font-headline-md text-headline-md font-bold text-on-surface dark:text-on-surface">知行内容实验室</span>
+</div>
+<!-- search_bar: on_left (moved to center for standard look, but matching spec) -->
+<div class="flex-1 max-w-md mx-8 relative hidden md:block">
+<span class="material-symbols-outlined absolute left-2 top-1/2 -translate-y-1/2 text-on-surface-variant text-sm">search</span>
+<input class="w-full pl-8 pr-4 py-1 bg-surface-container-low border border-ink text-sm font-label-mono focus:outline-none focus:border-cobalt" placeholder="Search..." type="text"/>
+</div>
+<div class="flex items-center gap-4">
+<button class="btn-editorial-primary px-4 py-1 font-label-mono text-sm uppercase">新建</button>
+<button class="text-on-surface-variant hover:text-on-surface transition-colors cursor-pointer active:translate-y-0.5"><span class="material-symbols-outlined">notifications</span></button>
+<button class="text-on-surface-variant hover:text-on-surface transition-colors cursor-pointer active:translate-y-0.5"><span class="material-symbols-outlined">sync</span></button>
+<div class="w-8 h-8 rounded-full bg-surface-container-highest border border-ink overflow-hidden">
+<img alt="User Avatar" class="w-full h-full object-cover" data-alt="A small, stylized avatar image of a professional user in a minimalist digital workspace. The avatar should have a clean, light mode aesthetic with subtle cobalt blue and warm white tones, fitting a pop-nostalgia brutalist design system." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBUiwvyAx88TSb03zuP2jf7zn1fI9uQRjMSwgL9RU0U3TGGbCRRnWIYkSq_uB-3P_QR0VWdHXkUuMhpquofnmxYBlntGXsUZLbRebpXrWbGUnGfKtRhwt2NwEwWyydhbtjKrTX172cJrGY0sU1BGMZoW0AmJ31SOZb_eJyOOX_0AvW8_OtZujEtAi7iJvN87jKIiIMBWmR-_HD_DzPsLr4zhPA4M_XydCQJ3eh9oQ9keoQYRvpmbjb1Jw"/>
+</div>
+</div>
+</header>
+<!-- SideNavBar -->
+<nav class="bg-surface-container-low dark:bg-surface-container text-primary dark:text-primary-fixed font-body-md text-body-md fixed left-0 top-[56px] w-[208px] h-[calc(100vh-56px)] border-r border-on-surface flat no shadows flex flex-col py-unit-md gap-unit-sm w-[208px] z-40 hidden md:flex">
+<div class="px-4 mb-4">
+<div class="flex items-center gap-2 mb-1">
+<span class="font-headline-md text-headline-md font-black text-on-surface">内容引擎</span>
+</div>
+<span class="font-label-mono text-label-mono text-on-surface-variant">V2.0</span>
+<button class="btn-editorial-secondary w-full mt-4 py-2 font-label-mono text-sm uppercase font-bold">新建选题</button>
+</div>
+<div class="flex-1 overflow-y-auto flex flex-col gap-1">
+<!-- 10 Tabs -->
+<a class="flex items-center gap-3 px-4 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95" href="#"><span class="material-symbols-outlined">today</span><span class="font-bold">今天</span></a>
+<a class="flex items-center gap-3 px-4 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95" href="#"><span class="material-symbols-outlined">explore</span><span class="font-bold">发现</span></a>
+<a class="flex items-center gap-3 px-4 py-2 bg-primary text-on-primary border-l-4 border-tertiary transition-all active:scale-95" href="#"><span class="material-symbols-outlined">event_note</span><span class="font-bold">规划</span></a>
+<a class="flex items-center gap-3 px-4 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95" href="#"><span class="material-symbols-outlined">edit_note</span><span class="font-bold">创作</span></a>
+<a class="flex items-center gap-3 px-4 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95" href="#"><span class="material-symbols-outlined">publish</span><span class="font-bold">发布</span></a>
+<a class="flex items-center gap-3 px-4 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95" href="#"><span class="material-symbols-outlined">analytics</span><span class="font-bold">复盘</span></a>
+<a class="flex items-center gap-3 px-4 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95" href="#"><span class="material-symbols-outlined">inventory_2</span><span class="font-bold">素材库</span></a>
+<a class="flex items-center gap-3 px-4 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95" href="#"><span class="material-symbols-outlined">bolt</span><span class="font-bold">自动化</span></a>
+<a class="flex items-center gap-3 px-4 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95" href="#"><span class="material-symbols-outlined">settings</span><span class="font-bold">设置</span></a>
+</div>
+<div class="mt-auto px-4 pb-4">
+<a class="flex items-center gap-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95" href="#"><span class="material-symbols-outlined">help</span><span class="font-bold">帮助中心</span></a>
+</div>
+</nav>
+<!-- Main Canvas -->
+<main class="flex-1 ml-0 md:ml-[208px] mt-[56px] p-unit-lg max-w-5xl mx-auto w-full relative">
+<!-- Halftone background element for brutalist depth -->
+<div class="absolute top-0 right-0 w-64 h-64 halftone-overlay pointer-events-none -z-10"></div>
+<!-- Top Section: Header -->
+<header class="mb-unit-lg flex flex-col md:flex-row md:items-end justify-between gap-4">
+<div>
+<div class="flex items-center gap-3 mb-2">
+<div class="tag-halftone bg-yellow text-ink border-ink">
+<span>PLANNING</span>
+</div>
+<span class="font-label-mono text-label-mono text-on-surface-variant flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">source</span> Source: AIGC Weekly</span>
+</div>
+<h1 class="font-display-lg text-display-lg font-black text-ink">DeepSeek 架构解析与国内大模型生态破局点</h1>
+</div>
+<div class="flex-shrink-0">
+<button class="btn-editorial-primary px-6 py-3 font-label-mono text-body-lg font-bold uppercase flex items-center gap-2">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">add_box</span>
+                    创建内容项目
+                </button>
+</div>
+</header>
+<div class="divider-double"></div>
+<!-- Body: 4 Vertical Sections (Editorial Project Sheet Style) -->
+<div class="flex flex-col gap-unit-md mt-unit-md pb-unit-xl">
+<!-- 1. 选题 Brief -->
+<section class="panel p-6 flex flex-col gap-4 relative overflow-hidden group">
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-ink"></div>
+<h2 class="font-headline-md text-headline-md font-bold flex items-center gap-2 text-ink border-b border-ink pb-2">
+<span class="material-symbols-outlined text-cobalt">description</span> 
+                    01. 选题 Brief
+                </h2>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 mt-2">
+<div>
+<h3 class="font-label-mono text-label-mono text-on-surface-variant uppercase mb-1 border-b border-dashed border-ink pb-1">Target Audience</h3>
+<p class="font-body-md text-body-md text-on-surface">AI 开发者、技术产品经理、对 AI 行业趋势敏感的科技互联网从业者。</p>
+</div>
+<div>
+<h3 class="font-label-mono text-label-mono text-on-surface-variant uppercase mb-1 border-b border-dashed border-ink pb-1">Primary Goals</h3>
+<p class="font-body-md text-body-md text-on-surface">建立技术硬核认知，提升公众号在 AI 专业圈层的订阅率与转发率。</p>
+</div>
+<div class="md:col-span-2">
+<h3 class="font-label-mono text-label-mono text-on-surface-variant uppercase mb-1 border-b border-dashed border-ink pb-1">Core Viewpoint</h3>
+<p class="font-body-lg text-body-lg text-ink font-bold leading-relaxed">
+                            DeepSeek 的核心优势不仅在于技术架构的创新（如 MoE 优化），更在于其工程化落地的高效与成本控制，这为国内大模型在算力受限下突围提供了新范式。
+                        </p>
+</div>
+<div class="md:col-span-2 bg-surface-container-low p-4 border border-ink">
+<h3 class="font-label-mono text-label-mono text-cobalt uppercase mb-1">Differentiation (差异化)</h3>
+<p class="font-body-md text-body-md text-on-surface">不单纯讲技术原理，重点放在“工程化算账”上，对比其他模型的训练成本，提供给决策者具象的商业参考。</p>
+</div>
+</div>
+</section>
+<!-- 2. 关联情报 -->
+<section class="panel p-6 flex flex-col gap-4 relative">
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-ink"></div>
+<h2 class="font-headline-md text-headline-md font-bold flex items-center gap-2 text-ink border-b border-ink pb-2">
+<span class="material-symbols-outlined text-cobalt">hub</span> 
+                    02. 关联情报 (Intelligence)
+                </h2>
+<div class="flex flex-col gap-3 mt-2">
+<div class="flex items-start gap-3 p-3 border border-ink hover:bg-surface-container-low transition-colors cursor-pointer">
+<div class="tag-halftone bg-surface-variant text-ink border-ink shrink-0 mt-1"><span>HOT SPOT</span></div>
+<div>
+<h4 class="font-body-md text-body-md font-bold text-ink hover:underline">DeepSeek V2 霸榜引发热议，训练成本极低</h4>
+<p class="font-label-mono text-label-mono text-on-surface-variant mt-1">Source: HackerNews / Twitter | Date: 2024-05-10</p>
+</div>
+<span class="material-symbols-outlined ml-auto text-on-surface-variant">open_in_new</span>
+</div>
+<div class="flex items-start gap-3 p-3 border border-ink hover:bg-surface-container-low transition-colors cursor-pointer">
+<div class="tag-halftone bg-surface-variant text-ink border-ink shrink-0 mt-1"><span>REFERENCE</span></div>
+<div>
+<h4 class="font-body-md text-body-md font-bold text-ink hover:underline">论文解读：DeepSeekMoE Architecture Explained</h4>
+<p class="font-label-mono text-label-mono text-on-surface-variant mt-1">Source: Arxiv | Authors: DeepSeek AI Team</p>
+</div>
+<span class="material-symbols-outlined ml-auto text-on-surface-variant">open_in_new</span>
+</div>
+</div>
+</section>
+<!-- 3. 内容策略 -->
+<section class="panel p-6 flex flex-col gap-4 relative">
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-ink"></div>
+<h2 class="font-headline-md text-headline-md font-bold flex items-center gap-2 text-ink border-b border-ink pb-2">
+<span class="material-symbols-outlined text-cobalt">strategy</span> 
+                    03. 内容策略 (Strategy)
+                </h2>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
+<!-- WeChat -->
+<div class="border border-ink p-4 flex flex-col h-full bg-surface">
+<div class="flex items-center gap-2 mb-3 pb-2 border-b border-dashed border-ink">
+<span class="material-symbols-outlined text-on-surface">article</span>
+<h3 class="font-body-lg text-body-lg font-bold">微信公众号 (WeChat)</h3>
+</div>
+<p class="font-body-md text-body-md text-on-surface mb-4 flex-1">
+                            深度长文（3000字+）。侧重架构解析与商业启示，排版需严谨，图表清晰。
+                        </p>
+<div class="font-label-mono text-label-mono text-on-surface-variant bg-surface-container-highest p-2 border border-ink">
+                            Format: Deep Dive Article
+                        </div>
+</div>
+<!-- Xiaohongshu -->
+<div class="border border-ink p-4 flex flex-col h-full bg-surface">
+<div class="flex items-center gap-2 mb-3 pb-2 border-b border-dashed border-ink">
+<span class="material-symbols-outlined text-on-surface">image</span>
+<h3 class="font-body-lg text-body-lg font-bold">小红书 (Red)</h3>
+</div>
+<p class="font-body-md text-body-md text-on-surface mb-4 flex-1">
+                            “一图看懂”系列。提炼核心优势，制作对比信息图，文案通俗化，强调“国产之光”情感共鸣。
+                        </p>
+<div class="font-label-mono text-label-mono text-on-surface-variant bg-surface-container-highest p-2 border border-ink">
+                            Format: Infographic Carousel
+                        </div>
+</div>
+<!-- Video Account -->
+<div class="border border-ink p-4 flex flex-col h-full bg-surface">
+<div class="flex items-center gap-2 mb-3 pb-2 border-b border-dashed border-ink">
+<span class="material-symbols-outlined text-on-surface">play_circle</span>
+<h3 class="font-body-lg text-body-lg font-bold">视频号 (Video)</h3>
+</div>
+<p class="font-body-md text-body-md text-on-surface mb-4 flex-1">
+                            3分钟口播+动画混剪。重点讲解MoE机制的比喻（如“专家会诊”），注重留存率设计。
+                        </p>
+<div class="font-label-mono text-label-mono text-on-surface-variant bg-surface-container-highest p-2 border border-ink">
+                            Format: Explainer Video
+                        </div>
+</div>
+</div>
+</section>
+<!-- 4. 风险与核验 -->
+<section class="panel p-6 flex flex-col gap-4 relative">
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-tomato"></div>
+<h2 class="font-headline-md text-headline-md font-bold flex items-center gap-2 text-ink border-b border-ink pb-2">
+<span class="material-symbols-outlined text-tomato">warning</span> 
+                    04. 风险与核验 (Verification)
+                </h2>
+<ul class="font-body-md text-body-md text-on-surface mt-2 space-y-3">
+<li class="flex items-start gap-3">
+<input class="mt-1 w-4 h-4 text-cobalt border-ink focus:ring-cobalt rounded-none" type="checkbox"/>
+<div>
+<span class="font-bold">Copyright (版权):</span> 
+                            引用论文图片需重新绘制或注明准确来源，避免直接截取外媒未授权图表。
+                        </div>
+</li>
+<li class="flex items-start gap-3">
+<input class="mt-1 w-4 h-4 text-cobalt border-ink focus:ring-cobalt rounded-none" type="checkbox"/>
+<div>
+<span class="font-bold">Sensitive Terms (敏感词):</span> 
+                            避免过度拉踩其他特定国产模型，保持客观中立的分析态度。
+                        </div>
+</li>
+<li class="flex items-start gap-3">
+<input class="mt-1 w-4 h-4 text-cobalt border-ink focus:ring-cobalt rounded-none" type="checkbox"/>
+<div>
+<span class="font-bold">Data to Confirm (待核验数据):</span> 
+                            需二次确认 DeepSeek 官方公布的训练成本 $x/token 是否在最新版本中有修正。
+                        </div>
+</li>
+</ul>
+</section>
+</div>
+<div class="divider-end">
+<div class="end-mark"></div>
+<div class="end-mark"></div>
+<div class="end-mark"></div>
+</div>
+</main>
+</body></html>

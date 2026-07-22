@@ -1,0 +1,10 @@
+.serena/
+.spec-workflow/
+.playwright-mcp/
+content-engine/node_modules/
+content-engine/dist/
+content-engine/*.tsbuildinfo
+content-engine/*.sqlite
+content-engine/*.sqlite-shm
+content-engine/*.sqlite-wal
+*.log

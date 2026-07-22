@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>内容引擎 - 统一原型</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600;700;800&family=ZCOOL+KuaiLe&display=swap" rel="stylesheet" />
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    :root { --paper:#fffdf7; --ink:#17203b; --blue:#1e5bff; --red:#f0523d; --yellow:#ffd53d; --mint:#8ed9b4; --mist:#eef1f8; --line:#cbd1df; --muted:#65708b; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-width:1180px; background:var(--paper); color:var(--ink); font-family:"Noto Sans SC", sans-serif; }
+    button, input { font:inherit; }
+    button { cursor:pointer; }
+    .app { min-height:100vh; display:grid; grid-template-columns:208px 1fr; grid-template-rows:58px 1fr; }
+    .topbar { grid-column:1 / -1; display:flex; align-items:center; gap:24px; padding:0 28px; border-bottom:1px solid var(--ink); background:var(--paper); }
+    .brand { width:235px; font-size:24px; font-weight:800; letter-spacing:-1px; }
+    .brand span { display:inline-block; color:var(--blue); text-shadow:2px 2px 0 var(--red); }
+    .search { width:350px; height:34px; display:flex; align-items:center; gap:8px; padding:0 10px; border:1px solid var(--ink); color:var(--muted); font-family:"DM Mono", monospace; font-size:12px; }
+    .top-actions { margin-left:auto; display:flex; align-items:center; gap:10px; }
+    .icon-button, .nav-item { display:flex; align-items:center; justify-content:center; border:0; background:transparent; color:var(--ink); }
+    .icon-button { width:34px; height:34px; }
+    .primary { min-height:34px; padding:0 14px; border:1px solid var(--ink); background:var(--blue); color:#fff; font-weight:700; box-shadow:3px 3px 0 var(--red); }
+    .avatar { width:30px; height:30px; border:1px solid var(--ink); border-radius:50%; background:linear-gradient(135deg,var(--yellow),var(--mint)); }
+    .sidebar { grid-row:2; border-right:1px solid var(--ink); background:linear-gradient(90deg,rgba(30,91,255,.05),transparent 45%), var(--mist); display:flex; flex-direction:column; }
+    .workspace { padding:20px 20px 16px; border-bottom:1px solid var(--ink); }
+    .workspace-mark { display:flex; align-items:center; gap:10px; font-size:18px; font-weight:800; }
+    .stamp { width:30px; height:30px; display:grid; place-items:center; background:var(--blue); color:#fff; border:1px solid var(--ink); font-family:"ZCOOL KuaiLe", cursive; }
+    .version { margin:5px 0 16px 40px; color:var(--muted); font:11px "DM Mono", monospace; }
+    .new-topic { width:100%; min-height:38px; border:1px solid var(--ink); background:#fff; font-weight:700; }
+    .nav { padding:14px 10px; display:grid; gap:3px; }
+    .nav-item { justify-content:flex-start; gap:12px; width:100%; min-height:42px; padding:0 12px; font-size:15px; }
+    .nav-item.active { background:var(--blue); color:#fff; border-left:4px solid var(--red); font-weight:700; }
+    .nav-item.muted { margin-top:10px; border-top:1px solid var(--line); padding-top:14px; }
+    .side-footer { margin-top:auto; padding:18px; border-top:1px solid var(--ink); color:var(--muted); font-size:13px; }
+    main { min-width:0; padding:34px 48px 48px; }
+    .view { display:none; max-width:1350px; margin:0 auto; }
+    .view.active { display:block; }
+    .eyebrow { color:var(--blue); font:12px "DM Mono", monospace; letter-spacing:.08em; text-transform:uppercase; }
+    .page-title { margin:8px 0 4px; font-size:38px; line-height:1.1; letter-spacing:-1.5px; }
+    .page-subtitle { margin:0; color:var(--muted); font-size:15px; }
+    .rule { height:1px; margin:24px 0; background:var(--ink); position:relative; }
+    .rule::after { content:""; position:absolute; left:42%; top:-3px; width:7px; height:7px; background:var(--ink); }
+    .section-title { margin:0; font-size:21px; display:flex; align-items:center; gap:10px; }
+    .section-title i { color:var(--blue); }
+    .panel { border:1px solid var(--ink); background:#fff; }
+    .panel-head { display:flex; align-items:center; justify-content:space-between; min-height:46px; padding:0 16px; border-bottom:1px solid var(--ink); }
+    .status { display:inline-flex; align-items:center; gap:6px; padding:3px 7px; border:1px solid var(--ink); font:11px "DM Mono", monospace; white-space:nowrap; }
+    .status.yellow { background:#fff4b5; } .status.mint { background:#c9f1dc; } .status.red { background:#ffd4ce; } .status.blue { background:#d8e2ff; }
+    .today-grid { display:grid; grid-template-columns:minmax(0, 1fr) 340px; gap:28px; }
+    .task-list { padding:12px; display:grid; gap:10px; }
+    .task { display:grid; grid-template-columns:26px 1fr auto; gap:12px; align-items:center; padding:15px 14px; border:1px solid var(--ink); }
+    .check { width:19px; height:19px; border:2px solid var(--ink); }
+    .task strong { display:block; font-size:16px; }
+    .task small { display:block; margin-top:5px; color:var(--muted); }
+    .text-button { border:1px solid var(--ink); background:var(--paper); padding:7px 10px; font-size:13px; }
+    .project-row { display:grid; grid-template-columns:1fr 1fr; gap:14px; padding:16px; }
+    .project { min-height:150px; padding:18px; border:1px solid var(--ink); background:linear-gradient(135deg,#fff 70%,rgba(142,217,180,.16)); }
+    .project h3 { margin:16px 0 6px; font-size:18px; }
+    .project p { margin:0; color:var(--muted); font-size:13px; }
+    .project-foot { display:flex; justify-content:space-between; align-items:end; margin-top:23px; font-size:13px; }
+    .side-stack { display:grid; align-content:start; gap:20px; }
+    .hot-box { padding:20px; background:var(--ink); color:#fff; border:1px solid var(--ink); }
+    .hot-box h2 { margin:0 0 16px; font-size:22px; }
+    .hot-item { padding:13px 0; border-top:1px solid rgba(255,255,255,.35); }
+    .hot-item small { color:var(--mint); } .hot-item strong { display:block; margin-top:5px; font-size:14px; line-height:1.5; }
+    .schedule { padding:18px; }
+    .schedule-entry { padding:12px 0 12px 16px; border-left:2px solid var(--blue); border-bottom:1px dashed var(--line); }
+    .schedule-entry small { color:var(--blue); }
+    .render-toast { padding:16px; border:2px solid var(--ink); background:#fff; box-shadow:4px 4px 0 var(--ink); }
+    .progress { height:9px; border:1px solid var(--ink); background:#fff; margin:11px 0 6px; } .progress span { display:block; height:100%; width:68%; background:var(--blue); }
+    .filter-bar { display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
+    .filter { padding:7px 11px; border:1px solid var(--ink); background:#fff; font-size:13px; } .filter.active { color:#fff; background:var(--ink); }
+    .discover-layout { display:grid; grid-template-columns:minmax(0,1fr) 350px; gap:28px; align-items:start; }
+    .signal-list { display:grid; gap:12px; }
+    .signal { display:grid; grid-template-columns:48px 1fr auto; gap:16px; align-items:start; padding:19px; border:1px solid var(--ink); background:#fff; }
+    .signal-icon { width:46px; height:46px; display:grid; place-items:center; background:var(--mist); border:1px solid var(--ink); }
+    .signal h3 { margin:0 0 6px; font-size:18px; } .signal p { margin:0; color:var(--muted); font-size:14px; line-height:1.55; }
+    .meta { display:flex; gap:12px; margin-top:12px; color:var(--muted); font:11px "DM Mono", monospace; }
+    .detail-drawer { position:sticky; top:18px; padding:22px; border:2px solid var(--ink); background:var(--mist); }
+    .detail-drawer h2 { margin:12px 0; font-size:23px; line-height:1.35; } .detail-drawer p { color:var(--muted); line-height:1.7; }
+    .idea { margin:17px 0; padding:14px; border-left:4px solid var(--yellow); background:#fff9d9; }
+    .drawer-actions { display:flex; gap:10px; } .drawer-actions button { flex:1; }
+    .plan-layout { display:grid; grid-template-columns:minmax(0,1fr) 330px; gap:26px; }
+    .topic-table { width:100%; border-collapse:collapse; background:#fff; } .topic-table th { text-align:left; background:var(--mist); font:11px "DM Mono", monospace; color:var(--muted); letter-spacing:.06em; }
+    .topic-table th,.topic-table td { padding:15px 14px; border:1px solid var(--ink); vertical-align:middle; } .topic-table td:first-child { width:42%; font-weight:700; line-height:1.5; }
+    .topic-table tr.selected td { background:#e3e9ff; }
+    .topic-summary { padding:20px; border:1px solid var(--ink); background:#f1f4fa; } .topic-summary h2 { margin:0 0 18px; font-size:22px; }
+    .summary-block { padding:15px 0; border-top:1px solid var(--ink); } .summary-block small { color:var(--muted); font:11px "DM Mono", monospace; }
+    .summary-block p { margin:8px 0 0; line-height:1.65; font-size:14px; }
+    .project-header { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; }
+    .stepper { display:grid; grid-template-columns:repeat(5,1fr); gap:0; margin:30px 0; padding:22px 12px; border:1px solid var(--ink); background:#fff; }
+    .step { position:relative; text-align:center; color:var(--muted); font-size:13px; } .step:not(:last-child)::after { content:""; position:absolute; top:14px; right:-50%; width:100%; height:1px; background:var(--ink); z-index:0; }
+    .step b { position:relative; z-index:1; display:grid; place-items:center; width:29px; height:29px; margin:0 auto 8px; border:1px solid var(--ink); border-radius:50%; background:var(--paper); color:var(--ink); } .step.done b { background:var(--ink); color:#fff; } .step.current { color:var(--blue); font-weight:700; } .step.current b { border:2px solid var(--blue); color:var(--blue); }
+    .project-overview { display:grid; grid-template-columns:minmax(0,1fr) 330px; gap:28px; }
+    .statement { padding:24px; background:var(--mist); border-left:5px solid var(--blue); font-size:17px; line-height:1.75; }
+    .platforms { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-top:26px; } .platform { min-height:190px; padding:18px; border:1px solid var(--ink); background:#fff; }
+    .platform h3 { margin:12px 0; font-size:17px; } .platform p { margin:0; color:var(--muted); font-size:13px; line-height:1.6; }
+    .fact-box { padding:20px; background:#fff5bc; border:1px solid var(--ink); } .fact-box h2 { margin:0 0 14px; } .fact-box li { margin:10px 0; line-height:1.55; }
+    .create-layout { display:grid; grid-template-columns:minmax(0,1fr) 320px; min-height:680px; border:1px solid var(--ink); background:#fff; }
+    .editor { min-width:0; } .editor-top { display:flex; align-items:center; justify-content:space-between; padding:12px 18px; border-bottom:1px solid var(--ink); } .tabs { display:flex; gap:0; } .tabs button { padding:9px 18px; border:1px solid var(--ink); border-right:0; background:#fff; } .tabs button.active { background:var(--blue); color:#fff; } .tabs button:last-child { border-right:1px solid var(--ink); }
+    .editor-toolbar { padding:10px 18px; border-bottom:1px solid var(--line); display:flex; gap:18px; font-weight:700; }
+    .document { max-width:760px; padding:56px 60px; margin:auto; } .document h1 { font-size:36px; margin:0 0 22px; } .document .lead { padding:18px; border:1px solid var(--ink); background:#fffdf7; line-height:1.7; } .document p { line-height:2; } .document figure { margin:26px 0; } .document img { display:block; width:100%; height:220px; object-fit:cover; border:1px solid var(--ink); } .document figcaption { text-align:center; color:var(--muted); font-size:12px; margin-top:7px; }
+    .assist { padding:18px; border-left:1px solid var(--ink); background:var(--mist); } .assist h2 { margin:0 0 16px; font-size:18px; } .assist-card { padding:14px; margin-bottom:12px; border:1px solid var(--ink); background:#fff; } .assist-card.warning { background:#ffe1db; border-color:var(--red); } .assist-card p { margin:7px 0 0; color:var(--muted); font-size:13px; line-height:1.55; }
+    .publish-layout { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:28px; } .calendar { display:grid; grid-template-columns:repeat(7,1fr); border-top:1px solid var(--ink); border-left:1px solid var(--ink); background:#fff; } .day { min-height:160px; padding:12px; border-right:1px solid var(--ink); border-bottom:1px solid var(--ink); } .day b { font:13px "DM Mono", monospace; } .calendar-post { margin-top:15px; padding:8px; border:1px solid var(--ink); background:#dce6ff; font-size:12px; line-height:1.45; } .calendar-post.red { background:#ffe0d9; } .calendar-post.mint { background:#d9f4e5; }
+    .preflight { padding:22px; border:2px solid var(--ink); background:#fff; } .preview-thumb { width:100%; height:168px; object-fit:cover; border:1px solid var(--ink); } .checklist { list-style:none; padding:0; margin:20px 0; } .checklist li { padding:10px 0; border-bottom:1px solid var(--line); font-size:14px; } .checklist i { width:18px; vertical-align:middle; margin-right:7px; color:#178650; } .checklist .pending i { color:#c78a00; }
+    .review-grid { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:28px; } .chart-panel { padding:22px; border:1px solid var(--ink); background:#fff; } .bars { display:grid; gap:18px; margin-top:25px; } .bar { display:grid; grid-template-columns:110px 1fr 40px; align-items:center; gap:12px; font-size:13px; } .bar-track { height:22px; border:1px solid var(--ink); } .bar-fill { height:100%; background:var(--blue); } .bar-fill.yellow { background:var(--yellow); } .bar-fill.mint { background:var(--mint); } .bar-fill.red { background:var(--red); }
+    .insight { padding:22px; border:1px solid var(--ink); background:#fff5bc; } .insight h2 { margin:0 0 12px; } .insight p { line-height:1.75; }
+    .utility-empty { padding:26px; border:1px dashed var(--ink); background:rgba(255,255,255,.7); color:var(--muted); }
+    .footer-status { position:fixed; right:22px; bottom:22px; width:285px; padding:14px; border:2px solid var(--ink); background:#fff; box-shadow:4px 4px 0 var(--ink); display:none; } .footer-status.show { display:block; }
+    @media (max-width:1250px) { main { padding:26px 30px; } .today-grid,.discover-layout,.plan-layout,.project-overview,.publish-layout,.review-grid { grid-template-columns:1fr 300px; } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">知行<span>内容</span>实验室</div>
+      <div class="search"><i data-lucide="search" size="16"></i><span>搜索热点、选题、内容、素材</span></div>
+      <div class="top-actions">
+        <button class="primary" type="button"><i data-lucide="plus" size="15" style="vertical-align:-2px"></i> 新建</button>
+        <button class="icon-button" title="通知"><i data-lucide="bell" size="20"></i></button>
+        <button class="icon-button" title="同步状态"><i data-lucide="refresh-cw" size="20"></i></button>
+        <div class="avatar" title="林知行"></div>
+      </div>
+    </header>
+
+    <aside class="sidebar">
+      <section class="workspace">
+        <div class="workspace-mark"><span class="stamp">内</span>内容引擎</div>
+        <div class="version">DESKTOP · V0.2</div>
+        <button class="new-topic"><i data-lucide="plus" size="16" style="vertical-align:-3px"></i> 新建选题</button>
+      </section>
+      <nav class="nav" aria-label="主导航">
+        <button class="nav-item active" data-view="today"><i data-lucide="calendar-days" size="21"></i>今天</button>
+        <button class="nav-item" data-view="discover"><i data-lucide="compass" size="21"></i>发现</button>
+        <button class="nav-item" data-view="plan"><i data-lucide="clipboard-list" size="21"></i>规划</button>
+        <button class="nav-item" data-view="create"><i data-lucide="pen-line" size="21"></i>创作</button>
+        <button class="nav-item" data-view="publish"><i data-lucide="send" size="21"></i>发布</button>
+        <button class="nav-item" data-view="review"><i data-lucide="chart-column" size="21"></i>复盘</button>
+        <button class="nav-item muted" data-view="assets"><i data-lucide="folder-open" size="21"></i>素材库</button>
+        <button class="nav-item" data-view="automation"><i data-lucide="zap" size="21"></i>自动化</button>
+        <button class="nav-item" data-view="settings"><i data-lucide="settings" size="21"></i>设置</button>
+      </nav>
+      <div class="side-footer"><i data-lucide="circle-help" size="18" style="vertical-align:-4px"></i> 帮助中心</div>
+    </aside>
+
+    <main>
+      <section class="view active" id="today">
+        <div class="eyebrow">TODAY / 行动中心</div>
+        <h1 class="page-title">今天，7 月 22 日</h1>
+        <p class="page-subtitle">你有 3 件内容工作需要确认。</p>
+        <div class="rule"></div>
+        <div class="today-grid">
+          <div>
+            <section class="panel">
+              <div class="panel-head"><h2 class="section-title"><i data-lucide="square-check-big"></i>今日优先事项</h2><span class="status mint">2 待办</span></div>
+              <div class="task-list">
+                <article class="task"><span class="check"></span><div><strong>确认选题：普通人如何用 AI 做知识视频</strong><small><span class="status red">高优先级</span> 小红书 · 今日 11:00 前</small></div><button class="text-button" data-view="plan">去确认</button></article>
+                <article class="task"><span class="check"></span><div><strong>审核小红书 8 页图文</strong><small>视觉版本已提交 V2，需今日定稿</small></div><button class="text-button" data-view="create">审核</button></article>
+              </div>
+            </section>
+            <div class="rule"></div>
+            <section class="panel">
+              <div class="panel-head"><h2 class="section-title"><i data-lucide="pen-line"></i>进行中的内容项目</h2><button class="text-button" data-view="create">查看全部</button></div>
+              <div class="project-row">
+                <article class="project"><span class="status yellow">大纲撰写</span><h3>AIGC 行业周报（第 32 期）</h3><p>正在整理本周 AI 工具与政策更新。</p><div class="project-foot"><span>进度 · 40%</span><button class="text-button" data-view="create">继续编辑</button></div></article>
+                <article class="project"><span class="status mint">视频剪辑</span><h3>Notion AI 实战教程</h3><p>口播、字幕和案例画面已完成。</p><div class="project-foot"><span>进度 · 80%</span><button class="text-button" data-view="create">查看项目</button></div></article>
+              </div>
+            </section>
+          </div>
+          <aside class="side-stack">
+            <section class="hot-box"><h2><i data-lucide="flame" size="22"></i> 今日热点</h2><div class="hot-item"><small>#科技圈</small><strong>GPT-4V 开放新功能，视觉分析能力大幅提升</strong></div><div class="hot-item"><small>#爆款解构</small><strong>“打工人必看”标签在小红书流量提升 300%</strong></div><div class="hot-item"><small>#设计趋势</small><strong>高对比结构化版式重新回到内容封面</strong></div><button class="text-button" data-view="discover" style="width:100%;margin-top:15px;color:#fff;border-color:#fff;background:transparent">前往发现中心 →</button></section>
+            <section class="panel schedule"><h2 class="section-title"><i data-lucide="calendar"></i>近期排期</h2><div class="schedule-entry"><small>今天 · 7.22</small><div>发布：Notion 教程下集<br/>平台：视频号、小红书</div></div><div class="schedule-entry"><small>明天 · 7.23</small><div>截稿：周报大纲审核</div></div></section>
+          </aside>
+        </div>
+      </section>
+
+      <section class="view" id="discover">
+        <div class="eyebrow">DISCOVER / 热点情报</div>
+        <h1 class="page-title">今日热点</h1>
+        <div class="filter-bar" style="justify-content:space-between;margin-top:24px"><div class="filter-bar"><button class="filter active">全部</button><button class="filter">AI</button><button class="filter">财经</button><button class="filter">历史</button><button class="filter">人文</button><button class="filter">国学</button><span style="margin-left:10px;color:var(--muted)">近 7 天</span></div><button class="primary"><i data-lucide="refresh-cw" size="15" style="vertical-align:-3px"></i> 刷新热点</button></div>
+        <div class="rule"></div>
+        <div class="discover-layout"><div class="signal-list">
+          <article class="signal"><div class="signal-icon"><i data-lucide="bot"></i></div><div><h3>OpenAI 发布 Sora 新功能，视频生成一致性提升</h3><p>新版本重点改善长镜头的角色一致性和文本指令控制，适合延展为普通人如何使用 AI 视频工具的教程选题。</p><div class="meta"><span>10:42</span><span>AI</span><span>TechCrunch</span></div></div><div><span class="status mint">可信</span><br/><span class="status red" style="margin-top:8px">98 热度</span></div></article>
+          <article class="signal"><div class="signal-icon"><i data-lucide="chart-no-axes-combined"></i></div><div><h3>国内大模型价格调整，对个体创作者意味着什么</h3><p>多个模型服务更新推理套餐与价格，适合从“内容生产成本下降”切入，避免做单纯参数对比。</p><div class="meta"><span>09:15</span><span>财经</span><span>36Kr</span></div></div><div><span class="status yellow">待核验</span><br/><span class="status blue" style="margin-top:8px">85 热度</span></div></article>
+          <article class="signal"><div class="signal-icon"><i data-lucide="landmark"></i></div><div><h3>新发现汉墓材料揭示丝路贸易路线细节</h3><p>可做“历史并不遥远”的系列选题，关联个人消费、交通与文化交流的现代视角。</p><div class="meta"><span>昨天</span><span>历史</span><span>国家文物局</span></div></div><div><span class="status mint">可信</span><br/><span class="status blue" style="margin-top:8px">72 热度</span></div></article>
+        </div>
+        <aside class="detail-drawer"><span class="status blue">已选中热点</span><h2>OpenAI 发布 Sora 新功能</h2><p>核心变化：更强的时序一致性和可控性。适合做工具教程、案例拆解和“哪些人现在适合使用”的场景内容。</p><div class="idea"><strong>建议角度</strong><br/>普通人如何用 AI 视频工具做出能看的知识短片？</div><p><strong>来源</strong><br/><a href="#">查看原始报道 ↗</a></p><div class="drawer-actions"><button class="text-button">忽略</button><button class="primary" data-view="plan">创建选题</button></div></aside></div>
+      </section>
+
+      <section class="view" id="plan">
+        <div class="eyebrow">PLAN / 内容规划</div><h1 class="page-title">选题池</h1><p class="page-subtitle">从热点里选择值得投入制作成本的内容。</p><div class="rule"></div>
+        <div class="plan-layout"><div><div class="filter-bar" style="margin-bottom:14px"><button class="filter active">全部</button><button class="filter">AI 工具实战</button><button class="filter">财经政策解读</button><button class="filter">历史人文</button></div><table class="topic-table"><thead><tr><th>选题</th><th>题材</th><th>目标平台</th><th>时效</th><th>状态</th><th>计划日期</th></tr></thead><tbody><tr class="selected"><td>普通人如何用 AI 做知识视频</td><td>AI 工具</td><td>公众号 / 小红书 / 视频号</td><td>高</td><td><span class="status yellow">待判断</span></td><td>7 月 23 日</td></tr><tr><td>最新大模型价格调整对个体创作者的影响</td><td>财经</td><td>公众号</td><td>中</td><td><span class="status mint">已采纳</span></td><td>7 月 25 日</td></tr><tr><td>丝路贸易如何影响普通人的生活</td><td>历史</td><td>小红书 / 视频号</td><td>低</td><td><span class="status blue">已立项</span></td><td>7 月 28 日</td></tr></tbody></table></div>
+        <aside class="topic-summary"><h2>选题详情</h2><div class="summary-block"><small>核心观点</small><p>不是把 AI 当搜索工具，而是用结构化流程让普通人稳定产出知识内容。</p></div><div class="summary-block"><small>目标受众</small><p><span class="status blue">新中产职场人</span> <span class="status blue">AI 工具爱好者</span></p></div><div class="summary-block"><small>关联热点</small><p>#Sora 更新<br/>#知识视频<br/>#创作者工具</p></div><div class="summary-block"><small>执行备注</small><p>补充 2 个真实案例，避免只讲提示词。</p></div><button class="primary" data-view="create" style="width:100%;margin-top:18px">确认立项</button></aside></div>
+      </section>
+
+      <section class="view" id="create">
+        <div class="project-header"><div><div class="eyebrow">CREATE / 内容项目</div><h1 class="page-title">普通人如何用 AI 做知识视频</h1><p class="page-subtitle">项目编号 PROJ-9024 · 正在进行</p></div><button class="primary" data-view="publish"><i data-lucide="send" size="15" style="vertical-align:-3px"></i> 进入发布审核</button></div>
+        <div class="stepper"><div class="step done"><b>✓</b>策划</div><div class="step done"><b>✓</b>写作</div><div class="step current"><b>3</b>视觉</div><div class="step"><b>4</b>视频</div><div class="step"><b>5</b>审核</div></div>
+        <div class="project-overview"><div><section class="statement"><h2 class="section-title"><i data-lucide="lightbulb"></i>核心观点</h2>无需深厚专业背景，通过系统化拆解 AI 工具工作流，普通人也能高频产出结构严谨、视觉及格的知识类视频。</section><h2 class="section-title" style="margin-top:30px"><i data-lucide="layers-3"></i>平台版本状态</h2><div class="platforms"><article class="platform"><span class="status mint">已定稿</span><h3>微信公众号</h3><p>深度长文，已完成事实核验与图文排版。</p><button class="text-button" style="margin-top:18px">编辑文章</button></article><article class="platform"><span class="status yellow">视觉制作中</span><h3>小红书</h3><p>8 页知识卡，当前正在完善第 3 页视觉。</p><button class="text-button" style="margin-top:18px">制作图文</button></article><article class="platform"><span class="status blue">待启动</span><h3>视频号</h3><p>60 秒口播与案例混剪，等待视觉素材完成。</p><button class="text-button" style="margin-top:18px">制作视频</button></article></div></div><aside><section class="fact-box"><h2>待确认事实</h2><ul><li>确认当前主流视频工具的基础订阅价格。</li><li>核实剪映专业版“一键成片”时长限制。</li></ul></section><section style="margin-top:26px"><h2 class="section-title"><i data-lucide="history"></i>最近活动</h2><p style="line-height:1.7">内容引擎生成了 8 张小红书配图草稿。<br/><br/>编辑 Lin 将公众号文章状态标记为“已定稿”。</p></section></aside></div>
+      </section>
+
+      <section class="view" id="publish">
+        <div class="eyebrow">PUBLISH / 发布中心</div><h1 class="page-title">内容日历</h1><p class="page-subtitle">安排发布时间；发布前再进入单独的审核页。</p><div class="rule"></div>
+        <div class="publish-layout"><div><div class="filter-bar" style="margin-bottom:18px"><button class="filter active">本周</button><button class="filter">公众号</button><button class="filter">小红书</button><button class="filter">视频号</button></div><section class="calendar"><div class="day"><b>周一 21</b></div><div class="day"><b>周二 22</b><div class="calendar-post">小红书：Notion AI 教程下集</div></div><div class="day"><b>周三 23</b><div class="calendar-post red">待审核：普通人如何用 AI 做知识视频</div></div><div class="day"><b>周四 24</b></div><div class="day"><b>周五 25</b><div class="calendar-post mint">公众号：AIGC 行业周报</div></div><div class="day"><b>周六 26</b></div><div class="day"><b>周日 27</b></div></section></div><aside class="preflight"><span class="status yellow">待发布审核</span><h2>普通人如何用 AI 做知识视频</h2><img class="preview-thumb" alt="知识视频预览封面" src="https://images.unsplash.com/photo-1551434678-e076c223a692?auto=format&fit=crop&w=960&q=80"/><p><strong>小红书 · 图文 8 页</strong><br/><span style="color:var(--muted)">计划发布时间：7 月 23 日 18:30</span></p><ul class="checklist"><li><i data-lucide="check-circle-2" size="17"></i>标题与封面已确认</li><li><i data-lucide="check-circle-2" size="17"></i>图片比例符合平台要求</li><li class="pending"><i data-lucide="alert-circle" size="17"></i>有 1 条事实待确认</li></ul><button class="primary" style="width:100%">进入发布审核 →</button></aside></div>
+      </section>
+
+      <section class="view" id="review">
+        <div class="eyebrow">REVIEW / 数据复盘</div><h1 class="page-title">什么内容值得继续做？</h1><p class="page-subtitle">近 30 天 · 全部账号 · 以可复用结论为目标。</p><div class="rule"></div>
+        <div class="review-grid"><section class="chart-panel"><h2 class="section-title"><i data-lucide="bar-chart-3"></i>栏目表现</h2><div class="bars"><div class="bar"><span>国学生活化</span><div class="bar-track"><div class="bar-fill" style="width:88%"></div></div><b>88</b></div><div class="bar"><span>AI 工具实战</span><div class="bar-track"><div class="bar-fill yellow" style="width:71%"></div></div><b>71</b></div><div class="bar"><span>财经政策解读</span><div class="bar-track"><div class="bar-fill mint" style="width:56%"></div></div><b>56</b></div><div class="bar"><span>历史人物</span><div class="bar-track"><div class="bar-fill red" style="width:39%"></div></div><b>39</b></div></div><div class="rule"></div><h2 class="section-title"><i data-lucide="trophy"></i>本周期表现最佳</h2><p style="font-size:18px;font-weight:700">《国学里的情绪管理》</p><p style="color:var(--muted)">小红书收藏率 14.8% · 视频号完播率 42%</p></section><aside class="insight"><span class="status mint">可执行结论</span><h2>继续做“国学生活化”系列</h2><p>这个栏目在小红书的收藏率最高。建议下一期继续围绕“职场焦虑”“关系边界”两个现代场景，并将视频号口播控制在 45-60 秒。</p><button class="text-button" data-view="plan">创建系列选题 →</button></aside></div>
+      </section>
+
+      <section class="view" id="assets"><div class="eyebrow">LIBRARY / 素材库</div><h1 class="page-title">素材库</h1><p class="page-subtitle">本地与云端素材在同一个库中检索，使用时再选择版本与授权信息。</p><div class="rule"></div><section class="utility-empty"><h2>素材库将在下一轮原型中细化</h2><p>默认呈现为“目录 + 紧凑缩略图/列表 + 右侧素材检查器”，不与内容项目编辑器混在同一页面。</p></section></section>
+      <section class="view" id="automation"><div class="eyebrow">AUTOMATION / 自动化</div><h1 class="page-title">自动化规则</h1><p class="page-subtitle">使用预设任务，不让普通创作者搭建复杂流程图。</p><div class="rule"></div><section class="utility-empty"><h2>每日热点收集 · 飞书同步 · 数据回流 · 本机渲染</h2><p>每条规则只显示开关、频率、上次运行、下一次运行和最近错误。高级日志进入单独的运行记录抽屉。</p></section></section>
+      <section class="view" id="settings"><div class="eyebrow">SETTINGS / 设置</div><h1 class="page-title">设置</h1><p class="page-subtitle">工作空间、题材模板、模型、本地路径、飞书和账号授权。</p><div class="rule"></div><section class="utility-empty"><h2>本地路径与 GPU</h2><p>素材目录、模型目录、缓存占用、本机服务状态和显卡信息。高级诊断默认折叠，避免进入产品后先看到工程配置。</p></section></section>
+    </main>
+  </div>
+  <div class="footer-status" id="renderStatus"><strong><i data-lucide="clapperboard" size="17" style="vertical-align:-3px"></i> 正在本机渲染</strong><br/><span style="font-size:13px;color:var(--muted)">Notion_AI_Tutorial_Final.mp4</span><div class="progress"><span></span></div><small>68% · 约 12 分钟剩余</small></div>
+  <script>
+    lucide.createIcons();
+    const navItems = document.querySelectorAll('[data-view]');
+    const views = document.querySelectorAll('.view');
+    const renderStatus = document.getElementById('renderStatus');
+    function setView(id) {
+      if (!document.getElementById(id)) return;
+      views.forEach(view => view.classList.toggle('active', view.id === id));
+      document.querySelectorAll('.nav-item').forEach(item => item.classList.toggle('active', item.dataset.view === id));
+      renderStatus.classList.toggle('show', id === 'today' || id === 'create');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    navItems.forEach(item => item.addEventListener('click', () => setView(item.dataset.view)));
+    setView('today');
+  </script>
+</body>
+</html>

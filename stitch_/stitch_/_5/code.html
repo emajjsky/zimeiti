@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>创作 - 内容项目概览</title>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Google Fonts (Noto Sans & IBM Plex Mono as placeholders for Hanken Grotesk if needed, assuming generic sans/mono fallback in system if actual font fails) -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=Noto+Sans:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Tailwind Config injected from Style Guidance -->
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "tertiary-container": "#c83524",
+                        "surface": "#faf8ff",
+                        "tertiary-fixed": "#ffdad4",
+                        "surface-bright": "#faf8ff",
+                        "secondary": "#5b5f64",
+                        "on-primary": "#ffffff",
+                        "primary-container": "#1e5bff",
+                        "surface-container": "#ebedff",
+                        "inverse-on-surface": "#eff0ff",
+                        "outline": "#737688",
+                        "on-error": "#ffffff",
+                        "error": "#ba1a1a",
+                        "on-surface": "#111a35",
+                        "surface-dim": "#d0d9fd",
+                        "on-primary-container": "#ecedff",
+                        "on-tertiary-fixed": "#400100",
+                        "tertiary": "#a51b0e",
+                        "on-tertiary-fixed-variant": "#910802",
+                        "secondary-fixed": "#dfe2e9",
+                        "surface-container-highest": "#dbe1ff",
+                        "on-tertiary": "#ffffff",
+                        "surface-tint": "#004cec",
+                        "on-background": "#111a35",
+                        "on-secondary-fixed-variant": "#43474d",
+                        "surface-container-high": "#e3e7ff",
+                        "on-tertiary-container": "#ffeae6",
+                        "background": "#faf8ff",
+                        "inverse-surface": "#272f4b",
+                        "secondary-container": "#dfe2e9",
+                        "surface-container-lowest": "#ffffff",
+                        "error-container": "#ffdad6",
+                        "primary-fixed": "#dce1ff",
+                        "outline-variant": "#c3c5d9",
+                        "surface-container-low": "#f2f3ff",
+                        "on-primary-fixed": "#001551",
+                        "on-secondary-container": "#61656b",
+                        "inverse-primary": "#b7c4ff",
+                        "on-secondary-fixed": "#181c21",
+                        "on-error-container": "#93000a",
+                        "on-surface-variant": "#434656",
+                        "on-primary-fixed-variant": "#0039b5",
+                        "surface-variant": "#dbe1ff",
+                        "on-secondary": "#ffffff",
+                        "primary": "#0044d3",
+                        "secondary-fixed-dim": "#c3c7cd",
+                        "tertiary-fixed-dim": "#ffb4a7",
+                        "primary-fixed-dim": "#b7c4ff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "unit-lg": "24px",
+                        "sidebar-width": "208px",
+                        "unit-xl": "48px",
+                        "topbar-height": "56px",
+                        "unit-xs": "4px",
+                        "unit-sm": "8px",
+                        "unit-md": "16px"
+                    },
+                    "fontFamily": {
+                        "body-md": ["Noto Sans", "sans-serif"],
+                        "body-lg": ["Noto Sans", "sans-serif"],
+                        "headline-md": ["Noto Sans", "sans-serif"],
+                        "display-lg": ["Noto Sans", "sans-serif"],
+                        "label-mono": ["IBM Plex Mono", "monospace"]
+                    },
+                    "fontSize": {
+                        "body-md": ["14px", { "lineHeight": "1.6", "fontWeight": "400" }],
+                        "body-lg": ["16px", { "lineHeight": "1.6", "fontWeight": "400" }],
+                        "headline-md": ["24px", { "lineHeight": "1.4", "fontWeight": "700" }],
+                        "display-lg": ["40px", { "lineHeight": "1.2", "letterSpacing": "-0.02em", "fontWeight": "800" }],
+                        "label-mono": ["12px", { "lineHeight": "1.0", "letterSpacing": "0.05em", "fontWeight": "500" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        /* Custom Styles for Digital Brutalism Lite & Editorial Feel */
+        body {
+            background-color: theme('colors.background');
+            color: theme('colors.on-background');
+        }
+
+        /* Halftone Pattern Generator */
+        .halftone-bg {
+            background-image: radial-gradient(theme('colors.on-surface') 10%, transparent 15%);
+            background-size: 4px 4px;
+            background-color: theme('colors.surface-container-high');
+        }
+        
+        .halftone-tag {
+            background-image: radial-gradient(rgba(17, 26, 53, 0.15) 20%, transparent 20%);
+            background-size: 3px 3px;
+        }
+
+        /* Editorial Buttons */
+        .btn-primary-editorial {
+            background-color: theme('colors.primary-container');
+            color: theme('colors.on-primary-container');
+            border: 1px solid theme('colors.on-surface');
+            transition: all 0.2s ease;
+            position: relative;
+        }
+        .btn-primary-editorial:hover {
+            box-shadow: 2px 2px 0px 0px theme('colors.tertiary-container');
+            transform: translate(-1px, -1px);
+        }
+
+        .btn-secondary-editorial {
+            background-color: theme('colors.surface');
+            color: theme('colors.on-surface');
+            border: 1px solid theme('colors.on-surface');
+            transition: all 0.2s ease;
+        }
+        .btn-secondary-editorial:hover {
+            background-color: theme('colors.surface-container-lowest');
+            box-shadow: 2px 2px 0px 0px theme('colors.on-surface');
+            transform: translate(-1px, -1px);
+        }
+
+        /* Newspaper Divider */
+        .newspaper-divider {
+            border-top: 1px solid theme('colors.on-surface');
+            position: relative;
+            margin: theme('spacing.unit-lg') 0;
+        }
+        .newspaper-divider::after {
+            content: '';
+            position: absolute;
+            top: -4px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 8px;
+            height: 8px;
+            background-color: theme('colors.on-surface');
+        }
+
+        /* Panel Borders (Level 1) */
+        .panel-border {
+            border: 1px solid theme('colors.on-surface');
+        }
+
+        /* Hide scrollbar for clean aesthetic */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: theme('colors.surface');
+            border-left: 1px solid theme('colors.on-surface');
+        }
+        ::-webkit-scrollbar-thumb {
+            background: theme('colors.on-surface-variant');
+        }
+    </style>
+</head>
+<body class="font-body-md text-body-md antialiased overflow-x-hidden">
+<!-- JSON Anchor: TopNavBar -->
+<nav class="bg-surface dark:bg-surface text-primary dark:text-primary-fixed font-body-md text-body-md fixed top-0 left-0 w-full h-[56px] border-b border-on-surface flex justify-between items-center px-unit-lg h-[56px] z-50">
+<div class="flex items-center gap-4">
+<span class="font-headline-md text-headline-md font-bold text-on-surface dark:text-on-surface">知行内容实验室</span>
+</div>
+<!-- Search Bar (on_left logical position relative to actions) -->
+<div class="hidden md:flex flex-1 max-w-md mx-8">
+<div class="flex items-center w-full border border-on-surface bg-surface-container-lowest px-3 py-1">
+<span class="material-symbols-outlined text-on-surface-variant mr-2" style="font-size: 18px;">search</span>
+<input class="w-full bg-transparent border-none focus:ring-0 p-0 text-on-surface font-label-mono text-label-mono placeholder-on-surface-variant" placeholder="Masthead Search..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<button class="btn-primary-editorial px-4 py-1 text-label-mono font-label-mono uppercase">
+                新建
+            </button>
+<button class="text-on-surface hover:bg-surface-container-high transition-colors p-1 flex items-center justify-center">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="text-on-surface hover:bg-surface-container-high transition-colors p-1 flex items-center justify-center">
+<span class="material-symbols-outlined">sync</span>
+</button>
+<div class="w-8 h-8 rounded-full panel-border overflow-hidden bg-surface-container-high ml-2">
+<img alt="User Avatar" class="w-full h-full object-cover" data-alt="A small, stylized digital avatar portrait of a creative professional, monochromatic style with a pop of red, minimalist background." src="https://lh3.googleusercontent.com/aida-public/AB6AXuC2BJ_AOU_qDpI2uz0YpY_FAW_qan1lbjT_cwKUGJu8ycSTbQkHaiHHpGOp3IO869mpodbZaimce33KZr_KGUH2l91L5wU3yY__3CTwqv9sUm7-v2t9Nx9NFQEW0XxdHrvA1Fa16tm6MrE-nEmsWNA9u703ewSGVBhEuyVvujjGCoSMxvCMiorq6IcOxocl32T0RMBc4xsMsGWhb93bfqWYOUjWHsRwwcQXunvHycyadJFQRwDBiKILTw"/>
+</div>
+</div>
+</nav>
+<!-- JSON Anchor: SideNavBar -->
+<aside class="hidden md:flex flex-col py-unit-md gap-unit-sm w-[208px] bg-surface-container-low dark:bg-surface-container text-primary dark:text-primary-fixed font-body-md text-body-md fixed left-0 top-[56px] h-[calc(100vh-56px)] border-r border-on-surface">
+<div class="px-unit-md mb-6">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 panel-border halftone-bg flex items-center justify-center">
+<span class="material-symbols-outlined text-on-surface">auto_awesome</span>
+</div>
+<div>
+<div class="font-headline-md text-headline-md font-black text-on-surface leading-tight">内容引擎</div>
+<div class="font-label-mono text-label-mono text-on-surface-variant">V2.0</div>
+</div>
+</div>
+<button class="btn-primary-editorial w-full mt-6 py-2 text-label-mono font-label-mono font-bold flex justify-center items-center gap-2">
+<span class="material-symbols-outlined" style="font-size: 16px;">add</span>新建选题
+            </button>
+</div>
+<nav class="flex-1 flex flex-col gap-1 px-2">
+<!-- Active logic: The prompt is about "创作" (Creation). Tab index 3 -->
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95" href="#">
+<span class="material-symbols-outlined">today</span>今天
+            </a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95" href="#">
+<span class="material-symbols-outlined">explore</span>发现
+            </a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95" href="#">
+<span class="material-symbols-outlined">event_note</span>规划
+            </a>
+<!-- Active Tab -->
+<a class="flex items-center gap-3 px-3 py-2 bg-primary text-on-primary border-l-4 border-tertiary transition-all active:scale-95 relative" href="#">
+<!-- 4px vertical ink strike is handled by border-l-4 -->
+<span class="material-symbols-outlined">edit_note</span>创作
+            </a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95" href="#">
+<span class="material-symbols-outlined">publish</span>发布
+            </a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95" href="#">
+<span class="material-symbols-outlined">analytics</span>复盘
+            </a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95" href="#">
+<span class="material-symbols-outlined">inventory_2</span>素材库
+            </a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95" href="#">
+<span class="material-symbols-outlined">bolt</span>自动化
+            </a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95" href="#">
+<span class="material-symbols-outlined">settings</span>设置
+            </a>
+</nav>
+<div class="mt-auto px-2 pb-4">
+<div class="border-t border-on-surface mb-2 mx-3"></div>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95" href="#">
+<span class="material-symbols-outlined">help</span>帮助中心
+            </a>
+</div>
+</aside>
+<!-- Main Canvas -->
+<main class="md:ml-[208px] pt-[56px] min-h-screen bg-surface p-unit-lg flex flex-col">
+<!-- Header Section -->
+<header class="mb-8 flex flex-col md:flex-row justify-between items-start md:items-end gap-4 border-b border-on-surface pb-6">
+<div>
+<div class="flex items-center gap-3 mb-2">
+<span class="font-label-mono text-label-mono bg-surface-variant halftone-tag px-2 py-0.5 border border-on-surface">IN PROGRESS</span>
+<span class="font-label-mono text-label-mono text-on-surface-variant">ID: PROJ-9024</span>
+</div>
+<h1 class="font-display-lg text-display-lg text-on-surface leading-tight">普通人如何用 AI 做知识视频</h1>
+</div>
+<!-- Actions -->
+<div class="flex gap-2">
+<button class="btn-secondary-editorial p-2 flex items-center justify-center" title="Save Draft">
+<span class="material-symbols-outlined">save</span>
+</button>
+<button class="btn-secondary-editorial p-2 flex items-center justify-center" title="Settings">
+<span class="material-symbols-outlined">more_horiz</span>
+</button>
+</div>
+</header>
+<!-- Progress Bar (5-step) -->
+<section class="mb-10 panel-border p-6 bg-surface-container-lowest">
+<div class="flex justify-between items-center relative">
+<!-- Connecting Line -->
+<div class="absolute left-[10%] right-[10%] top-1/2 -translate-y-1/2 h-px bg-on-surface z-0"></div>
+<!-- Steps -->
+<div class="relative z-10 flex flex-col items-center gap-2 bg-surface-container-lowest px-2">
+<div class="w-8 h-8 rounded-full border border-on-surface bg-on-surface text-surface flex items-center justify-center">
+<span class="material-symbols-outlined" style="font-size: 16px;">check</span>
+</div>
+<span class="font-label-mono text-label-mono text-on-surface">策划 (Brief)</span>
+</div>
+<div class="relative z-10 flex flex-col items-center gap-2 bg-surface-container-lowest px-2">
+<div class="w-8 h-8 rounded-full border border-on-surface bg-on-surface text-surface flex items-center justify-center">
+<span class="material-symbols-outlined" style="font-size: 16px;">check</span>
+</div>
+<span class="font-label-mono text-label-mono text-on-surface">撰写 (Writing)</span>
+</div>
+<div class="relative z-10 flex flex-col items-center gap-2 bg-surface-container-lowest px-2">
+<div class="w-8 h-8 rounded-full border-2 border-primary-container bg-surface flex items-center justify-center">
+<span class="w-3 h-3 bg-primary-container"></span>
+</div>
+<span class="font-label-mono text-label-mono font-bold text-primary-container">视觉 (Visual)</span>
+</div>
+<div class="relative z-10 flex flex-col items-center gap-2 bg-surface-container-lowest px-2">
+<div class="w-8 h-8 rounded-full border border-on-surface bg-surface flex items-center justify-center">
+<span class="font-label-mono text-label-mono">4</span>
+</div>
+<span class="font-label-mono text-label-mono text-on-surface-variant">视频 (Video)</span>
+</div>
+<div class="relative z-10 flex flex-col items-center gap-2 bg-surface-container-lowest px-2">
+<div class="w-8 h-8 rounded-full border border-on-surface bg-surface flex items-center justify-center">
+<span class="font-label-mono text-label-mono">5</span>
+</div>
+<span class="font-label-mono text-label-mono text-on-surface-variant">审核 (Audit)</span>
+</div>
+</div>
+</section>
+<!-- Main Bento Grid -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1">
+<!-- Left Column: Core Viewpoint & Pending Facts -->
+<div class="lg:col-span-2 flex flex-col gap-6">
+<!-- Core Viewpoint -->
+<div class="panel-border bg-surface-container-low p-6 flex flex-col relative overflow-hidden">
+<div class="absolute top-0 right-0 w-16 h-16 bg-surface border-l border-b border-on-surface halftone-bg"></div>
+<h2 class="font-headline-md text-headline-md mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined">lightbulb</span>核心观点
+                    </h2>
+<p class="font-body-lg text-body-lg text-on-surface leading-relaxed max-w-2xl z-10">
+                        无需深厚的专业背景，通过系统化地拆解 AI 工具的工作流（如 ChatGPT 生成框架、Midjourney 制作配图、剪映自动成片），普通人也能高频产出结构严谨、视觉及格的知识类视频，实现从“信息消费者”到“内容生产者”的跨越。
+                    </p>
+</div>
+<!-- 3 Platform Versions Status -->
+<div class="panel-border bg-surface p-6">
+<h2 class="font-headline-md text-headline-md mb-6 flex items-center gap-2">
+<span class="material-symbols-outlined">layers</span>平台版本状态
+                    </h2>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+<!-- Platform 1 -->
+<div class="border border-on-surface p-4 bg-surface-container-lowest hover:bg-surface-container-low transition-colors">
+<div class="flex justify-between items-start mb-4">
+<span class="font-label-mono text-label-mono font-bold">微信公众号</span>
+<span class="material-symbols-outlined text-tertiary-container" style="font-variation-settings: 'FILL' 1;">article</span>
+</div>
+<div class="mb-2">
+<span class="font-label-mono text-label-mono bg-[#E8F5E9] text-[#2E7D32] border border-[#2E7D32] px-1 py-0.5 halftone-tag">已定稿</span>
+</div>
+<p class="font-body-md text-body-md text-on-surface-variant mb-4 line-clamp-2">深度长文，包含详细的 Prompt 示例和操作截图。</p>
+<button class="btn-primary-editorial w-full py-2 font-label-mono text-label-mono">
+                                编辑公众号文章
+                            </button>
+</div>
+<!-- Platform 2 -->
+<div class="border border-on-surface p-4 bg-surface-container-lowest hover:bg-surface-container-low transition-colors border-t-4 border-t-primary-container">
+<div class="flex justify-between items-start mb-4">
+<span class="font-label-mono text-label-mono font-bold">小红书</span>
+<span class="material-symbols-outlined text-primary-container" style="font-variation-settings: 'FILL' 1;">imagesmode</span>
+</div>
+<div class="mb-2">
+<span class="font-label-mono text-label-mono bg-surface-variant border border-on-surface px-1 py-0.5 halftone-tag">制作中 (视觉)</span>
+</div>
+<p class="font-body-md text-body-md text-on-surface-variant mb-4 line-clamp-2">提炼核心步骤，优化为 6-8 张高对比度图文卡片。</p>
+<button class="btn-primary-editorial w-full py-2 font-label-mono text-label-mono">
+                                制作小红书图文
+                            </button>
+</div>
+<!-- Platform 3 -->
+<div class="border border-on-surface p-4 bg-surface-container-lowest hover:bg-surface-container-low transition-colors opacity-70">
+<div class="flex justify-between items-start mb-4">
+<span class="font-label-mono text-label-mono font-bold">视频号 / 抖音</span>
+<span class="material-symbols-outlined text-on-surface-variant">play_circle</span>
+</div>
+<div class="mb-2">
+<span class="font-label-mono text-label-mono border border-on-surface-variant text-on-surface-variant px-1 py-0.5">待启动</span>
+</div>
+<p class="font-body-md text-body-md text-on-surface-variant mb-4 line-clamp-2">基于小红书图文脚本，转化为 1 分钟内的口播/解说视频。</p>
+<button class="btn-secondary-editorial w-full py-2 font-label-mono text-label-mono">
+                                制作视频号视频
+                            </button>
+</div>
+</div>
+</div>
+</div>
+<!-- Right Column: Stats, Facts, Activity -->
+<div class="flex flex-col gap-6">
+<!-- Asset Count -->
+<div class="panel-border bg-surface p-6 flex flex-row gap-4">
+<div class="flex-1 border-r border-on-surface pr-4">
+<div class="font-label-mono text-label-mono text-on-surface-variant mb-1 uppercase">图文素材</div>
+<div class="font-display-lg text-display-lg">24</div>
+</div>
+<div class="flex-1">
+<div class="font-label-mono text-label-mono text-on-surface-variant mb-1 uppercase">视频片段</div>
+<div class="font-display-lg text-display-lg">05</div>
+</div>
+</div>
+<!-- Pending Facts -->
+<div class="panel-border bg-[#FFF9C4] p-6 relative">
+<div class="absolute top-0 right-0 w-8 h-8 border-l border-b border-on-surface bg-surface flex items-center justify-center">
+<span class="material-symbols-outlined text-on-surface" style="font-size: 16px;">push_pin</span>
+</div>
+<h3 class="font-headline-md text-headline-md mb-4 flex items-center gap-2">
+                        待确认事实
+                    </h3>
+<ul class="space-y-3 font-body-md text-body-md">
+<li class="flex gap-2 items-start">
+<span class="mt-1 w-2 h-2 bg-tertiary-container flex-shrink-0"></span>
+<span>确认 Midjourney V6 当前的基础订阅价格是否仍为 $10/月。</span>
+</li>
+<li class="flex gap-2 items-start">
+<span class="mt-1 w-2 h-2 bg-on-surface flex-shrink-0"></span>
+<span>核实剪映专业版的“一键成片”功能对非 VIP 用户的具体时长限制。</span>
+</li>
+</ul>
+</div>
+<!-- Recent Activity -->
+<div class="panel-border bg-surface flex-1 p-6 flex flex-col">
+<h3 class="font-headline-md text-headline-md mb-4 border-b border-on-surface pb-2">
+                        最近活动
+                    </h3>
+<div class="flex-1 overflow-y-auto space-y-4 pt-2">
+<div class="flex gap-3">
+<div class="w-8 h-8 rounded-full border border-on-surface flex-shrink-0 bg-surface-container-high flex items-center justify-center">
+<span class="font-label-mono text-label-mono text-xs">AI</span>
+</div>
+<div>
+<div class="font-body-md text-body-md"><span class="font-bold">内容引擎</span> 生成了 8 张小红书配图草稿。</div>
+<div class="font-label-mono text-label-mono text-on-surface-variant mt-1">10 分钟前</div>
+</div>
+</div>
+<div class="flex gap-3">
+<div class="w-8 h-8 rounded-full border border-on-surface flex-shrink-0 overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="Close up thumbnail avatar of a female editor with glasses, monochromatic retro newspaper print style." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDGGKs62oCB98FeKWjU00HLUwMBNTADCweJVM9N-GayfcoVt9t0Cnv1RRo9T2G9j3dAIUpGvw1FJU0cHyF5HvSAwZnTITwNOXNo8F3CTrJZ0M5sRq8RLn6mvAnmgHRmOX71V6rVup016PaqHb0PxiJ4tJZGe-azWyLlIX3ZAtCfFfX9HHkDxCv-FKc16JZ5tTEdYafEmWzTSvhO_RGnDyTeTRx2mNvm0XUnPkUBwZuMpUZAwVrv2wEN8A"/>
+</div>
+<div>
+<div class="font-body-md text-body-md"><span class="font-bold">编辑 Lin</span> 将公众号文章状态标记为“已定稿”。</div>
+<div class="font-label-mono text-label-mono text-on-surface-variant mt-1">2 小时前</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Bottom padding for visual balance -->
+<div class="h-12"></div>
+</main>
+</body></html>
