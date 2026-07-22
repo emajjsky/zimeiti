@@ -23,6 +23,9 @@ export interface IntelligenceItem {
   publishedAt: string;
   heat: number;
   trust: '可信' | '待核验';
+  url?: string;
+  captureMethod?: 'RSS' | 'MANUAL_LINK';
+  note?: string;
 }
 
 export interface IntelligenceSource {

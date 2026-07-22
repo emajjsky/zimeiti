@@ -6,7 +6,7 @@ import { platformName, projectStatusName, type ContentProject, type ContentVersi
 import type { ModelConnection, ModelConnectionInput, ModelProvider } from './domain/integrations';
 import './styles.css';
 
-type View = 'today' | 'discover' | 'plan' | 'topicEditor' | 'create' | 'publish' | 'review' | 'assets' | 'automation' | 'models' | 'settings';
+type View = 'today' | 'discover' | 'clip' | 'plan' | 'topicEditor' | 'create' | 'publish' | 'review' | 'assets' | 'automation' | 'models' | 'settings';
 
 const mainNav: { view: View; label: string; icon: typeof CalendarDays }[] = [
   { view: 'today', label: '今天', icon: CalendarDays },
@@ -19,6 +19,7 @@ const mainNav: { view: View; label: string; icon: typeof CalendarDays }[] = [
 
 const utilityNav: { view: View; label: string; icon: typeof CalendarDays }[] = [
   { view: 'assets', label: '素材库', icon: FolderOpen },
+  { view: 'clip', label: '剪藏链接', icon: Compass },
   { view: 'automation', label: '自动化', icon: Zap },
   { view: 'models', label: '模型与 API', icon: Settings },
   { view: 'settings', label: '设置', icon: Settings },
@@ -178,6 +179,11 @@ function App() {
   };
   const removeSource = (sourceId: string) => updateState({ ...state, sources: state.sources.filter((source) => source.id !== sourceId) });
   const saveFeishuTemplate = (feishuTemplate: FeishuLibraryTemplate) => updateState({ ...state, feishuTemplate });
+  const saveClippedLink = (item: Omit<LocalState['intelligence'][number], 'id'>) => {
+    const id = `clip-${Date.now()}`;
+    updateState({ ...state, intelligence: [{ ...item, id }, ...state.intelligence] });
+    setSelectedIntelId(id); setView('discover');
+  };
   const projectVersions = featuredProject?.versions ?? [];
   const activeVersion = projectVersions.find((item) => item.platform === activePlatform);
   const platformProgress = useMemo(() => projectVersions.filter((version) => version.status === 'PREFLIGHT_PASSED').length, [projectVersions]);
@@ -199,6 +205,7 @@ function App() {
     <main className="main-content">
       {view === 'today' && <Today onNavigate={setView} projects={state.projects} intelligence={state.intelligence} />}
       {view === 'discover' && selectedIntel && <Discover item={selectedIntel} intelligence={state.intelligence} onSelect={setSelectedIntelId} onCreateTopic={createTopicFromIntel} onRefresh={refreshRss} refreshFeedback={refreshFeedback} />}
+      {view === 'clip' && <LinkClipEditor onSave={saveClippedLink} onCancel={() => setView('discover')} />}
       {view === 'plan' && selectedTopic && <Plan topics={state.topics} selected={selectedTopic} onSelect={setSelectedTopicId} onCreateProject={createProjectFromTopic} onEdit={openTopicEditor} onDelete={deleteTopic} />}
       {view === 'topicEditor' && <TopicEditor key={editingTopicId ?? 'new'} topic={state.topics.find((topic) => topic.id === editingTopicId)} defaultCategory={state.workspace.primaryTopics[0] ?? '未分类'} onSave={saveTopic} onCancel={() => { setEditingTopicId(null); setView('plan'); }} />}
       {view === 'create' && <Create project={featuredProject} activePlatform={activePlatform} onPlatform={setActivePlatform} activeVersion={activeVersion} progress={platformProgress} onSaveVersion={saveContentVersion} />}
@@ -261,6 +268,12 @@ function Discover({ item, intelligence, onSelect, onCreateTopic, onRefresh, refr
   <div className="discover-layout"><section className="signal-list">{intelligence.map((signal) => <button key={signal.id} className={`signal ${signal.id === item.id ? 'selected' : ''}`} onClick={() => onSelect(signal.id)}><span className="signal-icon">{signal.category === 'AI' ? '⌘' : signal.category === '财经' ? '↗' : '▤'}</span><span><b>{signal.title}</b><p>{signal.summary}</p><small>{signal.publishedAt} · {signal.category} · {signal.source}</small></span><span><em className={`chip ${signal.trust === '可信' ? 'mint' : 'yellow'}`}>{signal.trust}</em><em className="chip">{signal.heat} 热度</em></span></button>)}</section>
   <aside className="detail-drawer"><span className="chip blue">已选中热点</span><h2>{item.title}</h2><p>{item.summary}</p><div className="idea"><b>建议角度</b><br/>普通人如何用 AI 视频工具做出能看的知识短片？</div><p className="source-link">来源：{item.source} ↗</p><footer><button className="text-button">忽略</button><button className="button primary" onClick={onCreateTopic}>创建选题</button></footer></aside></div>
   </>; }
+
+function LinkClipEditor({ onSave, onCancel }: { onSave: (item: Omit<LocalState['intelligence'][number], 'id'>) => void; onCancel: () => void }) {
+  const [url, setUrl] = useState(''); const [title, setTitle] = useState(''); const [source, setSource] = useState('公众号文章'); const [summary, setSummary] = useState(''); const [category, setCategory] = useState('未分类'); const [note, setNote] = useState(''); const [error, setError] = useState('');
+  const submit = (event: React.FormEvent) => { event.preventDefault(); try { new URL(url); } catch { setError('请输入有效链接。'); return; } if (!title.trim()) { setError('请补充文章标题。'); return; } onSave({ title:title.trim(), summary:summary.trim() || '用户主动剪藏，待补充摘要。', source:source.trim() || '手工剪藏', category:category.trim() || '未分类', publishedAt:'刚刚', heat:0, trust:'待核验', url:url.trim(), note:note.trim(), captureMethod:'MANUAL_LINK' }); };
+  return <section className="topic-editor-page"><div className="editor-page-head"><div><div className="eyebrow">DISCOVER / 链接剪藏</div><h1 className="page-title">收藏一篇值得研究的文章</h1><p className="page-subtitle">适用于公众号文章、公开网页和报告链接。系统不会绕过登录、付费墙或访问限制。</p></div><button className="text-button" onClick={onCancel}>返回热点</button></div><form className="topic-form" onSubmit={submit}><label className="form-title">原文链接<input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="粘贴公众号文章或公开网页链接" autoFocus /></label><div className="form-grid"><label>文章标题<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="从原文复制标题" /></label><label>来源 / 公众号名<input value={source} onChange={(event) => setSource(event.target.value)} /></label></div><label>摘要或核心内容<textarea value={summary} onChange={(event) => setSummary(event.target.value)} rows={5} placeholder="粘贴文章摘要、关键段落或你的理解。" /></label><div className="form-grid"><label>归属题材<input value={category} onChange={(event) => setCategory(event.target.value)} /></label><label>收藏备注<input value={note} onChange={(event) => setNote(event.target.value)} placeholder="为什么值得关注？" /></label></div>{error && <p className="form-error">{error}</p>}<footer><button className="text-button" type="button" onClick={onCancel}>取消</button><button className="button primary" type="submit">保存到热点池 <ChevronRight size={17}/></button></footer></form></section>;
+}
 
 function TopicEditor({ topic, defaultCategory, onSave, onCancel }: { topic?: TopicCandidate; defaultCategory: string; onSave: (draft: Omit<TopicCandidate, 'id' | 'status' | 'sourceIds'>) => void; onCancel: () => void }) {
   const [title, setTitle] = useState(topic?.title ?? '');
