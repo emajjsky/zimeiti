@@ -105,6 +105,11 @@ function registerIpc() {
     database.prepare('UPDATE model_connections SET config_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(JSON.stringify(config), id);
     return config;
   });
+
+  ipcMain.handle('models:remove', (_event, id) => {
+    if (typeof id !== 'string' || !id) throw new Error('模型连接标识无效。');
+    database.prepare('DELETE FROM model_connections WHERE id = ?').run(id);
+  });
 }
 
 function validateModelInput(input) {

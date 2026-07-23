@@ -19,5 +19,6 @@ contextBridge.exposeInMainWorld('contentEngine', {
     list: () => ipcRenderer.invoke('models:list'),
     save: (input) => ipcRenderer.invoke('models:save', input),
     test: (id) => ipcRenderer.invoke('models:test', id),
+    remove: (id) => ipcRenderer.invoke('models:remove', id),
   },
 });

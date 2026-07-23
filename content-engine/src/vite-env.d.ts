@@ -23,6 +23,7 @@ declare global {
         list: () => Promise<ModelConnection[]>;
         save: (input: ModelConnectionInput) => Promise<ModelConnection>;
         test: (id: string) => Promise<ModelConnection>;
+        remove: (id: string) => Promise<void>;
       };
     };
   }

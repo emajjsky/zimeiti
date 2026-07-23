@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Bell, CalendarDays, ChartColumn, CheckCircle2, ChevronRight, ClipboardList, Compass, FolderOpen, Lightbulb, PenLine, Plus, RefreshCw, Search, Send, Settings, Zap } from 'lucide-react';
+import { animate, createScope, stagger } from 'animejs';
+import { Bell, CalendarDays, ChartColumn, CheckCircle2, ChevronRight, CircleAlert, CircleCheck, ClipboardList, Compass, FolderOpen, KeyRound, Lightbulb, PenLine, Plus, RefreshCw, Search, Send, Settings, ShieldCheck, Trash2, Zap } from 'lucide-react';
 import { intelligenceKey, loadState, persistState, seedState, type FeishuLibraryTemplate, type LocalState, type WorkspaceProfile } from './data/localRepository';
 import { platformName, projectStatusName, type ContentProject, type ContentVersion, type IntelligenceSource, type Platform, type TopicCandidate } from './domain/content';
 import type { ModelConnection, ModelConnectionInput, ModelProvider } from './domain/integrations';
@@ -359,7 +360,98 @@ function Review({ onNavigate }: { onNavigate: (view: View) => void }) { return <
   <div className="review-layout"><section className="chart-panel"><h2>栏目表现</h2>{[['国学生活化',88,'blue'],['AI 工具实战',71,'yellow'],['财经政策解读',56,'mint'],['历史人物',39,'red']].map(([label,value,color]) => <div className="bar" key={String(label)}><span>{label}</span><div><i className={String(color)} style={{width:`${value}%`}}/></div><b>{value}</b></div>)}<div className="editorial-rule compact"/><h2>本周期表现最佳</h2><p><b>《国学里的情绪管理》</b><br/>小红书收藏率 14.8% · 视频号完播率 42%</p></section><aside className="insight-panel"><span className="chip mint">可执行结论</span><h2>继续做“国学生活化”系列</h2><p>这个栏目在小红书的收藏率最高。建议下一期围绕“职场焦虑”和“关系边界”两个现代场景，将视频号口播控制在 45-60 秒。</p><button className="text-button" onClick={() => onNavigate('plan')}>创建系列选题 →</button></aside></div>
   </>; }
 
-function ModelSettingsScreen() { return <><PageHeader eyebrow="SETTINGS / 模型与 API" title="选择你的 AI 能力" subtitle="模型用于摘要、筛选与选题推荐；API Key 仅加密保存在本机。" /><section className="utility"><h2>模型连接安全层已就绪</h2><p>阿里云百炼、硅基流动、火山方舟、Kimi、智谱、OpenAI 和兼容接口将从这里添加与测试。</p></section></>; }
+const modelProviders: { provider: ModelProvider; label: string; detail: string; baseUrl: string; model: string }[] = [
+  { provider: 'DASHSCOPE', label: '阿里云百炼', detail: '通义千问兼容接口', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus' },
+  { provider: 'SILICONFLOW', label: '硅基流动', detail: '模型聚合与推理服务', baseUrl: 'https://api.siliconflow.cn/v1', model: 'Qwen/Qwen3-8B' },
+  { provider: 'VOLCENGINE_ARK', label: '火山方舟', detail: '填写你的接入点模型 ID', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: '你的接入点 ID' },
+  { provider: 'KIMI', label: 'Kimi', detail: 'Moonshot AI 接口', baseUrl: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
+  { provider: 'ZHIPU', label: '智谱 AI', detail: 'GLM 系列兼容接口', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash' },
+  { provider: 'OPENAI', label: 'OpenAI', detail: '官方 API', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4.1-mini' },
+  { provider: 'OPENAI_COMPATIBLE', label: '自定义兼容接口', detail: '适用于 OpenAI 兼容服务', baseUrl: 'https://api.example.com/v1', model: '填写模型名称' },
+];
+
+const modelPurposeNames = {
+  INTELLIGENCE_SUMMARY: '热点摘要',
+  INTELLIGENCE_FILTER: '资讯筛选',
+  TOPIC_RECOMMENDATION: '选题推荐',
+  CONTENT_WRITING: '后续创作',
+} as const;
+
+type ModelDraft = {
+  id?: string;
+  provider: ModelProvider;
+  label: string;
+  baseUrl: string;
+  model: string;
+  purposes: ModelConnection['purposes'];
+  apiKey: string;
+};
+
+function draftForProvider(provider: ModelProvider): ModelDraft {
+  const preset = modelProviders.find((item) => item.provider === provider) ?? modelProviders[0];
+  return { provider, label: preset.label, baseUrl: preset.baseUrl, model: preset.model, purposes: ['INTELLIGENCE_SUMMARY', 'INTELLIGENCE_FILTER', 'TOPIC_RECOMMENDATION'], apiKey: '' };
+}
+
+function ModelSettingsScreen() {
+  const [connections, setConnections] = useState<ModelConnection[]>([]);
+  const [draft, setDraft] = useState<ModelDraft>(() => draftForProvider('DASHSCOPE'));
+  const [busy, setBusy] = useState<'idle' | 'saving' | 'testing'>('idle');
+  const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const animationRoot = useRef<HTMLDivElement>(null);
+
+  const loadConnections = () => void window.contentEngine?.models.list().then(setConnections).catch((error) => setNotice({ type: 'error', text: error instanceof Error ? error.message : '读取模型连接失败。' }));
+  useEffect(loadConnections, []);
+  useEffect(() => {
+    if (!animationRoot.current || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const scope = createScope({ root: animationRoot }).add(() => {
+      animate('.model-form-step', { opacity: { from: 0 }, y: { from: 12 }, duration: 360, delay: stagger(65), ease: 'outQuad' });
+    });
+    return () => scope.revert();
+  }, [draft.provider]);
+
+  const selectProvider = (provider: ModelProvider) => { setDraft(draftForProvider(provider)); setNotice(null); };
+  const editConnection = (connection: ModelConnection) => { setDraft({ ...connection, apiKey: '' }); setNotice(null); };
+  const saveConnection = async () => {
+    if (!window.contentEngine) throw new Error('请在桌面端中配置模型连接。');
+    if (!draft.apiKey.trim() && !draft.id) throw new Error('请输入 API Key。');
+    const saved = await window.contentEngine.models.save({ ...draft, apiKey: draft.apiKey.trim() || undefined });
+    setConnections((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
+    setDraft((current) => ({ ...current, id: saved.id, apiKey: '' }));
+    return saved;
+  };
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault(); setBusy('saving'); setNotice(null);
+    try { await saveConnection(); setNotice({ type: 'success', text: '已加密保存到本机。现在可以进行连通性检查。' }); }
+    catch (error) { setNotice({ type: 'error', text: error instanceof Error ? error.message : '保存模型连接失败。' }); }
+    finally { setBusy('idle'); }
+  };
+  const test = async () => {
+    setBusy('testing'); setNotice(null);
+    try {
+      const saved = await saveConnection();
+      const tested = await window.contentEngine!.models.test(saved.id);
+      setConnections((current) => [tested, ...current.filter((item) => item.id !== tested.id)]);
+      setNotice(tested.status === 'READY' ? { type: 'success', text: `连接可用，已于 ${tested.lastTestedAt} 完成检查。` } : { type: 'error', text: tested.lastError || '连接检查未通过，请核对地址、模型名称和 API Key。' });
+    } catch (error) { setNotice({ type: 'error', text: error instanceof Error ? error.message : '连接检查失败。' }); }
+    finally { setBusy('idle'); }
+  };
+  const remove = async (connection: ModelConnection) => {
+    if (!window.confirm(`确定移除“${connection.label}”连接吗？本机保存的 API Key 也会一并删除。`)) return;
+    try {
+      await window.contentEngine?.models.remove(connection.id);
+      setConnections((current) => current.filter((item) => item.id !== connection.id));
+      if (draft.id === connection.id) setDraft(draftForProvider('DASHSCOPE'));
+      setNotice({ type: 'success', text: '模型连接已移除。' });
+    } catch (error) { setNotice({ type: 'error', text: error instanceof Error ? error.message : '移除模型连接失败。' }); }
+  };
+  const togglePurpose = (purpose: keyof typeof modelPurposeNames) => setDraft((current) => ({ ...current, purposes: current.purposes.includes(purpose) ? current.purposes.filter((item) => item !== purpose) : [...current.purposes, purpose] }));
+
+  return <div ref={animationRoot} className="model-settings"><PageHeader eyebrow="SETTINGS / 模型与 API" title="接入你的 AI 服务" subtitle="先连接一个模型，用于热点摘要、筛选和选题推荐。API Key 仅加密保存在这台电脑。" />
+    <section className="model-provider-stage model-form-step"><div className="section-intro"><h2>1. 选择服务商</h2><p>已预填常用兼容地址和示例模型，你仍可按自己的账号与接入点修改。</p></div><div className="provider-grid">{modelProviders.map((item) => <button type="button" key={item.provider} className={`provider-card ${draft.provider === item.provider ? 'selected' : ''}`} onClick={() => selectProvider(item.provider)}><b>{item.label}</b><small>{item.detail}</small></button>)}</div></section>
+    <div className="model-connection-layout"><form className="model-form model-form-step" onSubmit={save}><div className="model-form-heading"><div><h2>2. 配置并测试</h2><p>{draft.id ? '正在编辑已保存连接。留空 API Key 即保留原密钥。' : '填写完成后，先保存或直接进行连通性检查。'}</p></div><span className="chip blue"><ShieldCheck size={13}/>本机加密</span></div><label>连接名称<input value={draft.label} onChange={(event) => setDraft({ ...draft, label: event.target.value })} placeholder="例如：我的通义主力模型" /></label><div className="model-form-grid"><label>API 地址<input value={draft.baseUrl} onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })} placeholder="https://.../v1" /></label><label>模型名称<input value={draft.model} onChange={(event) => setDraft({ ...draft, model: event.target.value })} placeholder="例如：qwen-plus" /></label></div><label>API Key<input type="password" value={draft.apiKey} onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} placeholder={draft.id ? '留空表示不修改已保存的密钥' : '粘贴 API Key'} autoComplete="off" /></label><fieldset><legend>用于哪些工作</legend><div className="purpose-grid">{(Object.keys(modelPurposeNames) as (keyof typeof modelPurposeNames)[]).map((purpose) => <label className="purpose-option" key={purpose}><input type="checkbox" checked={draft.purposes.includes(purpose)} onChange={() => togglePurpose(purpose)} />{modelPurposeNames[purpose]}</label>)}</div></fieldset>{notice && <p className={`model-notice ${notice.type}`} aria-live="polite">{notice.type === 'success' ? <CircleCheck size={17}/> : <CircleAlert size={17}/>} {notice.text}</p>}<footer><button className="button" type="button" disabled={busy !== 'idle'} onClick={test}><KeyRound size={16}/>{busy === 'testing' ? '检查中' : '保存并检查'}</button><button className="button primary" type="submit" disabled={busy !== 'idle'}>{busy === 'saving' ? '保存中' : '加密保存'}</button></footer><small>连通性检查仅请求服务商的模型目录，不会生成内容或产生模型调用费用。</small></form>
+      <aside className="saved-connections model-form-step"><div className="panel-head"><h2>已保存连接</h2><span className="chip mint">{connections.length} 个</span></div>{connections.length === 0 ? <div className="model-empty"><KeyRound size={22}/><b>还没有连接</b><p>建议先接入一个文本模型，后续热点智能筛选才会启用。</p></div> : <div className="connection-list">{connections.map((connection) => <article className="connection-row" key={connection.id}><button type="button" className="connection-main" onClick={() => editConnection(connection)}><span className={`connection-status ${connection.status.toLowerCase()}`} /><span><b>{connection.label}</b><small>{connection.model}</small></span></button><button type="button" className="connection-remove" aria-label={`移除 ${connection.label}`} onClick={() => remove(connection)}><Trash2 size={16}/></button></article>)}</div>}<p className="connection-help">绿色为已检查可用，黄色为尚未检查，红色为上次检查失败。点击连接可继续编辑。</p></aside></div>
+  </div>;
+}
 
 function SettingsHub({ sources, template, onTemplateChange, onAddSource, onRemoveSource }: { sources: IntelligenceSource[]; template: FeishuLibraryTemplate; onTemplateChange: (template: FeishuLibraryTemplate) => void; onAddSource: (source: Omit<IntelligenceSource, 'id' | 'lastSyncedAt' | 'lastError'>) => void; onRemoveSource: (id: string) => void }) {
   const [section, setSection] = useState<'sources' | 'feishu' | 'models'>('sources');
