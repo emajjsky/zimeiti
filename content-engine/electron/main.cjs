@@ -144,7 +144,7 @@ function registerIpc() {
       testError = error instanceof Error ? error : new Error('百炼 CLI 连通性检查失败，未获得具体错误原因。');
       config.status = 'ERROR'; config.lastError = testError.message;
     }
-    database.prepare('UPDATE bailian_cli_settings SET config_json = ?, updated_at = CURRENT_TIMESTAMP WHERE setting_id = ?').run(JSON.stringify(config));
+    database.prepare('UPDATE bailian_cli_settings SET config_json = ?, updated_at = CURRENT_TIMESTAMP WHERE setting_id = ?').run(JSON.stringify(config), 'default');
     if (testError) return { ...(await getBailianStatus()), status: 'ERROR', lastError: testError.message };
     return getBailianStatus();
   });
