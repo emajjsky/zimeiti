@@ -525,15 +525,20 @@ function BailianCliCenter({ status, onSave, onTest, onRemove }: { status: Bailia
   const [apiKey, setApiKey] = useState('');
   const [busy, setBusy] = useState<'idle' | 'saving' | 'testing'>('idle');
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const keyInput = useRef<HTMLInputElement>(null);
+  const hasTypedKey = Boolean(apiKey.trim());
+  const canUseKey = hasTypedKey || status.configured;
+  const keyState = hasTypedKey ? '已输入' : status.configured ? '已保存' : '待输入';
   useEffect(() => setScope(status.scope), [status.scope]);
   const save = async () => {
-    if (!apiKey.trim() && !status.configured) { setNotice({ type: 'error', text: '请输入百炼 API Key。' }); return; }
+    if (!canUseKey) { setNotice({ type: 'error', text: '请输入百炼 API Key。' }); keyInput.current?.focus(); return; }
     setBusy('saving'); setNotice(null);
     try { await onSave({ apiKey: apiKey.trim() || undefined, scope }); setApiKey(''); setNotice({ type: 'success', text: '百炼配置已加密保存。' }); }
     catch (error) { setNotice({ type: 'error', text: error instanceof Error ? error.message : '保存百炼配置失败。' }); }
     finally { setBusy('idle'); }
   };
   const test = async () => {
+    if (!canUseKey) { setNotice({ type: 'error', text: '请输入百炼 API Key。' }); keyInput.current?.focus(); return; }
     setBusy('testing'); setNotice(null);
     try {
       if (apiKey.trim()) await onSave({ apiKey: apiKey.trim(), scope });
@@ -544,7 +549,7 @@ function BailianCliCenter({ status, onSave, onTest, onRemove }: { status: Bailia
   };
   return <div className="bailian-center"><section className="bailian-status"><div><span className={`connection-status ${status.status.toLowerCase()}`} /><b>{status.installed ? '内置 CLI' : 'CLI 未检测到'}</b>{status.version && <p>{status.version}</p>}</div><div className="bailian-status-meta"><span className={`chip ${status.status === 'READY' ? 'mint' : status.status === 'ERROR' ? 'red' : 'yellow'}`}>{status.status === 'READY' ? '已验证' : status.configured ? '待验证' : '未配置'}</span>{status.configured && <button className="text-button danger" onClick={() => void onRemove()}>移除 Key</button>}</div></section>
     <section className="scope-section"><h2>能力范围</h2><div className="scope-grid">{bailianScopes.map((item) => { const Icon = item.icon; return <button type="button" key={item.id} className={`scope-card ${scope === item.id ? 'selected' : ''}`} onClick={() => setScope(item.id)} title={item.label}><Icon size={19}/><b>{item.label}</b></button>; })}</div></section>
-    <section className="bailian-key-panel"><div className="bailian-key-head"><h2>访问凭证</h2>{status.configured && <span className="chip mint">已保存</span>}</div><div className="bailian-key-form"><label>百炼 API Key<input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={status.configured ? '输入新 Key 以替换' : '粘贴 API Key'} autoComplete="off" /></label>{notice && <p className={`model-notice ${notice.type}`} aria-live="polite">{notice.type === 'success' ? <CircleCheck size={17}/> : <CircleAlert size={17}/>} {notice.text}</p>}<div><button className="button" type="button" disabled={busy !== 'idle'} onClick={test}><KeyRound size={16}/>{busy === 'testing' ? '检查中' : '保存并检查'}</button><button className="button primary" type="button" disabled={busy !== 'idle'} onClick={save}>{busy === 'saving' ? '保存中' : '保存'}</button></div></div></section>
+    <section className="bailian-key-panel"><h2>访问凭证</h2><div className="bailian-key-form"><div className="key-field"><div className="key-field-head"><label htmlFor="bailian-api-key">百炼 API Key</label><span className={`chip ${hasTypedKey || status.configured ? 'mint' : 'yellow'}`}>{keyState}</span></div><input ref={keyInput} id="bailian-api-key" className={hasTypedKey ? 'has-value' : ''} type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={status.configured ? '输入新 Key 以替换' : '粘贴 API Key'} autoComplete="off" /></div>{notice && <p className={`model-notice ${notice.type}`} aria-live="polite">{notice.type === 'success' ? <CircleCheck size={17}/> : <CircleAlert size={17}/>} {notice.text}</p>}<div><button className="button" type="button" disabled={busy !== 'idle' || !canUseKey} onClick={test}><KeyRound size={16}/>{busy === 'testing' ? '检查中' : '保存并检查'}</button><button className="button primary" type="button" disabled={busy !== 'idle' || !canUseKey} onClick={save}>{busy === 'saving' ? '保存中' : '保存'}</button></div></div></section>
   </div>;
 }
 
