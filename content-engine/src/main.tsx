@@ -36,6 +36,7 @@ function App() {
   const [activePlatform, setActivePlatform] = useState<Platform>('WECHAT');
   const [isLoaded, setIsLoaded] = useState(false);
   const [refreshFeedback, setRefreshFeedback] = useState<{ status: 'idle' | 'running' | 'success' | 'empty' | 'error'; message: string }>({ status: 'idle', message: '' });
+  const [analysisFeedback, setAnalysisFeedback] = useState<{ status: 'idle' | 'running' | 'error'; message: string }>({ status: 'idle', message: '' });
 
   const selectedIntel = state.intelligence.find((item) => item.id === selectedIntelId) ?? state.intelligence[0];
   const selectedTopic = state.topics.find((item) => item.id === selectedTopicId) ?? state.topics[0];
@@ -178,6 +179,19 @@ function App() {
   const addSource = (source: Omit<IntelligenceSource, 'id' | 'lastSyncedAt' | 'lastError'>) => {
     updateState({ ...state, sources: [...state.sources, { ...source, id: `source-${Date.now()}` }] });
   };
+  const analyzeIntelligence = async () => {
+    if (!selectedIntel) return;
+    if (!window.contentEngine) { setAnalysisFeedback({ status: 'error', message: '请在桌面端执行 AI 分析。' }); return; }
+    setAnalysisFeedback({ status: 'running', message: '正在分析…' });
+    try {
+      const analysis = await window.contentEngine.intelligence.analyze(selectedIntel);
+      const next = { ...state, intelligence: state.intelligence.map((item) => item.id === selectedIntel.id ? { ...item, summary: analysis.summary, heat: analysis.heat, analysis } : item) };
+      updateState(next);
+      setAnalysisFeedback({ status: 'idle', message: '' });
+    } catch (error) {
+      setAnalysisFeedback({ status: 'error', message: error instanceof Error ? error.message : 'AI 分析失败。' });
+    }
+  };
   const removeSource = (sourceId: string) => updateState({ ...state, sources: state.sources.filter((source) => source.id !== sourceId) });
   const saveFeishuTemplate = (feishuTemplate: FeishuLibraryTemplate) => updateState({ ...state, feishuTemplate });
   const saveClippedLink = (item: Omit<LocalState['intelligence'][number], 'id'>) => {
@@ -205,7 +219,7 @@ function App() {
     </aside>
     <main className="main-content">
       {view === 'today' && <Today onNavigate={setView} projects={state.projects} intelligence={state.intelligence} />}
-      {view === 'discover' && selectedIntel && <Discover item={selectedIntel} intelligence={state.intelligence} onSelect={setSelectedIntelId} onCreateTopic={createTopicFromIntel} onRefresh={refreshRss} refreshFeedback={refreshFeedback} />}
+      {view === 'discover' && selectedIntel && <Discover item={selectedIntel} intelligence={state.intelligence} onSelect={setSelectedIntelId} onCreateTopic={createTopicFromIntel} onRefresh={refreshRss} refreshFeedback={refreshFeedback} analysisFeedback={analysisFeedback} onAnalyze={analyzeIntelligence} />}
       {view === 'clip' && <LinkClipEditor onSave={saveClippedLink} onCancel={() => setView('discover')} />}
       {view === 'plan' && selectedTopic && <Plan topics={state.topics} selected={selectedTopic} onSelect={setSelectedTopicId} onCreateProject={createProjectFromTopic} onEdit={openTopicEditor} onDelete={deleteTopic} />}
       {view === 'topicEditor' && <TopicEditor key={editingTopicId ?? 'new'} topic={state.topics.find((topic) => topic.id === editingTopicId)} defaultCategory={state.workspace.primaryTopics[0] ?? '未分类'} onSave={saveTopic} onCancel={() => { setEditingTopicId(null); setView('plan'); }} />}
@@ -262,12 +276,12 @@ function Today({ onNavigate, projects, intelligence }: { onNavigate: (view: View
 
 function Task({ title, sub, action, onClick }: { title: string; sub: string; action: string; onClick: () => void }) { return <article className="task"><span className="checkbox"/><div><b>{title}</b><small>{sub}</small></div><button className="text-button" onClick={onClick}>{action}</button></article>; }
 
-function Discover({ item, intelligence, onSelect, onCreateTopic, onRefresh, refreshFeedback }: { item: LocalState['intelligence'][number]; intelligence: LocalState['intelligence']; onSelect: (id: string) => void; onCreateTopic: () => void; onRefresh: () => void; refreshFeedback: { status: 'idle' | 'running' | 'success' | 'empty' | 'error'; message: string } }) { return <>
+function Discover({ item, intelligence, onSelect, onCreateTopic, onRefresh, refreshFeedback, analysisFeedback, onAnalyze }: { item: LocalState['intelligence'][number]; intelligence: LocalState['intelligence']; onSelect: (id: string) => void; onCreateTopic: () => void; onRefresh: () => void; refreshFeedback: { status: 'idle' | 'running' | 'success' | 'empty' | 'error'; message: string }; analysisFeedback: { status: 'idle' | 'running' | 'error'; message: string }; onAnalyze: () => void }) { return <>
   <PageHeader eyebrow="DISCOVER / 热点情报" title="今日热点" />
   <div className="filter-row"><div>{['全部','AI','财经','历史','人文','国学'].map((label,index) => <button key={label} className={`filter ${index === 0 ? 'active' : ''}`}>{label}</button>)}<span className="filter-note">近 7 天</span></div><button className="button primary" onClick={onRefresh} disabled={refreshFeedback.status === 'running'}><RefreshCw className={refreshFeedback.status === 'running' ? 'spin' : ''} size={15}/>{refreshFeedback.status === 'running' ? '正在刷新' : '刷新热点'}</button></div>
   {refreshFeedback.status !== 'idle' && <div className={`refresh-feedback ${refreshFeedback.status}`} role="status"><span>{refreshFeedback.status === 'running' ? '…' : refreshFeedback.status === 'success' ? '✓' : refreshFeedback.status === 'error' ? '!' : 'i'}</span>{refreshFeedback.message}</div>}
-  <div className="discover-layout"><section className="signal-list">{intelligence.map((signal) => <button key={signal.id} className={`signal ${signal.id === item.id ? 'selected' : ''}`} onClick={() => onSelect(signal.id)}><span className="signal-icon">{signal.category === 'AI' ? '⌘' : signal.category === '财经' ? '↗' : '▤'}</span><span><b>{signal.title}</b><p>{signal.summary}</p><small>{signal.publishedAt} · {signal.category} · {signal.source}</small></span><span><em className={`chip ${signal.trust === '可信' ? 'mint' : 'yellow'}`}>{signal.trust}</em><em className="chip">{signal.heat} 热度</em></span></button>)}</section>
-  <aside className="detail-drawer"><span className="chip blue">已选中热点</span><h2>{item.title}</h2><p>{item.summary}</p><div className="idea"><b>建议角度</b><br/>普通人如何用 AI 视频工具做出能看的知识短片？</div><p className="source-link">来源：{item.source} ↗</p><footer><button className="text-button">忽略</button><button className="button primary" onClick={onCreateTopic}>创建选题</button></footer></aside></div>
+  <div className="discover-layout"><section className="signal-list">{intelligence.map((signal) => <button key={signal.id} className={`signal ${signal.id === item.id ? 'selected' : ''}`} onClick={() => onSelect(signal.id)}><span className="signal-icon">{signal.category === 'AI' ? '⌘' : signal.category === '财经' ? '↗' : '▤'}</span><span><b>{signal.title}</b><p>{signal.summary}</p><small>{signal.publishedAt} · {signal.category} · {signal.source}</small></span><span><em className={`chip ${signal.trust === '可信' ? 'mint' : 'yellow'}`}>{signal.trust}</em><em className="chip">{signal.analysis ? `${signal.heat} 热度` : '未评分'}</em></span></button>)}</section>
+  <aside className="detail-drawer"><span className="chip blue">已选中热点</span><h2>{item.title}</h2><p>{item.summary}</p>{item.analysis && <div className="idea"><b>建议角度</b><br/>{item.analysis.suggestedAngle}</div>}{item.analysis?.factsToVerify.length ? <p className="fact-checks">待核验：{item.analysis.factsToVerify.join('；')}</p> : null}{item.url ? <a className="source-link" href={item.url} target="_blank" rel="noreferrer">打开原文 ↗</a> : <p className="source-link">来源：{item.source}</p>}{analysisFeedback.status === 'error' && <p className="form-error">{analysisFeedback.message}</p>}<footer><button className="text-button" disabled={analysisFeedback.status === 'running'} onClick={onAnalyze}>{analysisFeedback.status === 'running' ? '分析中' : 'AI 分析'}</button><button className="button primary" onClick={onCreateTopic}>创建选题</button></footer></aside></div>
   </>; }
 
 function LinkClipEditor({ onSave, onCancel }: { onSave: (item: Omit<LocalState['intelligence'][number], 'id'>) => void; onCancel: () => void }) {

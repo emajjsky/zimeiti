@@ -26,6 +26,14 @@ export interface IntelligenceItem {
   url?: string;
   captureMethod?: 'RSS' | 'MANUAL_LINK';
   note?: string;
+  analysis?: {
+    summary: string;
+    heat: number;
+    suggestedAngle: string;
+    factsToVerify: string[];
+    model: string;
+    analyzedAt: string;
+  };
 }
 
 export interface IntelligenceSource {

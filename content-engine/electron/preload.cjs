@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('contentEngine', {
   },
   intelligence: {
     refreshRss: (sources) => ipcRenderer.invoke('intelligence:refresh-rss', sources),
+    analyze: (item) => ipcRenderer.invoke('intelligence:analyze', item),
     onUpdated: (callback) => {
       const listener = (_event, intelligence) => callback(intelligence);
       ipcRenderer.on('intelligence:updated', listener);

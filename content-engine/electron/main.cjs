@@ -85,6 +85,22 @@ function registerIpc() {
     return { items, results };
   });
 
+  ipcMain.handle('intelligence:analyze', async (_event, item) => {
+    if (!item || typeof item !== 'object' || typeof item.title !== 'string' || item.title.length > 500) throw new Error('资讯内容无效，无法分析。');
+    const row = database.prepare('SELECT config_json, api_key_encrypted FROM bailian_cli_settings WHERE setting_id = ?').get('default');
+    if (!row) throw new Error('请先配置并验证百炼 CLI。');
+    const config = JSON.parse(row.config_json);
+    if (config.status !== 'READY') throw new Error('百炼 CLI 尚未验证通过。');
+    const apiKey = safeStorage.decryptString(row.api_key_encrypted);
+    const prompt = JSON.stringify({ title: item.title, summary: item.summary, category: item.category, source: item.source });
+    const system = '你是内容编辑助手。仅返回一个 JSON 对象，不要使用 Markdown。字段：summary（80字以内中文摘要）、heat（0到100整数）、suggestedAngle（不超过40字的内容角度）、factsToVerify（最多3条待核验事实数组）。不得编造原文没有提供的事实。';
+    const raw = await runBailianCli(['text', 'chat', '--model', 'qwen-plus', '--system', system, '--message', prompt, '--max-tokens', '500', '--temperature', '0.2', '--output', 'json'], apiKey);
+    const response = JSON.parse(raw);
+    const content = response?.choices?.[0]?.message?.content ?? response?.content;
+    const analysis = parseIntelligenceAnalysis(content);
+    return { ...analysis, model: 'qwen-plus', analyzedAt: localTime() };
+  });
+
   ipcMain.handle('models:list', () => database.prepare('SELECT id, config_json FROM model_connections ORDER BY updated_at DESC').all().map((row) => ({ id: row.id, ...JSON.parse(row.config_json) })));
 
   ipcMain.handle('models:save', (_event, input) => {
@@ -286,9 +302,30 @@ async function collectRss(source) {
     category: source.category || '未分类',
     source: source.name,
     publishedAt: formatTime(text(entry.pubDate) || text(entry.published) || text(entry.updated)),
-    heat: 50,
+    heat: 0,
     trust: source.trust || '待核验',
+    captureMethod: 'RSS',
+    url: entryUrl(entry),
   }));
+}
+
+function parseIntelligenceAnalysis(content) {
+  if (typeof content !== 'string') throw new Error('百炼没有返回可解析的分析结果。');
+  const candidate = content.trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/, '');
+  let value;
+  try { value = JSON.parse(candidate); } catch { throw new Error('百炼返回格式不符合预期，请重试。'); }
+  const summary = String(value?.summary ?? '').trim();
+  const suggestedAngle = String(value?.suggestedAngle ?? '').trim();
+  const heat = Number(value?.heat);
+  if (!summary || !suggestedAngle || !Number.isFinite(heat)) throw new Error('百炼分析结果不完整，请重试。');
+  return { summary: clip(summary, 120), heat: Math.max(0, Math.min(100, Math.round(heat))), suggestedAngle: clip(suggestedAngle, 60), factsToVerify: Array.isArray(value.factsToVerify) ? value.factsToVerify.map((item) => clip(String(item), 100)).filter(Boolean).slice(0, 3) : [] };
+}
+
+function entryUrl(entry) {
+  const link = entry?.link;
+  if (typeof link === 'string') return link;
+  if (Array.isArray(link)) return link.find((item) => typeof item === 'string' || item?.['@_href'])?.['@_href'] ?? link.find((item) => typeof item === 'string');
+  return link?.['@_href'];
 }
 
 function asArray(value) { return Array.isArray(value) ? value : value ? [value] : []; }
