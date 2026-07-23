@@ -3,7 +3,7 @@
 .playwright-mcp/
 content-engine/node_modules/
 content-engine/dist/
-content-engine/release/
+content-engine/release*/
 content-engine/*.tsbuildinfo
 content-engine/*.sqlite
 content-engine/*.sqlite-shm

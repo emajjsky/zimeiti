@@ -140,7 +140,7 @@ function registerIpc() {
       await Promise.all([runBailianCli(['--version']), validateBailianApiKey(apiKey)]);
       config.status = 'READY'; config.lastTestedAt = localTime(); config.lastError = undefined;
     } catch (error) {
-      config.status = 'ERROR'; config.lastError = error instanceof Error ? error.message : '百炼 CLI 连通性检查失败。';
+      config.status = 'ERROR'; config.lastError = error instanceof Error ? error.message : '百炼 CLI 连通性检查失败，未获得具体错误原因。';
     }
     database.prepare('UPDATE bailian_cli_settings SET config_json = ?, updated_at = CURRENT_TIMESTAMP WHERE setting_id = ?').run(JSON.stringify(config));
     return getBailianStatus();
@@ -176,7 +176,7 @@ async function getBailianStatus() {
   if (!fs.existsSync(script)) return { installed: false, configured: Boolean(row), scope: config.scope ?? 'AUTO', status: 'ERROR', lastTestedAt: config.lastTestedAt, lastError: '应用内置的百炼 CLI 未找到。' };
   try {
     const version = (await runBailianCli(['--version'])).trim();
-    return { installed: true, version, configured: Boolean(row), scope: config.scope ?? 'AUTO', status: row ? (config.status ?? 'UNCONFIGURED') : 'UNCONFIGURED', lastTestedAt: config.lastTestedAt, lastError: config.lastError };
+    return { installed: true, version, configured: Boolean(row), scope: config.scope ?? 'AUTO', status: row ? (config.status ?? 'UNCONFIGURED') : 'UNCONFIGURED', lastTestedAt: config.lastTestedAt, lastError: config.status === 'ERROR' ? (config.lastError || '检查没有返回具体原因。请关闭后重新启动桌面端，再执行检查。') : config.lastError };
   } catch (error) {
     return { installed: false, configured: Boolean(row), scope: config.scope ?? 'AUTO', status: 'ERROR', lastTestedAt: config.lastTestedAt, lastError: error instanceof Error ? error.message : '百炼 CLI 无法启动。' };
   }
@@ -196,22 +196,33 @@ function runBailianCli(args, apiKey) {
     const append = (current, chunk) => (current.length + chunk.length > limit ? current : current + chunk);
     child.stdout.on('data', (chunk) => { stdout = append(stdout, chunk.toString()); });
     child.stderr.on('data', (chunk) => { stderr = append(stderr, chunk.toString()); });
-    const timeout = setTimeout(() => child.kill(), 30_000);
+    let timedOut = false;
+    const timeout = setTimeout(() => { timedOut = true; child.kill(); }, 30_000);
     child.on('error', (error) => { clearTimeout(timeout); reject(error); });
     child.on('close', (code) => {
       clearTimeout(timeout);
       if (code === 0) resolve(stdout);
+      else if (timedOut) reject(new Error('百炼 CLI 启动检查超时（30 秒）。请检查本机网络与安全软件。'));
       else reject(new Error((stderr || stdout || `百炼 CLI 退出，错误码 ${code}`).replace(/\s+/g, ' ').trim()));
     });
   });
 }
 
 async function validateBailianApiKey(apiKey) {
-  const response = await fetch('https://dashscope.aliyuncs.com/compatible-mode/v1/models', {
+  const endpoint = 'https://dashscope.aliyuncs.com/compatible-mode/v1/models';
+  const response = await fetch(endpoint, {
     signal: AbortSignal.timeout(15_000),
     headers: { Authorization: `Bearer ${apiKey}` },
   });
-  if (!response.ok) throw new Error(`百炼 API Key 验证失败：${response.status}`);
+  if (response.ok) return;
+  let detail = '';
+  try {
+    const payload = await response.json();
+    const code = typeof payload?.code === 'string' ? payload.code : '';
+    const message = typeof payload?.message === 'string' ? payload.message : '';
+    detail = [code, message].filter(Boolean).join('：');
+  } catch { /* The HTTP status is enough when the gateway has no JSON error body. */ }
+  throw new Error(`百炼模型目录请求失败（HTTP ${response.status}）${detail ? `：${detail}` : ''}`);
 }
 
 function startIntelligenceScheduler() {
