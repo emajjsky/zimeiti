@@ -543,11 +543,20 @@ function BailianCliCenter({ status, onSave, onTest, onRemove }: { status: Bailia
     try {
       if (apiKey.trim()) await onSave({ apiKey: apiKey.trim(), scope });
       const result = await onTest(); setApiKey('');
-      setNotice(result.status === 'READY' ? { type: 'success', text: `百炼 CLI 已就绪${result.version ? `，${result.version}` : ''}。` } : { type: 'error', text: result.lastError || '检查没有返回具体原因。请关闭后重新启动桌面端，再执行检查。' });
-    } catch (error) { setNotice({ type: 'error', text: error instanceof Error ? `检查失败：${error.message}` : '检查失败，未获得具体原因。' }); }
+      if (result.status === 'READY') setNotice({ type: 'success', text: `百炼 CLI 已就绪${result.version ? `，${result.version}` : ''}。` });
+      else {
+        const refreshed = window.contentEngine ? await window.contentEngine.bailian.status().catch(() => undefined) : undefined;
+        const detail = result.lastError || refreshed?.lastError || '检查失败，请重试。';
+        setNotice({ type: 'error', text: `检查失败：${detail}` });
+      }
+    } catch (error) {
+      const refreshed = window.contentEngine ? await window.contentEngine.bailian.status().catch(() => undefined) : undefined;
+      const detail = refreshed?.lastError || (error instanceof Error ? error.message : '检查失败，请重试。');
+      setNotice({ type: 'error', text: `检查失败：${detail}` });
+    }
     finally { setBusy('idle'); }
   };
-  return <div className="bailian-center"><section className="bailian-status"><div><span className={`connection-status ${status.status.toLowerCase()}`} /><b>{status.installed ? '内置 CLI' : 'CLI 未检测到'}</b>{status.version && <p>{status.version}</p>}</div><div className="bailian-status-meta"><span className={`chip ${status.status === 'READY' ? 'mint' : status.status === 'ERROR' ? 'red' : 'yellow'}`}>{status.status === 'READY' ? '已验证' : status.configured ? '待验证' : '未配置'}</span>{status.configured && <button className="text-button danger" onClick={() => void onRemove()}>移除 Key</button>}</div></section>
+  return <div className="bailian-center"><section className="bailian-status"><div><span className={`connection-status ${status.status.toLowerCase()}`} /><b>{status.installed ? '内置 CLI' : 'CLI 未检测到'}</b>{status.version && <p>{status.version}</p>}</div><div className="bailian-status-meta"><span className={`chip ${status.status === 'READY' ? 'mint' : status.status === 'ERROR' ? 'red' : 'yellow'}`}>{status.status === 'READY' ? '已验证' : status.status === 'ERROR' ? '检查失败' : status.configured ? '待验证' : '未配置'}</span>{status.configured && <button className="text-button danger" onClick={() => void onRemove()}>移除 Key</button>}</div></section>
     <section className="scope-section"><h2>能力范围</h2><div className="scope-grid">{bailianScopes.map((item) => { const Icon = item.icon; return <button type="button" key={item.id} className={`scope-card ${scope === item.id ? 'selected' : ''}`} onClick={() => setScope(item.id)} title={item.label}><Icon size={19}/><b>{item.label}</b></button>; })}</div></section>
     <section className="bailian-key-panel"><h2>访问凭证</h2><div className="bailian-key-form"><div className="key-field"><div className="key-field-head"><label htmlFor="bailian-api-key">百炼 API Key</label><span className={`chip ${hasTypedKey || status.configured ? 'mint' : 'yellow'}`}>{keyState}</span></div><input ref={keyInput} id="bailian-api-key" className={hasTypedKey ? 'has-value' : ''} type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={status.configured ? '输入新 Key 以替换' : '粘贴 API Key'} autoComplete="off" /></div>{notice && <p className={`model-notice ${notice.type}`} aria-live="polite">{notice.type === 'success' ? <CircleCheck size={17}/> : <CircleAlert size={17}/>} {notice.text}</p>}<div><button className="button" type="button" disabled={busy !== 'idle' || !canUseKey} onClick={test}><KeyRound size={16}/>{busy === 'testing' ? '检查中' : '保存并检查'}</button><button className="button primary" type="button" disabled={busy !== 'idle' || !canUseKey} onClick={save}>{busy === 'saving' ? '保存中' : '保存'}</button></div></div></section>
   </div>;

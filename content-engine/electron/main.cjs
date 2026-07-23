@@ -145,7 +145,7 @@ function registerIpc() {
       config.status = 'ERROR'; config.lastError = testError.message;
     }
     database.prepare('UPDATE bailian_cli_settings SET config_json = ?, updated_at = CURRENT_TIMESTAMP WHERE setting_id = ?').run(JSON.stringify(config));
-    if (testError) throw testError;
+    if (testError) return { ...(await getBailianStatus()), status: 'ERROR', lastError: testError.message };
     return getBailianStatus();
   });
 
