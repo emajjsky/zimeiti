@@ -135,14 +135,17 @@ function registerIpc() {
     const row = database.prepare('SELECT config_json, api_key_encrypted FROM bailian_cli_settings WHERE setting_id = ?').get('default');
     if (!row) throw new Error('请先保存百炼 API Key。');
     const config = JSON.parse(row.config_json);
+    let testError;
     try {
       const apiKey = safeStorage.decryptString(row.api_key_encrypted);
       await Promise.all([runBailianCli(['--version']), validateBailianApiKey(apiKey)]);
       config.status = 'READY'; config.lastTestedAt = localTime(); config.lastError = undefined;
     } catch (error) {
-      config.status = 'ERROR'; config.lastError = error instanceof Error ? error.message : '百炼 CLI 连通性检查失败，未获得具体错误原因。';
+      testError = error instanceof Error ? error : new Error('百炼 CLI 连通性检查失败，未获得具体错误原因。');
+      config.status = 'ERROR'; config.lastError = testError.message;
     }
     database.prepare('UPDATE bailian_cli_settings SET config_json = ?, updated_at = CURRENT_TIMESTAMP WHERE setting_id = ?').run(JSON.stringify(config));
+    if (testError) throw testError;
     return getBailianStatus();
   });
 
@@ -210,10 +213,16 @@ function runBailianCli(args, apiKey) {
 
 async function validateBailianApiKey(apiKey) {
   const endpoint = 'https://dashscope.aliyuncs.com/compatible-mode/v1/models';
-  const response = await fetch(endpoint, {
-    signal: AbortSignal.timeout(15_000),
-    headers: { Authorization: `Bearer ${apiKey}` },
-  });
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      signal: AbortSignal.timeout(15_000),
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知网络错误';
+    throw new Error(`无法访问百炼模型目录：${message}`);
+  }
   if (response.ok) return;
   let detail = '';
   try {

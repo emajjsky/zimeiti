@@ -500,8 +500,12 @@ function ModelSettingsScreen() {
   };
   const testBailian = async () => {
     if (!window.contentEngine) throw new Error('请在桌面端中检查百炼 CLI。');
-    const status = await window.contentEngine.bailian.test();
-    setBailian(status); return status;
+    try {
+      const status = await window.contentEngine.bailian.test();
+      setBailian(status); return status;
+    } finally {
+      void window.contentEngine.bailian.status().then(setBailian).catch(() => undefined);
+    }
   };
   const removeBailian = async () => {
     if (!window.confirm('确定移除百炼 API Key 吗？CLI 程序会保留，但不能再调用模型能力。')) return;
@@ -535,7 +539,7 @@ function BailianCliCenter({ status, onSave, onTest, onRemove }: { status: Bailia
       if (apiKey.trim()) await onSave({ apiKey: apiKey.trim(), scope });
       const result = await onTest(); setApiKey('');
       setNotice(result.status === 'READY' ? { type: 'success', text: `百炼 CLI 已就绪${result.version ? `，${result.version}` : ''}。` } : { type: 'error', text: result.lastError || '检查没有返回具体原因。请关闭后重新启动桌面端，再执行检查。' });
-    } catch (error) { setNotice({ type: 'error', text: error instanceof Error ? `检查调用未完成：${error.message}` : '检查调用未完成。请关闭后重新启动桌面端，再执行检查。' }); }
+    } catch (error) { setNotice({ type: 'error', text: error instanceof Error ? `检查失败：${error.message}` : '检查失败，未获得具体原因。' }); }
     finally { setBusy('idle'); }
   };
   return <div className="bailian-center"><section className="bailian-status"><div><span className={`connection-status ${status.status.toLowerCase()}`} /><b>{status.installed ? '应用内置 CLI 已检测到' : '应用内置 CLI 未检测到'}</b><p>{status.version ?? '桌面端会随安装包携带 `bailian-cli`，不要求用户全局安装。'}</p></div><div className="bailian-status-meta"><span className={`chip ${status.status === 'READY' ? 'mint' : status.status === 'ERROR' ? 'red' : 'yellow'}`}>{status.status === 'READY' ? '已验证' : status.configured ? '待验证' : '未配置'}</span>{status.configured && <button className="text-button danger" onClick={() => void onRemove()}>移除 Key</button>}</div></section>
