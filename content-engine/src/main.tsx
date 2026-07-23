@@ -455,12 +455,12 @@ function LegacyModelSettingsScreen() {
 
 const externalModelProviders = modelProviders.filter((provider) => provider.provider !== 'DASHSCOPE');
 const providerLabels: Record<ModelProvider, string> = { DASHSCOPE: '阿里云百炼', SILICONFLOW: '硅基流动', VOLCENGINE_ARK: '火山方舟', KIMI: 'Kimi', ZHIPU: '智谱 AI', OPENAI: 'OpenAI', OPENAI_COMPATIBLE: '自定义兼容接口' };
-const bailianScopes: { id: BailianCapabilityScope; label: string; detail: string; icon: typeof BrainCircuit }[] = [
-  { id: 'AUTO', label: '自动选择', detail: '由 Agent 按任务、成本与能力推荐模型', icon: BrainCircuit },
-  { id: 'TEXT', label: '文字研究', detail: '对话、摘要、筛选、选题与写作', icon: PenLine },
-  { id: 'IMAGE', label: '视觉素材', detail: '生图、图像编辑与视觉理解', icon: Image },
-  { id: 'AUDIO', label: '语音能力', detail: '配音、语音识别与音频理解', icon: AudioLines },
-  { id: 'VIDEO', label: '视频能力', detail: '视频生成、编辑与任务查询', icon: Video },
+const bailianScopes: { id: BailianCapabilityScope; label: string; icon: typeof BrainCircuit }[] = [
+  { id: 'AUTO', label: '自动选择', icon: BrainCircuit },
+  { id: 'TEXT', label: '文字研究', icon: PenLine },
+  { id: 'IMAGE', label: '视觉素材', icon: Image },
+  { id: 'AUDIO', label: '语音能力', icon: AudioLines },
+  { id: 'VIDEO', label: '视频能力', icon: Video },
 ];
 const emptyBailianStatus: BailianCliStatus = { installed: false, configured: false, scope: 'AUTO', status: 'UNCONFIGURED' };
 
@@ -513,7 +513,7 @@ function ModelSettingsScreen() {
   };
 
   if (screen === 'editor') return <ExternalApiEditor key={editing?.id ?? 'new'} connection={editing} onBack={() => setScreen('connections')} onSave={saveExternal} onTest={testExternal} />;
-  return <div className="ai-settings"><PageHeader eyebrow="SETTINGS / AI 能力与连接" title={screen === 'bailian' ? '百炼能力中心' : '外部 API 连接'} subtitle={screen === 'bailian' ? '一把百炼 API Key，按任务范围调度文本、图像、语音与视频能力。' : '外部连接用于补充特定模型或兼容服务，不与百炼 CLI 配置混在一起。'} />
+  return <div className="ai-settings"><PageHeader eyebrow="SETTINGS / AI 能力与连接" title={screen === 'bailian' ? '百炼能力中心' : '外部 API 连接'} subtitle={screen === 'bailian' ? '配置能力范围与访问凭证。' : '管理补充模型连接。'} />
     <nav className="ai-section-nav" aria-label="AI 设置分区"><button className={screen === 'bailian' ? 'active' : ''} onClick={() => setScreen('bailian')}><BrainCircuit size={18}/>百炼 CLI</button><button className={screen === 'connections' ? 'active' : ''} onClick={() => setScreen('connections')}><KeyRound size={18}/>外部 API <span>{connections.length}</span></button></nav>
     {notice && <p className={`model-notice ${notice.type}`} aria-live="polite">{notice.type === 'success' ? <CircleCheck size={17}/> : <CircleAlert size={17}/>} {notice.text}</p>}
     {screen === 'bailian' ? <BailianCliCenter status={bailian} onSave={saveBailian} onTest={testBailian} onRemove={removeBailian} /> : <ExternalApiConnections connections={connections} onNew={openNew} onEdit={openEdit} onRemove={deleteExternal} />}
@@ -542,9 +542,9 @@ function BailianCliCenter({ status, onSave, onTest, onRemove }: { status: Bailia
     } catch (error) { setNotice({ type: 'error', text: error instanceof Error ? `检查失败：${error.message}` : '检查失败，未获得具体原因。' }); }
     finally { setBusy('idle'); }
   };
-  return <div className="bailian-center"><section className="bailian-status"><div><span className={`connection-status ${status.status.toLowerCase()}`} /><b>{status.installed ? '应用内置 CLI 已检测到' : '应用内置 CLI 未检测到'}</b><p>{status.version ?? '桌面端会随安装包携带 `bailian-cli`，不要求用户全局安装。'}</p></div><div className="bailian-status-meta"><span className={`chip ${status.status === 'READY' ? 'mint' : status.status === 'ERROR' ? 'red' : 'yellow'}`}>{status.status === 'READY' ? '已验证' : status.configured ? '待验证' : '未配置'}</span>{status.configured && <button className="text-button danger" onClick={() => void onRemove()}>移除 Key</button>}</div></section>
-    <section className="scope-section"><div className="section-intro"><div><h2>选择当前能力范围</h2><p>“自动选择”会是通用 Agent 的默认模式，后续按任务、成本和模型可用性进行推荐与执行。</p></div></div><div className="scope-grid">{bailianScopes.map((item) => { const Icon = item.icon; return <button type="button" key={item.id} className={`scope-card ${scope === item.id ? 'selected' : ''}`} onClick={() => setScope(item.id)}><Icon size={20}/><span><b>{item.label}</b><small>{item.detail}</small></span></button>; })}</div></section>
-    <section className="bailian-key-panel"><div className="bailian-key-copy"><h2>配置百炼 API Key</h2><p>同一个 Key 可调用已开通的百炼文本、多模态、图片、语音、视频等能力。密钥只保存于系统安全存储，调用时临时注入 CLI 进程。</p><ul><li>不会写入 `~/.bailian/config.json`</li><li>不会要求用户全局安装 `bl`</li><li>CLI 命令和模型能力会在真正执行任务时按范围选择</li></ul></div><div className="bailian-key-form"><label>百炼 API Key<input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={status.configured ? '已安全保存，输入可替换' : '粘贴百炼 API Key'} autoComplete="off" /></label>{notice && <p className={`model-notice ${notice.type}`} aria-live="polite">{notice.type === 'success' ? <CircleCheck size={17}/> : <CircleAlert size={17}/>} {notice.text}</p>}<div><button className="button" type="button" disabled={busy !== 'idle'} onClick={test}><KeyRound size={16}/>{busy === 'testing' ? '检查中' : '保存并检查'}</button><button className="button primary" type="button" disabled={busy !== 'idle'} onClick={save}>{busy === 'saving' ? '保存中' : '加密保存'}</button></div><small>检查会验证 CLI 可启动并请求百炼模型目录，不生成内容，不会发起图片、语音或视频任务。</small></div></section>
+  return <div className="bailian-center"><section className="bailian-status"><div><span className={`connection-status ${status.status.toLowerCase()}`} /><b>{status.installed ? '内置 CLI' : 'CLI 未检测到'}</b>{status.version && <p>{status.version}</p>}</div><div className="bailian-status-meta"><span className={`chip ${status.status === 'READY' ? 'mint' : status.status === 'ERROR' ? 'red' : 'yellow'}`}>{status.status === 'READY' ? '已验证' : status.configured ? '待验证' : '未配置'}</span>{status.configured && <button className="text-button danger" onClick={() => void onRemove()}>移除 Key</button>}</div></section>
+    <section className="scope-section"><h2>能力范围</h2><div className="scope-grid">{bailianScopes.map((item) => { const Icon = item.icon; return <button type="button" key={item.id} className={`scope-card ${scope === item.id ? 'selected' : ''}`} onClick={() => setScope(item.id)} title={item.label}><Icon size={19}/><b>{item.label}</b></button>; })}</div></section>
+    <section className="bailian-key-panel"><div className="bailian-key-head"><h2>访问凭证</h2>{status.configured && <span className="chip mint">已保存</span>}</div><div className="bailian-key-form"><label>百炼 API Key<input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={status.configured ? '输入新 Key 以替换' : '粘贴 API Key'} autoComplete="off" /></label>{notice && <p className={`model-notice ${notice.type}`} aria-live="polite">{notice.type === 'success' ? <CircleCheck size={17}/> : <CircleAlert size={17}/>} {notice.text}</p>}<div><button className="button" type="button" disabled={busy !== 'idle'} onClick={test}><KeyRound size={16}/>{busy === 'testing' ? '检查中' : '保存并检查'}</button><button className="button primary" type="button" disabled={busy !== 'idle'} onClick={save}>{busy === 'saving' ? '保存中' : '保存'}</button></div></div></section>
   </div>;
 }
 
