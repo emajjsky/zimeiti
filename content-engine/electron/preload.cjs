@@ -21,4 +21,10 @@ contextBridge.exposeInMainWorld('contentEngine', {
     test: (id) => ipcRenderer.invoke('models:test', id),
     remove: (id) => ipcRenderer.invoke('models:remove', id),
   },
+  bailian: {
+    status: () => ipcRenderer.invoke('bailian:status'),
+    save: (input) => ipcRenderer.invoke('bailian:save', input),
+    test: () => ipcRenderer.invoke('bailian:test'),
+    remove: () => ipcRenderer.invoke('bailian:remove'),
+  },
 });

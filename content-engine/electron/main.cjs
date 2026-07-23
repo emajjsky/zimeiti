@@ -1,5 +1,7 @@
 const { app, BrowserWindow, ipcMain, safeStorage } = require('electron');
 const path = require('node:path');
+const fs = require('node:fs');
+const { spawn } = require('node:child_process');
 const { XMLParser } = require('fast-xml-parser');
 
 let database;
@@ -25,6 +27,12 @@ function initialiseDatabase() {
     );
     CREATE TABLE IF NOT EXISTS model_connections (
       id TEXT PRIMARY KEY,
+      config_json TEXT NOT NULL,
+      api_key_encrypted BLOB NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS bailian_cli_settings (
+      setting_id TEXT PRIMARY KEY,
       config_json TEXT NOT NULL,
       api_key_encrypted BLOB NOT NULL,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -110,6 +118,35 @@ function registerIpc() {
     if (typeof id !== 'string' || !id) throw new Error('模型连接标识无效。');
     database.prepare('DELETE FROM model_connections WHERE id = ?').run(id);
   });
+
+  ipcMain.handle('bailian:status', async () => getBailianStatus());
+
+  ipcMain.handle('bailian:save', async (_event, input) => {
+    const config = validateBailianInput(input);
+    if (!safeStorage.isEncryptionAvailable()) throw new Error('系统安全存储不可用，无法保存百炼 API Key。');
+    const existing = database.prepare('SELECT api_key_encrypted FROM bailian_cli_settings WHERE setting_id = ?').get('default');
+    const apiKey = input.apiKey?.trim() || (existing ? safeStorage.decryptString(existing.api_key_encrypted) : '');
+    if (!apiKey) throw new Error('请输入百炼 API Key。');
+    database.prepare(`INSERT INTO bailian_cli_settings (setting_id, config_json, api_key_encrypted, updated_at) VALUES ('default', ?, ?, CURRENT_TIMESTAMP) ON CONFLICT(setting_id) DO UPDATE SET config_json = excluded.config_json, api_key_encrypted = excluded.api_key_encrypted, updated_at = CURRENT_TIMESTAMP`).run(JSON.stringify({ ...config, status: 'UNCONFIGURED', lastError: undefined }), safeStorage.encryptString(apiKey));
+    return getBailianStatus();
+  });
+
+  ipcMain.handle('bailian:test', async () => {
+    const row = database.prepare('SELECT config_json, api_key_encrypted FROM bailian_cli_settings WHERE setting_id = ?').get('default');
+    if (!row) throw new Error('请先保存百炼 API Key。');
+    const config = JSON.parse(row.config_json);
+    try {
+      const apiKey = safeStorage.decryptString(row.api_key_encrypted);
+      await Promise.all([runBailianCli(['--version']), validateBailianApiKey(apiKey)]);
+      config.status = 'READY'; config.lastTestedAt = localTime(); config.lastError = undefined;
+    } catch (error) {
+      config.status = 'ERROR'; config.lastError = error instanceof Error ? error.message : '百炼 CLI 连通性检查失败。';
+    }
+    database.prepare('UPDATE bailian_cli_settings SET config_json = ?, updated_at = CURRENT_TIMESTAMP WHERE setting_id = ?').run(JSON.stringify(config));
+    return getBailianStatus();
+  });
+
+  ipcMain.handle('bailian:remove', () => database.prepare('DELETE FROM bailian_cli_settings WHERE setting_id = ?').run('default'));
 }
 
 function validateModelInput(input) {
@@ -119,6 +156,62 @@ function validateModelInput(input) {
   const url = new URL(baseUrl);
   if (!['https:', 'http:'].includes(url.protocol) || !input.model || !input.provider) throw new Error('请填写供应商、地址和模型名称。');
   return { id, provider: String(input.provider), label: String(input.label || input.provider), baseUrl, model: String(input.model), purposes: Array.isArray(input.purposes) ? input.purposes : [], status: 'UNTESTED' };
+}
+
+function validateBailianInput(input) {
+  if (!input || typeof input !== 'object') throw new Error('百炼 CLI 配置无效。');
+  const scopes = new Set(['AUTO', 'TEXT', 'IMAGE', 'AUDIO', 'VIDEO']);
+  if (!scopes.has(input.scope)) throw new Error('请选择有效的能力范围。');
+  return { scope: input.scope };
+}
+
+function localTime() { return new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date()); }
+
+function bailianCliScript() { return path.join(app.getAppPath(), 'node_modules', 'bailian-cli', 'dist', 'bailian.mjs'); }
+
+async function getBailianStatus() {
+  const row = database.prepare('SELECT config_json FROM bailian_cli_settings WHERE setting_id = ?').get('default');
+  const config = row ? JSON.parse(row.config_json) : { scope: 'AUTO', status: 'UNCONFIGURED' };
+  const script = bailianCliScript();
+  if (!fs.existsSync(script)) return { installed: false, configured: Boolean(row), scope: config.scope ?? 'AUTO', status: 'ERROR', lastTestedAt: config.lastTestedAt, lastError: '应用内置的百炼 CLI 未找到。' };
+  try {
+    const version = (await runBailianCli(['--version'])).trim();
+    return { installed: true, version, configured: Boolean(row), scope: config.scope ?? 'AUTO', status: row ? (config.status ?? 'UNCONFIGURED') : 'UNCONFIGURED', lastTestedAt: config.lastTestedAt, lastError: config.lastError };
+  } catch (error) {
+    return { installed: false, configured: Boolean(row), scope: config.scope ?? 'AUTO', status: 'ERROR', lastTestedAt: config.lastTestedAt, lastError: error instanceof Error ? error.message : '百炼 CLI 无法启动。' };
+  }
+}
+
+function runBailianCli(args, apiKey) {
+  const script = bailianCliScript();
+  if (!fs.existsSync(script)) return Promise.reject(new Error('应用内置的百炼 CLI 未找到。'));
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [script, ...args], {
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', ...(apiKey ? { DASHSCOPE_API_KEY: apiKey } : {}) },
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = ''; let stderr = '';
+    const limit = 1024 * 1024;
+    const append = (current, chunk) => (current.length + chunk.length > limit ? current : current + chunk);
+    child.stdout.on('data', (chunk) => { stdout = append(stdout, chunk.toString()); });
+    child.stderr.on('data', (chunk) => { stderr = append(stderr, chunk.toString()); });
+    const timeout = setTimeout(() => child.kill(), 30_000);
+    child.on('error', (error) => { clearTimeout(timeout); reject(error); });
+    child.on('close', (code) => {
+      clearTimeout(timeout);
+      if (code === 0) resolve(stdout);
+      else reject(new Error((stderr || stdout || `百炼 CLI 退出，错误码 ${code}`).replace(/\s+/g, ' ').trim()));
+    });
+  });
+}
+
+async function validateBailianApiKey(apiKey) {
+  const response = await fetch('https://dashscope.aliyuncs.com/compatible-mode/v1/models', {
+    signal: AbortSignal.timeout(15_000),
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+  if (!response.ok) throw new Error(`百炼 API Key 验证失败：${response.status}`);
 }
 
 function startIntelligenceScheduler() {

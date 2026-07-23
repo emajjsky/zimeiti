@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { animate, createScope, stagger } from 'animejs';
-import { Bell, CalendarDays, ChartColumn, CheckCircle2, ChevronRight, CircleAlert, CircleCheck, ClipboardList, Compass, FolderOpen, KeyRound, Lightbulb, PenLine, Plus, RefreshCw, Search, Send, Settings, ShieldCheck, Trash2, Zap } from 'lucide-react';
+import { ArrowLeft, AudioLines, Bell, BrainCircuit, CalendarDays, ChartColumn, CheckCircle2, ChevronRight, CircleAlert, CircleCheck, ClipboardList, Compass, FolderOpen, Image, KeyRound, Lightbulb, PenLine, Pencil, Plus, RefreshCw, Search, Send, Settings, ShieldCheck, Trash2, Video, Zap } from 'lucide-react';
 import { intelligenceKey, loadState, persistState, seedState, type FeishuLibraryTemplate, type LocalState, type WorkspaceProfile } from './data/localRepository';
 import { platformName, projectStatusName, type ContentProject, type ContentVersion, type IntelligenceSource, type Platform, type TopicCandidate } from './domain/content';
-import type { ModelConnection, ModelConnectionInput, ModelProvider } from './domain/integrations';
+import type { BailianCapabilityScope, BailianCliStatus, ModelConnection, ModelConnectionInput, ModelProvider } from './domain/integrations';
 import './styles.css';
 
 type View = 'today' | 'discover' | 'clip' | 'plan' | 'topicEditor' | 'create' | 'publish' | 'review' | 'assets' | 'automation' | 'models' | 'settings';
@@ -392,7 +392,7 @@ function draftForProvider(provider: ModelProvider): ModelDraft {
   return { provider, label: preset.label, baseUrl: preset.baseUrl, model: preset.model, purposes: ['INTELLIGENCE_SUMMARY', 'INTELLIGENCE_FILTER', 'TOPIC_RECOMMENDATION'], apiKey: '' };
 }
 
-function ModelSettingsScreen() {
+function LegacyModelSettingsScreen() {
   const [connections, setConnections] = useState<ModelConnection[]>([]);
   const [draft, setDraft] = useState<ModelDraft>(() => draftForProvider('DASHSCOPE'));
   const [busy, setBusy] = useState<'idle' | 'saving' | 'testing'>('idle');
@@ -451,6 +451,125 @@ function ModelSettingsScreen() {
     <div className="model-connection-layout"><form className="model-form model-form-step" onSubmit={save}><div className="model-form-heading"><div><h2>2. 配置并测试</h2><p>{draft.id ? '正在编辑已保存连接。留空 API Key 即保留原密钥。' : '填写完成后，先保存或直接进行连通性检查。'}</p></div><span className="chip blue"><ShieldCheck size={13}/>本机加密</span></div><label>连接名称<input value={draft.label} onChange={(event) => setDraft({ ...draft, label: event.target.value })} placeholder="例如：我的通义主力模型" /></label><div className="model-form-grid"><label>API 地址<input value={draft.baseUrl} onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })} placeholder="https://.../v1" /></label><label>模型名称<input value={draft.model} onChange={(event) => setDraft({ ...draft, model: event.target.value })} placeholder="例如：qwen-plus" /></label></div><label>API Key<input type="password" value={draft.apiKey} onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} placeholder={draft.id ? '留空表示不修改已保存的密钥' : '粘贴 API Key'} autoComplete="off" /></label><fieldset><legend>用于哪些工作</legend><div className="purpose-grid">{(Object.keys(modelPurposeNames) as (keyof typeof modelPurposeNames)[]).map((purpose) => <label className="purpose-option" key={purpose}><input type="checkbox" checked={draft.purposes.includes(purpose)} onChange={() => togglePurpose(purpose)} />{modelPurposeNames[purpose]}</label>)}</div></fieldset>{notice && <p className={`model-notice ${notice.type}`} aria-live="polite">{notice.type === 'success' ? <CircleCheck size={17}/> : <CircleAlert size={17}/>} {notice.text}</p>}<footer><button className="button" type="button" disabled={busy !== 'idle'} onClick={test}><KeyRound size={16}/>{busy === 'testing' ? '检查中' : '保存并检查'}</button><button className="button primary" type="submit" disabled={busy !== 'idle'}>{busy === 'saving' ? '保存中' : '加密保存'}</button></footer><small>连通性检查仅请求服务商的模型目录，不会生成内容或产生模型调用费用。</small></form>
       <aside className="saved-connections model-form-step"><div className="panel-head"><h2>已保存连接</h2><span className="chip mint">{connections.length} 个</span></div>{connections.length === 0 ? <div className="model-empty"><KeyRound size={22}/><b>还没有连接</b><p>建议先接入一个文本模型，后续热点智能筛选才会启用。</p></div> : <div className="connection-list">{connections.map((connection) => <article className="connection-row" key={connection.id}><button type="button" className="connection-main" onClick={() => editConnection(connection)}><span className={`connection-status ${connection.status.toLowerCase()}`} /><span><b>{connection.label}</b><small>{connection.model}</small></span></button><button type="button" className="connection-remove" aria-label={`移除 ${connection.label}`} onClick={() => remove(connection)}><Trash2 size={16}/></button></article>)}</div>}<p className="connection-help">绿色为已检查可用，黄色为尚未检查，红色为上次检查失败。点击连接可继续编辑。</p></aside></div>
   </div>;
+}
+
+const externalModelProviders = modelProviders.filter((provider) => provider.provider !== 'DASHSCOPE');
+const providerLabels: Record<ModelProvider, string> = { DASHSCOPE: '阿里云百炼', SILICONFLOW: '硅基流动', VOLCENGINE_ARK: '火山方舟', KIMI: 'Kimi', ZHIPU: '智谱 AI', OPENAI: 'OpenAI', OPENAI_COMPATIBLE: '自定义兼容接口' };
+const bailianScopes: { id: BailianCapabilityScope; label: string; detail: string; icon: typeof BrainCircuit }[] = [
+  { id: 'AUTO', label: '自动选择', detail: '由 Agent 按任务、成本与能力推荐模型', icon: BrainCircuit },
+  { id: 'TEXT', label: '文字研究', detail: '对话、摘要、筛选、选题与写作', icon: PenLine },
+  { id: 'IMAGE', label: '视觉素材', detail: '生图、图像编辑与视觉理解', icon: Image },
+  { id: 'AUDIO', label: '语音能力', detail: '配音、语音识别与音频理解', icon: AudioLines },
+  { id: 'VIDEO', label: '视频能力', detail: '视频生成、编辑与任务查询', icon: Video },
+];
+const emptyBailianStatus: BailianCliStatus = { installed: false, configured: false, scope: 'AUTO', status: 'UNCONFIGURED' };
+
+function ModelSettingsScreen() {
+  const [screen, setScreen] = useState<'bailian' | 'connections' | 'editor'>('bailian');
+  const [connections, setConnections] = useState<ModelConnection[]>([]);
+  const [bailian, setBailian] = useState<BailianCliStatus>(emptyBailianStatus);
+  const [editing, setEditing] = useState<ModelConnection | undefined>();
+  const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const loadConnections = () => void window.contentEngine?.models.list().then(setConnections).catch((error) => setNotice({ type: 'error', text: error instanceof Error ? error.message : '读取外部 API 连接失败。' }));
+  const loadBailian = () => void window.contentEngine?.bailian.status().then(setBailian).catch((error) => setNotice({ type: 'error', text: error instanceof Error ? error.message : '读取百炼 CLI 状态失败。' }));
+  useEffect(() => { loadConnections(); loadBailian(); }, []);
+  const openNew = () => { setEditing(undefined); setNotice(null); setScreen('editor'); };
+  const openEdit = (connection: ModelConnection) => { setEditing(connection); setNotice(null); setScreen('editor'); };
+  const saveExternal = async (input: ModelConnectionInput) => {
+    if (!window.contentEngine) throw new Error('请在桌面端中配置 API 连接。');
+    const saved = await window.contentEngine.models.save(input);
+    setConnections((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
+    return saved;
+  };
+  const testExternal = async (input: ModelConnectionInput) => {
+    const saved = await saveExternal(input);
+    const tested = await window.contentEngine!.models.test(saved.id);
+    setConnections((current) => [tested, ...current.filter((item) => item.id !== tested.id)]);
+    return tested;
+  };
+  const deleteExternal = async (connection: ModelConnection) => {
+    if (!window.confirm(`确定移除“${connection.label}”吗？本机保存的 API Key 也会一并删除。`)) return;
+    await window.contentEngine?.models.remove(connection.id);
+    setConnections((current) => current.filter((item) => item.id !== connection.id));
+  };
+  const saveBailian = async (input: { apiKey?: string; scope: BailianCapabilityScope }) => {
+    if (!window.contentEngine) throw new Error('请在桌面端中配置百炼 CLI。');
+    const status = await window.contentEngine.bailian.save(input);
+    setBailian(status); return status;
+  };
+  const testBailian = async () => {
+    if (!window.contentEngine) throw new Error('请在桌面端中检查百炼 CLI。');
+    const status = await window.contentEngine.bailian.test();
+    setBailian(status); return status;
+  };
+  const removeBailian = async () => {
+    if (!window.confirm('确定移除百炼 API Key 吗？CLI 程序会保留，但不能再调用模型能力。')) return;
+    await window.contentEngine?.bailian.remove(); setBailian({ ...emptyBailianStatus, installed: bailian.installed, version: bailian.version });
+  };
+
+  if (screen === 'editor') return <ExternalApiEditor key={editing?.id ?? 'new'} connection={editing} onBack={() => setScreen('connections')} onSave={saveExternal} onTest={testExternal} />;
+  return <div className="ai-settings"><PageHeader eyebrow="SETTINGS / AI 能力与连接" title={screen === 'bailian' ? '百炼能力中心' : '外部 API 连接'} subtitle={screen === 'bailian' ? '一把百炼 API Key，按任务范围调度文本、图像、语音与视频能力。' : '外部连接用于补充特定模型或兼容服务，不与百炼 CLI 配置混在一起。'} />
+    <nav className="ai-section-nav" aria-label="AI 设置分区"><button className={screen === 'bailian' ? 'active' : ''} onClick={() => setScreen('bailian')}><BrainCircuit size={18}/>百炼 CLI</button><button className={screen === 'connections' ? 'active' : ''} onClick={() => setScreen('connections')}><KeyRound size={18}/>外部 API <span>{connections.length}</span></button></nav>
+    {notice && <p className={`model-notice ${notice.type}`} aria-live="polite">{notice.type === 'success' ? <CircleCheck size={17}/> : <CircleAlert size={17}/>} {notice.text}</p>}
+    {screen === 'bailian' ? <BailianCliCenter status={bailian} onSave={saveBailian} onTest={testBailian} onRemove={removeBailian} /> : <ExternalApiConnections connections={connections} onNew={openNew} onEdit={openEdit} onRemove={deleteExternal} />}
+  </div>;
+}
+
+function BailianCliCenter({ status, onSave, onTest, onRemove }: { status: BailianCliStatus; onSave: (input: { apiKey?: string; scope: BailianCapabilityScope }) => Promise<BailianCliStatus>; onTest: () => Promise<BailianCliStatus>; onRemove: () => Promise<void> }) {
+  const [scope, setScope] = useState<BailianCapabilityScope>(status.scope);
+  const [apiKey, setApiKey] = useState('');
+  const [busy, setBusy] = useState<'idle' | 'saving' | 'testing'>('idle');
+  const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  useEffect(() => setScope(status.scope), [status.scope]);
+  const save = async () => {
+    if (!apiKey.trim() && !status.configured) { setNotice({ type: 'error', text: '请输入百炼 API Key。' }); return; }
+    setBusy('saving'); setNotice(null);
+    try { await onSave({ apiKey: apiKey.trim() || undefined, scope }); setApiKey(''); setNotice({ type: 'success', text: '百炼配置已加密保存。' }); }
+    catch (error) { setNotice({ type: 'error', text: error instanceof Error ? error.message : '保存百炼配置失败。' }); }
+    finally { setBusy('idle'); }
+  };
+  const test = async () => {
+    setBusy('testing'); setNotice(null);
+    try {
+      if (apiKey.trim()) await onSave({ apiKey: apiKey.trim(), scope });
+      const result = await onTest(); setApiKey('');
+      setNotice(result.status === 'READY' ? { type: 'success', text: `百炼 CLI 已就绪${result.version ? `，${result.version}` : ''}。` } : { type: 'error', text: result.lastError || '连通性检查失败。' });
+    } catch (error) { setNotice({ type: 'error', text: error instanceof Error ? error.message : '百炼 CLI 检查失败。' }); }
+    finally { setBusy('idle'); }
+  };
+  return <div className="bailian-center"><section className="bailian-status"><div><span className={`connection-status ${status.status.toLowerCase()}`} /><b>{status.installed ? '应用内置 CLI 已检测到' : '应用内置 CLI 未检测到'}</b><p>{status.version ?? '桌面端会随安装包携带 `bailian-cli`，不要求用户全局安装。'}</p></div><div className="bailian-status-meta"><span className={`chip ${status.status === 'READY' ? 'mint' : status.status === 'ERROR' ? 'red' : 'yellow'}`}>{status.status === 'READY' ? '已验证' : status.configured ? '待验证' : '未配置'}</span>{status.configured && <button className="text-button danger" onClick={() => void onRemove()}>移除 Key</button>}</div></section>
+    <section className="scope-section"><div className="section-intro"><div><h2>选择当前能力范围</h2><p>“自动选择”会是通用 Agent 的默认模式，后续按任务、成本和模型可用性进行推荐与执行。</p></div></div><div className="scope-grid">{bailianScopes.map((item) => { const Icon = item.icon; return <button type="button" key={item.id} className={`scope-card ${scope === item.id ? 'selected' : ''}`} onClick={() => setScope(item.id)}><Icon size={20}/><span><b>{item.label}</b><small>{item.detail}</small></span></button>; })}</div></section>
+    <section className="bailian-key-panel"><div className="bailian-key-copy"><h2>配置百炼 API Key</h2><p>同一个 Key 可调用已开通的百炼文本、多模态、图片、语音、视频等能力。密钥只保存于系统安全存储，调用时临时注入 CLI 进程。</p><ul><li>不会写入 `~/.bailian/config.json`</li><li>不会要求用户全局安装 `bl`</li><li>CLI 命令和模型能力会在真正执行任务时按范围选择</li></ul></div><div className="bailian-key-form"><label>百炼 API Key<input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={status.configured ? '已安全保存，输入可替换' : '粘贴百炼 API Key'} autoComplete="off" /></label>{notice && <p className={`model-notice ${notice.type}`} aria-live="polite">{notice.type === 'success' ? <CircleCheck size={17}/> : <CircleAlert size={17}/>} {notice.text}</p>}<div><button className="button" type="button" disabled={busy !== 'idle'} onClick={test}><KeyRound size={16}/>{busy === 'testing' ? '检查中' : '保存并检查'}</button><button className="button primary" type="button" disabled={busy !== 'idle'} onClick={save}>{busy === 'saving' ? '保存中' : '加密保存'}</button></div><small>检查会验证 CLI 可启动并请求百炼模型目录，不生成内容，不会发起图片、语音或视频任务。</small></div></section>
+  </div>;
+}
+
+function ExternalApiConnections({ connections, onNew, onEdit, onRemove }: { connections: ModelConnection[]; onNew: () => void; onEdit: (connection: ModelConnection) => void; onRemove: (connection: ModelConnection) => Promise<void> }) {
+  return <section className="external-api-page"><div className="external-api-head"><div><h2>已保存的外部连接</h2><p>它们用于补充特定文本模型或 OpenAI 兼容接口。视觉、音频、视频任务优先由百炼 CLI 执行。</p></div><button className="button primary" onClick={onNew}><Plus size={16}/>新增 API 连接</button></div>{connections.length === 0 ? <div className="external-api-empty"><KeyRound size={24}/><h2>尚未添加外部 API</h2><p>先配置百炼 CLI；只有需要额外模型或私有兼容服务时，再添加外部 API。</p><button className="button" onClick={onNew}>新增外部连接</button></div> : <div className="external-connection-list">{connections.map((connection) => <article className="external-connection-row" key={connection.id}><div className="connection-provider"><span className={`connection-status ${connection.status.toLowerCase()}`} /><div><b>{connection.label}</b><small>{providerLabels[connection.provider]} · {connection.model}</small></div></div><div className="connection-scopes">{connection.purposes.map((purpose) => <span className="chip" key={purpose}>{modelPurposeNames[purpose]}</span>)}</div><div className="connection-actions"><button className="text-button" onClick={() => onEdit(connection)}><Pencil size={15}/>编辑</button><button className="icon-button danger-icon" aria-label={`移除 ${connection.label}`} onClick={() => void onRemove(connection)}><Trash2 size={17}/></button></div></article>)}</div>}</section>;
+}
+
+function ExternalApiEditor({ connection, onBack, onSave, onTest }: { connection?: ModelConnection; onBack: () => void; onSave: (input: ModelConnectionInput) => Promise<ModelConnection>; onTest: (input: ModelConnectionInput) => Promise<ModelConnection> }) {
+  const [draft, setDraft] = useState<ModelDraft>(() => connection ? { ...connection, apiKey: '' } : draftForProvider('SILICONFLOW'));
+  const [busy, setBusy] = useState<'idle' | 'saving' | 'testing'>('idle');
+  const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const chooseProvider = (provider: ModelProvider) => { setDraft(draftForProvider(provider)); setNotice(null); };
+  const makeInput = (): ModelConnectionInput => ({ ...draft, apiKey: draft.apiKey.trim() || undefined });
+  const save = async () => {
+    if (!draft.apiKey.trim() && !draft.id) { setNotice({ type: 'error', text: '请输入 API Key。' }); return; }
+    setBusy('saving'); setNotice(null);
+    try { await onSave(makeInput()); setDraft((current) => ({ ...current, apiKey: '' })); setNotice({ type: 'success', text: '外部 API 已加密保存。' }); }
+    catch (error) { setNotice({ type: 'error', text: error instanceof Error ? error.message : '保存失败。' }); }
+    finally { setBusy('idle'); }
+  };
+  const test = async () => {
+    if (!draft.apiKey.trim() && !draft.id) { setNotice({ type: 'error', text: '请输入 API Key 后再检查。' }); return; }
+    setBusy('testing'); setNotice(null);
+    try { const result = await onTest(makeInput()); setDraft({ ...result, apiKey: '' }); setNotice(result.status === 'READY' ? { type: 'success', text: '连接可用。' } : { type: 'error', text: result.lastError || '连接检查未通过。' }); }
+    catch (error) { setNotice({ type: 'error', text: error instanceof Error ? error.message : '连接检查失败。' }); }
+    finally { setBusy('idle'); }
+  };
+  const togglePurpose = (purpose: keyof typeof modelPurposeNames) => setDraft((current) => ({ ...current, purposes: current.purposes.includes(purpose) ? current.purposes.filter((item) => item !== purpose) : [...current.purposes, purpose] }));
+  return <div className="external-editor"><button className="back-button" onClick={onBack}><ArrowLeft size={17}/>返回外部 API 列表</button><PageHeader eyebrow="SETTINGS / 外部 API" title={connection ? `编辑 ${connection.label}` : '新增外部 API'} subtitle="外部 API 仅作为补充连接；百炼 CLI 是图像、音频、视频等综合能力的默认执行器。" /><section className="external-provider-picker"><h2>选择服务商</h2><div className="provider-grid">{externalModelProviders.map((item) => <button type="button" key={item.provider} className={`provider-card ${draft.provider === item.provider ? 'selected' : ''}`} onClick={() => chooseProvider(item.provider)}><b>{item.label}</b><small>{item.detail}</small></button>)}</div></section><section className="external-editor-form"><div className="model-form-heading"><div><h2>连接信息</h2><p>{draft.id ? '留空 API Key 即保留已保存的密钥。' : '填写服务商地址、模型名称和 API Key。'}</p></div><span className="chip blue"><ShieldCheck size={13}/>本机加密</span></div><label>连接名称<input value={draft.label} onChange={(event) => setDraft({ ...draft, label: event.target.value })} /></label><div className="model-form-grid"><label>API 地址<input value={draft.baseUrl} onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })} /></label><label>模型名称<input value={draft.model} onChange={(event) => setDraft({ ...draft, model: event.target.value })} /></label></div><label>API Key<input type="password" value={draft.apiKey} onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} placeholder={draft.id ? '已安全保存，输入可替换' : '粘贴 API Key'} autoComplete="off" /></label><fieldset><legend>允许用于哪些工作</legend><div className="purpose-grid">{(Object.keys(modelPurposeNames) as (keyof typeof modelPurposeNames)[]).map((purpose) => <label className="purpose-option" key={purpose}><input type="checkbox" checked={draft.purposes.includes(purpose)} onChange={() => togglePurpose(purpose)} />{modelPurposeNames[purpose]}</label>)}</div></fieldset>{notice && <p className={`model-notice ${notice.type}`} aria-live="polite">{notice.type === 'success' ? <CircleCheck size={17}/> : <CircleAlert size={17}/>} {notice.text}</p>}<footer><button className="button" type="button" disabled={busy !== 'idle'} onClick={test}><KeyRound size={16}/>{busy === 'testing' ? '检查中' : '保存并检查'}</button><button className="button primary" type="button" disabled={busy !== 'idle'} onClick={save}>{busy === 'saving' ? '保存中' : '加密保存'}</button></footer><small>检查仅请求服务商模型目录；不会生成内容，也不产生模型调用费用。</small></section></div>;
 }
 
 function SettingsHub({ sources, template, onTemplateChange, onAddSource, onRemoveSource }: { sources: IntelligenceSource[]; template: FeishuLibraryTemplate; onTemplateChange: (template: FeishuLibraryTemplate) => void; onAddSource: (source: Omit<IntelligenceSource, 'id' | 'lastSyncedAt' | 'lastError'>) => void; onRemoveSource: (id: string) => void }) {

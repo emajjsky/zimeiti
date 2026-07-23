@@ -2,6 +2,23 @@ export type ModelProvider = 'DASHSCOPE' | 'SILICONFLOW' | 'VOLCENGINE_ARK' | 'KI
 
 export type ModelPurpose = 'INTELLIGENCE_SUMMARY' | 'INTELLIGENCE_FILTER' | 'TOPIC_RECOMMENDATION' | 'CONTENT_WRITING';
 
+export type BailianCapabilityScope = 'AUTO' | 'TEXT' | 'IMAGE' | 'AUDIO' | 'VIDEO';
+
+export interface BailianCliStatus {
+  installed: boolean;
+  version?: string;
+  configured: boolean;
+  scope: BailianCapabilityScope;
+  status: 'UNCONFIGURED' | 'READY' | 'ERROR';
+  lastTestedAt?: string;
+  lastError?: string;
+}
+
+export interface BailianCliInput {
+  apiKey?: string;
+  scope: BailianCapabilityScope;
+}
+
 export interface ModelConnection {
   id: string;
   provider: ModelProvider;

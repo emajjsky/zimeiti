@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 
 import type { LocalState } from './data/localRepository';
-import type { ModelConnection, ModelConnectionInput } from './domain/integrations';
+import type { BailianCliInput, BailianCliStatus, ModelConnection, ModelConnectionInput } from './domain/integrations';
 
 declare global {
   interface Window {
@@ -24,6 +24,12 @@ declare global {
         save: (input: ModelConnectionInput) => Promise<ModelConnection>;
         test: (id: string) => Promise<ModelConnection>;
         remove: (id: string) => Promise<void>;
+      };
+      bailian: {
+        status: () => Promise<BailianCliStatus>;
+        save: (input: BailianCliInput) => Promise<BailianCliStatus>;
+        test: () => Promise<BailianCliStatus>;
+        remove: () => Promise<void>;
       };
     };
   }

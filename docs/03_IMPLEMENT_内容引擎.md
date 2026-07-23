@@ -369,3 +369,10 @@ Reverse Proxy
 - 主进程使用 Electron `safeStorage` 加密密钥，仅在调用供应商连通性检查时临时解密。SQLite 仅保存密文和不敏感连接配置。
 - 当前“保存并检查”请求兼容接口的 `/models` 目录，不生成内容，不产生模型推理费用。连接失败会保存最近错误，供用户修改后重试。
 - 本阶段只完成本机自带 Key 的连接管理；云端代管密钥、团队共享和按量计费属于云端身份系统范围，必须另行授权和加密设计。
+
+### 17.1 百炼 CLI 本地执行器（2026-07-23）
+
+- 将 `bailian-cli` 固定为桌面应用依赖，通过 Electron 自身的 Node 运行时执行内置 `bailian.mjs`，不调用用户全局安装的 `bl`。
+- 独立表 `bailian_cli_settings` 保存能力范围和经 `safeStorage` 加密的 Key。CLI 子进程以临时 `DASHSCOPE_API_KEY` 环境变量获取密钥，禁止调用 `bl auth login` 或写入用户的 `~/.bailian/config.json`。
+- 状态检查包含两步：启动内置 CLI 获取版本号，再请求百炼兼容接口 `/models` 验证 API Key；两步均不执行内容生成。
+- UI 拆为“百炼 CLI 能力中心”“外部 API 列表”“新增/编辑外部 API”。外部 API 的权限范围不等同于百炼全能力范围。
