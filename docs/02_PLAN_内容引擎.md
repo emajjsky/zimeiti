@@ -1,5 +1,13 @@
 # 内容引擎项目计划
 
+## Web-first 迁移计划（2026-07-24）
+
+1. 建立 Fastify API、PostgreSQL、Redis/BullMQ、凭据加密和用户/工作空间边界。
+2. 将工作空间状态、资讯源、剪藏、Tavily 检索迁移为 HTTP API；Electron 仅作为迁移期参考。
+3. 建立百炼 CLI 服务端 Worker、模型任务 Scope、用量与任务日志。
+4. 将内容项目、飞书 OAuth、素材和发布日历改为领域表，不长期依赖工作空间快照。
+5. 接入云端视频/数字人/Remotion Worker，以及浏览器扩展半自动发布。
+
 > 状态：Draft v0.1  
 > 日期：2026-07-22  
 > 计划原则：先完成可 dogfood 的内容闭环，再扩展平台、团队和复杂自动化。

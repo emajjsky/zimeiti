@@ -1,5 +1,11 @@
 # 内容引擎技术实施方案
 
+## Web-first 基线（2026-07-24）
+
+已建立 `content-engine/server`：Fastify API、PostgreSQL 迁移、JWT 登录、工作空间快照迁移桥、AES-256-GCM 凭据库、RSS 刷新、Tavily 检索、公开链接剪藏、BullMQ 队列和百炼 CLI Worker。前端新增 Web 登录页和 HTTP 客户端；在浏览器会话存在时，工作空间状态改为调用 `/api/v1/workspace/state`，RSS 刷新改为调用服务端 API。
+
+本地依赖通过 `content-engine/docker-compose.yml` 提供 PostgreSQL 16 和 Redis 7。启动顺序为 Docker Desktop、`docker compose up -d`、`npm run db:migrate`、`npm run dev`；Worker 使用 `npm run dev:worker` 单独启动。
+
 > 状态：Draft v0.1  
 > 日期：2026-07-22  
 > 架构原则：桌面端承担本地生产与算力；云端承担持续在线任务、主数据和受控集成。

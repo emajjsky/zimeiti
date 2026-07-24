@@ -1,5 +1,16 @@
 # 内容引擎验收记录
 
+## A9. Web-first 迁移基线（2026-07-24）
+
+| 验收项 | 结果 | 备注 |
+| --- | --- | --- |
+| Web 前端构建 | 通过 | `npm run typecheck` 与 `npm run build` 通过。 |
+| API/Worker 语法检查 | 通过 | 服务端与百炼 CLI Runner 已通过 Node 语法检查。 |
+| PostgreSQL/Redis 集成 | 通过 | Docker Compose 已启动 PostgreSQL 16 与 Redis 7，`001_web_first.sql` 已应用；注册、登录、工作空间读取与保存 API 冒烟测试通过。 |
+| Web 注册与首次设置 | 通过 | Playwright 验证注册、进入首次设置、完成设置后进入 Web 工作台，状态已由 API 保存。 |
+| RSS 服务端刷新 | 通过 | 以 36Kr RSS 真实调用，成功返回 30 条资讯。 |
+| Tavily/剪藏真实调用 | 待用户验收 | 需使用用户自己的 Key 与可公开读取的链接进行最终验收。 |
+
 > 最近更新：2026-07-22
 > 环境：Windows 本地开发环境，Electron + React + SQLite
 

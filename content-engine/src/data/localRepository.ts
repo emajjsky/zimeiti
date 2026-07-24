@@ -1,4 +1,5 @@
 import type { ContentProject, IntelligenceItem, IntelligenceSource, Platform, TopicCandidate } from '../domain/content';
+import { webState } from './webApi';
 
 const key = 'content-engine-prototype-v1';
 
@@ -68,6 +69,11 @@ export async function loadState(): Promise<LocalState> {
     if (result?.state) return normalizeState(result.state);
   }
 
+  if (window.localStorage.getItem('content-engine-web-session-v1')) {
+    const result = await webState.load();
+    return normalizeState(result.state);
+  }
+
   // 仅用于从早期原型迁移。正式桌面端不会继续把 localStorage 作为数据层。
   const value = window.localStorage.getItem(key);
   if (!value) return seedState;
@@ -78,6 +84,10 @@ export async function persistState(state: LocalState): Promise<void> {
   if (window.contentEngine?.state) {
     await window.contentEngine.state.save(state);
     window.localStorage.removeItem(key);
+    return;
+  }
+  if (window.localStorage.getItem('content-engine-web-session-v1')) {
+    await webState.save(state);
     return;
   }
   window.localStorage.setItem(key, JSON.stringify(state));

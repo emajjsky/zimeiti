@@ -5,7 +5,13 @@
   "description": "内容引擎桌面端 MVP",
   "main": "electron/main.cjs",
   "scripts": {
-    "dev": "concurrently -k \"vite --host 127.0.0.1 --port 5173 --strictPort\" \"wait-on http://127.0.0.1:5173 && cross-env ELECTRON_RENDERER_URL=http://127.0.0.1:5173 electron .\"",
+    "dev": "concurrently -k \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:web": "vite --host 127.0.0.1 --port 5173 --strictPort",
+    "dev:api": "node --watch server/index.cjs",
+    "dev:worker": "node --watch server/worker.cjs",
+    "dev:desktop": "concurrently -k \"vite --host 127.0.0.1 --port 5173 --strictPort\" \"wait-on http://127.0.0.1:5173 && cross-env ELECTRON_RENDERER_URL=http://127.0.0.1:5173 electron .\"",
+    "start": "node server/index.cjs",
+    "db:migrate": "node server/migrate.cjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "typecheck": "tsc -b --pretty false",
@@ -13,16 +19,25 @@
     "package:win": "npm run build && electron-builder --win"
   },
   "dependencies": {
+    "@fastify/cors": "^11.3.0",
+    "@fastify/jwt": "^10.2.0",
     "@vitejs/plugin-react": "latest",
     "animejs": "^4.5.0",
     "bailian-cli": "1.10.1",
+    "bullmq": "^5.81.1",
+    "dotenv": "^17.4.2",
     "fast-xml-parser": "^5.10.1",
+    "fastify": "^5.10.0",
+    "ioredis": "^5.11.1",
     "lucide-react": "latest",
+    "pg": "^8.22.0",
     "react": "latest",
     "react-dom": "latest",
-    "vite": "latest"
+    "vite": "latest",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/node": "^26.1.1",
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "concurrently": "latest",

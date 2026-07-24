@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { animate, createScope, stagger } from 'animejs';
 import { ArrowLeft, AudioLines, Bell, BrainCircuit, CalendarDays, ChartColumn, CheckCircle2, ChevronRight, CircleAlert, CircleCheck, ClipboardList, Compass, FolderOpen, Image, KeyRound, Lightbulb, PenLine, Pencil, Plus, RefreshCw, Search, Send, Settings, ShieldCheck, Trash2, Video, Zap } from 'lucide-react';
 import { intelligenceKey, loadState, persistState, seedState, type FeishuLibraryTemplate, type LocalState, type WorkspaceProfile } from './data/localRepository';
+import { webAuth, webIntelligence, type WebSession } from './data/webApi';
 import { platformName, projectStatusName, type ContentProject, type ContentVersion, type IntelligenceSource, type Platform, type TopicCandidate } from './domain/content';
 import type { ApiUsageLog, ApiUsageSummary, BailianCapabilityScope, BailianCliStatus, ModelCapability, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelProvider, ModelTask, ModelTaskPolicy } from './domain/integrations';
 import './styles.css';
@@ -13,6 +14,12 @@ function displayError(error: unknown, fallback: string) {
   const message = error instanceof Error ? error.message : fallback;
   return message.replace(/^Error invoking remote method '[^']+': Error:\s*/, '');
 }
+
+function previewPublicLink(url: string) { return window.contentEngine ? window.contentEngine.intelligence.previewLink(url) : webIntelligence.previewLink(url); }
+function refreshRssSources(sources: LocalState['sources']) { return window.contentEngine ? window.contentEngine.intelligence.refreshRss(sources) : webIntelligence.refreshRss(sources); }
+function webSearchStatus() { return window.contentEngine ? window.contentEngine.intelligence.webSearchStatus() : webIntelligence.webSearchStatus(); }
+function saveWebSearchKey(apiKey: string) { return window.contentEngine ? window.contentEngine.intelligence.saveWebSearchKey(apiKey) : webIntelligence.saveWebSearchKey(apiKey); }
+function searchWeb(input: { query: string; category: string; domains: string[] }) { return window.contentEngine ? window.contentEngine.intelligence.searchWeb(input) : webIntelligence.searchWeb(input); }
 
 const mainNav: { view: View; label: string; icon: typeof CalendarDays }[] = [
   { view: 'today', label: '今天', icon: CalendarDays },
@@ -165,8 +172,7 @@ function App() {
     }
     setRefreshFeedback({ status: 'running', message: '正在读取已启用的情报源…' });
     try {
-      const result = await window.contentEngine?.intelligence.refreshRss(state.sources);
-      if (!result) throw new Error('当前不在桌面端环境。');
+      const result = await refreshRssSources(state.sources);
       const refreshedSourceNames = new Set(state.sources.filter((source) => result.results.some((status) => status.sourceId === source.id && status.ok)).map((source) => source.name));
       const retained = state.intelligence.filter((item) => item.captureMethod === 'MANUAL_LINK' || (item.captureMethod === 'RSS' && !refreshedSourceNames.has(item.source)));
       const existingKeys = new Set(retained.map(intelligenceKey));
@@ -332,10 +338,9 @@ function LinkClipEditor({ onSave, onCancel }: { onSave: (item: Omit<LocalState['
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const preview = async () => {
-    if (!window.contentEngine) { setError('请在桌面端读取链接。'); return; }
     setLoading(true); setError('');
     try {
-      const result = await window.contentEngine.intelligence.previewLink(url);
+      const result = await previewPublicLink(url);
       setUrl(result.url); setTitle(result.title); setSummary(result.summary); setSource(result.source);
     } catch (error) { setError(displayError(error, '读取链接失败。')); }
     finally { setLoading(false); }
@@ -903,20 +908,37 @@ function FeishuTemplateEditor({ template, onChange }: { template: FeishuLibraryT
 
 function WebSearchSettings() {
   const [apiKey, setApiKey] = useState(''); const [configured, setConfigured] = useState(false); const [busy, setBusy] = useState(false); const [notice, setNotice] = useState('');
-  useEffect(() => { const load = async () => { try { const result = await window.contentEngine?.intelligence.webSearchStatus(); setConfigured(Boolean(result?.configured)); } catch { setConfigured(false); } }; void load(); }, []);
-  const save = async () => { if (!apiKey.trim()) return; setBusy(true); setNotice(''); try { const result = await window.contentEngine?.intelligence.saveWebSearchKey(apiKey.trim()); setApiKey(''); setConfigured(Boolean(result?.configured)); setNotice('已保存'); } catch (error) { setNotice(displayError(error, '保存失败。')); } finally { setBusy(false); } };
+  useEffect(() => { const load = async () => { try { const result = await webSearchStatus(); setConfigured(Boolean(result?.configured)); } catch { setConfigured(false); } }; void load(); }, []);
+  const save = async () => { if (!apiKey.trim()) return; setBusy(true); setNotice(''); try { const result = await saveWebSearchKey(apiKey.trim()); setApiKey(''); setConfigured(Boolean(result?.configured)); setNotice('已保存'); } catch (error) { setNotice(displayError(error, '保存失败。')); } finally { setBusy(false); } };
   return <section className="web-search-settings"><div className="web-search-settings-head"><div><h2>网页检索</h2><small>{configured ? 'Tavily Key 已保存' : '尚未配置 Tavily Key'}</small></div><span className={`chip ${configured ? 'mint' : 'yellow'}`}>{configured ? '已配置' : '待配置'}</span></div><div className="web-search-key-form"><label>Tavily API Key<input type="password" value={apiKey} onChange={(event) => { setApiKey(event.target.value); setNotice(''); }} placeholder={configured ? '输入新 Key 以替换' : '粘贴 Tavily API Key'} autoComplete="off" /></label><button className="button primary" disabled={busy || !apiKey.trim()} onClick={() => void save()}>{busy ? '保存中' : '保存'}</button></div>{notice && <p className={notice === '已保存' ? 'web-search-success' : 'form-error'} aria-live="polite">{notice}</p>}</section>;
 }
 
 function WebSearchPanel({ onSave, onNavigate }: { onSave: (item: LocalState['intelligence'][number]) => void; onNavigate: (view: View) => void }) {
   const [configured, setConfigured] = useState(false); const [checking, setChecking] = useState(true); const [query, setQuery] = useState(''); const [category, setCategory] = useState('科技'); const [domains, setDomains] = useState<string[]>([]); const [results, setResults] = useState<LocalState['intelligence']>([]); const [busy, setBusy] = useState(false); const [notice, setNotice] = useState(''); const [added, setAdded] = useState<string[]>([]);
-  useEffect(() => { const load = async () => { try { const result = await window.contentEngine?.intelligence.webSearchStatus(); setConfigured(Boolean(result?.configured)); } catch { setConfigured(false); } finally { setChecking(false); } }; void load(); }, []);
+  useEffect(() => { const load = async () => { try { const result = await webSearchStatus(); setConfigured(Boolean(result?.configured)); } catch { setConfigured(false); } finally { setChecking(false); } }; void load(); }, []);
   const toggleDomain = (domain: string) => setDomains((current) => current.includes(domain) ? current.filter((item) => item !== domain) : [...current, domain]);
-  const search = async () => { if (!configured || !query.trim()) return; setBusy(true); setNotice(''); setAdded([]); try { const items = await window.contentEngine?.intelligence.searchWeb({ query: query.trim(), category: category.trim() || '未分类', domains }); setResults(items ?? []); } catch (error) { setNotice(displayError(error, '搜索失败。')); } finally { setBusy(false); } };
+  const search = async () => { if (!configured || !query.trim()) return; setBusy(true); setNotice(''); setAdded([]); try { const items = await searchWeb({ query: query.trim(), category: category.trim() || '未分类', domains }); setResults(items ?? []); } catch (error) { setNotice(displayError(error, '搜索失败。')); } finally { setBusy(false); } };
   const saveCandidate = (item: LocalState['intelligence'][number]) => { onSave(item); setAdded((current) => [...current, item.id]); };
   return <><PageHeader eyebrow="DISCOVER / 网页搜索" title="搜索候选" /><section className="web-search">{!checking && !configured ? <div className="web-search-empty"><div><b>先配置 Tavily Key</b><p>配置完成后即可检索公开网页。</p></div><button className="button primary" onClick={() => onNavigate('settings')}>前往设置</button></div> : <div className="web-search-workspace"><form className="web-search-query" onSubmit={(event) => { event.preventDefault(); void search(); }}><div className="web-search-field"><label>检索词</label><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="例如：人工智能 大模型 最新政策" autoFocus /></div><div className="web-search-field compact"><label>题材</label><input value={category} onChange={(event) => setCategory(event.target.value)} placeholder="科技" /></div><fieldset className="web-search-sources"><legend>来源范围</legend><div><button type="button" className={domains.length === 0 ? 'chosen' : ''} onClick={() => setDomains([])}>全网</button>{[['toutiao.com','今日头条'],['mp.weixin.qq.com','公众号'],['x.com','X']].map(([domain,label]) => <button type="button" key={domain} className={domains.includes(domain) ? 'chosen' : ''} onClick={() => toggleDomain(domain)}>{label}</button>)}</div></fieldset><button className="button primary web-search-submit" type="submit" disabled={busy || !query.trim()}>{busy ? '检索中' : '开始检索'}</button></form><section className="web-search-results" aria-busy={busy}><div className="web-search-results-head"><h2>候选结果</h2><span>{busy ? '正在检索公开网页' : results.length ? `${results.length} 条` : '等待检索'}</span></div>{notice && <p className="form-error">{notice}</p>}{busy ? <div className="web-search-skeleton"><i/><i/><i/></div> : results.length === 0 ? <div className="web-search-results-empty">输入检索词后开始查找</div> : <div className="search-results">{results.map((item) => <article key={item.id}><div className="search-result-copy"><b>{item.title}</b><p>{item.summary}</p><small>{item.source} · {item.category}</small></div><div className="search-result-actions"><a href={item.url} target="_blank" rel="noreferrer">查看原文</a><button className="button" disabled={added.includes(item.id)} onClick={() => saveCandidate(item)}>{added.includes(item.id) ? '已加入' : '加入热点池'}</button></div></article>)}</div>}</section></div>}</section></>;
 }
 
 function Utility({ title, description }: { title: string; description: string }) { return <><PageHeader eyebrow="UTILITY / 辅助能力" title={title}/><section className="utility"><Lightbulb size={24}/><h2>该模块已预留</h2><p>{description}</p></section></>; }
 
-createRoot(document.getElementById('root')!).render(<App />);
+function WebEntry() {
+  const [session, setSession] = useState<WebSession | null>(() => window.contentEngine ? { accessToken: 'desktop', user: { id: 'desktop', email: '' }, workspace: { id: 'desktop', name: 'desktop' } } : webAuth.session());
+  const [checking, setChecking] = useState(!window.contentEngine && Boolean(webAuth.session()));
+  useEffect(() => {
+    if (window.contentEngine || !webAuth.session()) return;
+    void webAuth.me().catch(() => { webAuth.clear(); setSession(null); }).finally(() => setChecking(false));
+  }, []);
+  if (checking) return <section className="web-entry-loading">正在连接工作空间</section>;
+  return session ? <App /> : <WebAuthScreen onAuthenticated={setSession} />;
+}
+
+function WebAuthScreen({ onAuthenticated }: { onAuthenticated: (session: WebSession) => void }) {
+  const [mode, setMode] = useState<'login' | 'register'>('login'); const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [displayName, setDisplayName] = useState(''); const [workspaceName, setWorkspaceName] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
+  const submit = async (event: React.FormEvent) => { event.preventDefault(); setBusy(true); setError(''); try { const session = mode === 'login' ? await webAuth.login({ email, password }) : await webAuth.register({ email, password, displayName: displayName || email.split('@')[0] || '创作者', workspaceName: workspaceName || '我的内容工作室' }); onAuthenticated(session); } catch (reason) { setError(displayError(reason, '登录失败。')); } finally { setBusy(false); } };
+  return <main className="web-auth"><section className="web-auth-panel"><div className="eyebrow">CONTENT ENGINE / WEB</div><h1>{mode === 'login' ? '进入内容工作室' : '创建内容工作室'}</h1><form onSubmit={submit}>{mode === 'register' && <><label>你的名称<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoFocus /></label><label>工作室名称<input value={workspaceName} onChange={(event) => setWorkspaceName(event.target.value)} /></label></>}<label>邮箱<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required autoFocus={mode === 'login'} /></label><label>密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={8} required /></label>{error && <p className="form-error">{error}</p>}<button className="button primary wide" disabled={busy} type="submit">{busy ? '处理中' : mode === 'login' ? '登录' : '创建并进入'}</button></form><button className="text-button" type="button" onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(''); }}>{mode === 'login' ? '创建新工作室' : '已有账号，去登录'}</button></section></main>;
+}
+
+createRoot(document.getElementById('root')!).render(<WebEntry />);
