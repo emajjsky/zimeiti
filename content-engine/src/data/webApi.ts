@@ -43,3 +43,10 @@ export const webIntelligence = {
   saveWebSearchKey: (apiKey: string) => request<{ configured: boolean }>('/settings/credentials/TAVILY', { method: 'PUT', body: JSON.stringify({ apiKey }) }),
   searchWeb: (input: { query: string; category: string; domains: string[] }) => request<LocalState['intelligence']>('/intelligence/search', { method: 'POST', body: JSON.stringify(input) }),
 };
+
+export const webAgent = {
+  credentialStatus: () => request<{ configured: boolean; updatedAt?: string | null }>('/settings/credentials/BAILIAN'),
+  saveCredential: (apiKey: string) => request<{ configured: boolean }>('/settings/credentials/BAILIAN', { method: 'PUT', body: JSON.stringify({ apiKey }) }),
+  policy: () => request<{ scope: string; configured?: boolean; model?: string }>('/agent/model-policies/AGENT_PLANNER'),
+  savePolicy: (model: string) => request<{ scope: string; provider: string; model: string }>('/agent/model-policies/AGENT_PLANNER', { method: 'PUT', body: JSON.stringify({ model }) }),
+};

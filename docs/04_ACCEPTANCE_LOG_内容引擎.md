@@ -33,6 +33,11 @@
 | 验收项 | 状态 | 说明 |
 | --- | --- | --- |
 | 百炼 CLI Worker 骨架 | 代码完成 | 可创建文本任务，尚未连接内容项目 Agent。 |
+| Skill 注册表 | 通过 | `002_agent_orchestration.sql` 已应用，工作空间 API 可读取 6 个内置 Skill。 |
+| Agent 计划权限边界 | 通过 | 未配置百炼 Key 或 `AGENT_PLANNER` 模型策略时，API 明确拒绝创建计划。 |
+| 核心 Agent Web 配置 | 通过 | 浏览器验收已确认：首次设置后可打开核心 Agent 区，百炼 Key 不回显，未保存 Key 时规划模型保存不可用。 |
+| BullMQ Worker | 通过 | 本地 Worker 已启动并连接 Redis，等待受确认的 Agent 任务。 |
+| 核心 Agent 真实计划生成 | 待用户验收 | 需在 Web 设置中配置百炼 Key 和规划模型后，启动 Worker 生成并确认一次计划。 |
 | 内容项目 Agent | 未开始 | 阶段 2。 |
 | 三平台内容包 | 未开始 | 阶段 2。 |
 | 飞书 OAuth 与模板同步 | 未开始 | 阶段 4。 |

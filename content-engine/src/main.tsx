@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { animate, createScope, stagger } from 'animejs';
 import { ArrowLeft, AudioLines, Bell, BrainCircuit, CalendarDays, ChartColumn, CheckCircle2, ChevronRight, CircleAlert, CircleCheck, ClipboardList, Compass, FolderOpen, Image, KeyRound, Lightbulb, PenLine, Pencil, Plus, RefreshCw, Search, Send, Settings, ShieldCheck, Trash2, Video, Zap } from 'lucide-react';
 import { intelligenceKey, loadState, persistState, seedState, type FeishuLibraryTemplate, type LocalState, type WorkspaceProfile } from './data/localRepository';
-import { webAuth, webIntelligence, type WebSession } from './data/webApi';
+import { webAgent, webAuth, webIntelligence, type WebSession } from './data/webApi';
 import { platformName, projectStatusName, type ContentProject, type ContentVersion, type IntelligenceSource, type Platform, type TopicCandidate } from './domain/content';
 import type { ApiUsageLog, ApiUsageSummary, BailianCapabilityScope, BailianCliStatus, ModelCapability, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelProvider, ModelTask, ModelTaskPolicy } from './domain/integrations';
 import './styles.css';
@@ -251,7 +251,7 @@ function App() {
       {view === 'assets' && <Utility title="素材库" description="本地与云端素材将以目录、紧凑列表和素材检查器呈现；不会打断内容项目主编辑流程。" />}
       {view === 'automation' && <WebSearchPanel onSave={saveSearchCandidate} onNavigate={setView} />}
       {view === 'models' && <ModelSettingsScreen />}
-      {view === 'settings' && <><SettingsHub sources={state.sources} template={state.feishuTemplate} onTemplateChange={saveFeishuTemplate} onAddSource={addSource} onAddSources={addSources} onRemoveSource={removeSource} /><WebSearchSettings /></>}
+      {view === 'settings' && <><SettingsHub sources={state.sources} template={state.feishuTemplate} onTemplateChange={saveFeishuTemplate} onAddSource={addSource} onAddSources={addSources} onRemoveSource={removeSource} /><WebSearchSettings /><CoreAgentSettings /></>}
     </main>
   </div>;
 }
@@ -911,6 +911,15 @@ function WebSearchSettings() {
   useEffect(() => { const load = async () => { try { const result = await webSearchStatus(); setConfigured(Boolean(result?.configured)); } catch { setConfigured(false); } }; void load(); }, []);
   const save = async () => { if (!apiKey.trim()) return; setBusy(true); setNotice(''); try { const result = await saveWebSearchKey(apiKey.trim()); setApiKey(''); setConfigured(Boolean(result?.configured)); setNotice('已保存'); } catch (error) { setNotice(displayError(error, '保存失败。')); } finally { setBusy(false); } };
   return <section className="web-search-settings"><div className="web-search-settings-head"><div><h2>网页检索</h2><small>{configured ? 'Tavily Key 已保存' : '尚未配置 Tavily Key'}</small></div><span className={`chip ${configured ? 'mint' : 'yellow'}`}>{configured ? '已配置' : '待配置'}</span></div><div className="web-search-key-form"><label>Tavily API Key<input type="password" value={apiKey} onChange={(event) => { setApiKey(event.target.value); setNotice(''); }} placeholder={configured ? '输入新 Key 以替换' : '粘贴 Tavily API Key'} autoComplete="off" /></label><button className="button primary" disabled={busy || !apiKey.trim()} onClick={() => void save()}>{busy ? '保存中' : '保存'}</button></div>{notice && <p className={notice === '已保存' ? 'web-search-success' : 'form-error'} aria-live="polite">{notice}</p>}</section>;
+}
+
+function CoreAgentSettings() {
+  const [apiKey, setApiKey] = useState(''); const [configured, setConfigured] = useState(false); const [model, setModel] = useState(''); const [busy, setBusy] = useState<'idle' | 'key' | 'model'>('idle'); const [notice, setNotice] = useState('');
+  useEffect(() => { const load = async () => { try { const [credential, policy] = await Promise.all([webAgent.credentialStatus(), webAgent.policy()]); setConfigured(Boolean(credential.configured)); setModel(policy.model ?? ''); } catch (error) { setNotice(displayError(error, '无法读取核心 Agent 配置。')); } }; if (!window.contentEngine) void load(); }, []);
+  if (window.contentEngine) return null;
+  const saveKey = async () => { if (!apiKey.trim()) return; setBusy('key'); setNotice(''); try { await webAgent.saveCredential(apiKey.trim()); setApiKey(''); setConfigured(true); setNotice('百炼 Key 已保存'); } catch (error) { setNotice(displayError(error, '保存失败。')); } finally { setBusy('idle'); } };
+  const saveModel = async () => { if (!model.trim()) return; setBusy('model'); setNotice(''); try { await webAgent.savePolicy(model.trim()); setNotice('规划模型已保存'); } catch (error) { setNotice(displayError(error, '保存失败。')); } finally { setBusy('idle'); } };
+  return <section className="core-agent-settings"><div className="core-agent-head"><div><h2>核心 Agent</h2><small>{configured ? '百炼 Key 已保存' : '尚未配置百炼 Key'}</small></div><span className={`chip ${configured ? 'mint' : 'yellow'}`}>{configured ? '已配置' : '待配置'}</span></div><div className="core-agent-grid"><label>百炼 API Key<input type="password" value={apiKey} onChange={(event) => { setApiKey(event.target.value); setNotice(''); }} placeholder={configured ? '输入新 Key 以替换' : '粘贴百炼 API Key'} autoComplete="off" /></label><button className="button" disabled={busy !== 'idle' || !apiKey.trim()} onClick={() => void saveKey()}>{busy === 'key' ? '保存中' : '保存 Key'}</button><label>规划模型<input value={model} onChange={(event) => { setModel(event.target.value); setNotice(''); }} placeholder="例如：qwen-plus" /></label><button className="button primary" disabled={busy !== 'idle' || !configured || !model.trim()} onClick={() => void saveModel()}>{busy === 'model' ? '保存中' : '保存模型'}</button></div>{notice && <p className={notice.includes('已保存') ? 'web-search-success' : 'form-error'} aria-live="polite">{notice}</p>}</section>;
 }
 
 function WebSearchPanel({ onSave, onNavigate }: { onSave: (item: LocalState['intelligence'][number]) => void; onNavigate: (view: View) => void }) {

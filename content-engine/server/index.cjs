@@ -9,6 +9,7 @@ const { clipPublicLink } = require('./services/public-web.cjs');
 const { searchTavily } = require('./services/tavily.cjs');
 const { refreshRss } = require('./services/rss.cjs');
 const { enqueue } = require('./queue.cjs');
+const { listAvailableSkills } = require('./agent/skillRegistry.cjs');
 
 const app = Fastify({ logger: true, bodyLimit: 5 * 1024 * 1024 });
 const credentials = new Set(['TAVILY', 'BAILIAN']);
@@ -99,6 +100,62 @@ app.put('/api/v1/settings/credentials/:provider', { preHandler: authenticate }, 
 app.post('/api/v1/intelligence/clip', { preHandler: authenticate }, async (request) => clipPublicLink(z.object({ url: z.string().url().max(2_000) }).parse(request.body).url));
 app.post('/api/v1/intelligence/search', { preHandler: authenticate }, async (request) => searchTavily((await currentWorkspace(request.user.sub)).id, z.object({ query: z.string(), category: z.string().optional(), domains: z.array(z.string()).optional() }).parse(request.body)));
 app.post('/api/v1/intelligence/rss/refresh', { preHandler: authenticate }, async (request) => refreshRss(z.object({ sources: z.array(z.object({ id: z.string(), name: z.string(), type: z.literal('RSS'), url: z.string().url(), category: z.string(), includeKeywords: z.array(z.string()).optional(), excludeKeywords: z.array(z.string()).optional(), language: z.enum(['ALL', 'ZH', 'EN']).optional(), enabled: z.boolean(), refreshMinutes: z.number(), trust: z.string() })) }).parse(request.body).sources));
+
+app.get('/api/v1/agent/skills', { preHandler: authenticate }, async (request) => listAvailableSkills((await currentWorkspace(request.user.sub)).id));
+
+app.get('/api/v1/agent/model-policies/:scope', { preHandler: authenticate }, async (request) => {
+  const workspace = await currentWorkspace(request.user.sub);
+  const result = await query('SELECT scope, provider, model, updated_at FROM agent_model_policies WHERE workspace_id = $1 AND scope = $2', [workspace.id, String(request.params.scope)]);
+  return result.rows[0] ?? { scope: String(request.params.scope), configured: false };
+});
+
+app.put('/api/v1/agent/model-policies/:scope', { preHandler: authenticate }, async (request) => {
+  const input = z.object({ model: z.string().min(1).max(160) }).parse(request.body);
+  const scope = String(request.params.scope);
+  if (scope !== 'AGENT_PLANNER') { const error = new Error('当前只支持配置核心 Agent 规划模型。'); error.statusCode = 400; throw error; }
+  const workspace = await currentWorkspace(request.user.sub);
+  const credential = await query('SELECT 1 FROM credential_vault WHERE workspace_id = $1 AND provider = $2', [workspace.id, 'BAILIAN']);
+  if (!credential.rowCount) { const error = new Error('请先保存百炼 Key。'); error.statusCode = 400; throw error; }
+  const result = await query(`INSERT INTO agent_model_policies (workspace_id, scope, provider, model) VALUES ($1, $2, 'BAILIAN_CLI', $3) ON CONFLICT (workspace_id, scope) DO UPDATE SET model = excluded.model, updated_at = now() RETURNING scope, provider, model, updated_at`, [workspace.id, scope, input.model.trim()]);
+  return result.rows[0];
+});
+
+app.post('/api/v1/agent/plans', { preHandler: authenticate }, async (request, reply) => {
+  const input = z.object({ request: z.string().min(1).max(8_000), context: z.record(z.string(), z.unknown()).optional() }).parse(request.body);
+  const workspace = await currentWorkspace(request.user.sub);
+  const policy = await query('SELECT 1 FROM agent_model_policies WHERE workspace_id = $1 AND scope = $2', [workspace.id, 'AGENT_PLANNER']);
+  if (!policy.rowCount) { const error = new Error('请先配置核心 Agent 规划模型。'); error.statusCode = 400; throw error; }
+  const result = await query('INSERT INTO agent_plans (workspace_id, status, request_text, context_json) VALUES ($1, $2, $3, $4) RETURNING id, status, created_at', [workspace.id, 'GENERATING', input.request.trim(), JSON.stringify(input.context ?? {})]);
+  const job = await query('INSERT INTO jobs (workspace_id, job_type, payload_json) VALUES ($1, $2, $3) RETURNING *', [workspace.id, 'AGENT_PLAN', JSON.stringify({ planId: result.rows[0].id })]);
+  await enqueue(job.rows[0]);
+  reply.code(202).send({ id: result.rows[0].id, status: result.rows[0].status });
+});
+
+app.get('/api/v1/agent/plans/:id', { preHandler: authenticate }, async (request) => {
+  const workspace = await currentWorkspace(request.user.sub);
+  const result = await query('SELECT id, status, request_text, context_json, plan_json, planner_model, error, confirmed_at, created_at, updated_at FROM agent_plans WHERE id = $1 AND workspace_id = $2', [request.params.id, workspace.id]);
+  if (!result.rowCount) { const error = new Error('未找到 Agent 计划。'); error.statusCode = 404; throw error; }
+  return result.rows[0];
+});
+
+app.post('/api/v1/agent/plans/:id/confirm', { preHandler: authenticate }, async (request) => {
+  const workspace = await currentWorkspace(request.user.sub);
+  const result = await transaction(async (client) => {
+    const plan = await client.query('SELECT plan_json FROM agent_plans WHERE id = $1 AND workspace_id = $2 AND status = $3 FOR UPDATE', [request.params.id, workspace.id, 'WAITING_CONFIRMATION']);
+    if (!plan.rowCount) { const error = new Error('该计划当前不能确认。'); error.statusCode = 409; throw error; }
+    const steps = Array.isArray(plan.rows[0].plan_json?.steps) ? plan.rows[0].plan_json.steps : [];
+    for (const step of steps) await client.query('INSERT INTO generation_runs (workspace_id, agent_plan_id, skill_version_id, status, input_json) VALUES ($1, $2, $3, $4, $5)', [workspace.id, request.params.id, step.skillVersionId, 'DRAFT', JSON.stringify({ purpose: step.purpose, inputs: step.inputs })]);
+    return client.query('UPDATE agent_plans SET status = $1, confirmed_at = now(), updated_at = now() WHERE id = $2 RETURNING id, status, confirmed_at', ['CONFIRMED', request.params.id]);
+  });
+  return result.rows[0];
+});
+
+app.post('/api/v1/agent/plans/:id/cancel', { preHandler: authenticate }, async (request) => {
+  const workspace = await currentWorkspace(request.user.sub);
+  const result = await query('UPDATE agent_plans SET status = $1, updated_at = now() WHERE id = $2 AND workspace_id = $3 AND status IN ($4, $5) RETURNING id, status', ['CANCELLED', request.params.id, workspace.id, 'GENERATING', 'WAITING_CONFIRMATION']);
+  if (!result.rowCount) { const error = new Error('该计划当前不能取消。'); error.statusCode = 409; throw error; }
+  return result.rows[0];
+});
 
 app.post('/api/v1/jobs/bailian-text', { preHandler: authenticate }, async (request, reply) => {
   const input = z.object({ model: z.string().min(1).max(120), system: z.string().min(1).max(8_000), message: z.string().min(1).max(60_000) }).parse(request.body);
