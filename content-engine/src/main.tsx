@@ -4,10 +4,15 @@ import { animate, createScope, stagger } from 'animejs';
 import { ArrowLeft, AudioLines, Bell, BrainCircuit, CalendarDays, ChartColumn, CheckCircle2, ChevronRight, CircleAlert, CircleCheck, ClipboardList, Compass, FolderOpen, Image, KeyRound, Lightbulb, PenLine, Pencil, Plus, RefreshCw, Search, Send, Settings, ShieldCheck, Trash2, Video, Zap } from 'lucide-react';
 import { intelligenceKey, loadState, persistState, seedState, type FeishuLibraryTemplate, type LocalState, type WorkspaceProfile } from './data/localRepository';
 import { platformName, projectStatusName, type ContentProject, type ContentVersion, type IntelligenceSource, type Platform, type TopicCandidate } from './domain/content';
-import type { BailianCapabilityScope, BailianCliStatus, ModelConnection, ModelConnectionInput, ModelProvider } from './domain/integrations';
+import type { ApiUsageLog, ApiUsageSummary, BailianCapabilityScope, BailianCliStatus, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelProvider, ModelTask, ModelTaskPolicy } from './domain/integrations';
 import './styles.css';
 
 type View = 'today' | 'discover' | 'clip' | 'plan' | 'topicEditor' | 'create' | 'publish' | 'review' | 'assets' | 'automation' | 'models' | 'settings';
+
+function displayError(error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message : fallback;
+  return message.replace(/^Error invoking remote method '[^']+': Error:\s*/, '');
+}
 
 const mainNav: { view: View; label: string; icon: typeof CalendarDays }[] = [
   { view: 'today', label: '今天', icon: CalendarDays },
@@ -189,7 +194,7 @@ function App() {
       updateState(next);
       setAnalysisFeedback({ status: 'idle', message: '' });
     } catch (error) {
-      setAnalysisFeedback({ status: 'error', message: error instanceof Error ? error.message : 'AI 分析失败。' });
+      setAnalysisFeedback({ status: 'error', message: displayError(error, 'AI 分析失败。') });
     }
   };
   const removeSource = (sourceId: string) => updateState({ ...state, sources: state.sources.filter((source) => source.id !== sourceId) });
@@ -406,7 +411,7 @@ function draftForProvider(provider: ModelProvider): ModelDraft {
   return { provider, label: preset.label, baseUrl: preset.baseUrl, model: preset.model, purposes: ['INTELLIGENCE_SUMMARY', 'INTELLIGENCE_FILTER', 'TOPIC_RECOMMENDATION'], apiKey: '' };
 }
 
-function LegacyModelSettingsScreen() {
+function LegacyModelConnectionScreen() {
   const [connections, setConnections] = useState<ModelConnection[]>([]);
   const [draft, setDraft] = useState<ModelDraft>(() => draftForProvider('DASHSCOPE'));
   const [busy, setBusy] = useState<'idle' | 'saving' | 'testing'>('idle');
@@ -478,7 +483,7 @@ const bailianScopes: { id: BailianCapabilityScope; label: string; icon: typeof B
 ];
 const emptyBailianStatus: BailianCliStatus = { installed: false, configured: false, scope: 'AUTO', status: 'UNCONFIGURED' };
 
-function ModelSettingsScreen() {
+function LegacyModelSettingsScreen() {
   const [screen, setScreen] = useState<'bailian' | 'connections' | 'editor'>('bailian');
   const [connections, setConnections] = useState<ModelConnection[]>([]);
   const [bailian, setBailian] = useState<BailianCliStatus>(emptyBailianStatus);
@@ -532,6 +537,112 @@ function ModelSettingsScreen() {
     {notice && <p className={`model-notice ${notice.type}`} aria-live="polite">{notice.type === 'success' ? <CircleCheck size={17}/> : <CircleAlert size={17}/>} {notice.text}</p>}
     {screen === 'bailian' ? <BailianCliCenter status={bailian} onSave={saveBailian} onTest={testBailian} onRemove={removeBailian} /> : <ExternalApiConnections connections={connections} onNew={openNew} onEdit={openEdit} onRemove={deleteExternal} />}
   </div>;
+}
+
+const modelTaskNames: Record<ModelTask, string> = {
+  INTELLIGENCE_ANALYSIS: '热点分析',
+  TOPIC_RECOMMENDATION: '选题建议',
+  CONTENT_WRITING: '文案生成',
+  CONTENT_REWRITE: '改写与解读',
+  CONTENT_LAYOUT: '公众号排版',
+  IMAGE_GENERATION: '图片生成',
+  SPEECH_SYNTHESIS: '配音与口播',
+  VIDEO_GENERATION: '视频生成',
+};
+
+function ModelSettingsScreen() {
+  const [screen, setScreen] = useState<'bailian' | 'connections' | 'policies' | 'usage' | 'editor'>('bailian');
+  const [connections, setConnections] = useState<ModelConnection[]>([]);
+  const [bailian, setBailian] = useState<BailianCliStatus>(emptyBailianStatus);
+  const [catalog, setCatalog] = useState<ModelCatalogItem[]>([]);
+  const [policies, setPolicies] = useState<ModelTaskPolicy[]>([]);
+  const [usage, setUsage] = useState<ApiUsageSummary>({ totalCalls: 0, todayCalls: 0, successCalls: 0, failedCalls: 0, inputTokens: 0, outputTokens: 0 });
+  const [logs, setLogs] = useState<ApiUsageLog[]>([]);
+  const [editing, setEditing] = useState<ModelConnection | undefined>();
+  const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const loadConnections = () => void window.contentEngine?.models.list().then(setConnections).catch((error) => setNotice({ type: 'error', text: error instanceof Error ? error.message : '读取外部 API 连接失败。' }));
+  const loadBailian = () => void window.contentEngine?.bailian.status().then(setBailian).catch((error) => setNotice({ type: 'error', text: error instanceof Error ? error.message : '读取百炼 CLI 状态失败。' }));
+  const loadPolicies = () => void window.contentEngine?.models.taskPolicies().then(setPolicies).catch((error) => setNotice({ type: 'error', text: error instanceof Error ? error.message : '读取任务策略失败。' }));
+  const loadUsage = () => { void window.contentEngine?.models.usageSummary().then(setUsage).catch(() => undefined); void window.contentEngine?.models.usageLogs().then(setLogs).catch(() => undefined); };
+  useEffect(() => { loadConnections(); loadBailian(); loadPolicies(); loadUsage(); }, []);
+  const syncCatalog = async () => {
+    if (!window.contentEngine) return;
+    setNotice(null);
+    try {
+      const result = await window.contentEngine.models.syncCatalog();
+      setCatalog(result.items);
+      setNotice(result.errors[0] ? { type: 'error', text: result.errors[0].message } : { type: 'success', text: `已同步 ${result.items.length} 个可选模型。` });
+    } catch (error) { setNotice({ type: 'error', text: error instanceof Error ? error.message : '同步模型目录失败。' }); }
+  };
+  const saveExternal = async (input: ModelConnectionInput) => {
+    if (!window.contentEngine) throw new Error('请在桌面端中配置 API 连接。');
+    const saved = await window.contentEngine.models.save(input);
+    setConnections((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
+    return saved;
+  };
+  const testExternal = async (input: ModelConnectionInput) => {
+    const saved = await saveExternal(input);
+    const tested = await window.contentEngine!.models.test(saved.id);
+    setConnections((current) => [tested, ...current.filter((item) => item.id !== tested.id)]);
+    return tested;
+  };
+  const removeExternal = async (connection: ModelConnection) => {
+    if (!window.confirm(`确定移除“${connection.label}”吗？本机保存的 API Key 也会一并删除。`)) return;
+    await window.contentEngine?.models.remove(connection.id);
+    setConnections((current) => current.filter((item) => item.id !== connection.id));
+  };
+  const saveBailian = async (input: { apiKey?: string; scope: BailianCapabilityScope }) => {
+    if (!window.contentEngine) throw new Error('请在桌面端中配置百炼 CLI。');
+    const status = await window.contentEngine.bailian.save(input); setBailian(status); return status;
+  };
+  const testBailian = async () => {
+    if (!window.contentEngine) throw new Error('请在桌面端中检查百炼 CLI。');
+    try { const status = await window.contentEngine.bailian.test(); setBailian(status); return status; }
+    finally { void window.contentEngine.bailian.status().then(setBailian).catch(() => undefined); }
+  };
+  const removeBailian = async () => {
+    if (!window.confirm('确定移除百炼 API Key 吗？CLI 程序会保留，但不能再调用模型能力。')) return;
+    await window.contentEngine?.bailian.remove();
+    setBailian({ ...emptyBailianStatus, installed: bailian.installed, version: bailian.version });
+    setCatalog((current) => current.filter((item) => item.provider !== 'BAILIAN_CLI'));
+  };
+  const savePolicy = async (policy: ModelTaskPolicy) => {
+    if (!window.contentEngine) return;
+    const saved = await window.contentEngine.models.saveTaskPolicy(policy);
+    setPolicies((current) => [saved, ...current.filter((item) => item.task !== saved.task)]);
+  };
+  if (screen === 'editor') return <ExternalApiEditor key={editing?.id ?? 'new'} connection={editing} onBack={() => setScreen('connections')} onSave={saveExternal} onTest={testExternal} />;
+  return <div className="ai-settings"><PageHeader eyebrow="SETTINGS / 模型与 API" title="模型路由" />
+    <UsageOverview usage={usage} />
+    <nav className="ai-section-nav" aria-label="AI 设置分区"><button className={screen === 'bailian' ? 'active' : ''} onClick={() => setScreen('bailian')}><BrainCircuit size={18}/>百炼 CLI</button><button className={screen === 'connections' ? 'active' : ''} onClick={() => setScreen('connections')}><KeyRound size={18}/>外部 API <span>{connections.length}</span></button><button className={screen === 'policies' ? 'active' : ''} onClick={() => setScreen('policies')}><Settings size={18}/>任务策略</button><button className={screen === 'usage' ? 'active' : ''} onClick={() => { setScreen('usage'); loadUsage(); }}><ChartColumn size={18}/>调用记录</button></nav>
+    {notice && <p className={`model-notice ${notice.type}`} aria-live="polite">{notice.type === 'success' ? <CircleCheck size={17}/> : <CircleAlert size={17}/>} {notice.text}</p>}
+    {screen === 'bailian' ? <BailianCliCenter status={bailian} onSave={saveBailian} onTest={testBailian} onRemove={removeBailian} /> : screen === 'connections' ? <ExternalApiConnections connections={connections} onNew={() => { setEditing(undefined); setNotice(null); setScreen('editor'); }} onEdit={(connection) => { setEditing(connection); setNotice(null); setScreen('editor'); }} onRemove={removeExternal} /> : screen === 'policies' ? <TaskPolicyScreen catalog={catalog} policies={policies} onSync={() => void syncCatalog()} onSave={savePolicy} /> : <UsageLogScreen logs={logs} />}
+  </div>;
+}
+
+function UsageOverview({ usage }: { usage: ApiUsageSummary }) {
+  return <section className="usage-overview"><div><small>今日调用</small><b>{usage.todayCalls}</b></div><div><small>累计调用</small><b>{usage.totalCalls}</b></div><div><small>成功 / 失败</small><b>{usage.successCalls} / {usage.failedCalls}</b></div><div><small>输入 / 输出 Token</small><b>{usage.inputTokens} / {usage.outputTokens}</b></div></section>;
+}
+
+function TaskPolicyScreen({ catalog, policies, onSync, onSave }: { catalog: ModelCatalogItem[]; policies: ModelTaskPolicy[]; onSync: () => void; onSave: (policy: ModelTaskPolicy) => Promise<void> }) {
+  const tasks = Object.keys(modelTaskNames) as ModelTask[];
+  const [task, setTask] = useState<ModelTask>('INTELLIGENCE_ANALYSIS');
+  const [selection, setSelection] = useState('');
+  const [busy, setBusy] = useState(false);
+  const policy = policies.find((item) => item.task === task);
+  const effectiveSelection = selection || catalog.find((item) => item.provider === policy?.provider && item.connectionId === policy?.connectionId && item.model === policy?.model)?.id || '';
+  const save = async () => {
+    setBusy(true);
+    try {
+      const selected = catalog.find((item) => item.id === effectiveSelection);
+      await onSave(selected ? { task, provider: selected.provider, connectionId: selected.connectionId, model: selected.model } : { task });
+    } finally { setBusy(false); }
+  };
+  return <section className="task-policy-layout"><aside>{tasks.map((item) => <button key={item} className={task === item ? 'active' : ''} onClick={() => { setTask(item); setSelection(''); }}><span>{modelTaskNames[item]}</span><small>{policies.find((policy) => policy.task === item)?.model ?? '未设置'}</small></button>)}</aside><div className="task-policy-editor"><div className="task-policy-head"><h2>{modelTaskNames[task]}</h2><button className="button" onClick={onSync}><RefreshCw size={16}/>同步模型</button></div><label>执行模型<select value={effectiveSelection} onChange={(event) => setSelection(event.target.value)}><option value="">不调用模型</option>{catalog.map((item) => <option value={item.id} key={item.id}>{item.connectionLabel} · {item.model}</option>)}</select></label><footer><button className="button primary" disabled={busy} onClick={() => void save()}>{busy ? '保存中' : '保存策略'}</button></footer></div></section>;
+}
+
+function UsageLogScreen({ logs }: { logs: ApiUsageLog[] }) {
+  return <section className="usage-log"><div className="panel-head"><h2>调用记录</h2><span className="chip">最近 80 条</span></div>{logs.length === 0 ? <p>尚无模型调用。</p> : <table><thead><tr><th>时间</th><th>功能</th><th>模型</th><th>结果</th><th>Token</th><th>耗时</th></tr></thead><tbody>{logs.map((log) => <tr key={log.id}><td>{new Date(log.startedAt).toLocaleString('zh-CN', { hour12: false })}</td><td>{modelTaskNames[log.task]}</td><td>{log.connectionLabel} · {log.model}</td><td><span className={`chip ${log.status === 'SUCCESS' ? 'mint' : 'red'}`}>{log.status === 'SUCCESS' ? '成功' : '失败'}</span>{log.error && <small className="usage-error">{log.error}</small>}</td><td>{log.inputTokens ?? '-'} / {log.outputTokens ?? '-'}</td><td>{(log.durationMs / 1000).toFixed(1)}s</td></tr>)}</tbody></table>}</section>;
 }
 
 function BailianCliCenter({ status, onSave, onTest, onRemove }: { status: BailianCliStatus; onSave: (input: { apiKey?: string; scope: BailianCapabilityScope }) => Promise<BailianCliStatus>; onTest: () => Promise<BailianCliStatus>; onRemove: () => Promise<void> }) {

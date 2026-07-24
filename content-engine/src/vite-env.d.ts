@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 
 import type { LocalState } from './data/localRepository';
-import type { BailianCliInput, BailianCliStatus, ModelConnection, ModelConnectionInput } from './domain/integrations';
+import type { ApiUsageLog, ApiUsageSummary, BailianCliInput, BailianCliStatus, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelTaskPolicy } from './domain/integrations';
 
 declare global {
   interface Window {
@@ -25,6 +25,11 @@ declare global {
         save: (input: ModelConnectionInput) => Promise<ModelConnection>;
         test: (id: string) => Promise<ModelConnection>;
         remove: (id: string) => Promise<void>;
+        syncCatalog: () => Promise<{ items: ModelCatalogItem[]; errors: { connectionLabel: string; message: string }[] }>;
+        taskPolicies: () => Promise<ModelTaskPolicy[]>;
+        saveTaskPolicy: (input: ModelTaskPolicy) => Promise<ModelTaskPolicy>;
+        usageSummary: () => Promise<ApiUsageSummary>;
+        usageLogs: () => Promise<ApiUsageLog[]>;
       };
       bailian: {
         status: () => Promise<BailianCliStatus>;

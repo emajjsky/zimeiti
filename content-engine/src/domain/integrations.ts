@@ -2,6 +2,62 @@ export type ModelProvider = 'DASHSCOPE' | 'SILICONFLOW' | 'VOLCENGINE_ARK' | 'KI
 
 export type ModelPurpose = 'INTELLIGENCE_SUMMARY' | 'INTELLIGENCE_FILTER' | 'TOPIC_RECOMMENDATION' | 'CONTENT_WRITING';
 
+export type ModelTask =
+  | 'INTELLIGENCE_ANALYSIS'
+  | 'TOPIC_RECOMMENDATION'
+  | 'CONTENT_WRITING'
+  | 'CONTENT_REWRITE'
+  | 'CONTENT_LAYOUT'
+  | 'IMAGE_GENERATION'
+  | 'SPEECH_SYNTHESIS'
+  | 'VIDEO_GENERATION';
+
+export type ModelRouteProvider = 'BAILIAN_CLI' | 'EXTERNAL_API';
+
+export interface ModelCatalogItem {
+  id: string;
+  provider: ModelRouteProvider;
+  connectionId?: string;
+  connectionLabel: string;
+  model: string;
+}
+
+export interface ModelTaskPolicy {
+  task: ModelTask;
+  provider?: ModelRouteProvider;
+  connectionId?: string;
+  model?: string;
+  fallbackProvider?: ModelRouteProvider;
+  fallbackConnectionId?: string;
+  fallbackModel?: string;
+  updatedAt?: string;
+}
+
+export interface ApiUsageLog {
+  id: string;
+  task: ModelTask;
+  provider: ModelRouteProvider;
+  connectionLabel: string;
+  model: string;
+  status: 'SUCCESS' | 'ERROR';
+  startedAt: string;
+  durationMs: number;
+  requestChars: number;
+  responseChars: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  error?: string;
+}
+
+export interface ApiUsageSummary {
+  totalCalls: number;
+  todayCalls: number;
+  successCalls: number;
+  failedCalls: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
 export type BailianCapabilityScope = 'AUTO' | 'TEXT' | 'IMAGE' | 'AUDIO' | 'VIDEO';
 
 export interface BailianCliStatus {

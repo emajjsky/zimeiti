@@ -21,6 +21,11 @@ contextBridge.exposeInMainWorld('contentEngine', {
     save: (input) => ipcRenderer.invoke('models:save', input),
     test: (id) => ipcRenderer.invoke('models:test', id),
     remove: (id) => ipcRenderer.invoke('models:remove', id),
+    syncCatalog: () => ipcRenderer.invoke('model-catalog:sync'),
+    taskPolicies: () => ipcRenderer.invoke('task-policies:list'),
+    saveTaskPolicy: (input) => ipcRenderer.invoke('task-policies:save', input),
+    usageSummary: () => ipcRenderer.invoke('usage:summary'),
+    usageLogs: () => ipcRenderer.invoke('usage:list'),
   },
   bailian: {
     status: () => ipcRenderer.invoke('bailian:status'),

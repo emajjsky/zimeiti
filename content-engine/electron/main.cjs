@@ -37,6 +37,27 @@ function initialiseDatabase() {
       api_key_encrypted BLOB NOT NULL,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS model_task_policies (
+      task TEXT PRIMARY KEY,
+      config_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS api_usage_logs (
+      id TEXT PRIMARY KEY,
+      task TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      connection_label TEXT NOT NULL,
+      model TEXT NOT NULL,
+      status TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      duration_ms INTEGER NOT NULL,
+      request_chars INTEGER NOT NULL DEFAULT 0,
+      response_chars INTEGER NOT NULL DEFAULT 0,
+      input_tokens INTEGER,
+      output_tokens INTEGER,
+      error TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_api_usage_logs_started_at ON api_usage_logs(started_at DESC);
     INSERT OR IGNORE INTO schema_migrations (version) VALUES (1);
   `);
 }
@@ -87,18 +108,19 @@ function registerIpc() {
 
   ipcMain.handle('intelligence:analyze', async (_event, item) => {
     if (!item || typeof item !== 'object' || typeof item.title !== 'string' || item.title.length > 500) throw new Error('资讯内容无效，无法分析。');
-    const row = database.prepare('SELECT config_json, api_key_encrypted FROM bailian_cli_settings WHERE setting_id = ?').get('default');
-    if (!row) throw new Error('请先配置并验证百炼 CLI。');
-    const config = JSON.parse(row.config_json);
-    if (config.status !== 'READY') throw new Error('百炼 CLI 尚未验证通过。');
-    const apiKey = safeStorage.decryptString(row.api_key_encrypted);
+    const route = resolveTaskRoute('INTELLIGENCE_ANALYSIS');
     const prompt = JSON.stringify({ title: item.title, summary: item.summary, category: item.category, source: item.source });
     const system = '你是内容编辑助手。仅返回一个 JSON 对象，不要使用 Markdown。字段：summary（80字以内中文摘要）、heat（0到100整数）、suggestedAngle（不超过40字的内容角度）、factsToVerify（最多3条待核验事实数组）。不得编造原文没有提供的事实。';
-    const raw = await runBailianCli(['text', 'chat', '--model', 'qwen-plus', '--system', system, '--message', prompt, '--max-tokens', '500', '--temperature', '0.2', '--output', 'json'], apiKey);
-    const response = JSON.parse(raw);
-    const content = response?.choices?.[0]?.message?.content ?? response?.content;
-    const analysis = parseIntelligenceAnalysis(content);
-    return { ...analysis, model: 'qwen-plus', analyzedAt: localTime() };
+    const started = Date.now();
+    try {
+      const result = await executeTextRoute(route, system, prompt);
+      const analysis = parseIntelligenceAnalysis(result.content);
+      writeUsageLog({ task: 'INTELLIGENCE_ANALYSIS', route, status: 'SUCCESS', started, requestChars: system.length + prompt.length, responseChars: result.content.length, usage: result.usage });
+      return { ...analysis, model: route.model, analyzedAt: localTime() };
+    } catch (error) {
+      writeUsageLog({ task: 'INTELLIGENCE_ANALYSIS', route, status: 'ERROR', started, requestChars: system.length + prompt.length, responseChars: 0, error: error instanceof Error ? error.message : '模型调用失败' });
+      throw error;
+    }
   });
 
   ipcMain.handle('models:list', () => database.prepare('SELECT id, config_json FROM model_connections ORDER BY updated_at DESC').all().map((row) => ({ id: row.id, ...JSON.parse(row.config_json) })));
@@ -135,6 +157,12 @@ function registerIpc() {
     database.prepare('DELETE FROM model_connections WHERE id = ?').run(id);
   });
 
+  ipcMain.handle('model-catalog:sync', () => syncModelCatalog());
+  ipcMain.handle('task-policies:list', () => listTaskPolicies());
+  ipcMain.handle('task-policies:save', (_event, input) => saveTaskPolicy(input));
+  ipcMain.handle('usage:summary', () => usageSummary());
+  ipcMain.handle('usage:list', () => database.prepare('SELECT * FROM api_usage_logs ORDER BY started_at DESC LIMIT 80').all().map(mapUsageLog));
+
   ipcMain.handle('bailian:status', async () => getBailianStatus());
 
   ipcMain.handle('bailian:save', async (_event, input) => {
@@ -166,6 +194,125 @@ function registerIpc() {
   });
 
   ipcMain.handle('bailian:remove', () => database.prepare('DELETE FROM bailian_cli_settings WHERE setting_id = ?').run('default'));
+}
+
+const modelTasks = ['INTELLIGENCE_ANALYSIS', 'TOPIC_RECOMMENDATION', 'CONTENT_WRITING', 'CONTENT_REWRITE', 'CONTENT_LAYOUT', 'IMAGE_GENERATION', 'SPEECH_SYNTHESIS', 'VIDEO_GENERATION'];
+
+function listTaskPolicies() {
+  const saved = new Map(database.prepare('SELECT task, config_json, updated_at FROM model_task_policies').all().map((row) => [row.task, { ...JSON.parse(row.config_json), task: row.task, updatedAt: row.updated_at }]));
+  return modelTasks.map((task) => saved.get(task) ?? { task });
+}
+
+function saveTaskPolicy(input) {
+  if (!input || typeof input !== 'object' || !modelTasks.includes(input.task)) throw new Error('任务策略无效。');
+  const task = input.task;
+  if (!input.provider && !input.model) {
+    database.prepare('DELETE FROM model_task_policies WHERE task = ?').run(task);
+    return { task };
+  }
+  if (!['BAILIAN_CLI', 'EXTERNAL_API'].includes(input.provider) || typeof input.model !== 'string' || !input.model.trim()) throw new Error('请为该功能选择一个模型。');
+  if (input.provider === 'EXTERNAL_API' && (typeof input.connectionId !== 'string' || !input.connectionId)) throw new Error('外部 API 模型必须关联已验证连接。');
+  const config = { task, provider: input.provider, connectionId: input.provider === 'EXTERNAL_API' ? input.connectionId : undefined, model: input.model.trim() };
+  database.prepare(`INSERT INTO model_task_policies (task, config_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(task) DO UPDATE SET config_json = excluded.config_json, updated_at = CURRENT_TIMESTAMP`).run(task, JSON.stringify(config));
+  const row = database.prepare('SELECT updated_at FROM model_task_policies WHERE task = ?').get(task);
+  return { ...config, updatedAt: row.updated_at };
+}
+
+async function syncModelCatalog() {
+  const items = [];
+  const errors = [];
+  const bailianRow = database.prepare('SELECT config_json, api_key_encrypted FROM bailian_cli_settings WHERE setting_id = ?').get('default');
+  if (bailianRow) {
+    const config = JSON.parse(bailianRow.config_json);
+    if (config.status === 'READY') {
+      try {
+        const models = await fetchAvailableModels('https://dashscope.aliyuncs.com/compatible-mode/v1', safeStorage.decryptString(bailianRow.api_key_encrypted));
+        items.push(...models.map((model) => ({ id: `bailian:${model}`, provider: 'BAILIAN_CLI', connectionLabel: '阿里云百炼 CLI', model })));
+      } catch (error) { errors.push({ connectionLabel: '阿里云百炼 CLI', message: error instanceof Error ? error.message : '模型目录同步失败' }); }
+    }
+  }
+  const connections = database.prepare('SELECT id, config_json, api_key_encrypted FROM model_connections').all();
+  for (const row of connections) {
+    const config = JSON.parse(row.config_json);
+    if (config.status !== 'READY') continue;
+    try {
+      const models = await fetchAvailableModels(config.baseUrl, safeStorage.decryptString(row.api_key_encrypted));
+      items.push(...models.map((model) => ({ id: `external:${row.id}:${model}`, provider: 'EXTERNAL_API', connectionId: row.id, connectionLabel: config.label, model })));
+    } catch (error) { errors.push({ connectionLabel: config.label, message: error instanceof Error ? error.message : '模型目录同步失败' }); }
+  }
+  const seen = new Set();
+  return { items: items.filter((item) => { if (seen.has(item.id)) return false; seen.add(item.id); return true; }), errors };
+}
+
+async function fetchAvailableModels(baseUrl, apiKey) {
+  const response = await fetch(`${baseUrl.replace(/\/$/, '')}/models`, { signal: AbortSignal.timeout(15_000), headers: { Authorization: `Bearer ${apiKey}` } });
+  if (!response.ok) throw new Error(`模型目录请求失败（HTTP ${response.status}）。`);
+  const payload = await response.json();
+  const raw = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload?.models) ? payload.models : [];
+  const models = raw.map((item) => typeof item === 'string' ? item : item?.id ?? item?.model_id ?? item?.model).filter((item) => typeof item === 'string' && item.trim());
+  if (models.length === 0) throw new Error('接口未返回可选模型。');
+  return [...new Set(models)];
+}
+
+function resolveTaskRoute(task) {
+  const row = database.prepare('SELECT config_json FROM model_task_policies WHERE task = ?').get(task);
+  const policy = row ? JSON.parse(row.config_json) : null;
+  if (!policy?.provider || !policy?.model) throw new Error('请先在“模型与 API → 任务策略”为热点分析选择已验证模型。');
+  if (policy.provider === 'BAILIAN_CLI') {
+    const bailianRow = database.prepare('SELECT config_json, api_key_encrypted FROM bailian_cli_settings WHERE setting_id = ?').get('default');
+    if (!bailianRow) throw new Error('热点分析绑定的百炼 CLI 已移除。');
+    const config = JSON.parse(bailianRow.config_json);
+    if (config.status !== 'READY') throw new Error('热点分析绑定的百炼 CLI 尚未验证通过。');
+    return { provider: 'BAILIAN_CLI', connectionLabel: '阿里云百炼 CLI', model: policy.model, apiKey: safeStorage.decryptString(bailianRow.api_key_encrypted) };
+  }
+  const connectionRow = database.prepare('SELECT config_json, api_key_encrypted FROM model_connections WHERE id = ?').get(policy.connectionId);
+  if (!connectionRow) throw new Error('热点分析绑定的外部 API 连接已移除。');
+  const config = JSON.parse(connectionRow.config_json);
+  if (config.status !== 'READY') throw new Error('热点分析绑定的外部 API 尚未验证通过。');
+  return { provider: 'EXTERNAL_API', connectionLabel: config.label, model: policy.model, baseUrl: config.baseUrl, apiKey: safeStorage.decryptString(connectionRow.api_key_encrypted) };
+}
+
+async function executeTextRoute(route, system, prompt) {
+  if (route.provider === 'BAILIAN_CLI') {
+    const raw = await runBailianCli(['text', 'chat', '--model', route.model, '--system', system, '--message', prompt, '--max-tokens', '500', '--temperature', '0.2', '--output', 'json'], route.apiKey);
+    const payload = JSON.parse(raw);
+    const content = payload?.choices?.[0]?.message?.content ?? payload?.content;
+    if (typeof content !== 'string' || !content.trim()) throw new Error('模型没有返回可用的分析结果。');
+    return { content, usage: extractUsage(payload) };
+  }
+  const response = await fetch(`${route.baseUrl.replace(/\/$/, '')}/chat/completions`, {
+    method: 'POST', signal: AbortSignal.timeout(45_000), headers: { Authorization: `Bearer ${route.apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: route.model, messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }], temperature: 0.2, max_tokens: 500 }),
+  });
+  if (!response.ok) throw new Error(`外部 API 调用失败（HTTP ${response.status}）。`);
+  const payload = await response.json();
+  const content = payload?.choices?.[0]?.message?.content;
+  if (typeof content !== 'string' || !content.trim()) throw new Error('模型没有返回可用的分析结果。');
+  return { content, usage: extractUsage(payload) };
+}
+
+function extractUsage(payload) {
+  const usage = payload?.usage ?? {};
+  const inputTokens = Number(usage.prompt_tokens ?? usage.input_tokens);
+  const outputTokens = Number(usage.completion_tokens ?? usage.output_tokens);
+  return { inputTokens: Number.isFinite(inputTokens) ? inputTokens : undefined, outputTokens: Number.isFinite(outputTokens) ? outputTokens : undefined };
+}
+
+function writeUsageLog({ task, route, status, started, requestChars, responseChars, usage, error }) {
+  database.prepare(`INSERT INTO api_usage_logs (id, task, provider, connection_label, model, status, started_at, duration_ms, request_chars, response_chars, input_tokens, output_tokens, error)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(`usage-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, task, route.provider, route.connectionLabel, route.model, status, new Date(started).toISOString(), Date.now() - started, requestChars, responseChars, usage?.inputTokens ?? null, usage?.outputTokens ?? null, error ?? null);
+}
+
+function usageSummary() {
+  const total = database.prepare(`SELECT COUNT(*) AS total_calls, SUM(CASE WHEN status = 'SUCCESS' THEN 1 ELSE 0 END) AS success_calls, SUM(CASE WHEN status = 'ERROR' THEN 1 ELSE 0 END) AS failed_calls, SUM(COALESCE(input_tokens, 0)) AS input_tokens, SUM(COALESCE(output_tokens, 0)) AS output_tokens FROM api_usage_logs`).get();
+  const today = database.prepare(`SELECT COUNT(*) AS today_calls FROM api_usage_logs WHERE date(started_at, 'localtime') = date('now', 'localtime')`).get();
+  return { totalCalls: Number(total.total_calls ?? 0), todayCalls: Number(today.today_calls ?? 0), successCalls: Number(total.success_calls ?? 0), failedCalls: Number(total.failed_calls ?? 0), inputTokens: Number(total.input_tokens ?? 0), outputTokens: Number(total.output_tokens ?? 0) };
+}
+
+function mapUsageLog(row) {
+  return { id: row.id, task: row.task, provider: row.provider, connectionLabel: row.connection_label, model: row.model, status: row.status, startedAt: row.started_at, durationMs: row.duration_ms, requestChars: row.request_chars, responseChars: row.response_chars, inputTokens: row.input_tokens ?? undefined, outputTokens: row.output_tokens ?? undefined, error: row.error ?? undefined };
 }
 
 function validateModelInput(input) {
