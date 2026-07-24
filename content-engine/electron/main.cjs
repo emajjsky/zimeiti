@@ -236,6 +236,7 @@ async function syncModelCatalog() {
   if (bailianRow) {
     const config = JSON.parse(bailianRow.config_json);
     if (config.status === 'READY') {
+      items.push(...bailianCliBuiltInModels());
       try {
         const models = await fetchAvailableModels('https://dashscope.aliyuncs.com/compatible-mode/v1', safeStorage.decryptString(bailianRow.api_key_encrypted));
         items.push(...models.map((model) => ({ id: `bailian:${model}`, provider: 'BAILIAN_CLI', connectionLabel: '阿里云百炼 CLI', model, capabilities: classifyModelCapabilities(model) })));
@@ -257,6 +258,19 @@ async function syncModelCatalog() {
   const insert = database.prepare('INSERT INTO model_catalog (id, item_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)');
   for (const item of uniqueItems) insert.run(item.id, JSON.stringify(item));
   return { items: uniqueItems, errors };
+}
+
+function bailianCliBuiltInModels() {
+  const models = [
+    ['happyhorse-1.1-t2v', ['VIDEO']],
+    ['happyhorse-1.1-i2v', ['VIDEO']],
+    ['happyhorse-1.1-r2v', ['VIDEO']],
+    ['happyhorse-1.0-video-edit', ['VIDEO']],
+    ['wan2.6-t2v', ['VIDEO']],
+    ['wan2.6-r2v', ['VIDEO']],
+    ['wan2.7-image', ['IMAGE']],
+  ];
+  return models.map(([model, capabilities]) => ({ id: `bailian:${model}`, provider: 'BAILIAN_CLI', connectionLabel: '阿里云百炼 CLI', model, capabilities }));
 }
 
 function classifyModelCapabilities(model) {
