@@ -37,11 +37,12 @@
 @media (max-width:1250px) { .main-content { padding:28px 30px; }.today-layout,.discover-layout,.plan-layout,.publish-layout,.review-layout { grid-template-columns:minmax(0,1fr) 300px; } }
 
 /* 情报收件箱：来源优先，卡片高度随摘要自然变化。 */
-.discover-filters { display:grid; gap:12px; margin:20px 0 24px; }
-.source-filters { display:flex; gap:8px; overflow-x:auto; padding:0 0 3px; scrollbar-width:thin; }
-.source-filters .filter { flex:none; margin:0; white-space:nowrap; }
+.discover-filters { display:flex; align-items:center; gap:8px; margin:20px 0 24px; overflow-x:auto; padding:0 0 3px; scrollbar-width:thin; }
+.discover-filters > * { flex:none; }
+.source-filter-select,.discover-filters > select { height:40px; max-width:150px; padding:0 29px 0 10px; overflow:hidden; border:1px solid var(--ink); background:#fff; color:var(--ink); font-size:13px; font-weight:700; text-overflow:ellipsis; white-space:nowrap; }
 .time-filters { display:flex; gap:0; }.time-filters button { min-height:40px; padding:0 10px; border:1px solid var(--ink); border-right:0; background:#fff; color:var(--ink); font-size:12px; font-weight:700; white-space:nowrap; }.time-filters button:last-child { border-right:1px solid var(--ink); }.time-filters button.active { background:var(--ink); color:#fff; }
-.discover-filter-controls { justify-content:flex-start; }
+.discover-filters .model-search { width:190px; min-width:190px; }
+.discover-filters .button { min-height:40px; white-space:nowrap; }
 .discover-layout { grid-template-columns:minmax(0,1fr) 340px; align-items:start; gap:24px; }
 .signal-list { display:block; column-count:2; column-gap:16px; }
 .signal {
