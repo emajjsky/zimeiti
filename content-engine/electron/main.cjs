@@ -262,6 +262,17 @@ async function syncModelCatalog() {
 
 function bailianCliBuiltInModels() {
   const models = [
+    ['qwen3.7-max', ['TEXT']],
+    ['qwen3.7-plus', ['TEXT', 'VISION']],
+    ['qwen3.6-flash', ['TEXT']],
+    ['qwen3.5-omni-plus', ['TEXT', 'VISION', 'MULTIMODAL']],
+    ['qwen3.5-omni-plus-realtime', ['TEXT', 'VISION', 'MULTIMODAL']],
+    ['qwen-image-3.0-pro', ['IMAGE']],
+    ['wan2.7-image-pro', ['IMAGE']],
+    ['qwen-image-2.0', ['IMAGE']],
+    ['qwen-image-2.0-pro', ['IMAGE']],
+    ['wan2.6-t2i', ['IMAGE']],
+    ['wan2.7-image', ['IMAGE']],
     ['happyhorse-1.1-t2v', ['VIDEO']],
     ['happyhorse-1.1-i2v', ['VIDEO']],
     ['happyhorse-1.1-r2v', ['VIDEO']],
@@ -272,7 +283,12 @@ function bailianCliBuiltInModels() {
     ['wan2.7-i2v', ['VIDEO']],
     ['wan2.7-r2v', ['VIDEO']],
     ['wan2.7-videoedit', ['VIDEO']],
-    ['wan2.7-image', ['IMAGE']],
+    ['cosyvoice-v3-flash', ['AUDIO']],
+    ['cosyvoice-v3.5-flash', ['AUDIO']],
+    ['qwen-audio-3.0-tts-plus', ['MULTIMODAL']],
+    ['fun-asr', ['ASR']],
+    ['fun-asr-realtime', ['ASR']],
+    ['fun-music-v1', ['MUSIC']],
   ];
   return models.map(([model, capabilities]) => ({ id: `bailian:${model}`, provider: 'BAILIAN_CLI', connectionLabel: '阿里云百炼 CLI', model, capabilities }));
 }
@@ -280,10 +296,15 @@ function bailianCliBuiltInModels() {
 function classifyModelCapabilities(model) {
   const value = String(model).toLowerCase();
   if (/embed|rerank/.test(value)) return ['EMBEDDING'];
-  if (/tts|asr|audio|voice|speech|realtime/.test(value)) return ['AUDIO'];
-  if (/video|wanx|wan-|hailuo|seedance/.test(value)) return ['VIDEO'];
+  if (/asr|paraformer/.test(value)) return ['ASR'];
+  if (/music/.test(value)) return ['MUSIC'];
+  if (/omni/.test(value)) return ['TEXT', 'VISION', 'MULTIMODAL'];
+  if (/\bvl\b|vision/.test(value)) return ['TEXT', 'VISION'];
+  if (/tts|cosy|voice|speech/.test(value)) return ['AUDIO'];
+  if (/video|wanx|wan\d+\.\d+-(t2v|i2v|r2v|videoedit)|hailuo|seedance/.test(value)) return ['VIDEO'];
   if (/image|flux|z-image|cogview|stable-diffusion|sdxl/.test(value)) return ['IMAGE'];
   if (/code|coder/.test(value)) return ['CODE'];
+  if (/reasoner|reasoning|r1/.test(value)) return ['TEXT', 'REASONING'];
   return ['TEXT'];
 }
 

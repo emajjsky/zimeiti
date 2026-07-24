@@ -13,7 +13,7 @@ export type ModelTask =
   | 'VIDEO_GENERATION';
 
 export type ModelRouteProvider = 'BAILIAN_CLI' | 'EXTERNAL_API';
-export type ModelCapability = 'TEXT' | 'IMAGE' | 'AUDIO' | 'VIDEO' | 'EMBEDDING' | 'CODE';
+export type ModelCapability = 'TEXT' | 'IMAGE' | 'AUDIO' | 'VIDEO' | 'VISION' | 'MULTIMODAL' | 'ASR' | 'MUSIC' | 'REASONING' | 'EMBEDDING' | 'CODE';
 
 export interface ModelCatalogItem {
   id: string;

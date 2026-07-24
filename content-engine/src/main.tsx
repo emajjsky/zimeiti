@@ -642,7 +642,7 @@ function LegacyTaskPolicyScreen({ catalog, policies, onSync, onSave }: { catalog
   return <section className="task-policy-layout"><aside>{tasks.map((item) => <button key={item} className={task === item ? 'active' : ''} onClick={() => { setTask(item); setSelection(''); }}><span>{modelTaskNames[item]}</span><small>{policies.find((policy) => policy.task === item)?.model ?? '未设置'}</small></button>)}</aside><div className="task-policy-editor"><div className="task-policy-head"><h2>{modelTaskNames[task]}</h2><button className="button" onClick={onSync}><RefreshCw size={16}/>同步模型</button></div><label>执行模型<select value={effectiveSelection} onChange={(event) => setSelection(event.target.value)}><option value="">不调用模型</option>{catalog.map((item) => <option value={item.id} key={item.id}>{item.connectionLabel} · {item.model}</option>)}</select></label><footer><button className="button primary" disabled={busy} onClick={() => void save()}>{busy ? '保存中' : '保存策略'}</button></footer></div></section>;
 }
 
-const capabilityNames: Record<ModelCapability, string> = { TEXT: '文本', IMAGE: '图像', AUDIO: '语音', VIDEO: '视频', EMBEDDING: '嵌入', CODE: '代码' };
+const capabilityNames: Record<ModelCapability, string> = { TEXT: '文本', IMAGE: '图像生成', AUDIO: '语音合成', VIDEO: '视频生成', VISION: '视觉理解', MULTIMODAL: '全模态', ASR: '语音识别', MUSIC: '音乐生成', REASONING: '推理', EMBEDDING: '嵌入', CODE: '代码' };
 const taskCapabilities: Record<ModelTask, ModelCapability> = {
   INTELLIGENCE_ANALYSIS: 'TEXT', TOPIC_RECOMMENDATION: 'TEXT', CONTENT_WRITING: 'TEXT', CONTENT_REWRITE: 'TEXT', CONTENT_LAYOUT: 'TEXT', IMAGE_GENERATION: 'IMAGE', SPEECH_SYNTHESIS: 'AUDIO', VIDEO_GENERATION: 'VIDEO',
 };
