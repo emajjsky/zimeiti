@@ -507,7 +507,9 @@ async function collectRss(source) {
   const xml = await response.text();
   if (xml.length > 2_000_000) throw new Error('RSS 响应超过 2MB。');
   const parsed = new XMLParser({ ignoreAttributes: false, trimValues: true }).parse(xml);
-  const rawItems = asArray(parsed?.rss?.channel?.item ?? parsed?.feed?.entry).slice(0, 30);
+  const rawItems = asArray(parsed?.rss?.channel?.item ?? parsed?.feed?.entry).slice(0, 60);
+  const includeKeywords = sourceKeywords(source, 'includeKeywords');
+  const excludeKeywords = sourceKeywords(source, 'excludeKeywords');
   return rawItems.map((entry, index) => ({
     id: `rss-${source.id}-${Date.now()}-${index}`,
     title: text(entry.title) || '未命名资讯',
@@ -519,7 +521,35 @@ async function collectRss(source) {
     trust: source.trust || '待核验',
     captureMethod: 'RSS',
     url: entryUrl(entry),
-  }));
+  })).filter((item) => matchesSourceRule(item, includeKeywords, excludeKeywords, source.language));
+}
+
+function sourceKeywords(source, field) {
+  const configured = Array.isArray(source?.[field]) ? source[field].map((item) => String(item).trim()).filter(Boolean) : [];
+  if (configured.length) return configured;
+  if (field !== 'includeKeywords') return [];
+  const host = (() => { try { return new URL(source?.url).hostname; } catch { return ''; } })();
+  if (/36kr\.com|ithome\.com/.test(host)) return ['AI', '人工智能', '大模型', '模型', '机器人', '芯片'];
+  if (/technologyreview\.com/.test(host)) return ['AI', 'artificial intelligence', 'model', 'robot', 'OpenAI', 'Google'];
+  if (/hnrss\.org/.test(host)) return ['AI', 'artificial intelligence', 'LLM', 'model', 'OpenAI', 'Google'];
+  return [];
+}
+
+function matchesSourceRule(item, includeKeywords, excludeKeywords, language) {
+  const haystack = `${item.title} ${item.summary}`.toLocaleLowerCase();
+  const normalizedInclude = includeKeywords.map((item) => item.toLocaleLowerCase());
+  const normalizedExclude = excludeKeywords.map((item) => item.toLocaleLowerCase());
+  if (normalizedInclude.length && !normalizedInclude.some((keyword) => haystack.includes(keyword))) return false;
+  if (normalizedExclude.some((keyword) => haystack.includes(keyword))) return false;
+  const detected = detectLanguage(`${item.title} ${item.summary}`);
+  item.language = detected;
+  return language !== 'ZH' || detected === 'zh' ? language !== 'EN' || detected === 'en' : false;
+}
+
+function detectLanguage(value) {
+  if (/[\u3400-\u9fff]/.test(value)) return 'zh';
+  if (/[a-z]/i.test(value)) return 'en';
+  return 'other';
 }
 
 async function previewPublicLink(rawUrl) {

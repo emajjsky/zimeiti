@@ -167,10 +167,12 @@ function App() {
     try {
       const result = await window.contentEngine?.intelligence.refreshRss(state.sources);
       if (!result) throw new Error('当前不在桌面端环境。');
-      const existingKeys = new Set(state.intelligence.map(intelligenceKey));
+      const refreshedSourceNames = new Set(state.sources.filter((source) => result.results.some((status) => status.sourceId === source.id && status.ok)).map((source) => source.name));
+      const retained = state.intelligence.filter((item) => item.captureMethod === 'MANUAL_LINK' || (item.captureMethod === 'RSS' && !refreshedSourceNames.has(item.source)));
+      const existingKeys = new Set(retained.map(intelligenceKey));
       const received = result.items.filter((item) => !existingKeys.has(intelligenceKey(item)));
       const now = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
-      updateState({ ...state, intelligence: [...received, ...state.intelligence], sources: state.sources.map((source) => {
+      updateState({ ...state, intelligence: [...received, ...retained], sources: state.sources.map((source) => {
         const status = result.results.find((item) => item.sourceId === source.id);
         return !status ? source : { ...source, lastSyncedAt: status.ok ? now : source.lastSyncedAt, lastError: status.ok ? undefined : status.error };
       }) });
@@ -286,7 +288,29 @@ function Today({ onNavigate, projects, intelligence }: { onNavigate: (view: View
 
 function Task({ title, sub, action, onClick }: { title: string; sub: string; action: string; onClick: () => void }) { return <article className="task"><span className="checkbox"/><div><b>{title}</b><small>{sub}</small></div><button className="text-button" onClick={onClick}>{action}</button></article>; }
 
-function Discover({ item, intelligence, onSelect, onCreateTopic, onRefresh, refreshFeedback, analysisFeedback, onAnalyze }: { item: LocalState['intelligence'][number]; intelligence: LocalState['intelligence']; onSelect: (id: string) => void; onCreateTopic: () => void; onRefresh: () => void; refreshFeedback: { status: 'idle' | 'running' | 'success' | 'empty' | 'error'; message: string }; analysisFeedback: { status: 'idle' | 'running' | 'error'; message: string }; onAnalyze: () => void }) { return <>
+function Discover({ item, intelligence, onSelect, onCreateTopic, onRefresh, refreshFeedback, analysisFeedback, onAnalyze }: { item: LocalState['intelligence'][number]; intelligence: LocalState['intelligence']; onSelect: (id: string) => void; onCreateTopic: () => void; onRefresh: () => void; refreshFeedback: { status: 'idle' | 'running' | 'success' | 'empty' | 'error'; message: string }; analysisFeedback: { status: 'idle' | 'running' | 'error'; message: string }; onAnalyze: () => void }) {
+  const [category, setCategory] = useState('ALL');
+  const [source, setSource] = useState('ALL');
+  const [language, setLanguage] = useState('ALL');
+  const [query, setQuery] = useState('');
+  const categories = [...new Set(intelligence.map((signal) => signal.category).filter(Boolean))];
+  const sources = [...new Set(intelligence.map((signal) => signal.source).filter(Boolean))];
+  const detect = (value: string) => /[\u3400-\u9fff]/.test(value) ? 'zh' : /[a-z]/i.test(value) ? 'en' : 'other';
+  const visible = intelligence.filter((signal) => {
+    const text = `${signal.title} ${signal.summary} ${signal.source}`.toLocaleLowerCase();
+    const signalLanguage = signal.language ?? detect(`${signal.title} ${signal.summary}`);
+    return (category === 'ALL' || signal.category === category) && (source === 'ALL' || signal.source === source) && (language === 'ALL' || signalLanguage === language) && (!query.trim() || text.includes(query.trim().toLocaleLowerCase()));
+  });
+  const selected = visible.find((signal) => signal.id === item?.id) ?? visible[0];
+  return <>
+  <PageHeader eyebrow="DISCOVER / 热点情报" title="今日热点" />
+  <div className="filter-row discover-filters"><div className="category-filters"><button className={`filter ${category === 'ALL' ? 'active' : ''}`} onClick={() => setCategory('ALL')}>全部</button>{categories.map((value) => <button key={value} className={`filter ${category === value ? 'active' : ''}`} onClick={() => setCategory(value)}>{value}</button>)}</div><div className="discover-filter-controls"><select value={source} onChange={(event) => setSource(event.target.value)}><option value="ALL">全部来源</option>{sources.map((value) => <option key={value} value={value}>{value}</option>)}</select><select value={language} onChange={(event) => setLanguage(event.target.value)}><option value="ALL">全部语言</option><option value="zh">中文</option><option value="en">英文</option></select><label className="model-search"><Search size={16}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="筛选关键词" /></label><button className="button primary" onClick={onRefresh} disabled={refreshFeedback.status === 'running'}><RefreshCw className={refreshFeedback.status === 'running' ? 'spin' : ''} size={15}/>{refreshFeedback.status === 'running' ? '正在刷新' : '刷新热点'}</button></div></div>
+  {refreshFeedback.status !== 'idle' && <div className={`refresh-feedback ${refreshFeedback.status}`} role="status"><span>{refreshFeedback.status === 'running' ? '…' : refreshFeedback.status === 'success' ? '✓' : refreshFeedback.status === 'error' ? '!' : 'i'}</span>{refreshFeedback.message}</div>}
+  {!selected ? <section className="utility"><h2>没有匹配的资讯</h2></section> : <div className="discover-layout"><section className="signal-list">{visible.map((signal) => <button key={signal.id} className={`signal ${signal.id === selected.id ? 'selected' : ''}`} onClick={() => onSelect(signal.id)}><span className="signal-icon">{signal.category === '财经' ? '↗' : signal.category === '历史' ? '▤' : '⌘'}</span><span><b>{signal.title}</b><p>{signal.summary}</p><small>{signal.publishedAt} · {signal.category} · {signal.source}</small></span><span><em className={`chip ${signal.trust === '可信' ? 'mint' : 'yellow'}`}>{signal.trust}</em><em className="chip">{signal.analysis ? `${signal.heat} 热度` : '未评分'}</em></span></button>)}</section><aside className="detail-drawer"><span className="chip blue">已选中热点</span><h2>{selected.title}</h2><p>{selected.summary}</p>{selected.analysis && <div className="idea"><b>建议角度</b><br/>{selected.analysis.suggestedAngle}</div>}{selected.analysis?.factsToVerify.length ? <p className="fact-checks">待核验：{selected.analysis.factsToVerify.join('；')}</p> : null}{selected.url ? <a className="source-link" href={selected.url} target="_blank" rel="noreferrer">打开原文 ↗</a> : <p className="source-link">来源：{selected.source}</p>}{analysisFeedback.status === 'error' && <p className="form-error">{analysisFeedback.message}</p>}<footer><button className="text-button" disabled={analysisFeedback.status === 'running'} onClick={onAnalyze}>{analysisFeedback.status === 'running' ? '分析中' : 'AI 分析'}</button><button className="button primary" onClick={onCreateTopic}>创建选题</button></footer></aside></div>}
+  </>;
+}
+
+function LegacyDiscover({ item, intelligence, onSelect, onCreateTopic, onRefresh, refreshFeedback, analysisFeedback, onAnalyze }: { item: LocalState['intelligence'][number]; intelligence: LocalState['intelligence']; onSelect: (id: string) => void; onCreateTopic: () => void; onRefresh: () => void; refreshFeedback: { status: 'idle' | 'running' | 'success' | 'empty' | 'error'; message: string }; analysisFeedback: { status: 'idle' | 'running' | 'error'; message: string }; onAnalyze: () => void }) { return <>
   <PageHeader eyebrow="DISCOVER / 热点情报" title="今日热点" />
   <div className="filter-row"><div>{['全部','AI','财经','历史','人文','国学'].map((label,index) => <button key={label} className={`filter ${index === 0 ? 'active' : ''}`}>{label}</button>)}<span className="filter-note">近 7 天</span></div><button className="button primary" onClick={onRefresh} disabled={refreshFeedback.status === 'running'}><RefreshCw className={refreshFeedback.status === 'running' ? 'spin' : ''} size={15}/>{refreshFeedback.status === 'running' ? '正在刷新' : '刷新热点'}</button></div>
   {refreshFeedback.status !== 'idle' && <div className={`refresh-feedback ${refreshFeedback.status}`} role="status"><span>{refreshFeedback.status === 'running' ? '…' : refreshFeedback.status === 'success' ? '✓' : refreshFeedback.status === 'error' ? '!' : 'i'}</span>{refreshFeedback.message}</div>}
@@ -814,15 +838,41 @@ function ExternalApiEditor({ connection, onBack, onSave, onTest }: { connection?
   return <div className="external-editor"><button className="back-button" onClick={onBack}><ArrowLeft size={17}/>返回</button><PageHeader eyebrow="SETTINGS / 外部 API" title={connection ? `编辑 ${connection.label}` : '新增外部 API'} /><section className="external-provider-picker"><div className="provider-grid">{externalModelProviders.map((item) => <button type="button" key={item.provider} className={`provider-card ${draft.provider === item.provider ? 'selected' : ''}`} onClick={() => { setDraft(connectionDraftForProvider(item.provider)); setNotice(null); }}><b>{item.label}</b><small>{item.detail}</small></button>)}</div></section><section className="external-editor-form"><label>连接名称<input value={draft.label} onChange={(event) => setDraft({ ...draft, label: event.target.value })} /></label><label>API 地址<input value={draft.baseUrl} onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })} /></label><label>API Key<input type="password" value={draft.apiKey} onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} placeholder={draft.id ? '留空表示不更新' : '粘贴 API Key'} autoComplete="off" /></label>{notice && <p className={`model-notice ${notice.type}`} aria-live="polite">{notice.type === 'success' ? <CircleCheck size={17}/> : <CircleAlert size={17}/>} {notice.text}</p>}<footer><button className="button" type="button" disabled={busy !== 'idle'} onClick={() => void test()}><KeyRound size={16}/>{busy === 'testing' ? '检查中' : '保存并检查'}</button><button className="button primary" type="button" disabled={busy !== 'idle'} onClick={() => void save()}>{busy === 'saving' ? '保存中' : '保存'}</button></footer></section></div>;
 }
 
-const recommendedRssSources: Omit<IntelligenceSource, 'id' | 'lastSyncedAt' | 'lastError'>[] = [
-  { name: 'TechCrunch AI', type: 'RSS', url: 'https://techcrunch.com/category/artificial-intelligence/feed/', category: 'AI', enabled: true, refreshMinutes: 60, trust: '待核验' },
-  { name: 'MIT Technology Review', type: 'RSS', url: 'https://www.technologyreview.com/feed/', category: '科技', enabled: true, refreshMinutes: 120, trust: '待核验' },
-  { name: 'Hacker News 高热', type: 'RSS', url: 'https://hnrss.org/newest?points=100', category: '科技', enabled: true, refreshMinutes: 60, trust: '待核验' },
-  { name: 'Google AI', type: 'RSS', url: 'https://blog.google/technology/ai/rss/', category: 'AI', enabled: true, refreshMinutes: 120, trust: '可信' },
-  { name: 'OpenAI News', type: 'RSS', url: 'https://openai.com/news/rss.xml', category: 'AI', enabled: true, refreshMinutes: 120, trust: '可信' },
+const domesticRssSources: Omit<IntelligenceSource, 'id' | 'lastSyncedAt' | 'lastError'>[] = [
+  { name: '36Kr', type: 'RSS', url: 'https://36kr.com/feed', category: '科技', includeKeywords: ['AI', '人工智能', '大模型', '模型', '机器人', '芯片'], enabled: true, refreshMinutes: 60, trust: '待核验', language: 'ZH' },
+  { name: 'IT之家', type: 'RSS', url: 'https://www.ithome.com/rss/', category: '科技', includeKeywords: ['AI', '人工智能', '大模型', '模型', '机器人', '芯片'], enabled: true, refreshMinutes: 60, trust: '待核验', language: 'ZH' },
+  { name: '少数派', type: 'RSS', url: 'https://sspai.com/feed', category: '创作', includeKeywords: ['AI', '工具', '效率', '创作'], enabled: true, refreshMinutes: 120, trust: '待核验', language: 'ZH' },
+  { name: '中国新闻网', type: 'RSS', url: 'https://www.chinanews.com.cn/rss/scroll-news.xml', category: '时事', enabled: true, refreshMinutes: 120, trust: '可信', language: 'ZH' },
 ];
+const internationalRssSources: Omit<IntelligenceSource, 'id' | 'lastSyncedAt' | 'lastError'>[] = [
+  { name: 'TechCrunch AI', type: 'RSS', url: 'https://techcrunch.com/category/artificial-intelligence/feed/', category: 'AI', enabled: true, refreshMinutes: 60, trust: '待核验', language: 'EN' },
+  { name: 'MIT Technology Review', type: 'RSS', url: 'https://www.technologyreview.com/feed/', category: '科技', includeKeywords: ['AI', 'artificial intelligence', 'model', 'robot', 'OpenAI', 'Google'], enabled: true, refreshMinutes: 120, trust: '待核验', language: 'EN' },
+  { name: 'Hacker News 高热', type: 'RSS', url: 'https://hnrss.org/newest?points=100', category: '科技', enabled: true, refreshMinutes: 60, trust: '待核验', language: 'EN' },
+  { name: 'Google AI', type: 'RSS', url: 'https://blog.google/technology/ai/rss/', category: 'AI', enabled: true, refreshMinutes: 120, trust: '可信', language: 'EN' },
+  { name: 'OpenAI News', type: 'RSS', url: 'https://openai.com/news/rss.xml', category: 'AI', enabled: true, refreshMinutes: 120, trust: '可信', language: 'EN' },
+];
+const recommendedRssSources = [...domesticRssSources, ...internationalRssSources];
 
 function SettingsHub({ sources, template, onTemplateChange, onAddSource, onAddSources, onRemoveSource }: { sources: IntelligenceSource[]; template: FeishuLibraryTemplate; onTemplateChange: (template: FeishuLibraryTemplate) => void; onAddSource: (source: Omit<IntelligenceSource, 'id' | 'lastSyncedAt' | 'lastError'>) => void; onAddSources: (sources: Omit<IntelligenceSource, 'id' | 'lastSyncedAt' | 'lastError'>[]) => void; onRemoveSource: (id: string) => void }) {
+  const [section, setSection] = useState<'sources' | 'feishu'>('sources');
+  const [name, setName] = useState('');
+  const [url, setUrl] = useState('');
+  const [category, setCategory] = useState('科技');
+  const [includeKeywords, setIncludeKeywords] = useState('');
+  const [excludeKeywords, setExcludeKeywords] = useState('');
+  const [language, setLanguage] = useState<IntelligenceSource['language']>('ALL');
+  const [error, setError] = useState('');
+  const toKeywords = (value: string) => value.split(/[、,，\n]/).map((item) => item.trim()).filter(Boolean);
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    try { new URL(url); } catch { setError('请输入有效的 RSS 地址。'); return; }
+    onAddSource({ name: name.trim() || '未命名 RSS 源', type: 'RSS', url: url.trim(), category: category.trim() || '未分类', includeKeywords: toKeywords(includeKeywords), excludeKeywords: toKeywords(excludeKeywords), language, enabled: true, refreshMinutes: 60, trust: '待核验' });
+    setName(''); setUrl(''); setIncludeKeywords(''); setExcludeKeywords(''); setError('');
+  };
+  return <><PageHeader eyebrow="SETTINGS / 情报设置" title={section === 'sources' ? '资讯来源' : '飞书内容库'} /><div className="settings-tabs"><button className={section === 'sources' ? 'active' : ''} onClick={() => setSection('sources')}>情报源</button><button className={section === 'feishu' ? 'active' : ''} onClick={() => setSection('feishu')}>飞书内容库</button></div>{section === 'sources' ? <><section className="source-start"><div><b>推荐来源</b><p>国内和国际来源分开添加；每个来源可设置题材、包含词、排除词与语言。</p></div><div className="source-start-actions"><button className="button" onClick={() => onAddSources(domesticRssSources)}>添加国内来源</button><button className="button" onClick={() => onAddSources(internationalRssSources)}>添加国际来源</button></div></section><div className="sources-layout"><section className="source-list"><div className="panel-head"><h2>已接入情报源</h2><span className="chip mint">{sources.length} 个</span></div>{sources.length === 0 ? <p className="source-empty">尚未添加来源。</p> : sources.map((source) => <article className="source-row" key={source.id}><div><b>{source.name}</b><small>{source.category} · {source.language === 'ZH' ? '中文' : source.language === 'EN' ? '英文' : '全部语言'} · 每 {source.refreshMinutes} 分钟</small>{source.includeKeywords?.length ? <small>包含：{source.includeKeywords.join('、')}</small> : <small>包含：全部</small>}{source.excludeKeywords?.length ? <small>排除：{source.excludeKeywords.join('、')}</small> : null}<p>{source.url}</p>{source.lastError && <em>{source.lastError}</em>}</div><div><span className={`chip ${source.lastError ? 'red' : 'mint'}`}>{source.lastSyncedAt ? `上次 ${source.lastSyncedAt}` : '尚未刷新'}</span><button className="text-button danger" onClick={() => onRemoveSource(source.id)}>移除</button></div></article>)}</section><form className="source-form" onSubmit={submit}><h2>添加 RSS</h2><label>来源名称<input value={name} onChange={(event) => setName(event.target.value)} /></label><label>RSS 地址<input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://..." /></label><label>归属题材<input value={category} onChange={(event) => setCategory(event.target.value)} placeholder="科技、财经、历史、人文、国学" /></label><label>包含词<input value={includeKeywords} onChange={(event) => setIncludeKeywords(event.target.value)} placeholder="AI、大模型、人工智能" /></label><label>排除词<input value={excludeKeywords} onChange={(event) => setExcludeKeywords(event.target.value)} placeholder="广告、招聘" /></label><label>语言<select value={language} onChange={(event) => setLanguage(event.target.value as IntelligenceSource['language'])}><option value="ALL">全部</option><option value="ZH">中文</option><option value="EN">英文</option></select></label>{error && <p className="form-error">{error}</p>}<button className="button primary wide" type="submit"><Plus size={16}/>添加并启用</button></form></div></> : <FeishuTemplateEditor template={template} onChange={onTemplateChange} />}</>;
+}
+
+function LegacySettingsHub({ sources, template, onTemplateChange, onAddSource, onAddSources, onRemoveSource }: { sources: IntelligenceSource[]; template: FeishuLibraryTemplate; onTemplateChange: (template: FeishuLibraryTemplate) => void; onAddSource: (source: Omit<IntelligenceSource, 'id' | 'lastSyncedAt' | 'lastError'>) => void; onAddSources: (sources: Omit<IntelligenceSource, 'id' | 'lastSyncedAt' | 'lastError'>[]) => void; onRemoveSource: (id: string) => void }) {
   const [section, setSection] = useState<'sources' | 'feishu' | 'models'>('sources');
   const [models, setModels] = useState<ModelConnection[]>([]);
   const [name, setName] = useState('');

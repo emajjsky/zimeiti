@@ -25,6 +25,7 @@ export interface IntelligenceItem {
   trust: '可信' | '待核验';
   url?: string;
   captureMethod?: 'RSS' | 'MANUAL_LINK';
+  language?: 'zh' | 'en' | 'other';
   note?: string;
   analysis?: {
     summary: string;
@@ -42,6 +43,9 @@ export interface IntelligenceSource {
   type: 'RSS';
   url: string;
   category: string;
+  includeKeywords?: string[];
+  excludeKeywords?: string[];
+  language?: 'ALL' | 'ZH' | 'EN';
   enabled: boolean;
   refreshMinutes: number;
   trust: IntelligenceItem['trust'];
