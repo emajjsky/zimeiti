@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, net, safeStorage } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { lookup } = require('node:dns/promises');
@@ -567,9 +567,12 @@ function detectLanguage(value) {
 
 async function previewPublicLink(rawUrl) {
   let url = await validatePublicUrl(rawUrl);
+  if (url.hostname.toLowerCase() === 'mp.weixin.qq.com' && /\/mp\/wappoc_appmsgcaptcha/i.test(url.pathname)) {
+    throw new Error('这是微信的人机验证页，不是文章正文。请在浏览器完成验证后，复制地址栏中的公众号文章链接；程序不会绕过验证码。');
+  }
   let response;
   for (let redirects = 0; redirects < 4; redirects += 1) {
-    response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(15_000), headers: { 'User-Agent': 'ContentEngine/0.1 Link Clip' } });
+    response = await fetchPublicWeb(url, { redirect: 'manual', signal: AbortSignal.timeout(15_000), headers: { 'User-Agent': 'ContentEngine/0.1 Link Clip' } }, '读取链接');
     if (![301, 302, 303, 307, 308].includes(response.status)) break;
     const location = response.headers.get('location');
     if (!location) throw new Error('链接跳转缺少目标地址。');
@@ -583,6 +586,17 @@ async function previewPublicLink(rawUrl) {
   const title = htmlMeta(html, 'og:title') || htmlMeta(html, 'twitter:title') || htmlTitle(html) || '未命名文章';
   const summary = htmlMeta(html, 'og:description') || htmlMeta(html, 'description') || '';
   return { url: url.toString(), title: clip(text(title), 240), summary: clip(text(summary), 500), source: sourceNameForUrl(url) };
+}
+
+async function fetchPublicWeb(url, options, action) {
+  try {
+    // 走 Chromium 网络栈，桌面端会继承系统代理与证书配置。
+    return await net.fetch(url, options);
+  } catch (error) {
+    const cause = error && typeof error === 'object' ? error.cause : undefined;
+    const detail = cause && typeof cause === 'object' && typeof cause.code === 'string' ? cause.code : error instanceof Error ? error.message : '未知网络错误';
+    throw new Error(`${action}无法连接网络（${detail}）。请检查网络、代理或安全软件后重试。`);
+  }
 }
 
 async function validatePublicUrl(rawUrl) {
@@ -628,8 +642,12 @@ async function searchWebCandidates(input) {
   const query = typeof input?.query === 'string' ? input.query.trim() : '';
   if (!query || query.length > 300) throw new Error('请输入 1 到 300 个字符的搜索词。');
   const domains = Array.isArray(input?.domains) ? input.domains.filter((item) => typeof item === 'string' && item.length < 120).slice(0, 5) : [];
-  const response = await fetch('https://api.tavily.com/search', { method: 'POST', signal: AbortSignal.timeout(30_000), headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: safeStorage.decryptString(row.api_key_encrypted), query, topic: 'news', search_depth: 'basic', max_results: 10, include_domains: domains.length ? domains : undefined }) });
-  if (!response.ok) throw new Error(`Tavily 搜索失败：HTTP ${response.status}`);
+  const apiKey = safeStorage.decryptString(row.api_key_encrypted);
+  const response = await fetchPublicWeb('https://api.tavily.com/search', { method: 'POST', signal: AbortSignal.timeout(30_000), headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ query, topic: 'news', search_depth: 'basic', max_results: 10, include_domains: domains.length ? domains : undefined }) }, 'Tavily 搜索');
+  if (response.status === 401) throw new Error('Tavily Key 无效、已撤销，或未开通搜索权限。请在设置中重新保存有效 Key。');
+  if (response.status === 403) throw new Error('Tavily 拒绝了当前请求。请检查 Key 所属项目的权限或地区访问策略。');
+  if (response.status === 429) throw new Error('Tavily 调用频率或额度已达上限，请稍后再试。');
+  if (!response.ok) throw new Error(`Tavily 搜索失败（HTTP ${response.status}）。请稍后重试。`);
   const payload = await response.json();
   return (Array.isArray(payload?.results) ? payload.results : []).map((result, index) => {
     const url = typeof result?.url === 'string' ? result.url : '';
