@@ -37,7 +37,11 @@ export const webState = {
 };
 
 export const webIntelligence = {
-  refreshRss: (sources: LocalState['sources']) => request<{ items: LocalState['intelligence']; results: { sourceId: string; ok: boolean; count: number; error?: string }[] }>('/intelligence/rss/refresh', { method: 'POST', body: JSON.stringify({ sources }) }),
+  listSources: () => request<LocalState['sources']>('/intelligence/sources'),
+  createSources: (sources: Omit<LocalState['sources'][number], 'id' | 'lastSyncedAt' | 'lastError'>[]) => request<LocalState['sources']>('/intelligence/sources', { method: 'POST', body: JSON.stringify({ sources }) }),
+  removeSource: (sourceId: string) => request<void>(`/intelligence/sources/${sourceId}`, { method: 'DELETE' }),
+  listItems: () => request<LocalState['intelligence']>('/intelligence/items'),
+  refreshRss: () => request<{ items: LocalState['intelligence']; results: { sourceId: string; ok: boolean; count: number; error?: string }[]; sources: LocalState['sources'] }>('/intelligence/rss/refresh', { method: 'POST', body: '{}' }),
   previewLink: (url: string) => request<{ url: string; title: string; summary: string; source: string }>('/intelligence/clip', { method: 'POST', body: JSON.stringify({ url }) }),
   webSearchStatus: () => request<{ configured: boolean }>('/settings/credentials/TAVILY'),
   saveWebSearchKey: (apiKey: string) => request<{ configured: boolean }>('/settings/credentials/TAVILY', { method: 'PUT', body: JSON.stringify({ apiKey }) }),

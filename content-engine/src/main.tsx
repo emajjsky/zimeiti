@@ -16,7 +16,9 @@ function displayError(error: unknown, fallback: string) {
 }
 
 function previewPublicLink(url: string) { return window.contentEngine ? window.contentEngine.intelligence.previewLink(url) : webIntelligence.previewLink(url); }
-function refreshRssSources(sources: LocalState['sources']) { return window.contentEngine ? window.contentEngine.intelligence.refreshRss(sources) : webIntelligence.refreshRss(sources); }
+async function refreshRssSources(sources: LocalState['sources']): Promise<{ items: LocalState['intelligence']; results: { sourceId: string; ok: boolean; count: number; error?: string }[]; sources?: LocalState['sources'] }> {
+  return window.contentEngine ? window.contentEngine.intelligence.refreshRss(sources) : webIntelligence.refreshRss();
+}
 function webSearchStatus() { return window.contentEngine ? window.contentEngine.intelligence.webSearchStatus() : webIntelligence.webSearchStatus(); }
 function saveWebSearchKey(apiKey: string) { return window.contentEngine ? window.contentEngine.intelligence.saveWebSearchKey(apiKey) : webIntelligence.saveWebSearchKey(apiKey); }
 function searchWeb(input: { query: string; category: string; domains: string[] }) { return window.contentEngine ? window.contentEngine.intelligence.searchWeb(input) : webIntelligence.searchWeb(input); }
@@ -178,7 +180,7 @@ function App() {
       const existingKeys = new Set(retained.map(intelligenceKey));
       const received = result.items.filter((item) => !existingKeys.has(intelligenceKey(item)));
       const now = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
-      updateState({ ...state, intelligence: [...received, ...retained], sources: state.sources.map((source) => {
+      updateState({ ...state, intelligence: [...received, ...retained], sources: result.sources ?? state.sources.map((source) => {
         const status = result.results.find((item) => item.sourceId === source.id);
         return !status ? source : { ...source, lastSyncedAt: status.ok ? now : source.lastSyncedAt, lastError: status.ok ? undefined : status.error };
       }) });
@@ -190,9 +192,11 @@ function App() {
     }
   };
   const addSource = (source: Omit<IntelligenceSource, 'id' | 'lastSyncedAt' | 'lastError'>) => {
+    if (!window.contentEngine && webAuth.session()) { void webIntelligence.createSources([source]).then((saved) => updateState({ ...state, sources: [...state.sources, ...saved] })).catch((error) => window.alert(displayError(error, '添加资讯来源失败。'))); return; }
     updateState({ ...state, sources: [...state.sources, { ...source, id: `source-${Date.now()}` }] });
   };
   const addSources = (sources: Omit<IntelligenceSource, 'id' | 'lastSyncedAt' | 'lastError'>[]) => {
+    if (!window.contentEngine && webAuth.session()) { void webIntelligence.createSources(sources).then((saved) => { const existingIds = new Set(state.sources.map((source) => source.id)); updateState({ ...state, sources: [...state.sources, ...saved.filter((source) => !existingIds.has(source.id))] }); }).catch((error) => window.alert(displayError(error, '添加资讯来源失败。'))); return; }
     const existingUrls = new Set(state.sources.map((source) => source.url.trim().toLowerCase()));
     const additions = sources.filter((source) => !existingUrls.has(source.url.trim().toLowerCase())).map((source, index) => ({ ...source, id: `source-${Date.now()}-${index}` }));
     if (additions.length) updateState({ ...state, sources: [...state.sources, ...additions] });
@@ -210,7 +214,10 @@ function App() {
       setAnalysisFeedback({ status: 'error', message: displayError(error, 'AI 分析失败。') });
     }
   };
-  const removeSource = (sourceId: string) => updateState({ ...state, sources: state.sources.filter((source) => source.id !== sourceId) });
+  const removeSource = (sourceId: string) => {
+    if (!window.contentEngine && webAuth.session()) { void webIntelligence.removeSource(sourceId).then(() => updateState({ ...state, sources: state.sources.filter((source) => source.id !== sourceId) })).catch((error) => window.alert(displayError(error, '移除资讯来源失败。'))); return; }
+    updateState({ ...state, sources: state.sources.filter((source) => source.id !== sourceId) });
+  };
   const saveFeishuTemplate = (feishuTemplate: FeishuLibraryTemplate) => updateState({ ...state, feishuTemplate });
   const saveClippedLink = (item: Omit<LocalState['intelligence'][number], 'id'>) => {
     const id = `clip-${Date.now()}`;
@@ -241,7 +248,7 @@ function App() {
     </aside>
     <main className="main-content">
       {view === 'today' && <Today onNavigate={setView} projects={state.projects} intelligence={state.intelligence} />}
-      {view === 'discover' && selectedIntel && <Discover item={selectedIntel} intelligence={state.intelligence} onSelect={setSelectedIntelId} onCreateTopic={createTopicFromIntel} onRefresh={refreshRss} refreshFeedback={refreshFeedback} analysisFeedback={analysisFeedback} onAnalyze={analyzeIntelligence} />}
+      {view === 'discover' && <Discover item={selectedIntel} intelligence={state.intelligence} onSelect={setSelectedIntelId} onCreateTopic={createTopicFromIntel} onRefresh={refreshRss} refreshFeedback={refreshFeedback} analysisFeedback={analysisFeedback} onAnalyze={analyzeIntelligence} />}
       {view === 'clip' && <LinkClipEditor onSave={saveClippedLink} onCancel={() => setView('discover')} />}
       {view === 'plan' && selectedTopic && <Plan topics={state.topics} selected={selectedTopic} onSelect={setSelectedTopicId} onCreateProject={createProjectFromTopic} onEdit={openTopicEditor} onDelete={deleteTopic} />}
       {view === 'topicEditor' && <TopicEditor key={editingTopicId ?? 'new'} topic={state.topics.find((topic) => topic.id === editingTopicId)} defaultCategory={state.workspace.primaryTopics[0] ?? '未分类'} onSave={saveTopic} onCancel={() => { setEditingTopicId(null); setView('plan'); }} />}
@@ -298,7 +305,7 @@ function Today({ onNavigate, projects, intelligence }: { onNavigate: (view: View
 
 function Task({ title, sub, action, onClick }: { title: string; sub: string; action: string; onClick: () => void }) { return <article className="task"><span className="checkbox"/><div><b>{title}</b><small>{sub}</small></div><button className="text-button" onClick={onClick}>{action}</button></article>; }
 
-function Discover({ item, intelligence, onSelect, onCreateTopic, onRefresh, refreshFeedback, analysisFeedback, onAnalyze }: { item: LocalState['intelligence'][number]; intelligence: LocalState['intelligence']; onSelect: (id: string) => void; onCreateTopic: () => void; onRefresh: () => void; refreshFeedback: { status: 'idle' | 'running' | 'success' | 'empty' | 'error'; message: string }; analysisFeedback: { status: 'idle' | 'running' | 'error'; message: string }; onAnalyze: () => void }) {
+function Discover({ item, intelligence, onSelect, onCreateTopic, onRefresh, refreshFeedback, analysisFeedback, onAnalyze }: { item?: LocalState['intelligence'][number]; intelligence: LocalState['intelligence']; onSelect: (id: string) => void; onCreateTopic: () => void; onRefresh: () => void; refreshFeedback: { status: 'idle' | 'running' | 'success' | 'empty' | 'error'; message: string }; analysisFeedback: { status: 'idle' | 'running' | 'error'; message: string }; onAnalyze: () => void }) {
   const [category, setCategory] = useState('ALL');
   const [source, setSource] = useState('ALL');
   const [language, setLanguage] = useState('ALL');

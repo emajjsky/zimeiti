@@ -25,7 +25,7 @@ async function collectRss(source) {
   return entries.map((entry, index) => {
     const title = clean(entry?.title); const summary = clean(entry?.description ?? entry?.summary ?? entry?.content ?? ''); const combined = `${title} ${summary}`;
     const link = linkFor(entry); if (!title || !match(combined, include, exclude) || !languageMatches(combined, source.language)) return null;
-    return { id: `rss-${source.id}-${Date.now()}-${index}`, title: title.slice(0, 240), summary: summary.slice(0, 500), category: source.category || '未分类', source: source.name || sourceName(url), publishedAt: formatTime(entry?.pubDate ?? entry?.published ?? entry?.updated), heat: 0, trust: source.trust || '待核验', url: link || undefined, captureMethod: 'RSS', language: detectLanguage(combined) };
+    return { id: `rss-${source.id}-${Date.now()}-${index}`, sourceId: source.id, title: title.slice(0, 240), summary: summary.slice(0, 500), category: source.category || '未分类', source: source.name || sourceName(url), publishedAt: formatTime(entry?.pubDate ?? entry?.published ?? entry?.updated), heat: 0, trust: source.trust || '待核验', url: link || undefined, captureMethod: 'RSS', language: detectLanguage(combined) };
   }).filter(Boolean);
 }
 

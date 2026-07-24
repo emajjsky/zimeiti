@@ -7,12 +7,13 @@ const { query, transaction } = require('./db.cjs');
 const { encrypt, hashPassword, verifyPassword } = require('./crypto.cjs');
 const { clipPublicLink } = require('./services/public-web.cjs');
 const { searchTavily } = require('./services/tavily.cjs');
-const { refreshRss } = require('./services/rss.cjs');
+const { listSources, createSources, removeSource, listItems, refreshWorkspaceRss } = require('./services/intelligenceRepository.cjs');
 const { enqueue } = require('./queue.cjs');
 const { listAvailableSkills } = require('./agent/skillRegistry.cjs');
 
 const app = Fastify({ logger: true, bodyLimit: 5 * 1024 * 1024 });
 const credentials = new Set(['TAVILY', 'BAILIAN']);
+const sourceInput = z.object({ name: z.string().max(160), type: z.literal('RSS'), url: z.string().url().max(2_000), category: z.string().max(120), includeKeywords: z.array(z.string().max(120)).optional(), excludeKeywords: z.array(z.string().max(120)).optional(), language: z.enum(['ALL', 'ZH', 'EN']).optional(), enabled: z.boolean(), refreshMinutes: z.number().min(5).max(10_080), trust: z.string().max(80) });
 
 app.register(cors, { origin: config.corsOrigin, credentials: false });
 app.register(jwt, { secret: config.jwtSecret });
@@ -99,7 +100,15 @@ app.put('/api/v1/settings/credentials/:provider', { preHandler: authenticate }, 
 
 app.post('/api/v1/intelligence/clip', { preHandler: authenticate }, async (request) => clipPublicLink(z.object({ url: z.string().url().max(2_000) }).parse(request.body).url));
 app.post('/api/v1/intelligence/search', { preHandler: authenticate }, async (request) => searchTavily((await currentWorkspace(request.user.sub)).id, z.object({ query: z.string(), category: z.string().optional(), domains: z.array(z.string()).optional() }).parse(request.body)));
-app.post('/api/v1/intelligence/rss/refresh', { preHandler: authenticate }, async (request) => refreshRss(z.object({ sources: z.array(z.object({ id: z.string(), name: z.string(), type: z.literal('RSS'), url: z.string().url(), category: z.string(), includeKeywords: z.array(z.string()).optional(), excludeKeywords: z.array(z.string()).optional(), language: z.enum(['ALL', 'ZH', 'EN']).optional(), enabled: z.boolean(), refreshMinutes: z.number(), trust: z.string() })) }).parse(request.body).sources));
+app.get('/api/v1/intelligence/sources', { preHandler: authenticate }, async (request) => listSources((await currentWorkspace(request.user.sub)).id));
+app.post('/api/v1/intelligence/sources', { preHandler: authenticate }, async (request, reply) => {
+  const input = z.object({ sources: z.array(sourceInput).min(1).max(30) }).parse(request.body);
+  const workspace = await currentWorkspace(request.user.sub);
+  reply.code(201).send(await createSources(workspace.id, input.sources));
+});
+app.delete('/api/v1/intelligence/sources/:id', { preHandler: authenticate }, async (request, reply) => { await removeSource((await currentWorkspace(request.user.sub)).id, request.params.id); reply.code(204).send(); });
+app.get('/api/v1/intelligence/items', { preHandler: authenticate }, async (request) => listItems((await currentWorkspace(request.user.sub)).id));
+app.post('/api/v1/intelligence/rss/refresh', { preHandler: authenticate }, async (request) => refreshWorkspaceRss((await currentWorkspace(request.user.sub)).id));
 
 app.get('/api/v1/agent/skills', { preHandler: authenticate }, async (request) => listAvailableSkills((await currentWorkspace(request.user.sub)).id));
 
