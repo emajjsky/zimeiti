@@ -17,6 +17,7 @@ declare global {
           items: LocalState['intelligence'];
           results: { sourceId: string; ok: boolean; count: number; error?: string }[];
         }>;
+        previewLink: (url: string) => Promise<{ url: string; title: string; summary: string; source: string }>;
         analyze: (item: LocalState['intelligence'][number]) => Promise<NonNullable<LocalState['intelligence'][number]['analysis']>>;
         onUpdated: (callback: (items: LocalState['intelligence']) => void) => () => void;
       };

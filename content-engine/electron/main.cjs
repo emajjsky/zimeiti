@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, safeStorage } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
+const { lookup } = require('node:dns/promises');
 const { spawn } = require('node:child_process');
 const { XMLParser } = require('fast-xml-parser');
 
@@ -110,6 +111,8 @@ function registerIpc() {
     });
     return { items, results };
   });
+
+  ipcMain.handle('intelligence:preview-link', async (_event, rawUrl) => previewPublicLink(rawUrl));
 
   ipcMain.handle('intelligence:analyze', async (_event, item) => {
     if (!item || typeof item !== 'object' || typeof item.title !== 'string' || item.title.length > 500) throw new Error('资讯内容无效，无法分析。');
@@ -517,6 +520,63 @@ async function collectRss(source) {
     captureMethod: 'RSS',
     url: entryUrl(entry),
   }));
+}
+
+async function previewPublicLink(rawUrl) {
+  let url = await validatePublicUrl(rawUrl);
+  let response;
+  for (let redirects = 0; redirects < 4; redirects += 1) {
+    response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(15_000), headers: { 'User-Agent': 'ContentEngine/0.1 Link Clip' } });
+    if (![301, 302, 303, 307, 308].includes(response.status)) break;
+    const location = response.headers.get('location');
+    if (!location) throw new Error('链接跳转缺少目标地址。');
+    url = await validatePublicUrl(new URL(location, url).toString());
+  }
+  if (!response?.ok) throw new Error(`读取链接失败：${response?.status ?? '网络错误'}`);
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType && !/text\/html|application\/xhtml\+xml/i.test(contentType)) throw new Error('该链接不是可读取的网页。');
+  const html = await response.text();
+  if (html.length > 1_000_000) throw new Error('网页内容超过 1MB，无法剪藏。');
+  const title = htmlMeta(html, 'og:title') || htmlMeta(html, 'twitter:title') || htmlTitle(html) || '未命名文章';
+  const summary = htmlMeta(html, 'og:description') || htmlMeta(html, 'description') || '';
+  return { url: url.toString(), title: clip(text(title), 240), summary: clip(text(summary), 500), source: sourceNameForUrl(url) };
+}
+
+async function validatePublicUrl(rawUrl) {
+  if (typeof rawUrl !== 'string' || rawUrl.trim().length > 2_000) throw new Error('请输入有效的公开网页链接。');
+  const url = new URL(rawUrl.trim());
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('仅支持不含账号信息的 HTTP(S) 公开链接。');
+  const hostname = url.hostname.toLowerCase();
+  if (hostname === 'localhost' || hostname.endsWith('.local')) throw new Error('不允许读取本机或局域网链接。');
+  const addresses = await lookup(hostname, { all: true, verbatim: true });
+  if (!addresses.length || addresses.some((entry) => isPrivateAddress(entry.address))) throw new Error('不允许读取本机或局域网链接。');
+  return url;
+}
+
+function isPrivateAddress(address) {
+  const value = address.toLowerCase();
+  if (value === '::1' || value.startsWith('fc') || value.startsWith('fd') || value.startsWith('fe80:')) return true;
+  if (!/^\d+\.\d+\.\d+\.\d+$/.test(value)) return false;
+  const [a, b] = value.split('.').map(Number);
+  return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+}
+
+function htmlMeta(html, key) {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const tag = new RegExp(`<meta\\b(?=[^>]*(?:property|name)=["']${escaped}["'])[^>]*>`, 'i').exec(html)?.[0];
+  const content = tag && /content=["']([^"']*)["']/i.exec(tag)?.[1];
+  return content ? content.replace(/&quot;/gi, '"').replace(/&#39;/g, "'") : '';
+}
+
+function htmlTitle(html) { return /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1] ?? ''; }
+
+function sourceNameForUrl(url) {
+  const host = url.hostname.toLowerCase();
+  if (host === 'mp.weixin.qq.com') return '公众号文章';
+  if (host === 'x.com' || host.endsWith('.x.com') || host === 'twitter.com' || host.endsWith('.twitter.com')) return 'X';
+  if (host.includes('toutiao.com')) return '今日头条';
+  if (host.includes('cctv.com')) return '央视频';
+  return host.replace(/^www\./, '');
 }
 
 function parseIntelligenceAnalysis(content) {

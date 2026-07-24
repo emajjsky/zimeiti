@@ -184,6 +184,11 @@ function App() {
   const addSource = (source: Omit<IntelligenceSource, 'id' | 'lastSyncedAt' | 'lastError'>) => {
     updateState({ ...state, sources: [...state.sources, { ...source, id: `source-${Date.now()}` }] });
   };
+  const addSources = (sources: Omit<IntelligenceSource, 'id' | 'lastSyncedAt' | 'lastError'>[]) => {
+    const existingUrls = new Set(state.sources.map((source) => source.url.trim().toLowerCase()));
+    const additions = sources.filter((source) => !existingUrls.has(source.url.trim().toLowerCase())).map((source, index) => ({ ...source, id: `source-${Date.now()}-${index}` }));
+    if (additions.length) updateState({ ...state, sources: [...state.sources, ...additions] });
+  };
   const analyzeIntelligence = async () => {
     if (!selectedIntel) return;
     if (!window.contentEngine) { setAnalysisFeedback({ status: 'error', message: '请在桌面端执行 AI 分析。' }); return; }
@@ -234,7 +239,7 @@ function App() {
       {view === 'assets' && <Utility title="素材库" description="本地与云端素材将以目录、紧凑列表和素材检查器呈现；不会打断内容项目主编辑流程。" />}
       {view === 'automation' && <Utility title="自动化规则" description="首期使用预设任务：每日热点、飞书镜像、数据回流与本机渲染；不做自由流程画布。" />}
       {view === 'models' && <ModelSettingsScreen />}
-      {view === 'settings' && <SettingsHub sources={state.sources} template={state.feishuTemplate} onTemplateChange={saveFeishuTemplate} onAddSource={addSource} onRemoveSource={removeSource} />}
+      {view === 'settings' && <SettingsHub sources={state.sources} template={state.feishuTemplate} onTemplateChange={saveFeishuTemplate} onAddSource={addSource} onAddSources={addSources} onRemoveSource={removeSource} />}
     </main>
   </div>;
 }
@@ -290,7 +295,41 @@ function Discover({ item, intelligence, onSelect, onCreateTopic, onRefresh, refr
   </>; }
 
 function LinkClipEditor({ onSave, onCancel }: { onSave: (item: Omit<LocalState['intelligence'][number], 'id'>) => void; onCancel: () => void }) {
-  const [url, setUrl] = useState(''); const [title, setTitle] = useState(''); const [source, setSource] = useState('公众号文章'); const [summary, setSummary] = useState(''); const [category, setCategory] = useState('未分类'); const [note, setNote] = useState(''); const [error, setError] = useState('');
+  const [url, setUrl] = useState('');
+  const [title, setTitle] = useState('');
+  const [source, setSource] = useState('');
+  const [summary, setSummary] = useState('');
+  const [category, setCategory] = useState('未分类');
+  const [note, setNote] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const preview = async () => {
+    if (!window.contentEngine) { setError('请在桌面端读取链接。'); return; }
+    setLoading(true); setError('');
+    try {
+      const result = await window.contentEngine.intelligence.previewLink(url);
+      setUrl(result.url); setTitle(result.title); setSummary(result.summary); setSource(result.source);
+    } catch (error) { setError(displayError(error, '读取链接失败。')); }
+    finally { setLoading(false); }
+  };
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    try { new URL(url); } catch { setError('请输入有效链接。'); return; }
+    if (!title.trim()) { setError('请先读取链接或补充文章标题。'); return; }
+    onSave({ title: title.trim(), summary: summary.trim() || '用户主动剪藏，待补充摘要。', source: source.trim() || '手工剪藏', category: category.trim() || '未分类', publishedAt: '刚刚', heat: 0, trust: '待核验', url: url.trim(), note: note.trim(), captureMethod: 'MANUAL_LINK' });
+  };
+  return <section className="topic-editor-page"><div className="editor-page-head"><div><div className="eyebrow">DISCOVER / 链接剪藏</div><h1 className="page-title">收藏链接</h1></div><button className="text-button" onClick={onCancel}>返回热点</button></div><form className="topic-form" onSubmit={submit}><label className="form-title">原文链接<div className="link-input-row"><input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="公众号、X、今日头条或公开网页链接" autoFocus /><button type="button" className="button" disabled={loading || !url.trim()} onClick={() => void preview()}>{loading ? '读取中' : '读取链接'}</button></div></label><div className="form-grid"><label>文章标题<input value={title} onChange={(event) => setTitle(event.target.value)} /></label><label>来源<input value={source} onChange={(event) => setSource(event.target.value)} /></label></div><label>摘要<textarea value={summary} onChange={(event) => setSummary(event.target.value)} rows={5} /></label><div className="form-grid"><label>归属题材<input value={category} onChange={(event) => setCategory(event.target.value)} /></label><label>收藏备注<input value={note} onChange={(event) => setNote(event.target.value)} /></label></div>{error && <p className="form-error">{error}</p>}<footer><button className="text-button" type="button" onClick={onCancel}>取消</button><button className="button primary" type="submit">保存到热点池 <ChevronRight size={17}/></button></footer></form></section>;
+}
+
+function LegacyLinkClipEditor({ onSave, onCancel }: { onSave: (item: Omit<LocalState['intelligence'][number], 'id'>) => void; onCancel: () => void }) {
+  const [url, setUrl] = useState(''); const [title, setTitle] = useState(''); const [source, setSource] = useState(''); const [summary, setSummary] = useState(''); const [category, setCategory] = useState('未分类'); const [note, setNote] = useState(''); const [error, setError] = useState(''); const [loading, setLoading] = useState(false);
+  const preview = async () => {
+    if (!window.contentEngine) { setError('请在桌面端读取链接。'); return; }
+    setLoading(true); setError('');
+    try { const result = await window.contentEngine.intelligence.previewLink(url); setUrl(result.url); setTitle(result.title); setSummary(result.summary); setSource(result.source); }
+    catch (error) { setError(displayError(error, '读取链接失败。')); }
+    finally { setLoading(false); }
+  };
   const submit = (event: React.FormEvent) => { event.preventDefault(); try { new URL(url); } catch { setError('请输入有效链接。'); return; } if (!title.trim()) { setError('请补充文章标题。'); return; } onSave({ title:title.trim(), summary:summary.trim() || '用户主动剪藏，待补充摘要。', source:source.trim() || '手工剪藏', category:category.trim() || '未分类', publishedAt:'刚刚', heat:0, trust:'待核验', url:url.trim(), note:note.trim(), captureMethod:'MANUAL_LINK' }); };
   return <section className="topic-editor-page"><div className="editor-page-head"><div><div className="eyebrow">DISCOVER / 链接剪藏</div><h1 className="page-title">收藏一篇值得研究的文章</h1><p className="page-subtitle">适用于公众号文章、公开网页和报告链接。系统不会绕过登录、付费墙或访问限制。</p></div><button className="text-button" onClick={onCancel}>返回热点</button></div><form className="topic-form" onSubmit={submit}><label className="form-title">原文链接<input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="粘贴公众号文章或公开网页链接" autoFocus /></label><div className="form-grid"><label>文章标题<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="从原文复制标题" /></label><label>来源 / 公众号名<input value={source} onChange={(event) => setSource(event.target.value)} /></label></div><label>摘要或核心内容<textarea value={summary} onChange={(event) => setSummary(event.target.value)} rows={5} placeholder="粘贴文章摘要、关键段落或你的理解。" /></label><div className="form-grid"><label>归属题材<input value={category} onChange={(event) => setCategory(event.target.value)} /></label><label>收藏备注<input value={note} onChange={(event) => setNote(event.target.value)} placeholder="为什么值得关注？" /></label></div>{error && <p className="form-error">{error}</p>}<footer><button className="text-button" type="button" onClick={onCancel}>取消</button><button className="button primary" type="submit">保存到热点池 <ChevronRight size={17}/></button></footer></form></section>;
 }
@@ -775,7 +814,15 @@ function ExternalApiEditor({ connection, onBack, onSave, onTest }: { connection?
   return <div className="external-editor"><button className="back-button" onClick={onBack}><ArrowLeft size={17}/>返回</button><PageHeader eyebrow="SETTINGS / 外部 API" title={connection ? `编辑 ${connection.label}` : '新增外部 API'} /><section className="external-provider-picker"><div className="provider-grid">{externalModelProviders.map((item) => <button type="button" key={item.provider} className={`provider-card ${draft.provider === item.provider ? 'selected' : ''}`} onClick={() => { setDraft(connectionDraftForProvider(item.provider)); setNotice(null); }}><b>{item.label}</b><small>{item.detail}</small></button>)}</div></section><section className="external-editor-form"><label>连接名称<input value={draft.label} onChange={(event) => setDraft({ ...draft, label: event.target.value })} /></label><label>API 地址<input value={draft.baseUrl} onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })} /></label><label>API Key<input type="password" value={draft.apiKey} onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} placeholder={draft.id ? '留空表示不更新' : '粘贴 API Key'} autoComplete="off" /></label>{notice && <p className={`model-notice ${notice.type}`} aria-live="polite">{notice.type === 'success' ? <CircleCheck size={17}/> : <CircleAlert size={17}/>} {notice.text}</p>}<footer><button className="button" type="button" disabled={busy !== 'idle'} onClick={() => void test()}><KeyRound size={16}/>{busy === 'testing' ? '检查中' : '保存并检查'}</button><button className="button primary" type="button" disabled={busy !== 'idle'} onClick={() => void save()}>{busy === 'saving' ? '保存中' : '保存'}</button></footer></section></div>;
 }
 
-function SettingsHub({ sources, template, onTemplateChange, onAddSource, onRemoveSource }: { sources: IntelligenceSource[]; template: FeishuLibraryTemplate; onTemplateChange: (template: FeishuLibraryTemplate) => void; onAddSource: (source: Omit<IntelligenceSource, 'id' | 'lastSyncedAt' | 'lastError'>) => void; onRemoveSource: (id: string) => void }) {
+const recommendedRssSources: Omit<IntelligenceSource, 'id' | 'lastSyncedAt' | 'lastError'>[] = [
+  { name: 'TechCrunch AI', type: 'RSS', url: 'https://techcrunch.com/category/artificial-intelligence/feed/', category: 'AI', enabled: true, refreshMinutes: 60, trust: '待核验' },
+  { name: 'MIT Technology Review', type: 'RSS', url: 'https://www.technologyreview.com/feed/', category: '科技', enabled: true, refreshMinutes: 120, trust: '待核验' },
+  { name: 'Hacker News 高热', type: 'RSS', url: 'https://hnrss.org/newest?points=100', category: '科技', enabled: true, refreshMinutes: 60, trust: '待核验' },
+  { name: 'Google AI', type: 'RSS', url: 'https://blog.google/technology/ai/rss/', category: 'AI', enabled: true, refreshMinutes: 120, trust: '可信' },
+  { name: 'OpenAI News', type: 'RSS', url: 'https://openai.com/news/rss.xml', category: 'AI', enabled: true, refreshMinutes: 120, trust: '可信' },
+];
+
+function SettingsHub({ sources, template, onTemplateChange, onAddSource, onAddSources, onRemoveSource }: { sources: IntelligenceSource[]; template: FeishuLibraryTemplate; onTemplateChange: (template: FeishuLibraryTemplate) => void; onAddSource: (source: Omit<IntelligenceSource, 'id' | 'lastSyncedAt' | 'lastError'>) => void; onAddSources: (sources: Omit<IntelligenceSource, 'id' | 'lastSyncedAt' | 'lastError'>[]) => void; onRemoveSource: (id: string) => void }) {
   const [section, setSection] = useState<'sources' | 'feishu' | 'models'>('sources');
   const [models, setModels] = useState<ModelConnection[]>([]);
   const [name, setName] = useState('');
@@ -788,10 +835,10 @@ function SettingsHub({ sources, template, onTemplateChange, onAddSource, onRemov
     onAddSource({ name: name.trim() || '未命名 RSS 源', type: 'RSS', url: url.trim(), category: category.trim() || '未分类', enabled: true, refreshMinutes: 60, trust: '待核验' });
     setName(''); setUrl(''); setError('');
   };
-  const addExample = () => onAddSource({ name: 'TechCrunch AI（示例）', type: 'RSS', url: 'https://techcrunch.com/category/artificial-intelligence/feed/', category: 'AI', enabled: true, refreshMinutes: 60, trust: '待核验' });
+  const addRecommendedSources = () => onAddSources(recommendedRssSources);
   const loadModels = () => void window.contentEngine?.models.list().then(setModels).catch(() => undefined);
   useEffect(loadModels, []);
-  return <><PageHeader eyebrow="SETTINGS / 工作流设置" title={section === 'sources' ? '先让热点流进来' : '再定义飞书内容库'} subtitle={section === 'sources' ? '第一步只需添加一个资讯来源；不知道 RSS 地址时可以先使用示例源。' : '这里仅保存内容库模板，不会连接或修改任何飞书数据。'} /><div className="settings-tabs"><button className={section === 'sources' ? 'active' : ''} onClick={() => setSection('sources')}>1 情报源</button><button className={section === 'feishu' ? 'active' : ''} onClick={() => setSection('feishu')}>2 飞书内容库</button></div>{section === 'sources' ? <><section className="source-start"><div><b>还不知道填什么？</b><p>先添加示例源，到“发现”页点击刷新热点。确认流程可用后，再替换成你信任的行业来源。</p></div><button className="button" onClick={addExample}>添加示例源</button></section><div className="sources-layout"><section className="source-list"><div className="panel-head"><h2>已接入情报源</h2><span className="chip mint">{sources.length} 个</span></div>{sources.length === 0 ? <p className="source-empty">尚未添加来源。可以使用上方示例，或填写一个公开 RSS 地址。</p> : sources.map((source) => <article className="source-row" key={source.id}><div><b>{source.name}</b><small>{source.category} · 每 {source.refreshMinutes} 分钟</small><p>{source.url}</p>{source.lastError && <em>{source.lastError}</em>}</div><div><span className={`chip ${source.lastError ? 'red' : 'mint'}`}>{source.lastSyncedAt ? `上次 ${source.lastSyncedAt}` : '尚未刷新'}</span><button className="text-button danger" onClick={() => onRemoveSource(source.id)}>移除</button></div></article>)}</section><form className="source-form" onSubmit={submit}><h2>添加自己的 RSS 源</h2><label>来源名称<input value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：36氪 AI" /></label><label>RSS 地址<input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="在资讯网站找到的订阅地址" /></label><label>归属题材<input value={category} onChange={(event) => setCategory(event.target.value)} /></label>{error && <p className="form-error">{error}</p>}<button className="button primary wide" type="submit"><Plus size={16}/>添加并启用</button><small>支持公开 HTTP(S) RSS。后续可接 Tavily 搜索，不要求你永远手填 RSS。</small></form></div></> : <FeishuTemplateEditor template={template} onChange={onTemplateChange} />}</>;
+  return <><PageHeader eyebrow="SETTINGS / 工作流设置" title={section === 'sources' ? '资讯来源' : '飞书内容库'} /><div className="settings-tabs"><button className={section === 'sources' ? 'active' : ''} onClick={() => setSection('sources')}>情报源</button><button className={section === 'feishu' ? 'active' : ''} onClick={() => setSection('feishu')}>飞书内容库</button></div>{section === 'sources' ? <><section className="source-start"><div><b>推荐来源</b><p>RSS 自动更新；公众号、X、今日头条和公开网页使用左侧“剪藏链接”录入。</p></div><button className="button" onClick={addRecommendedSources}>添加推荐来源</button></section><div className="sources-layout"><section className="source-list"><div className="panel-head"><h2>已接入情报源</h2><span className="chip mint">{sources.length} 个</span></div>{sources.length === 0 ? <p className="source-empty">尚未添加来源。</p> : sources.map((source) => <article className="source-row" key={source.id}><div><b>{source.name}</b><small>{source.category} · 每 {source.refreshMinutes} 分钟</small><p>{source.url}</p>{source.lastError && <em>{source.lastError}</em>}</div><div><span className={`chip ${source.lastError ? 'red' : 'mint'}`}>{source.lastSyncedAt ? `上次 ${source.lastSyncedAt}` : '尚未刷新'}</span><button className="text-button danger" onClick={() => onRemoveSource(source.id)}>移除</button></div></article>)}</section><form className="source-form" onSubmit={submit}><h2>添加 RSS</h2><label>来源名称<input value={name} onChange={(event) => setName(event.target.value)} /></label><label>RSS 地址<input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://..." /></label><label>归属题材<input value={category} onChange={(event) => setCategory(event.target.value)} /></label>{error && <p className="form-error">{error}</p>}<button className="button primary wide" type="submit"><Plus size={16}/>添加并启用</button></form></div></> : <FeishuTemplateEditor template={template} onChange={onTemplateChange} />}</>;
 }
 
 function FeishuTemplateEditor({ template, onChange }: { template: FeishuLibraryTemplate; onChange: (template: FeishuLibraryTemplate) => void }) {
