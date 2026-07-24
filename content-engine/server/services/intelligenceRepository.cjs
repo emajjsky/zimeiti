@@ -34,7 +34,10 @@ async function removeSource(workspaceId, sourceId) {
 }
 
 async function listItems(workspaceId) {
-  const result = await query('SELECT * FROM intelligence_items WHERE workspace_id = $1 ORDER BY COALESCE(published_at, created_at) DESC LIMIT 500', [workspaceId]);
+  await purgeExpiredItems(workspaceId);
+  const result = await query(`SELECT * FROM intelligence_items
+    WHERE workspace_id = $1 AND COALESCE(published_at, created_at) >= now() - interval '30 days'
+    ORDER BY COALESCE(published_at, created_at) DESC LIMIT 500`, [workspaceId]);
   return result.rows.map(itemDto);
 }
 
@@ -43,7 +46,9 @@ async function refreshWorkspaceRss(workspaceId) {
   const collected = await refreshRss(sources);
   const savedItems = [];
   await transaction(async (client) => {
+    await purgeExpiredItems(workspaceId, client);
     for (const item of collected.items) {
+      if (isExpired(item.publishedAt)) continue;
       const source = sources.find((candidate) => candidate.id === item.sourceId);
       if (!source) continue;
       const sourceKey = item.url ? `url:${item.url}` : `title:${normalize(item.title)}`;
@@ -58,6 +63,17 @@ async function refreshWorkspaceRss(workspaceId) {
   return { items: savedItems, results: collected.results, sources: await listSources(workspaceId) };
 }
 
+async function purgeExpiredItems(workspaceId, client = null) {
+  const executor = client ?? { query };
+  await executor.query(`DELETE FROM intelligence_items
+    WHERE workspace_id = $1 AND COALESCE(published_at, created_at) < now() - interval '30 days'`, [workspaceId]);
+}
+
+function isExpired(value) {
+  const timestamp = new Date(value).valueOf();
+  return Number.isFinite(timestamp) && timestamp < Date.now() - 30 * 24 * 60 * 60 * 1000;
+}
+
 function normalize(value) { return String(value).replace(/\s+/g, ' ').trim().toLowerCase(); }
 
-module.exports = { listSources, createSources, removeSource, listItems, refreshWorkspaceRss };
+module.exports = { listSources, createSources, removeSource, listItems, refreshWorkspaceRss, purgeExpiredItems };

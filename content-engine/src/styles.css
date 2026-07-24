@@ -40,6 +40,7 @@
 .discover-filters { display:grid; gap:12px; margin:20px 0 24px; }
 .source-filters { display:flex; gap:8px; overflow-x:auto; padding:0 0 3px; scrollbar-width:thin; }
 .source-filters .filter { flex:none; margin:0; white-space:nowrap; }
+.time-filters { display:flex; gap:0; }.time-filters button { min-height:40px; padding:0 10px; border:1px solid var(--ink); border-right:0; background:#fff; color:var(--ink); font-size:12px; font-weight:700; white-space:nowrap; }.time-filters button:last-child { border-right:1px solid var(--ink); }.time-filters button.active { background:var(--ink); color:#fff; }
 .discover-filter-controls { justify-content:flex-start; }
 .discover-layout { grid-template-columns:minmax(0,1fr) 340px; align-items:start; gap:24px; }
 .signal-list { display:block; column-count:2; column-gap:16px; }
