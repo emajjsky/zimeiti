@@ -26,7 +26,7 @@ const mainNav: { view: View; label: string; icon: typeof CalendarDays }[] = [
 const utilityNav: { view: View; label: string; icon: typeof CalendarDays }[] = [
   { view: 'assets', label: '素材库', icon: FolderOpen },
   { view: 'clip', label: '剪藏链接', icon: Compass },
-  { view: 'automation', label: '自动化', icon: Zap },
+  { view: 'automation', label: '网页搜索', icon: Zap },
   { view: 'models', label: '模型与 API', icon: Settings },
   { view: 'settings', label: '设置', icon: Settings },
 ];
@@ -211,6 +211,10 @@ function App() {
     updateState({ ...state, intelligence: [{ ...item, id }, ...state.intelligence] });
     setSelectedIntelId(id); setView('discover');
   };
+  const saveSearchCandidate = (item: LocalState['intelligence'][number]) => {
+    if (state.intelligence.some((current) => intelligenceKey(current) === intelligenceKey(item))) return;
+    updateState({ ...state, intelligence: [{ ...item, id: `search-${Date.now()}` }, ...state.intelligence] });
+  };
   const projectVersions = featuredProject?.versions ?? [];
   const activeVersion = projectVersions.find((item) => item.platform === activePlatform);
   const platformProgress = useMemo(() => projectVersions.filter((version) => version.status === 'PREFLIGHT_PASSED').length, [projectVersions]);
@@ -239,7 +243,7 @@ function App() {
       {view === 'publish' && <Publish project={featuredProject} onNavigate={setView} />}
       {view === 'review' && <Review onNavigate={setView} />}
       {view === 'assets' && <Utility title="素材库" description="本地与云端素材将以目录、紧凑列表和素材检查器呈现；不会打断内容项目主编辑流程。" />}
-      {view === 'automation' && <Utility title="自动化规则" description="首期使用预设任务：每日热点、飞书镜像、数据回流与本机渲染；不做自由流程画布。" />}
+      {view === 'automation' && <WebSearchPanel onSave={saveSearchCandidate} />}
       {view === 'models' && <ModelSettingsScreen />}
       {view === 'settings' && <SettingsHub sources={state.sources} template={state.feishuTemplate} onTemplateChange={saveFeishuTemplate} onAddSource={addSource} onAddSources={addSources} onRemoveSource={removeSource} />}
     </main>
@@ -895,6 +899,15 @@ function FeishuTemplateEditor({ template, onChange }: { template: FeishuLibraryT
   const tables = ['热点库', '选题池', ...(template.includeSchedule ? ['内容排期'] : []), ...(template.includeReview ? ['复盘数据'] : []), '同步日志'];
   const update = (patch: Partial<FeishuLibraryTemplate>) => onChange({ ...template, ...patch, status: 'READY_TO_CREATE' });
   return <section className="feishu-template"><div className="template-head"><div><div className="eyebrow">FEISHU / 内容库模板</div><h2>先定义内容库，再授权创建</h2><p>不会写入你的现有 Base；真正创建前会要求飞书授权和最终确认。</p></div><span className="chip yellow">{template.status === 'DRAFT' ? '待配置' : template.status === 'CREATED' ? '已创建' : '待授权创建'}</span></div><div className="template-grid"><label>内容库名称<input value={template.name} onChange={(event) => update({ name: event.target.value })} /></label><fieldset><legend>题材组织方式</legend><button className={template.topicStorage === 'ONE_TABLE' ? 'chosen' : ''} onClick={() => update({ topicStorage: 'ONE_TABLE' })} type="button">一张总表</button><button className={template.topicStorage === 'BY_CATEGORY' ? 'chosen' : ''} onClick={() => update({ topicStorage: 'BY_CATEGORY' })} type="button">按题材分表</button></fieldset><label className="toggle-line"><input type="checkbox" checked={template.includeSchedule} onChange={(event) => update({ includeSchedule: event.target.checked })} />创建内容排期表</label><label className="toggle-line"><input type="checkbox" checked={template.includeReview} onChange={(event) => update({ includeReview: event.target.checked })} />创建复盘数据表</label></div><div className="template-preview"><b>生成预览</b><div>{tables.map((table) => <span key={table}>{table}</span>)}</div><small>热点库和选题池会包含受保护的 <code>content_engine_id</code> 字段，用于稳定同步。</small></div><button className="button primary" type="button" disabled>下一步：授权并创建（云端 OAuth 开发中）</button></section>;
+}
+
+function WebSearchPanel({ onSave }: { onSave: (item: LocalState['intelligence'][number]) => void }) {
+  const [apiKey, setApiKey] = useState(''); const [configured, setConfigured] = useState(false); const [query, setQuery] = useState(''); const [category, setCategory] = useState('科技'); const [domains, setDomains] = useState<string[]>([]); const [results, setResults] = useState<LocalState['intelligence']>([]); const [busy, setBusy] = useState(false); const [notice, setNotice] = useState('');
+  useEffect(() => { void window.contentEngine?.intelligence.webSearchStatus().then((result) => setConfigured(result.configured)); }, []);
+  const toggleDomain = (domain: string) => setDomains((current) => current.includes(domain) ? current.filter((item) => item !== domain) : [...current, domain]);
+  const saveKey = async () => { try { await window.contentEngine?.intelligence.saveWebSearchKey(apiKey); setApiKey(''); setConfigured(true); setNotice('已保存。'); } catch (error) { setNotice(displayError(error, '保存失败。')); } };
+  const search = async () => { setBusy(true); setNotice(''); try { const items = await window.contentEngine?.intelligence.searchWeb({ query, category, domains }); setResults(items ?? []); } catch (error) { setNotice(displayError(error, '搜索失败。')); } finally { setBusy(false); } };
+  return <><PageHeader eyebrow="DISCOVER / 网页搜索" title="搜索候选" /><section className="web-search"><div className="web-search-config"><label>Tavily API Key<input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={configured ? '已保存，输入可替换' : '粘贴 Tavily API Key'} /></label><button className="button" disabled={!apiKey.trim()} onClick={() => void saveKey()}>保存</button></div><div className="web-search-form"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="例如：人工智能 大模型 最新政策" /><input value={category} onChange={(event) => setCategory(event.target.value)} placeholder="题材" /><div className="domain-picks">{[['toutiao.com','今日头条'],['mp.weixin.qq.com','公众号'],['x.com','X']].map(([domain,label]) => <button key={domain} className={domains.includes(domain) ? 'chosen' : ''} onClick={() => toggleDomain(domain)}>{label}</button>)}</div><button className="button primary" disabled={busy || !configured || !query.trim()} onClick={() => void search()}>{busy ? '搜索中' : '搜索公开链接'}</button></div>{notice && <p className="form-error">{notice}</p>}<div className="search-results">{results.map((item) => <article key={item.id}><div><b>{item.title}</b><p>{item.summary}</p><small>{item.source} · {item.category}</small></div><button className="button" onClick={() => onSave(item)}>加入热点池</button></article>)}</div></section></>;
 }
 
 function Utility({ title, description }: { title: string; description: string }) { return <><PageHeader eyebrow="UTILITY / 辅助能力" title={title}/><section className="utility"><Lightbulb size={24}/><h2>该模块已预留</h2><p>{description}</p></section></>; }

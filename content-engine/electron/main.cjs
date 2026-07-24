@@ -48,6 +48,11 @@ function initialiseDatabase() {
       item_json TEXT NOT NULL,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS web_search_settings (
+      setting_id TEXT PRIMARY KEY,
+      api_key_encrypted BLOB NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
     CREATE TABLE IF NOT EXISTS api_usage_logs (
       id TEXT PRIMARY KEY,
       task TEXT NOT NULL,
@@ -113,6 +118,14 @@ function registerIpc() {
   });
 
   ipcMain.handle('intelligence:preview-link', async (_event, rawUrl) => previewPublicLink(rawUrl));
+  ipcMain.handle('intelligence:web-search-status', () => ({ configured: Boolean(database.prepare('SELECT 1 FROM web_search_settings WHERE setting_id = ?').get('tavily')) }));
+  ipcMain.handle('intelligence:web-search-save', (_event, apiKey) => {
+    if (typeof apiKey !== 'string' || !apiKey.trim()) throw new Error('请输入 Tavily API Key。');
+    if (!safeStorage.isEncryptionAvailable()) throw new Error('系统安全存储不可用，无法保存 Tavily API Key。');
+    database.prepare(`INSERT INTO web_search_settings (setting_id, api_key_encrypted, updated_at) VALUES ('tavily', ?, CURRENT_TIMESTAMP) ON CONFLICT(setting_id) DO UPDATE SET api_key_encrypted = excluded.api_key_encrypted, updated_at = CURRENT_TIMESTAMP`).run(safeStorage.encryptString(apiKey.trim()));
+    return { configured: true };
+  });
+  ipcMain.handle('intelligence:web-search', async (_event, input) => searchWebCandidates(input));
 
   ipcMain.handle('intelligence:analyze', async (_event, item) => {
     if (!item || typeof item !== 'object' || typeof item.title !== 'string' || item.title.length > 500) throw new Error('资讯内容无效，无法分析。');
@@ -607,6 +620,22 @@ function sourceNameForUrl(url) {
   if (host.includes('toutiao.com')) return '今日头条';
   if (host.includes('cctv.com')) return '央视频';
   return host.replace(/^www\./, '');
+}
+
+async function searchWebCandidates(input) {
+  const row = database.prepare('SELECT api_key_encrypted FROM web_search_settings WHERE setting_id = ?').get('tavily');
+  if (!row) throw new Error('请先在“网页搜索”保存 Tavily API Key。');
+  const query = typeof input?.query === 'string' ? input.query.trim() : '';
+  if (!query || query.length > 300) throw new Error('请输入 1 到 300 个字符的搜索词。');
+  const domains = Array.isArray(input?.domains) ? input.domains.filter((item) => typeof item === 'string' && item.length < 120).slice(0, 5) : [];
+  const response = await fetch('https://api.tavily.com/search', { method: 'POST', signal: AbortSignal.timeout(30_000), headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: safeStorage.decryptString(row.api_key_encrypted), query, topic: 'news', search_depth: 'basic', max_results: 10, include_domains: domains.length ? domains : undefined }) });
+  if (!response.ok) throw new Error(`Tavily 搜索失败：HTTP ${response.status}`);
+  const payload = await response.json();
+  return (Array.isArray(payload?.results) ? payload.results : []).map((result, index) => {
+    const url = typeof result?.url === 'string' ? result.url : '';
+    let parsed; try { parsed = new URL(url); } catch { return null; }
+    return { id: `search-${Date.now()}-${index}`, title: clip(text(String(result?.title ?? '未命名结果')), 240), summary: clip(text(String(result?.content ?? '')), 500), url, source: sourceNameForUrl(parsed), publishedAt: formatTime(String(result?.published_date ?? '')), category: typeof input?.category === 'string' && input.category.trim() ? input.category.trim() : '未分类', heat: 0, trust: '待核验', captureMethod: 'SEARCH', language: detectLanguage(`${result?.title ?? ''} ${result?.content ?? ''}`) };
+  }).filter(Boolean);
 }
 
 function parseIntelligenceAnalysis(content) {

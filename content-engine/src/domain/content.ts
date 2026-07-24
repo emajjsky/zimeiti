@@ -24,7 +24,7 @@ export interface IntelligenceItem {
   heat: number;
   trust: '可信' | '待核验';
   url?: string;
-  captureMethod?: 'RSS' | 'MANUAL_LINK';
+  captureMethod?: 'RSS' | 'MANUAL_LINK' | 'SEARCH';
   language?: 'zh' | 'en' | 'other';
   note?: string;
   analysis?: {
