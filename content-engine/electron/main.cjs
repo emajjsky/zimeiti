@@ -269,6 +269,9 @@ function bailianCliBuiltInModels() {
     ['wan2.6-t2v', ['VIDEO']],
     ['wan2.6-r2v', ['VIDEO']],
     ['wan2.7-t2v', ['VIDEO']],
+    ['wan2.7-i2v', ['VIDEO']],
+    ['wan2.7-r2v', ['VIDEO']],
+    ['wan2.7-videoedit', ['VIDEO']],
     ['wan2.7-image', ['IMAGE']],
   ];
   return models.map(([model, capabilities]) => ({ id: `bailian:${model}`, provider: 'BAILIAN_CLI', connectionLabel: '阿里云百炼 CLI', model, capabilities }));
