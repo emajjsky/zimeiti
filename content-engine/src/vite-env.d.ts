@@ -26,6 +26,7 @@ declare global {
         test: (id: string) => Promise<ModelConnection>;
         remove: (id: string) => Promise<void>;
         syncCatalog: () => Promise<{ items: ModelCatalogItem[]; errors: { connectionLabel: string; message: string }[] }>;
+        listCatalog: () => Promise<ModelCatalogItem[]>;
         taskPolicies: () => Promise<ModelTaskPolicy[]>;
         saveTaskPolicy: (input: ModelTaskPolicy) => Promise<ModelTaskPolicy>;
         usageSummary: () => Promise<ApiUsageSummary>;

@@ -4,7 +4,7 @@ import { animate, createScope, stagger } from 'animejs';
 import { ArrowLeft, AudioLines, Bell, BrainCircuit, CalendarDays, ChartColumn, CheckCircle2, ChevronRight, CircleAlert, CircleCheck, ClipboardList, Compass, FolderOpen, Image, KeyRound, Lightbulb, PenLine, Pencil, Plus, RefreshCw, Search, Send, Settings, ShieldCheck, Trash2, Video, Zap } from 'lucide-react';
 import { intelligenceKey, loadState, persistState, seedState, type FeishuLibraryTemplate, type LocalState, type WorkspaceProfile } from './data/localRepository';
 import { platformName, projectStatusName, type ContentProject, type ContentVersion, type IntelligenceSource, type Platform, type TopicCandidate } from './domain/content';
-import type { ApiUsageLog, ApiUsageSummary, BailianCapabilityScope, BailianCliStatus, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelProvider, ModelTask, ModelTaskPolicy } from './domain/integrations';
+import type { ApiUsageLog, ApiUsageSummary, BailianCapabilityScope, BailianCliStatus, ModelCapability, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelProvider, ModelTask, ModelTaskPolicy } from './domain/integrations';
 import './styles.css';
 
 type View = 'today' | 'discover' | 'clip' | 'plan' | 'topicEditor' | 'create' | 'publish' | 'review' | 'assets' | 'automation' | 'models' | 'settings';
@@ -562,9 +562,10 @@ function ModelSettingsScreen() {
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const loadConnections = () => void window.contentEngine?.models.list().then(setConnections).catch((error) => setNotice({ type: 'error', text: error instanceof Error ? error.message : '读取外部 API 连接失败。' }));
   const loadBailian = () => void window.contentEngine?.bailian.status().then(setBailian).catch((error) => setNotice({ type: 'error', text: error instanceof Error ? error.message : '读取百炼 CLI 状态失败。' }));
+  const loadCatalog = () => void window.contentEngine?.models.listCatalog().then(setCatalog).catch(() => undefined);
   const loadPolicies = () => void window.contentEngine?.models.taskPolicies().then(setPolicies).catch((error) => setNotice({ type: 'error', text: error instanceof Error ? error.message : '读取任务策略失败。' }));
   const loadUsage = () => { void window.contentEngine?.models.usageSummary().then(setUsage).catch(() => undefined); void window.contentEngine?.models.usageLogs().then(setLogs).catch(() => undefined); };
-  useEffect(() => { loadConnections(); loadBailian(); loadPolicies(); loadUsage(); }, []);
+  useEffect(() => { loadConnections(); loadBailian(); loadCatalog(); loadPolicies(); loadUsage(); }, []);
   const syncCatalog = async () => {
     if (!window.contentEngine) return;
     setNotice(null);
@@ -624,7 +625,7 @@ function UsageOverview({ usage }: { usage: ApiUsageSummary }) {
   return <section className="usage-overview"><div><small>今日调用</small><b>{usage.todayCalls}</b></div><div><small>累计调用</small><b>{usage.totalCalls}</b></div><div><small>成功 / 失败</small><b>{usage.successCalls} / {usage.failedCalls}</b></div><div><small>输入 / 输出 Token</small><b>{usage.inputTokens} / {usage.outputTokens}</b></div></section>;
 }
 
-function TaskPolicyScreen({ catalog, policies, onSync, onSave }: { catalog: ModelCatalogItem[]; policies: ModelTaskPolicy[]; onSync: () => void; onSave: (policy: ModelTaskPolicy) => Promise<void> }) {
+function LegacyTaskPolicyScreen({ catalog, policies, onSync, onSave }: { catalog: ModelCatalogItem[]; policies: ModelTaskPolicy[]; onSync: () => void; onSave: (policy: ModelTaskPolicy) => Promise<void> }) {
   const tasks = Object.keys(modelTaskNames) as ModelTask[];
   const [task, setTask] = useState<ModelTask>('INTELLIGENCE_ANALYSIS');
   const [selection, setSelection] = useState('');
@@ -639,6 +640,35 @@ function TaskPolicyScreen({ catalog, policies, onSync, onSave }: { catalog: Mode
     } finally { setBusy(false); }
   };
   return <section className="task-policy-layout"><aside>{tasks.map((item) => <button key={item} className={task === item ? 'active' : ''} onClick={() => { setTask(item); setSelection(''); }}><span>{modelTaskNames[item]}</span><small>{policies.find((policy) => policy.task === item)?.model ?? '未设置'}</small></button>)}</aside><div className="task-policy-editor"><div className="task-policy-head"><h2>{modelTaskNames[task]}</h2><button className="button" onClick={onSync}><RefreshCw size={16}/>同步模型</button></div><label>执行模型<select value={effectiveSelection} onChange={(event) => setSelection(event.target.value)}><option value="">不调用模型</option>{catalog.map((item) => <option value={item.id} key={item.id}>{item.connectionLabel} · {item.model}</option>)}</select></label><footer><button className="button primary" disabled={busy} onClick={() => void save()}>{busy ? '保存中' : '保存策略'}</button></footer></div></section>;
+}
+
+const capabilityNames: Record<ModelCapability, string> = { TEXT: '文本', IMAGE: '图像', AUDIO: '语音', VIDEO: '视频', EMBEDDING: '嵌入', CODE: '代码' };
+const taskCapabilities: Record<ModelTask, ModelCapability> = {
+  INTELLIGENCE_ANALYSIS: 'TEXT', TOPIC_RECOMMENDATION: 'TEXT', CONTENT_WRITING: 'TEXT', CONTENT_REWRITE: 'TEXT', CONTENT_LAYOUT: 'TEXT', IMAGE_GENERATION: 'IMAGE', SPEECH_SYNTHESIS: 'AUDIO', VIDEO_GENERATION: 'VIDEO',
+};
+
+function TaskPolicyScreen({ catalog, policies, onSync, onSave }: { catalog: ModelCatalogItem[]; policies: ModelTaskPolicy[]; onSync: () => void; onSave: (policy: ModelTaskPolicy) => Promise<void> }) {
+  const tasks = Object.keys(modelTaskNames) as ModelTask[];
+  const [task, setTask] = useState<ModelTask>('INTELLIGENCE_ANALYSIS');
+  const [channel, setChannel] = useState('ALL');
+  const [query, setQuery] = useState('');
+  const [selection, setSelection] = useState('');
+  const [busy, setBusy] = useState(false);
+  const capability = taskCapabilities[task];
+  const policy = policies.find((item) => item.task === task);
+  const savedSelection = catalog.find((item) => item.provider === policy?.provider && item.connectionId === policy?.connectionId && item.model === policy?.model)?.id ?? '';
+  const effectiveSelection = selection || savedSelection;
+  const channels = [...new Map(catalog.map((item) => [`${item.provider}:${item.connectionId ?? 'bailian'}`, item.connectionLabel])).entries()];
+  const filtered = catalog.filter((item) => item.capabilities.includes(capability) && (channel === 'ALL' || `${item.provider}:${item.connectionId ?? 'bailian'}` === channel) && `${item.connectionLabel} ${item.model}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const selectTask = (next: ModelTask) => { setTask(next); setChannel('ALL'); setQuery(''); setSelection(''); };
+  const save = async () => {
+    setBusy(true);
+    try {
+      const selected = catalog.find((item) => item.id === effectiveSelection);
+      await onSave(selected ? { task, provider: selected.provider, connectionId: selected.connectionId, model: selected.model } : { task });
+    } finally { setBusy(false); }
+  };
+  return <section className="task-policy-layout"><aside>{tasks.map((item) => <button key={item} className={task === item ? 'active' : ''} onClick={() => selectTask(item)}><span>{modelTaskNames[item]}</span><small>{policies.find((policy) => policy.task === item)?.model ?? '未设置'}</small></button>)}</aside><div className="task-policy-editor"><div className="task-policy-head"><div><h2>{modelTaskNames[task]}</h2><span className="chip blue">{capabilityNames[capability]}</span></div><button className="button" onClick={onSync}><RefreshCw size={16}/>同步模型</button></div><div className="model-filterbar"><div className="channel-filter"><button className={channel === 'ALL' ? 'active' : ''} onClick={() => setChannel('ALL')}>全部渠道</button>{channels.map(([id, label]) => <button key={id} className={channel === id ? 'active' : ''} onClick={() => setChannel(id)}>{label}</button>)}</div><label className="model-search"><Search size={16}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索模型" /></label></div><div className="model-choice-list">{catalog.length === 0 ? <button className="model-choice empty" onClick={onSync}>同步可选模型</button> : filtered.length === 0 ? <p>没有匹配模型</p> : filtered.map((item) => <button key={item.id} className={`model-choice ${effectiveSelection === item.id ? 'selected' : ''}`} onClick={() => setSelection(item.id)}><span className="connection-status ready"/><span><b>{item.model}</b><small>{item.connectionLabel}</small></span><em>{item.capabilities.map((value) => capabilityNames[value]).join(' / ')}</em></button>)}</div><footer><button className="text-button" onClick={() => setSelection('')}>不调用模型</button><button className="button primary" disabled={busy} onClick={() => void save()}>{busy ? '保存中' : '保存策略'}</button></footer></div></section>;
 }
 
 function UsageLogScreen({ logs }: { logs: ApiUsageLog[] }) {
@@ -687,11 +717,11 @@ function BailianCliCenter({ status, onSave, onTest, onRemove }: { status: Bailia
   </div>;
 }
 
-function ExternalApiConnections({ connections, onNew, onEdit, onRemove }: { connections: ModelConnection[]; onNew: () => void; onEdit: (connection: ModelConnection) => void; onRemove: (connection: ModelConnection) => Promise<void> }) {
+function LegacyExternalApiConnections({ connections, onNew, onEdit, onRemove }: { connections: ModelConnection[]; onNew: () => void; onEdit: (connection: ModelConnection) => void; onRemove: (connection: ModelConnection) => Promise<void> }) {
   return <section className="external-api-page"><div className="external-api-head"><div><h2>已保存的外部连接</h2><p>它们用于补充特定文本模型或 OpenAI 兼容接口。视觉、音频、视频任务优先由百炼 CLI 执行。</p></div><button className="button primary" onClick={onNew}><Plus size={16}/>新增 API 连接</button></div>{connections.length === 0 ? <div className="external-api-empty"><KeyRound size={24}/><h2>尚未添加外部 API</h2><p>先配置百炼 CLI；只有需要额外模型或私有兼容服务时，再添加外部 API。</p><button className="button" onClick={onNew}>新增外部连接</button></div> : <div className="external-connection-list">{connections.map((connection) => <article className="external-connection-row" key={connection.id}><div className="connection-provider"><span className={`connection-status ${connection.status.toLowerCase()}`} /><div><b>{connection.label}</b><small>{providerLabels[connection.provider]} · {connection.model}</small></div></div><div className="connection-scopes">{connection.purposes.map((purpose) => <span className="chip" key={purpose}>{modelPurposeNames[purpose]}</span>)}</div><div className="connection-actions"><button className="text-button" onClick={() => onEdit(connection)}><Pencil size={15}/>编辑</button><button className="icon-button danger-icon" aria-label={`移除 ${connection.label}`} onClick={() => void onRemove(connection)}><Trash2 size={17}/></button></div></article>)}</div>}</section>;
 }
 
-function ExternalApiEditor({ connection, onBack, onSave, onTest }: { connection?: ModelConnection; onBack: () => void; onSave: (input: ModelConnectionInput) => Promise<ModelConnection>; onTest: (input: ModelConnectionInput) => Promise<ModelConnection> }) {
+function LegacyExternalApiEditor({ connection, onBack, onSave, onTest }: { connection?: ModelConnection; onBack: () => void; onSave: (input: ModelConnectionInput) => Promise<ModelConnection>; onTest: (input: ModelConnectionInput) => Promise<ModelConnection> }) {
   const [draft, setDraft] = useState<ModelDraft>(() => connection ? { ...connection, apiKey: '' } : draftForProvider('SILICONFLOW'));
   const [busy, setBusy] = useState<'idle' | 'saving' | 'testing'>('idle');
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -713,6 +743,36 @@ function ExternalApiEditor({ connection, onBack, onSave, onTest }: { connection?
   };
   const togglePurpose = (purpose: keyof typeof modelPurposeNames) => setDraft((current) => ({ ...current, purposes: current.purposes.includes(purpose) ? current.purposes.filter((item) => item !== purpose) : [...current.purposes, purpose] }));
   return <div className="external-editor"><button className="back-button" onClick={onBack}><ArrowLeft size={17}/>返回外部 API 列表</button><PageHeader eyebrow="SETTINGS / 外部 API" title={connection ? `编辑 ${connection.label}` : '新增外部 API'} subtitle="外部 API 仅作为补充连接；百炼 CLI 是图像、音频、视频等综合能力的默认执行器。" /><section className="external-provider-picker"><h2>选择服务商</h2><div className="provider-grid">{externalModelProviders.map((item) => <button type="button" key={item.provider} className={`provider-card ${draft.provider === item.provider ? 'selected' : ''}`} onClick={() => chooseProvider(item.provider)}><b>{item.label}</b><small>{item.detail}</small></button>)}</div></section><section className="external-editor-form"><div className="model-form-heading"><div><h2>连接信息</h2><p>{draft.id ? '留空 API Key 即保留已保存的密钥。' : '填写服务商地址、模型名称和 API Key。'}</p></div><span className="chip blue"><ShieldCheck size={13}/>本机加密</span></div><label>连接名称<input value={draft.label} onChange={(event) => setDraft({ ...draft, label: event.target.value })} /></label><div className="model-form-grid"><label>API 地址<input value={draft.baseUrl} onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })} /></label><label>模型名称<input value={draft.model} onChange={(event) => setDraft({ ...draft, model: event.target.value })} /></label></div><label>API Key<input type="password" value={draft.apiKey} onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} placeholder={draft.id ? '已安全保存，输入可替换' : '粘贴 API Key'} autoComplete="off" /></label><fieldset><legend>允许用于哪些工作</legend><div className="purpose-grid">{(Object.keys(modelPurposeNames) as (keyof typeof modelPurposeNames)[]).map((purpose) => <label className="purpose-option" key={purpose}><input type="checkbox" checked={draft.purposes.includes(purpose)} onChange={() => togglePurpose(purpose)} />{modelPurposeNames[purpose]}</label>)}</div></fieldset>{notice && <p className={`model-notice ${notice.type}`} aria-live="polite">{notice.type === 'success' ? <CircleCheck size={17}/> : <CircleAlert size={17}/>} {notice.text}</p>}<footer><button className="button" type="button" disabled={busy !== 'idle'} onClick={test}><KeyRound size={16}/>{busy === 'testing' ? '检查中' : '保存并检查'}</button><button className="button primary" type="button" disabled={busy !== 'idle'} onClick={save}>{busy === 'saving' ? '保存中' : '加密保存'}</button></footer><small>检查仅请求服务商模型目录；不会生成内容，也不产生模型调用费用。</small></section></div>;
+}
+
+function connectionDraftForProvider(provider: ModelProvider): ModelDraft {
+  return { ...draftForProvider(provider), model: '', purposes: [] };
+}
+
+function ExternalApiConnections({ connections, onNew, onEdit, onRemove }: { connections: ModelConnection[]; onNew: () => void; onEdit: (connection: ModelConnection) => void; onRemove: (connection: ModelConnection) => Promise<void> }) {
+  return <section className="external-api-page"><div className="external-api-head"><h2>外部 API 连接</h2><button className="button primary" onClick={onNew}><Plus size={16}/>新增连接</button></div>{connections.length === 0 ? <div className="external-api-empty"><KeyRound size={24}/><h2>尚未添加连接</h2><button className="button" onClick={onNew}>新增连接</button></div> : <div className="external-connection-list">{connections.map((connection) => <article className="external-connection-row" key={connection.id}><div className="connection-provider"><span className={`connection-status ${connection.status.toLowerCase()}`} /><div><b>{connection.label}</b><small>{providerLabels[connection.provider]} · {connection.baseUrl}</small></div></div><span className={`chip ${connection.status === 'READY' ? 'mint' : connection.status === 'ERROR' ? 'red' : 'yellow'}`}>{connection.status === 'READY' ? '已验证' : connection.status === 'ERROR' ? '异常' : '待验证'}</span><div className="connection-actions"><button className="text-button" onClick={() => onEdit(connection)}><Pencil size={15}/>编辑</button><button className="icon-button danger-icon" aria-label={`移除 ${connection.label}`} onClick={() => void onRemove(connection)}><Trash2 size={17}/></button></div></article>)}</div>}</section>;
+}
+
+function ExternalApiEditor({ connection, onBack, onSave, onTest }: { connection?: ModelConnection; onBack: () => void; onSave: (input: ModelConnectionInput) => Promise<ModelConnection>; onTest: (input: ModelConnectionInput) => Promise<ModelConnection> }) {
+  const [draft, setDraft] = useState<ModelDraft>(() => connection ? { ...connectionDraftForProvider(connection.provider), ...connection, apiKey: '' } : connectionDraftForProvider('SILICONFLOW'));
+  const [busy, setBusy] = useState<'idle' | 'saving' | 'testing'>('idle');
+  const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const makeInput = (): ModelConnectionInput => ({ ...draft, model: '', purposes: [], apiKey: draft.apiKey.trim() || undefined });
+  const save = async () => {
+    if (!draft.apiKey.trim() && !draft.id) { setNotice({ type: 'error', text: '请输入 API Key。' }); return; }
+    setBusy('saving'); setNotice(null);
+    try { const saved = await onSave(makeInput()); setDraft({ ...connectionDraftForProvider(saved.provider), ...saved, apiKey: '' }); setNotice({ type: 'success', text: '已保存' }); }
+    catch (error) { setNotice({ type: 'error', text: displayError(error, '保存失败。') }); }
+    finally { setBusy('idle'); }
+  };
+  const test = async () => {
+    if (!draft.apiKey.trim() && !draft.id) { setNotice({ type: 'error', text: '请输入 API Key。' }); return; }
+    setBusy('testing'); setNotice(null);
+    try { const result = await onTest(makeInput()); setDraft({ ...connectionDraftForProvider(result.provider), ...result, apiKey: '' }); setNotice(result.status === 'READY' ? { type: 'success', text: '已验证，模型将在任务策略中同步。' } : { type: 'error', text: result.lastError || '连接失败。' }); }
+    catch (error) { setNotice({ type: 'error', text: displayError(error, '连接失败。') }); }
+    finally { setBusy('idle'); }
+  };
+  return <div className="external-editor"><button className="back-button" onClick={onBack}><ArrowLeft size={17}/>返回</button><PageHeader eyebrow="SETTINGS / 外部 API" title={connection ? `编辑 ${connection.label}` : '新增外部 API'} /><section className="external-provider-picker"><div className="provider-grid">{externalModelProviders.map((item) => <button type="button" key={item.provider} className={`provider-card ${draft.provider === item.provider ? 'selected' : ''}`} onClick={() => { setDraft(connectionDraftForProvider(item.provider)); setNotice(null); }}><b>{item.label}</b><small>{item.detail}</small></button>)}</div></section><section className="external-editor-form"><label>连接名称<input value={draft.label} onChange={(event) => setDraft({ ...draft, label: event.target.value })} /></label><label>API 地址<input value={draft.baseUrl} onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })} /></label><label>API Key<input type="password" value={draft.apiKey} onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} placeholder={draft.id ? '留空表示不更新' : '粘贴 API Key'} autoComplete="off" /></label>{notice && <p className={`model-notice ${notice.type}`} aria-live="polite">{notice.type === 'success' ? <CircleCheck size={17}/> : <CircleAlert size={17}/>} {notice.text}</p>}<footer><button className="button" type="button" disabled={busy !== 'idle'} onClick={() => void test()}><KeyRound size={16}/>{busy === 'testing' ? '检查中' : '保存并检查'}</button><button className="button primary" type="button" disabled={busy !== 'idle'} onClick={() => void save()}>{busy === 'saving' ? '保存中' : '保存'}</button></footer></section></div>;
 }
 
 function SettingsHub({ sources, template, onTemplateChange, onAddSource, onRemoveSource }: { sources: IntelligenceSource[]; template: FeishuLibraryTemplate; onTemplateChange: (template: FeishuLibraryTemplate) => void; onAddSource: (source: Omit<IntelligenceSource, 'id' | 'lastSyncedAt' | 'lastError'>) => void; onRemoveSource: (id: string) => void }) {

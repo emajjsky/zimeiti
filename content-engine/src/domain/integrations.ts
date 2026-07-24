@@ -13,6 +13,7 @@ export type ModelTask =
   | 'VIDEO_GENERATION';
 
 export type ModelRouteProvider = 'BAILIAN_CLI' | 'EXTERNAL_API';
+export type ModelCapability = 'TEXT' | 'IMAGE' | 'AUDIO' | 'VIDEO' | 'EMBEDDING' | 'CODE';
 
 export interface ModelCatalogItem {
   id: string;
@@ -20,6 +21,8 @@ export interface ModelCatalogItem {
   connectionId?: string;
   connectionLabel: string;
   model: string;
+  capabilities: ModelCapability[];
+  syncedAt?: string;
 }
 
 export interface ModelTaskPolicy {
@@ -80,6 +83,7 @@ export interface ModelConnection {
   provider: ModelProvider;
   label: string;
   baseUrl: string;
+  // New connections leave these legacy fields empty; models are selected in task policies.
   model: string;
   purposes: ModelPurpose[];
   status: 'UNTESTED' | 'READY' | 'ERROR';

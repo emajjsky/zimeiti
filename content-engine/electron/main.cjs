@@ -42,6 +42,11 @@ function initialiseDatabase() {
       config_json TEXT NOT NULL,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS model_catalog (
+      id TEXT PRIMARY KEY,
+      item_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
     CREATE TABLE IF NOT EXISTS api_usage_logs (
       id TEXT PRIMARY KEY,
       task TEXT NOT NULL,
@@ -155,9 +160,11 @@ function registerIpc() {
   ipcMain.handle('models:remove', (_event, id) => {
     if (typeof id !== 'string' || !id) throw new Error('模型连接标识无效。');
     database.prepare('DELETE FROM model_connections WHERE id = ?').run(id);
+    database.prepare('DELETE FROM model_catalog WHERE id LIKE ?').run(`external:${id}:%`);
   });
 
   ipcMain.handle('model-catalog:sync', () => syncModelCatalog());
+  ipcMain.handle('model-catalog:list', () => database.prepare('SELECT item_json, updated_at FROM model_catalog ORDER BY updated_at DESC, id').all().map((row) => ({ ...JSON.parse(row.item_json), syncedAt: row.updated_at })));
   ipcMain.handle('task-policies:list', () => listTaskPolicies());
   ipcMain.handle('task-policies:save', (_event, input) => saveTaskPolicy(input));
   ipcMain.handle('usage:summary', () => usageSummary());
@@ -193,7 +200,10 @@ function registerIpc() {
     return getBailianStatus();
   });
 
-  ipcMain.handle('bailian:remove', () => database.prepare('DELETE FROM bailian_cli_settings WHERE setting_id = ?').run('default'));
+  ipcMain.handle('bailian:remove', () => {
+    database.prepare('DELETE FROM bailian_cli_settings WHERE setting_id = ?').run('default');
+    database.prepare("DELETE FROM model_catalog WHERE id LIKE 'bailian:%'").run();
+  });
 }
 
 const modelTasks = ['INTELLIGENCE_ANALYSIS', 'TOPIC_RECOMMENDATION', 'CONTENT_WRITING', 'CONTENT_REWRITE', 'CONTENT_LAYOUT', 'IMAGE_GENERATION', 'SPEECH_SYNTHESIS', 'VIDEO_GENERATION'];
@@ -228,7 +238,7 @@ async function syncModelCatalog() {
     if (config.status === 'READY') {
       try {
         const models = await fetchAvailableModels('https://dashscope.aliyuncs.com/compatible-mode/v1', safeStorage.decryptString(bailianRow.api_key_encrypted));
-        items.push(...models.map((model) => ({ id: `bailian:${model}`, provider: 'BAILIAN_CLI', connectionLabel: '阿里云百炼 CLI', model })));
+        items.push(...models.map((model) => ({ id: `bailian:${model}`, provider: 'BAILIAN_CLI', connectionLabel: '阿里云百炼 CLI', model, capabilities: classifyModelCapabilities(model) })));
       } catch (error) { errors.push({ connectionLabel: '阿里云百炼 CLI', message: error instanceof Error ? error.message : '模型目录同步失败' }); }
     }
   }
@@ -238,11 +248,25 @@ async function syncModelCatalog() {
     if (config.status !== 'READY') continue;
     try {
       const models = await fetchAvailableModels(config.baseUrl, safeStorage.decryptString(row.api_key_encrypted));
-      items.push(...models.map((model) => ({ id: `external:${row.id}:${model}`, provider: 'EXTERNAL_API', connectionId: row.id, connectionLabel: config.label, model })));
+      items.push(...models.map((model) => ({ id: `external:${row.id}:${model}`, provider: 'EXTERNAL_API', connectionId: row.id, connectionLabel: config.label, model, capabilities: classifyModelCapabilities(model) })));
     } catch (error) { errors.push({ connectionLabel: config.label, message: error instanceof Error ? error.message : '模型目录同步失败' }); }
   }
   const seen = new Set();
-  return { items: items.filter((item) => { if (seen.has(item.id)) return false; seen.add(item.id); return true; }), errors };
+  const uniqueItems = items.filter((item) => { if (seen.has(item.id)) return false; seen.add(item.id); return true; });
+  database.prepare('DELETE FROM model_catalog').run();
+  const insert = database.prepare('INSERT INTO model_catalog (id, item_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)');
+  for (const item of uniqueItems) insert.run(item.id, JSON.stringify(item));
+  return { items: uniqueItems, errors };
+}
+
+function classifyModelCapabilities(model) {
+  const value = String(model).toLowerCase();
+  if (/embed|rerank/.test(value)) return ['EMBEDDING'];
+  if (/tts|asr|audio|voice|speech|realtime/.test(value)) return ['AUDIO'];
+  if (/video|wanx|wan-|hailuo|seedance/.test(value)) return ['VIDEO'];
+  if (/image|flux|z-image|cogview|stable-diffusion|sdxl/.test(value)) return ['IMAGE'];
+  if (/code|coder/.test(value)) return ['CODE'];
+  return ['TEXT'];
 }
 
 async function fetchAvailableModels(baseUrl, apiKey) {
@@ -320,8 +344,8 @@ function validateModelInput(input) {
   const id = typeof input.id === 'string' && input.id ? input.id : `model-${Date.now()}`;
   const baseUrl = String(input.baseUrl || '').replace(/\/$/, '');
   const url = new URL(baseUrl);
-  if (!['https:', 'http:'].includes(url.protocol) || !input.model || !input.provider) throw new Error('请填写供应商、地址和模型名称。');
-  return { id, provider: String(input.provider), label: String(input.label || input.provider), baseUrl, model: String(input.model), purposes: Array.isArray(input.purposes) ? input.purposes : [], status: 'UNTESTED' };
+  if (!['https:', 'http:'].includes(url.protocol) || !input.provider) throw new Error('请填写供应商和接口地址。');
+  return { id, provider: String(input.provider), label: String(input.label || input.provider), baseUrl, model: '', purposes: [], status: 'UNTESTED' };
 }
 
 function validateBailianInput(input) {

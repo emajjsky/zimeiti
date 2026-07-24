@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('contentEngine', {
     test: (id) => ipcRenderer.invoke('models:test', id),
     remove: (id) => ipcRenderer.invoke('models:remove', id),
     syncCatalog: () => ipcRenderer.invoke('model-catalog:sync'),
+    listCatalog: () => ipcRenderer.invoke('model-catalog:list'),
     taskPolicies: () => ipcRenderer.invoke('task-policies:list'),
     saveTaskPolicy: (input) => ipcRenderer.invoke('task-policies:save', input),
     usageSummary: () => ipcRenderer.invoke('usage:summary'),
