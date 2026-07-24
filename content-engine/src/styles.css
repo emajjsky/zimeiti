@@ -52,7 +52,8 @@
 }
 .signal:hover { transform:translate(-2px,-2px); box-shadow:4px 4px 0 var(--red); background:#f8fbff; }
 .signal.selected { background:#e3e9ff; box-shadow:4px 4px 0 var(--blue); }
-.signal-head { display:flex; align-items:center; justify-content:space-between; gap:7px; padding:12px 12px 0; }
+.signal-head { display:flex; align-items:center; justify-content:space-between; gap:7px; padding:9px 12px 0; border-top:7px solid var(--blue); }
+.signal-head.source-blue { border-top-color:var(--blue); }.signal-head.source-mint { border-top-color:#35a574; }.signal-head.source-yellow { border-top-color:#d89d00; }.signal-head.source-coral { border-top-color:var(--red); }
 .signal-source { display:block; min-width:0; overflow:hidden; color:var(--blue); font:11px "DM Mono",monospace; text-overflow:ellipsis; white-space:nowrap; }
 .projected-mark { flex:none; padding:3px 5px; border:1px solid var(--ink); background:var(--mint); color:var(--ink); font-size:10px; font-weight:800; white-space:nowrap; }
 .signal > b { display:block; padding:10px 12px 0; font-size:16px; line-height:1.42; }
@@ -61,6 +62,7 @@
 .signal-tags { display:flex; align-items:center; gap:5px; min-width:0; }
 .signal-topic { display:block; max-width:82px; overflow:hidden; padding:3px 6px; border:1px solid var(--ink); font-size:10px; font-style:normal; text-overflow:ellipsis; white-space:nowrap; }
 .signal-topic.tag-blue { background:#dce6ff; }.signal-topic.tag-mint { background:#c9f1dc; }.signal-topic.tag-yellow { background:#fff4b5; }.signal-topic.tag-coral { background:#ffd4ce; }
+.keyword-tag { display:block; max-width:76px; overflow:hidden; padding:3px 6px; border:1px solid var(--ink); font-size:10px; font-style:normal; text-overflow:ellipsis; white-space:nowrap; }.keyword-tag.tag-blue { background:#dce6ff; }.keyword-tag.tag-mint { background:#c9f1dc; }.keyword-tag.tag-yellow { background:#fff4b5; }.keyword-tag.tag-coral { background:#ffd4ce; }
 .signal > footer small { color:var(--muted); font:10px "DM Mono",monospace; white-space:nowrap; }
 .signal .chip { margin:0; padding:3px 5px; font-size:10px; white-space:nowrap; }
 .heat-mark { display:grid; place-items:center; min-width:24px; height:24px; border:1px solid var(--ink); background:var(--ink); color:#fff; font:11px "DM Mono",monospace; font-style:normal; }
