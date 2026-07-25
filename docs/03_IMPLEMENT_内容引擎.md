@@ -31,7 +31,7 @@ Fastify API
 | Redis/BullMQ | 延迟任务、异步任务、重试与 Worker 通信 | 已建立骨架 |
 | 百炼 CLI Runner | 每个任务临时注入 Key 并执行 CLI | 已建立骨架 |
 | Skill 注册表与 Agent 计划 | 内置 Skill、受限计划、确认前运行记录 | 已建立，真实百炼计划待用户验收 |
-| RSS/剪藏/Tavily 服务 | 合规信息采集和候选搜索 | 已建立，Tavily待真实 Key 验收 |
+| RSS/剪藏/Tavily 服务 | 合规信息采集、统一分类和候选搜索 | RSS 目录与分类已验收，Tavily/剪藏待真实用户验收 |
 | 飞书适配器 | OAuth、模板、字段映射、同步 | 未实现 |
 | 发布扩展 | 浏览器预填与人工确认 | 未实现 |
 | 媒体 Worker | 图像、ASR、视频、Remotion/Hyperframer | 未实现 |
@@ -51,7 +51,7 @@ Fastify API
 | --- | --- |
 | `users` / `workspaces` / `workspace_members` | 身份和工作空间边界 |
 | `credential_vault` | 加密的 Tavily、百炼等凭据；百炼凭据由核心 Agent 与 Worker 复用，不重复保存 |
-| `intelligence_sources` / `intelligence_items` | 资讯来源和情报记录；服务端在读取与 RSS 刷新时删除超过 30 天的数据 |
+| `intelligence_sources` / `intelligence_items` | 资讯来源和情报记录；`matched_keywords` 保存真实命中词；服务端在读取与 RSS 刷新时删除超过 30 天的数据 |
 | `jobs` / `api_usage_logs` | 异步任务、模型调用与错误记录 |
 | `workspace_snapshots` | 从早期原型迁移的临时状态桥 |
 
@@ -166,6 +166,8 @@ P0 先提供代码内置、数据库登记的通用 Skill。用户可以选择�
 - 最多跟随有限次跳转，并对跳转目标重复校验。
 - 公众号验证码页、登录页、付费墙和风控页不能读取或绕过；向用户说明如何提供可公开读取的原文链接或手工摘要。
 - Tavily 只在用户点击搜索时调用，候选结果必须经“加入热点池”确认后才成为情报。
+- 微博、今日头条、央视网、X 和公众号只登记为辅助渠道。系统只能剪藏用户提交的公开 URL，或在用户主动搜索时向 Tavily 传递域名范围；不得把辅助渠道伪装成可定时抓取的数据源。
+- Playwright 后续可作为用户主动公开页面读取助手，但必须遵守同一 URL、DNS、跳转、登录和验证码边界，不保存用户 Cookie，不执行绕过动作。
 
 ## 9. 发布与账号安全
 
@@ -231,3 +233,13 @@ API：`http://127.0.0.1:8787/health`
 - 页面反馈增加所属页签，百炼、外部连接、任务策略和调用记录的错误或成功信息不会串到其它页面。
 - 设置根容器扩展为 1400px；单连接配置页使用 960px 聚焦宽度，任务策略为 1180px，外部 API 与调用记录为 1280px。窄屏下页签两列、用量统计单列。
 - 新增 `tests/model-settings-layout.test.mjs`，以 Node 内置测试锁定页头、调用统计归属、连接概览移除、反馈归属和宽度规则。
+
+# 2026-07-25 实现记录：资讯来源目录与统一分类
+
+- `shared/intelligence-sources.json` 作为 Web 与测试共享目录，登记 14 个自动 RSS，并把微博、今日头条、央视网、X、公众号登记为 5 个辅助渠道；央视网限定域名同时包含 `cctv.com` 和 `news.cctv.com`。
+- `shared/intelligence-taxonomy.json` 定义 13 个统一题材及关键词。`intelligenceClassifier.cjs` 对标题按 3 倍权重、摘要按 1 倍权重评分，英文 `AI` 使用单词边界，最多返回 5 个真实命中词。
+- RSS、公开链接预读和 Tavily 结果共用分类器，不把搜索表单中的题材或来源预设直接当作最终分类。
+- `006_intelligence_keywords.sql` 增加 `matched_keywords jsonb`，并建立 `(workspace_id, canonical_url)` 条件唯一索引。规范化 URL 删除 hash 和 `utm_*`、`spm`、`from`、`source`、`ref`、`fbclid` 等追踪参数，再稳定排序查询参数。
+- 情报源页面拆为“自动来源/辅助渠道”。自动来源支持分组多选批量添加、自定义 RSS 和已接入状态；辅助渠道只跳转到链接剪藏或带域名预设的网页搜索。
+- 热点页关键词下拉从近 30 天持久化关键词生成，卡片最多显示 2 个关键词。现有来源、时间、题材、语言、全文搜索和刷新状态保持不变。
+- 单个 RSS 失败只更新该来源错误状态，不中断其它来源。真实联网探测中 13 个源返回 HTTP 200 XML；Hacker News 高热本次网络失败；中国新闻网娱乐源响应体很短，可能产生 0 条，应保留为可观察状态。
