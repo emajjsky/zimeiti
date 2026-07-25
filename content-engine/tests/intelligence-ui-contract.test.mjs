@@ -30,3 +30,8 @@ test('情报源布局包含窄屏回退和统一交互高度', () => {
   assert.match(styleSource, /@media \(max-width:860px\)/);
   assert.match(styleSource, /min-height:40px/);
 });
+
+test('辅助渠道长域名不会撑破卡片网格', () => {
+  assert.match(styleSource, /\.assisted-channel-card header\{[^}]*min-width:0/);
+  assert.match(styleSource, /\.assisted-channel-card header>div\{flex:1;min-width:0\}/);
+});
