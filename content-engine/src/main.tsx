@@ -5,7 +5,7 @@ import { ArrowLeft, AudioLines, Bell, BrainCircuit, CalendarDays, ChartColumn, C
 import { intelligenceKey, loadState, persistState, seedState, type FeishuLibraryTemplate, type LocalState, type WorkspaceProfile } from './data/localRepository';
 import { webAgent, webAuth, webIntelligence, webModels, webSettings, type CredentialStatus, type WebSession } from './data/webApi';
 import { platformName, projectStatusName, type ContentProject, type ContentVersion, type IntelligenceSource, type Platform, type TopicCandidate } from './domain/content';
-import type { ApiUsageLog, ApiUsageSummary, BailianCapabilityScope, BailianCliStatus, ModelCapability, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelProvider, ModelTask, ModelTaskPolicy } from './domain/integrations';
+import type { ApiUsageLog, ApiUsageSummary, BailianCapabilityScope, BailianCliStatus, ModelCapability, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelOperation, ModelProvider, ModelTask, ModelTaskPolicy } from './domain/integrations';
 import './styles.css';
 
 type View = 'today' | 'discover' | 'sources' | 'clip' | 'plan' | 'topicEditor' | 'create' | 'publish' | 'review' | 'assets' | 'automation' | 'models' | 'settings';
@@ -662,9 +662,14 @@ const modelTaskNames: Record<ModelTask, string> = {
   CONTENT_WRITING: '文案生成',
   CONTENT_REWRITE: '改写与解读',
   CONTENT_LAYOUT: '公众号排版',
-  IMAGE_GENERATION: '图片生成',
+  TEXT_TO_IMAGE: '文生图',
+  IMAGE_TO_IMAGE: '图生图 / 图片编辑',
   SPEECH_SYNTHESIS: '配音与口播',
-  VIDEO_GENERATION: '视频生成',
+  TEXT_TO_VIDEO: '文生视频',
+  IMAGE_TO_VIDEO: '首帧图生视频',
+  FIRST_LAST_FRAME_TO_VIDEO: '首尾帧生视频',
+  REFERENCE_TO_VIDEO: '参考图 / 视频生成',
+  VIDEO_EDIT: '视频编辑',
 };
 
 function ModelSettingsScreen() {
@@ -784,24 +789,56 @@ function LegacyTaskPolicyScreen({ catalog, policies, onSync, onSave }: { catalog
 }
 
 const capabilityNames: Record<ModelCapability, string> = { TEXT: '文本', IMAGE: '图像生成', AUDIO: '语音合成', VIDEO: '视频生成', VISION: '视觉理解', MULTIMODAL: '全模态', ASR: '语音识别', MUSIC: '音乐生成', REASONING: '推理', EMBEDDING: '嵌入', CODE: '代码' };
-const taskCapabilities: Record<ModelTask, ModelCapability> = {
-  INTELLIGENCE_ANALYSIS: 'TEXT', TOPIC_RECOMMENDATION: 'TEXT', CONTENT_WRITING: 'TEXT', CONTENT_REWRITE: 'TEXT', CONTENT_LAYOUT: 'TEXT', IMAGE_GENERATION: 'IMAGE', SPEECH_SYNTHESIS: 'AUDIO', VIDEO_GENERATION: 'VIDEO',
+const taskRequirements: Record<ModelTask, { capability: ModelCapability; operation?: ModelOperation; flow: string }> = {
+  INTELLIGENCE_ANALYSIS: { capability: 'TEXT', flow: '资讯 → 分析结果' }, TOPIC_RECOMMENDATION: { capability: 'TEXT', flow: '资讯 → 选题' }, CONTENT_WRITING: { capability: 'TEXT', flow: '素材 → 文案' }, CONTENT_REWRITE: { capability: 'TEXT', flow: '原文 → 改写' }, CONTENT_LAYOUT: { capability: 'TEXT', flow: '正文 → 排版稿' },
+  TEXT_TO_IMAGE: { capability: 'IMAGE', operation: 'TEXT_TO_IMAGE', flow: '文本 → 图片' }, IMAGE_TO_IMAGE: { capability: 'IMAGE', operation: 'IMAGE_TO_IMAGE', flow: '图片 + 文本 → 图片' }, SPEECH_SYNTHESIS: { capability: 'AUDIO', flow: '文本 → 音频' },
+  TEXT_TO_VIDEO: { capability: 'VIDEO', operation: 'TEXT_TO_VIDEO', flow: '文本 → 视频' }, IMAGE_TO_VIDEO: { capability: 'VIDEO', operation: 'IMAGE_TO_VIDEO', flow: '首帧 + 文本 → 视频' }, FIRST_LAST_FRAME_TO_VIDEO: { capability: 'VIDEO', operation: 'FIRST_LAST_FRAME_TO_VIDEO', flow: '首帧 + 尾帧 + 文本 → 视频' }, REFERENCE_TO_VIDEO: { capability: 'VIDEO', operation: 'REFERENCE_TO_VIDEO', flow: '参考图 / 视频 + 文本 → 视频' }, VIDEO_EDIT: { capability: 'VIDEO', operation: 'VIDEO_EDIT', flow: '视频 + 指令 → 视频' },
 };
+const modelTaskGroups: { label: string; tasks: ModelTask[] }[] = [
+  { label: '情报与内容', tasks: ['INTELLIGENCE_ANALYSIS', 'TOPIC_RECOMMENDATION', 'CONTENT_WRITING', 'CONTENT_REWRITE', 'CONTENT_LAYOUT'] },
+  { label: '图片', tasks: ['TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE'] },
+  { label: '音频', tasks: ['SPEECH_SYNTHESIS'] },
+  { label: '视频', tasks: ['TEXT_TO_VIDEO', 'IMAGE_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO', 'REFERENCE_TO_VIDEO', 'VIDEO_EDIT'] },
+];
+
+function modelSupportsTask(item: ModelCatalogItem, task: ModelTask) {
+  const requirement = taskRequirements[task];
+  return requirement.operation ? (item.operations ?? inferModelOperations(item.model)).includes(requirement.operation) : item.capabilities.includes(requirement.capability);
+}
+
+function inferModelOperations(model: string): ModelOperation[] {
+  const value = model.toLowerCase();
+  if (/video-?edit|videoedit/.test(value)) return ['VIDEO_EDIT'];
+  if (/first.*last|last.*frame|kf2v|flf2v/.test(value)) return ['FIRST_LAST_FRAME_TO_VIDEO'];
+  if (/r2v|reference.*video/.test(value)) return ['REFERENCE_TO_VIDEO'];
+  if (/i2v|image.*video/.test(value)) return ['IMAGE_TO_VIDEO'];
+  if (/t2v|text.*video/.test(value)) return ['TEXT_TO_VIDEO'];
+  if (/image-edit|edit-image/.test(value)) return ['IMAGE_TO_IMAGE'];
+  if (/qwen-image-(2\.0|2\.0-pro|max)|wan2\.7-image/.test(value)) return ['TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE'];
+  if (/image|t2i|flux|z-image|cogview|stable-diffusion|sdxl/.test(value)) return ['TEXT_TO_IMAGE'];
+  return [];
+}
+
+function modelSourceKey(item: ModelCatalogItem) {
+  if (item.provider === 'EXTERNAL_API') return `external:${item.connectionId}`;
+  return item.origin === 'CLI_MEDIA' ? 'CLI_MEDIA' : 'ACCOUNT_CATALOG';
+}
 
 function TaskPolicyScreen({ catalog, policies, onSync, onSave }: { catalog: ModelCatalogItem[]; policies: ModelTaskPolicy[]; onSync: () => void; onSave: (policy: ModelTaskPolicy) => Promise<void> }) {
   const tasks = Object.keys(modelTaskNames) as ModelTask[];
   const [task, setTask] = useState<ModelTask>('INTELLIGENCE_ANALYSIS');
-  const [channel, setChannel] = useState('ALL');
-  const [query, setQuery] = useState('');
-  const [selection, setSelection] = useState('');
+  const [source, setSource] = useState('ALL');
+  const [selection, setSelection] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
-  const capability = taskCapabilities[task];
+  const requirement = taskRequirements[task];
   const policy = policies.find((item) => item.task === task);
   const savedSelection = catalog.find((item) => item.provider === policy?.provider && item.connectionId === policy?.connectionId && item.model === policy?.model)?.id ?? '';
-  const effectiveSelection = selection || savedSelection;
-  const channels = [...new Map(catalog.map((item) => [`${item.provider}:${item.connectionId ?? 'bailian'}`, item.connectionLabel])).entries()];
-  const filtered = catalog.filter((item) => item.capabilities.includes(capability) && (channel === 'ALL' || `${item.provider}:${item.connectionId ?? 'bailian'}` === channel) && `${item.connectionLabel} ${item.model}`.toLowerCase().includes(query.trim().toLowerCase()));
-  const selectTask = (next: ModelTask) => { setTask(next); setChannel('ALL'); setQuery(''); setSelection(''); };
+  const effectiveSelection = selection ?? savedSelection;
+  const taskModels = catalog.filter((item) => modelSupportsTask(item, task));
+  const sourceOptions = [...new Map(taskModels.map((item) => [modelSourceKey(item), item.provider === 'EXTERNAL_API' ? item.connectionLabel : item.origin === 'CLI_MEDIA' ? 'CLI 媒体能力' : '百炼账户目录'])).entries()];
+  const filtered = taskModels.filter((item) => source === 'ALL' || modelSourceKey(item) === source);
+  const selectedModel = catalog.find((item) => item.id === effectiveSelection);
+  const selectTask = (next: ModelTask) => { setTask(next); setSource('ALL'); setSelection(undefined); };
   const save = async () => {
     setBusy(true);
     try {
@@ -809,7 +846,7 @@ function TaskPolicyScreen({ catalog, policies, onSync, onSave }: { catalog: Mode
       await onSave(selected ? { task, provider: selected.provider, connectionId: selected.connectionId, model: selected.model } : { task });
     } finally { setBusy(false); }
   };
-  return <section className="routing-workbench"><aside className="routing-task-list"><div className="routing-task-list-head"><b>任务路由</b><span>{tasks.filter((item) => policies.find((policy) => policy.task === item)?.model).length}/{tasks.length}</span></div>{tasks.map((item) => { const configured = policies.find((policy) => policy.task === item)?.model; return <button key={item} className={task === item ? 'active' : ''} onClick={() => selectTask(item)}><span>{modelTaskNames[item]}</span><small>{configured ?? '未配置'}</small></button>; })}</aside><div className="routing-stage"><header className="routing-stage-head"><div><span className="eyebrow">TASK ROUTING</span><h2>{modelTaskNames[task]}</h2></div><div><span className="capability-badge">{capabilityNames[capability]}</span><button className="icon-button" title="同步模型" aria-label="同步模型" onClick={onSync}><RefreshCw size={17}/></button></div></header><div className="routing-filters"><div className="channel-filter"><button className={channel === 'ALL' ? 'active' : ''} onClick={() => setChannel('ALL')}>全部</button>{channels.map(([id, label]) => <button key={id} className={channel === id ? 'active' : ''} onClick={() => setChannel(id)}>{label.replace('阿里云百炼 · ', '')}</button>)}</div><label className="model-search"><Search size={16}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索模型" /></label></div><div className="model-choice-grid">{catalog.length === 0 ? <button className="model-choice empty" onClick={onSync}>同步可选模型</button> : filtered.length === 0 ? <div className="model-choice-empty">没有匹配的{capabilityNames[capability]}模型</div> : filtered.map((item) => <button key={item.id} className={`model-choice ${effectiveSelection === item.id ? 'selected' : ''}`} onClick={() => setSelection(item.id)}><span className="model-choice-top"><b>{item.model}</b><i className={item.origin === 'CLI_MEDIA' ? 'media' : 'account'}>{item.origin === 'CLI_MEDIA' ? 'CLI 媒体' : '账户目录'}</i></span><small>{item.connectionLabel}</small></button>)}</div><footer className="routing-stage-footer"><button className="text-button" onClick={() => setSelection('')}>不调用模型</button><button className="button primary" disabled={busy} onClick={() => void save()}>{busy ? '保存中' : '保存策略'}</button></footer></div></section>;
+  return <section className="policy-selector"><header><div><span className="eyebrow">TASK ROUTING</span><h2>任务模型配置</h2></div><div className="policy-progress"><b>{tasks.filter((item) => policies.find((policy) => policy.task === item)?.model).length}</b><span>/ {tasks.length}</span></div></header><div className="policy-fields"><label><span>功能任务</span><select value={task} onChange={(event) => selectTask(event.target.value as ModelTask)}>{modelTaskGroups.map((group) => <optgroup key={group.label} label={group.label}>{group.tasks.map((item) => <option key={item} value={item}>{modelTaskNames[item]}</option>)}</optgroup>)}</select></label><label><span>模型来源</span><select value={source} onChange={(event) => { setSource(event.target.value); setSelection(undefined); }}><option value="ALL">全部来源</option>{sourceOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="policy-model-field"><span>执行模型 <em>{filtered.length} 个可选</em></span><select value={effectiveSelection} onChange={(event) => setSelection(event.target.value)}><option value="">不调用模型</option>{filtered.map((item) => <option key={item.id} value={item.id}>{item.model} · {item.origin === 'CLI_MEDIA' ? 'CLI 媒体' : item.connectionLabel}</option>)}</select></label></div><div className="policy-selection"><div><span className="capability-badge">{requirement.flow}</span>{requirement.operation && <span className="policy-operation">{modelTaskNames[task]}</span>}</div>{selectedModel ? <div className="selected-model-summary"><span className="connection-status ready"/><div><b>{selectedModel.model}</b><small>{selectedModel.connectionLabel} · {selectedModel.origin === 'CLI_MEDIA' ? '调用时验证权限' : '账户目录'}</small></div></div> : <div className="selected-model-summary empty"><CircleAlert size={16}/><span>{taskModels.length ? '尚未选择模型' : '当前目录没有支持该任务的模型'}</span></div>}</div><footer><button className="button" type="button" onClick={onSync}><RefreshCw size={16}/>同步模型</button><button className="button primary" disabled={busy} onClick={() => void save()}>{busy ? '保存中' : '保存策略'}</button></footer></section>;
 }
 
 function UsageLogScreen({ logs }: { logs: ApiUsageLog[] }) {

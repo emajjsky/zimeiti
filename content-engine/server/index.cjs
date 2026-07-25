@@ -14,7 +14,7 @@ const { runBailianCli } = require('./runner/bailian.cjs');
 
 const app = Fastify({ logger: true, bodyLimit: 5 * 1024 * 1024 });
 const credentials = new Set(['TAVILY', 'BAILIAN']);
-const modelTasks = ['INTELLIGENCE_ANALYSIS', 'TOPIC_RECOMMENDATION', 'CONTENT_WRITING', 'CONTENT_REWRITE', 'CONTENT_LAYOUT', 'IMAGE_GENERATION', 'SPEECH_SYNTHESIS', 'VIDEO_GENERATION'];
+const modelTasks = ['INTELLIGENCE_ANALYSIS', 'TOPIC_RECOMMENDATION', 'CONTENT_WRITING', 'CONTENT_REWRITE', 'CONTENT_LAYOUT', 'TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE', 'SPEECH_SYNTHESIS', 'TEXT_TO_VIDEO', 'IMAGE_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO', 'REFERENCE_TO_VIDEO', 'VIDEO_EDIT'];
 const externalProviders = new Set(['DASHSCOPE', 'SILICONFLOW', 'VOLCENGINE_ARK', 'KIMI', 'ZHIPU', 'OPENAI', 'OPENAI_COMPATIBLE']);
 const sourceInput = z.object({ name: z.string().max(160), type: z.literal('RSS'), url: z.string().url().max(2_000), category: z.string().max(120), includeKeywords: z.array(z.string().max(120)).optional(), excludeKeywords: z.array(z.string().max(120)).optional(), language: z.enum(['ALL', 'ZH', 'EN']).optional(), enabled: z.boolean(), refreshMinutes: z.number().min(5).max(10_080), trust: z.string().max(80) });
 
@@ -253,7 +253,8 @@ app.put('/api/v1/models/task-policies/:task', { preHandler: authenticate }, asyn
     return { task };
   }
   if (input.provider === 'EXTERNAL_API' && !input.connectionId) { const error = new Error('外部 API 策略必须选择具体连接。'); error.statusCode = 400; throw error; }
-  await ensureCatalogModel(workspace.id, input.provider, input.connectionId, input.model.trim());
+  const catalogItem = await ensureCatalogModel(workspace.id, input.provider, input.connectionId, input.model.trim());
+  if (!catalogSupportsTask(catalogItem, task)) { const error = new Error('所选模型不支持当前任务的输入与输出方式。请重新同步并选择匹配模型。'); error.statusCode = 400; throw error; }
   const result = await query(`INSERT INTO agent_model_policies (workspace_id, scope, provider, connection_id, model)
     VALUES ($1, $2, $3, $4, $5) ON CONFLICT (workspace_id, scope) DO UPDATE SET provider = excluded.provider, connection_id = excluded.connection_id, model = excluded.model, updated_at = now()
     RETURNING scope, provider, connection_id, model, updated_at`, [workspace.id, task, input.provider, input.connectionId ?? null, input.model.trim()]);
@@ -411,17 +412,17 @@ async function fetchAvailableModels(baseUrl, apiKey) {
   return [...new Set(models)];
 }
 
-function modelCatalogItem({ provider, connectionId, connectionLabel, model, origin = 'ACCOUNT_CATALOG' }) {
-  return { id: `${provider === 'BAILIAN_CLI' ? 'bailian' : `external:${connectionId}`}:${model}`, provider, ...(connectionId ? { connectionId } : {}), connectionLabel, model, capabilities: classifyModelCapabilities(model), origin };
+function modelCatalogItem({ provider, connectionId, connectionLabel, model, origin = 'ACCOUNT_CATALOG', capabilities, operations }) {
+  return { id: `${provider === 'BAILIAN_CLI' ? 'bailian' : `external:${connectionId}`}:${model}`, provider, ...(connectionId ? { connectionId } : {}), connectionLabel, model, capabilities: capabilities ?? classifyModelCapabilities(model), operations: operations ?? classifyModelOperations(model), origin };
 }
 
 function bailianCliMediaCatalog() {
   // 来源：当前安装的 bailian-cli 1.10.1 命令定义。媒体接口不是 OpenAI 兼容 /models 的一部分。
   const entries = [
-    ['qwen-image-2.0', 'IMAGE'], ['qwen-image-2.0-pro', 'IMAGE'], ['qwen-image-max', 'IMAGE'], ['wan2.7-image', 'IMAGE'], ['wan2.6-t2i', 'IMAGE'],
-    ['happyhorse-1.1-t2v', 'VIDEO'], ['happyhorse-1.1-i2v', 'VIDEO'], ['happyhorse-1.1-r2v', 'VIDEO'], ['happyhorse-1.0-video-edit', 'VIDEO'], ['wan2.6-t2v', 'VIDEO'], ['wan2.6-r2v', 'VIDEO'],
+    ['qwen-image-2.0', ['TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE']], ['qwen-image-2.0-pro', ['TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE']], ['qwen-image-max', ['TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE']], ['wan2.7-image', ['TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE']], ['wan2.6-t2i', ['TEXT_TO_IMAGE']],
+    ['happyhorse-1.1-t2v', ['TEXT_TO_VIDEO']], ['happyhorse-1.1-i2v', ['IMAGE_TO_VIDEO']], ['happyhorse-1.1-r2v', ['REFERENCE_TO_VIDEO']], ['happyhorse-1.0-video-edit', ['VIDEO_EDIT']], ['wan2.6-t2v', ['TEXT_TO_VIDEO']], ['wan2.6-r2v', ['REFERENCE_TO_VIDEO']],
   ];
-  return entries.map(([model, capability]) => modelCatalogItem({ provider: 'BAILIAN_CLI', connectionLabel: '阿里云百炼 · CLI 媒体', model, origin: 'CLI_MEDIA', capabilities: [capability] }));
+  return entries.map(([model, operations]) => modelCatalogItem({ provider: 'BAILIAN_CLI', connectionLabel: '阿里云百炼 · CLI 媒体', model, origin: 'CLI_MEDIA', capabilities: [String(model).includes('image') || String(model).includes('t2i') ? 'IMAGE' : 'VIDEO'], operations }));
 }
 
 function classifyModelCapabilities(model) {
@@ -439,9 +440,32 @@ function classifyModelCapabilities(model) {
   return ['TEXT'];
 }
 
+function classifyModelOperations(model) {
+  const value = String(model).toLowerCase();
+  if (/video-?edit|videoedit/.test(value)) return ['VIDEO_EDIT'];
+  if (/first.*last|last.*frame|kf2v|flf2v/.test(value)) return ['FIRST_LAST_FRAME_TO_VIDEO'];
+  if (/r2v|reference.*video/.test(value)) return ['REFERENCE_TO_VIDEO'];
+  if (/i2v|image.*video/.test(value)) return ['IMAGE_TO_VIDEO'];
+  if (/t2v|text.*video/.test(value)) return ['TEXT_TO_VIDEO'];
+  if (/image-edit|edit-image/.test(value)) return ['IMAGE_TO_IMAGE'];
+  if (/qwen-image-(2\.0|2\.0-pro|max)|wan2\.7-image/.test(value)) return ['TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE'];
+  if (/image|t2i|flux|z-image|cogview|stable-diffusion|sdxl/.test(value)) return ['TEXT_TO_IMAGE'];
+  return [];
+}
+
 async function ensureCatalogModel(workspaceId, provider, connectionId, model) {
-  const catalog = await query('SELECT 1 FROM model_catalog WHERE workspace_id = $1 AND item_json->>\'provider\' = $2 AND item_json->>\'model\' = $3 AND COALESCE(item_json->>\'connectionId\', \'\') = $4', [workspaceId, provider, model, connectionId ?? '']);
+  const catalog = await query('SELECT item_json FROM model_catalog WHERE workspace_id = $1 AND item_json->>\'provider\' = $2 AND item_json->>\'model\' = $3 AND COALESCE(item_json->>\'connectionId\', \'\') = $4', [workspaceId, provider, model, connectionId ?? '']);
   if (!catalog.rowCount) { const error = new Error('模型不在已同步且可用的目录中。请先完成连接检测并同步模型。'); error.statusCode = 400; throw error; }
+  return catalog.rows[0].item_json;
+}
+
+function catalogSupportsTask(item, task) {
+  const operations = Array.isArray(item?.operations) ? item.operations : classifyModelOperations(item?.model);
+  const capabilities = Array.isArray(item?.capabilities) ? item.capabilities : classifyModelCapabilities(item?.model);
+  const operationTasks = new Set(['TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE', 'TEXT_TO_VIDEO', 'IMAGE_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO', 'REFERENCE_TO_VIDEO', 'VIDEO_EDIT']);
+  if (operationTasks.has(task)) return operations.includes(task);
+  if (task === 'SPEECH_SYNTHESIS') return capabilities.includes('AUDIO');
+  return capabilities.includes('TEXT');
 }
 
 async function testTavilyKey(apiKey) {

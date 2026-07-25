@@ -213,3 +213,4 @@ API：`http://127.0.0.1:8787/health`
 - 新增外部 API 连接、检测、模型目录同步、任务策略和用量读取接口。模型目录不再写入静态猜测列表，只持久化连接实际返回的模型标识。
 - Web 前端已移除对模型目录、策略、外部连接、用量的 `window.contentEngine` 依赖；桌面端保留原 IPC 分支以兼容旧壳。
 - `bailianCliMediaCatalog()` 依据已安装 `bailian-cli 1.10.1` 的真实命令定义登记图像与视频能力；`/models` 的账户目录和 CLI 媒体目录以 `origin` 区分并合并去重。
+- `005_model_task_scopes.sql` 将旧图片/视频策略迁移为具体操作 Scope。目录项新增 `operations`，任务策略保存时由服务端校验模型是否支持对应输入输出契约。

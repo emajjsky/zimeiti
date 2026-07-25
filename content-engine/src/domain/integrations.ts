@@ -8,12 +8,18 @@ export type ModelTask =
   | 'CONTENT_WRITING'
   | 'CONTENT_REWRITE'
   | 'CONTENT_LAYOUT'
-  | 'IMAGE_GENERATION'
+  | 'TEXT_TO_IMAGE'
+  | 'IMAGE_TO_IMAGE'
   | 'SPEECH_SYNTHESIS'
-  | 'VIDEO_GENERATION';
+  | 'TEXT_TO_VIDEO'
+  | 'IMAGE_TO_VIDEO'
+  | 'FIRST_LAST_FRAME_TO_VIDEO'
+  | 'REFERENCE_TO_VIDEO'
+  | 'VIDEO_EDIT';
 
 export type ModelRouteProvider = 'BAILIAN_CLI' | 'EXTERNAL_API';
 export type ModelCapability = 'TEXT' | 'IMAGE' | 'AUDIO' | 'VIDEO' | 'VISION' | 'MULTIMODAL' | 'ASR' | 'MUSIC' | 'REASONING' | 'EMBEDDING' | 'CODE';
+export type ModelOperation = 'TEXT_TO_IMAGE' | 'IMAGE_TO_IMAGE' | 'TEXT_TO_VIDEO' | 'IMAGE_TO_VIDEO' | 'FIRST_LAST_FRAME_TO_VIDEO' | 'REFERENCE_TO_VIDEO' | 'VIDEO_EDIT';
 
 export interface ModelCatalogItem {
   id: string;
@@ -22,6 +28,7 @@ export interface ModelCatalogItem {
   connectionLabel: string;
   model: string;
   capabilities: ModelCapability[];
+  operations?: ModelOperation[];
   origin?: 'ACCOUNT_CATALOG' | 'CLI_MEDIA';
   syncedAt?: string;
 }
