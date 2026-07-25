@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { animate, createScope, stagger } from 'animejs';
 import { ArrowLeft, AudioLines, Bell, BrainCircuit, CalendarDays, ChartColumn, CheckCircle2, ChevronRight, CircleAlert, CircleCheck, ClipboardList, Compass, FolderOpen, Image, KeyRound, Lightbulb, PenLine, Pencil, Plus, RefreshCw, Search, Send, Settings, ShieldCheck, Trash2, Video, Zap } from 'lucide-react';
 import { intelligenceKey, loadState, persistState, seedState, type FeishuLibraryTemplate, type LocalState, type WorkspaceProfile } from './data/localRepository';
-import { webAgent, webAuth, webIntelligence, type WebSession } from './data/webApi';
+import { webAgent, webAuth, webIntelligence, webModels, webSettings, type CredentialStatus, type WebSession } from './data/webApi';
 import { platformName, projectStatusName, type ContentProject, type ContentVersion, type IntelligenceSource, type Platform, type TopicCandidate } from './domain/content';
 import type { ApiUsageLog, ApiUsageSummary, BailianCapabilityScope, BailianCliStatus, ModelCapability, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelProvider, ModelTask, ModelTaskPolicy } from './domain/integrations';
 import './styles.css';
@@ -677,37 +677,51 @@ function ModelSettingsScreen() {
   const [logs, setLogs] = useState<ApiUsageLog[]>([]);
   const [editing, setEditing] = useState<ModelConnection | undefined>();
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const loadConnections = () => void window.contentEngine?.models.list().then(setConnections).catch((error) => setNotice({ type: 'error', text: error instanceof Error ? error.message : '读取外部 API 连接失败。' }));
-  const loadBailian = () => void window.contentEngine?.bailian.status().then(setBailian).catch((error) => setNotice({ type: 'error', text: error instanceof Error ? error.message : '读取百炼 CLI 状态失败。' }));
-  const loadCatalog = () => void window.contentEngine?.models.listCatalog().then(setCatalog).catch(() => undefined);
-  const loadPolicies = () => void window.contentEngine?.models.taskPolicies().then(setPolicies).catch((error) => setNotice({ type: 'error', text: error instanceof Error ? error.message : '读取任务策略失败。' }));
-  const loadUsage = () => { void window.contentEngine?.models.usageSummary().then(setUsage).catch(() => undefined); void window.contentEngine?.models.usageLogs().then(setLogs).catch(() => undefined); };
+  const [connectionRevision, setConnectionRevision] = useState(0);
+  const isDesktop = Boolean(window.contentEngine);
+  const loadConnections = () => {
+    const source = window.contentEngine ? window.contentEngine.models.list() : webModels.connections();
+    void source.then(setConnections).catch((error) => setNotice({ type: 'error', text: error instanceof Error ? error.message : '读取外部 API 连接失败。' }));
+  };
+  const loadBailian = () => {
+    if (window.contentEngine) { void window.contentEngine.bailian.status().then(setBailian).catch((error) => setNotice({ type: 'error', text: error instanceof Error ? error.message : '读取百炼 CLI 状态失败。' })); }
+  };
+  const loadCatalog = () => { const source = window.contentEngine ? window.contentEngine.models.listCatalog() : webModels.catalog(); void source.then(setCatalog).catch(() => undefined); };
+  const loadPolicies = () => {
+    const source = window.contentEngine ? window.contentEngine.models.taskPolicies() : webModels.taskPolicies();
+    void source.then(setPolicies).catch((error) => setNotice({ type: 'error', text: error instanceof Error ? error.message : '读取任务策略失败。' }));
+  };
+  const loadUsage = () => {
+    if (window.contentEngine) { void window.contentEngine.models.usageSummary().then(setUsage).catch(() => undefined); void window.contentEngine.models.usageLogs().then(setLogs).catch(() => undefined); }
+    else { void webModels.usage().then((result) => { setUsage(result.summary); setLogs(result.logs); }).catch(() => undefined); }
+  };
+  const refreshModelSettings = () => { loadConnections(); loadCatalog(); loadPolicies(); setConnectionRevision((value) => value + 1); };
   useEffect(() => { loadConnections(); loadBailian(); loadCatalog(); loadPolicies(); loadUsage(); }, []);
   const syncCatalog = async () => {
-    if (!window.contentEngine) return;
     setNotice(null);
     try {
-      const result = await window.contentEngine.models.syncCatalog();
+      const result = window.contentEngine ? await window.contentEngine.models.syncCatalog() : await webModels.syncCatalog();
       setCatalog(result.items);
       setNotice(result.errors[0] ? { type: 'error', text: result.errors[0].message } : { type: 'success', text: `已同步 ${result.items.length} 个可选模型。` });
     } catch (error) { setNotice({ type: 'error', text: error instanceof Error ? error.message : '同步模型目录失败。' }); }
   };
   const saveExternal = async (input: ModelConnectionInput) => {
-    if (!window.contentEngine) throw new Error('请在桌面端中配置 API 连接。');
-    const saved = await window.contentEngine.models.save(input);
+    const saved = window.contentEngine ? await window.contentEngine.models.save(input) : input.id ? await webModels.updateConnection(input.id, input) : await webModels.createConnection(input);
     setConnections((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
+    setConnectionRevision((value) => value + 1);
     return saved;
   };
   const testExternal = async (input: ModelConnectionInput) => {
     const saved = await saveExternal(input);
-    const tested = await window.contentEngine!.models.test(saved.id);
+    const tested = window.contentEngine ? await window.contentEngine.models.test(saved.id) : await webModels.testConnection(saved.id);
     setConnections((current) => [tested, ...current.filter((item) => item.id !== tested.id)]);
     return tested;
   };
   const removeExternal = async (connection: ModelConnection) => {
     if (!window.confirm(`确定移除“${connection.label}”吗？本机保存的 API Key 也会一并删除。`)) return;
-    await window.contentEngine?.models.remove(connection.id);
+    if (window.contentEngine) await window.contentEngine.models.remove(connection.id); else await webModels.removeConnection(connection.id);
     setConnections((current) => current.filter((item) => item.id !== connection.id));
+    refreshModelSettings();
   };
   const saveBailian = async (input: { apiKey?: string; scope: BailianCapabilityScope }) => {
     if (!window.contentEngine) throw new Error('请在桌面端中配置百炼 CLI。');
@@ -725,17 +739,27 @@ function ModelSettingsScreen() {
     setCatalog((current) => current.filter((item) => item.provider !== 'BAILIAN_CLI'));
   };
   const savePolicy = async (policy: ModelTaskPolicy) => {
-    if (!window.contentEngine) return;
-    const saved = await window.contentEngine.models.saveTaskPolicy(policy);
+    const saved = window.contentEngine ? await window.contentEngine.models.saveTaskPolicy(policy) : await webModels.saveTaskPolicy(policy);
     setPolicies((current) => [saved, ...current.filter((item) => item.task !== saved.task)]);
   };
   if (screen === 'editor') return <ExternalApiEditor key={editing?.id ?? 'new'} connection={editing} onBack={() => setScreen('connections')} onSave={saveExternal} onTest={testExternal} />;
   return <div className="ai-settings"><PageHeader eyebrow="SETTINGS / 模型与 API" title="模型路由" />
     <UsageOverview usage={usage} />
-    <nav className="ai-section-nav" aria-label="AI 设置分区"><button className={screen === 'bailian' ? 'active' : ''} onClick={() => setScreen('bailian')}><BrainCircuit size={18}/>百炼</button>{!window.contentEngine && <><button className={screen === 'agent' ? 'active' : ''} onClick={() => setScreen('agent')}><BrainCircuit size={18}/>核心 Agent</button><button className={screen === 'search' ? 'active' : ''} onClick={() => setScreen('search')}><Search size={18}/>检索 API</button></>}<button className={screen === 'connections' ? 'active' : ''} onClick={() => setScreen('connections')}><KeyRound size={18}/>外部 API <span>{connections.length}</span></button><button className={screen === 'policies' ? 'active' : ''} onClick={() => setScreen('policies')}><Settings size={18}/>任务策略</button><button className={screen === 'usage' ? 'active' : ''} onClick={() => { setScreen('usage'); loadUsage(); }}><ChartColumn size={18}/>调用记录</button></nav>
+    <nav className="ai-section-nav" aria-label="AI 设置分区"><button className={screen === 'bailian' ? 'active' : ''} onClick={() => setScreen('bailian')}><BrainCircuit size={18}/>百炼</button>{!isDesktop && <><button className={screen === 'agent' ? 'active' : ''} onClick={() => setScreen('agent')}><BrainCircuit size={18}/>核心 Agent</button><button className={screen === 'search' ? 'active' : ''} onClick={() => setScreen('search')}><Search size={18}/>检索 API</button></>}<button className={screen === 'connections' ? 'active' : ''} onClick={() => setScreen('connections')}><KeyRound size={18}/>外部 API <span>{connections.length}</span></button><button className={screen === 'policies' ? 'active' : ''} onClick={() => setScreen('policies')}><Settings size={18}/>任务策略</button><button className={screen === 'usage' ? 'active' : ''} onClick={() => { setScreen('usage'); loadUsage(); }}><ChartColumn size={18}/>调用记录</button></nav>
+    {!isDesktop && <CredentialInventory refreshKey={connectionRevision} onOpen={(target) => setScreen(target)} />}
     {notice && <p className={`model-notice ${notice.type}`} aria-live="polite">{notice.type === 'success' ? <CircleCheck size={17}/> : <CircleAlert size={17}/>} {notice.text}</p>}
-    {screen === 'bailian' ? (window.contentEngine ? <BailianCliCenter status={bailian} onSave={saveBailian} onTest={testBailian} onRemove={removeBailian} /> : <BailianCredentialSettings />) : screen === 'agent' ? <CoreAgentSettings /> : screen === 'search' ? <WebSearchSettings embedded /> : screen === 'connections' ? <ExternalApiConnections connections={connections} onNew={() => { setEditing(undefined); setNotice(null); setScreen('editor'); }} onEdit={(connection) => { setEditing(connection); setNotice(null); setScreen('editor'); }} onRemove={removeExternal} /> : screen === 'policies' ? <TaskPolicyScreen catalog={catalog} policies={policies} onSync={() => void syncCatalog()} onSave={savePolicy} /> : <UsageLogScreen logs={logs} />}
+    {screen === 'bailian' ? (window.contentEngine ? <BailianCliCenter status={bailian} onSave={saveBailian} onTest={testBailian} onRemove={removeBailian} /> : <BailianCredentialSettings onChanged={refreshModelSettings} />) : screen === 'agent' ? <CoreAgentSettings catalog={catalog} onSynced={refreshModelSettings} /> : screen === 'search' ? <WebSearchSettings embedded onChanged={refreshModelSettings} /> : screen === 'connections' ? <ExternalApiConnections connections={connections} onNew={() => { setEditing(undefined); setNotice(null); setScreen('editor'); }} onEdit={(connection) => { setEditing(connection); setNotice(null); setScreen('editor'); }} onRemove={removeExternal} /> : screen === 'policies' ? <TaskPolicyScreen catalog={catalog} policies={policies} onSync={() => void syncCatalog()} onSave={savePolicy} /> : <UsageLogScreen logs={logs} />}
   </div>;
+}
+
+function CredentialInventory({ refreshKey, onOpen }: { refreshKey: number; onOpen: (screen: 'bailian' | 'search' | 'connections') => void }) {
+  const [credentials, setCredentials] = useState<CredentialStatus[]>([]); const [connections, setConnections] = useState<ModelConnection[]>([]);
+  useEffect(() => { void Promise.all([webSettings.credentials(), webModels.connections()]).then(([savedCredentials, savedConnections]) => { setCredentials(savedCredentials); setConnections(savedConnections); }).catch(() => undefined); }, [refreshKey]);
+  const rows = [
+    ...credentials.map((item) => ({ id: item.provider, label: item.provider === 'BAILIAN' ? '阿里云百炼' : 'Tavily 检索', status: item.status, updatedAt: item.updatedAt, screen: item.provider === 'BAILIAN' ? 'bailian' as const : 'search' as const })),
+    ...connections.map((item) => ({ id: item.id, label: item.label, status: item.status === 'UNTESTED' ? 'UNVERIFIED' : item.status, updatedAt: item.updatedAt, screen: 'connections' as const })),
+  ];
+  return <section className="credential-inventory" aria-label="已配置连接">{rows.map((row) => <button type="button" key={row.id} onClick={() => onOpen(row.screen)}><span className={`connection-status ${row.status.toLowerCase()}`} /><span><b>{row.label}</b><small>{row.status === 'READY' ? '可用' : row.status === 'ERROR' ? '异常' : row.status === 'UNVERIFIED' ? '待验证' : '未配置'}</small></span><time>{row.updatedAt ? new Date(row.updatedAt).toLocaleDateString('zh-CN') : ''}</time><ChevronRight size={16}/></button>)}</section>;
 }
 
 function UsageOverview({ usage }: { usage: ApiUsageSummary }) {
@@ -785,7 +809,7 @@ function TaskPolicyScreen({ catalog, policies, onSync, onSave }: { catalog: Mode
       await onSave(selected ? { task, provider: selected.provider, connectionId: selected.connectionId, model: selected.model } : { task });
     } finally { setBusy(false); }
   };
-  return <section className="task-policy-layout"><aside>{tasks.map((item) => <button key={item} className={task === item ? 'active' : ''} onClick={() => selectTask(item)}><span>{modelTaskNames[item]}</span><small>{policies.find((policy) => policy.task === item)?.model ?? '未设置'}</small></button>)}</aside><div className="task-policy-editor"><div className="task-policy-head"><div><h2>{modelTaskNames[task]}</h2><span className="chip blue">{capabilityNames[capability]}</span></div><button className="button" onClick={onSync}><RefreshCw size={16}/>同步模型</button></div><div className="model-filterbar"><div className="channel-filter"><button className={channel === 'ALL' ? 'active' : ''} onClick={() => setChannel('ALL')}>全部渠道</button>{channels.map(([id, label]) => <button key={id} className={channel === id ? 'active' : ''} onClick={() => setChannel(id)}>{label}</button>)}</div><label className="model-search"><Search size={16}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索模型" /></label></div><div className="model-choice-list">{catalog.length === 0 ? <button className="model-choice empty" onClick={onSync}>同步可选模型</button> : filtered.length === 0 ? <p>没有匹配模型</p> : filtered.map((item) => <button key={item.id} className={`model-choice ${effectiveSelection === item.id ? 'selected' : ''}`} onClick={() => setSelection(item.id)}><span className="connection-status ready"/><span><b>{item.model}</b><small>{item.connectionLabel}</small></span><em>{item.capabilities.map((value) => capabilityNames[value]).join(' / ')}</em></button>)}</div><footer><button className="text-button" onClick={() => setSelection('')}>不调用模型</button><button className="button primary" disabled={busy} onClick={() => void save()}>{busy ? '保存中' : '保存策略'}</button></footer></div></section>;
+  return <section className="routing-workbench"><aside className="routing-task-list"><div className="routing-task-list-head"><b>任务路由</b><span>{tasks.filter((item) => policies.find((policy) => policy.task === item)?.model).length}/{tasks.length}</span></div>{tasks.map((item) => { const configured = policies.find((policy) => policy.task === item)?.model; return <button key={item} className={task === item ? 'active' : ''} onClick={() => selectTask(item)}><span>{modelTaskNames[item]}</span><small>{configured ?? '未配置'}</small></button>; })}</aside><div className="routing-stage"><header className="routing-stage-head"><div><span className="eyebrow">TASK ROUTING</span><h2>{modelTaskNames[task]}</h2></div><div><span className="capability-badge">{capabilityNames[capability]}</span><button className="icon-button" title="同步模型" aria-label="同步模型" onClick={onSync}><RefreshCw size={17}/></button></div></header><div className="routing-filters"><div className="channel-filter"><button className={channel === 'ALL' ? 'active' : ''} onClick={() => setChannel('ALL')}>全部</button>{channels.map(([id, label]) => <button key={id} className={channel === id ? 'active' : ''} onClick={() => setChannel(id)}>{label.replace('阿里云百炼 · ', '')}</button>)}</div><label className="model-search"><Search size={16}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索模型" /></label></div><div className="model-choice-grid">{catalog.length === 0 ? <button className="model-choice empty" onClick={onSync}>同步可选模型</button> : filtered.length === 0 ? <div className="model-choice-empty">没有匹配的{capabilityNames[capability]}模型</div> : filtered.map((item) => <button key={item.id} className={`model-choice ${effectiveSelection === item.id ? 'selected' : ''}`} onClick={() => setSelection(item.id)}><span className="model-choice-top"><b>{item.model}</b><i className={item.origin === 'CLI_MEDIA' ? 'media' : 'account'}>{item.origin === 'CLI_MEDIA' ? 'CLI 媒体' : '账户目录'}</i></span><small>{item.connectionLabel}</small></button>)}</div><footer className="routing-stage-footer"><button className="text-button" onClick={() => setSelection('')}>不调用模型</button><button className="button primary" disabled={busy} onClick={() => void save()}>{busy ? '保存中' : '保存策略'}</button></footer></div></section>;
 }
 
 function UsageLogScreen({ logs }: { logs: ApiUsageLog[] }) {
@@ -954,26 +978,37 @@ function FeishuTemplateEditor({ template, onChange }: { template: FeishuLibraryT
   return <section className="feishu-template"><div className="template-head"><div><div className="eyebrow">FEISHU / 内容库模板</div><h2>先定义内容库，再授权创建</h2><p>不会写入你的现有 Base；真正创建前会要求飞书授权和最终确认。</p></div><span className="chip yellow">{template.status === 'DRAFT' ? '待配置' : template.status === 'CREATED' ? '已创建' : '待授权创建'}</span></div><div className="template-grid"><label>内容库名称<input value={template.name} onChange={(event) => update({ name: event.target.value })} /></label><fieldset><legend>题材组织方式</legend><button className={template.topicStorage === 'ONE_TABLE' ? 'chosen' : ''} onClick={() => update({ topicStorage: 'ONE_TABLE' })} type="button">一张总表</button><button className={template.topicStorage === 'BY_CATEGORY' ? 'chosen' : ''} onClick={() => update({ topicStorage: 'BY_CATEGORY' })} type="button">按题材分表</button></fieldset><label className="toggle-line"><input type="checkbox" checked={template.includeSchedule} onChange={(event) => update({ includeSchedule: event.target.checked })} />创建内容排期表</label><label className="toggle-line"><input type="checkbox" checked={template.includeReview} onChange={(event) => update({ includeReview: event.target.checked })} />创建复盘数据表</label></div><div className="template-preview"><b>生成预览</b><div>{tables.map((table) => <span key={table}>{table}</span>)}</div><small>热点库和选题池会包含受保护的 <code>content_engine_id</code> 字段，用于稳定同步。</small></div><button className="button primary" type="button" disabled>下一步：授权并创建（云端 OAuth 开发中）</button></section>;
 }
 
-function WebSearchSettings({ embedded = false }: { embedded?: boolean }) {
-  const [apiKey, setApiKey] = useState(''); const [configured, setConfigured] = useState(false); const [busy, setBusy] = useState(false); const [notice, setNotice] = useState('');
-  useEffect(() => { const load = async () => { try { const result = await webSearchStatus(); setConfigured(Boolean(result?.configured)); } catch { setConfigured(false); } }; void load(); }, []);
-  const save = async () => { if (!apiKey.trim()) return; setBusy(true); setNotice(''); try { const result = await saveWebSearchKey(apiKey.trim()); setApiKey(''); setConfigured(Boolean(result?.configured)); setNotice('已保存'); } catch (error) { setNotice(displayError(error, '保存失败。')); } finally { setBusy(false); } };
-  const panel = <section className="web-search-settings"><div className="web-search-settings-head"><div><h2>Tavily</h2><small>{configured ? 'Key 已保存' : '尚未配置 Key'}</small></div><span className={`chip ${configured ? 'mint' : 'yellow'}`}>{configured ? '已配置' : '待配置'}</span></div><div className="web-search-key-form"><label>Tavily API Key<input type="password" value={apiKey} onChange={(event) => { setApiKey(event.target.value); setNotice(''); }} placeholder={configured ? '输入新 Key 以替换' : '粘贴 Tavily API Key'} autoComplete="off" /></label><button className="button primary" disabled={busy || !apiKey.trim()} onClick={() => void save()}>{busy ? '保存中' : '保存'}</button></div>{notice && <p className={notice === '已保存' ? 'web-search-success' : 'form-error'} aria-live="polite">{notice}</p>}</section>;
+function WebSearchSettings({ embedded = false, onChanged }: { embedded?: boolean; onChanged?: () => void }) {
+  const [apiKey, setApiKey] = useState(''); const [status, setStatus] = useState<CredentialStatus | null>(null); const [busy, setBusy] = useState(false); const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const load = () => void webIntelligence.webSearchStatus().then(setStatus).catch((error) => setNotice({ type: 'error', text: displayError(error, '读取配置失败。') }));
+  useEffect(load, []);
+  const saveAndTest = async () => { if (!apiKey.trim()) return; setBusy(true); setNotice(null); try { await saveWebSearchKey(apiKey.trim()); const result = await webSettings.testCredential('TAVILY'); setApiKey(''); setStatus(result); onChanged?.(); setNotice(result.status === 'READY' ? { type: 'success', text: '已保存并验证' } : { type: 'error', text: result.lastError || '检测未通过' }); } catch (error) { setNotice({ type: 'error', text: displayError(error, '保存或检测失败。') }); } finally { setBusy(false); } };
+  const retest = async () => { setBusy(true); setNotice(null); try { const result = await webSettings.testCredential('TAVILY'); setStatus(result); onChanged?.(); setNotice(result.status === 'READY' ? { type: 'success', text: '检测通过' } : { type: 'error', text: result.lastError || '检测未通过' }); } catch (error) { setNotice({ type: 'error', text: displayError(error, '检测失败。') }); } finally { setBusy(false); } };
+  const remove = async () => { if (!window.confirm('确定移除 Tavily API Key 吗？网页检索将不可用。')) return; setBusy(true); try { await webSettings.removeCredential('TAVILY'); setStatus({ provider: 'TAVILY', configured: false, status: 'UNCONFIGURED' }); setApiKey(''); onChanged?.(); setNotice({ type: 'success', text: '已移除' }); } catch (error) { setNotice({ type: 'error', text: displayError(error, '移除失败。') }); } finally { setBusy(false); } };
+  const configured = Boolean(status?.configured); const state = status?.status ?? 'UNCONFIGURED';
+  const panel = <section className="web-search-settings"><div className="web-search-settings-head"><div><h2>Tavily</h2><small>{state === 'READY' ? '已验证' : state === 'ERROR' ? status?.lastError : configured ? '待验证' : '尚未配置'}</small></div><div className="credential-actions"><span className={`chip ${state === 'READY' ? 'mint' : state === 'ERROR' ? 'red' : 'yellow'}`}>{state === 'READY' ? '可用' : state === 'ERROR' ? '异常' : configured ? '待验证' : '待配置'}</span>{configured && <button className="text-button danger" disabled={busy} onClick={() => void remove()}>移除</button>}</div></div><div className="web-search-key-form"><label>Tavily API Key<input type="password" value={apiKey} onChange={(event) => { setApiKey(event.target.value); setNotice(null); }} placeholder={configured ? '输入新 Key 以替换' : '粘贴 Tavily API Key'} autoComplete="off" /></label>{apiKey.trim() ? <button className="button primary" disabled={busy} onClick={() => void saveAndTest()}>{busy ? '检测中' : '保存并检测'}</button> : <button className="button" disabled={busy || !configured} onClick={() => void retest()}>{busy ? '检测中' : '重新检测'}</button>}</div>{status?.lastTestedAt && <small className="credential-time">最近检测：{new Date(status.lastTestedAt).toLocaleString('zh-CN', { hour12: false })}</small>}{notice && <p className={notice.type === 'success' ? 'web-search-success' : 'form-error'} aria-live="polite">{notice.text}</p>}</section>;
   return embedded ? panel : <><PageHeader eyebrow="SETTINGS / 模型与 API" title="检索 API" />{panel}</>;
 }
 
-function BailianCredentialSettings() {
-  const [apiKey, setApiKey] = useState(''); const [configured, setConfigured] = useState(false); const [busy, setBusy] = useState(false); const [notice, setNotice] = useState('');
-  useEffect(() => { void webAgent.credentialStatus().then((result) => setConfigured(Boolean(result.configured))).catch((error) => setNotice(displayError(error, '无法读取百炼配置。'))); }, []);
-  const save = async () => { if (!apiKey.trim()) return; setBusy(true); setNotice(''); try { await webAgent.saveCredential(apiKey.trim()); setApiKey(''); setConfigured(true); setNotice('已保存'); } catch (error) { setNotice(displayError(error, '保存失败。')); } finally { setBusy(false); } };
-  return <section className="bailian-web-settings"><div className="core-agent-head"><div><h2>百炼</h2><small>{configured ? 'Key 已保存' : '尚未配置 Key'}</small></div><span className={`chip ${configured ? 'mint' : 'yellow'}`}>{configured ? '已配置' : '待配置'}</span></div><div className="bailian-web-grid"><label>百炼 API Key<input type="password" value={apiKey} onChange={(event) => { setApiKey(event.target.value); setNotice(''); }} placeholder={configured ? '输入新 Key 以替换' : '粘贴百炼 API Key'} autoComplete="off" /></label><button className="button primary" disabled={busy || !apiKey.trim()} onClick={() => void save()}>{busy ? '保存中' : '保存'}</button></div>{notice && <p className={notice === '已保存' ? 'web-search-success' : 'form-error'} aria-live="polite">{notice}</p>}</section>;
+function BailianCredentialSettings({ onChanged }: { onChanged: () => void }) {
+  const [apiKey, setApiKey] = useState(''); const [status, setStatus] = useState<CredentialStatus | null>(null); const [busy, setBusy] = useState(false); const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const load = () => void webAgent.credentialStatus().then(setStatus).catch((error) => setNotice({ type: 'error', text: displayError(error, '无法读取百炼配置。') }));
+  useEffect(load, []);
+  const saveAndTest = async () => { if (!apiKey.trim()) return; setBusy(true); setNotice(null); try { await webAgent.saveCredential(apiKey.trim()); const result = await webAgent.testCredential(); setApiKey(''); setStatus(result); if (result.status === 'READY') { onChanged(); setNotice({ type: 'success', text: '已保存并验证，可同步模型' }); } else setNotice({ type: 'error', text: result.lastError || '检测未通过' }); } catch (error) { setNotice({ type: 'error', text: displayError(error, '保存或检测失败。') }); } finally { setBusy(false); } };
+  const retest = async () => { setBusy(true); setNotice(null); try { const result = await webAgent.testCredential(); setStatus(result); if (result.status === 'READY') { onChanged(); setNotice({ type: 'success', text: '检测通过' }); } else setNotice({ type: 'error', text: result.lastError || '检测未通过' }); } catch (error) { setNotice({ type: 'error', text: displayError(error, '检测失败。') }); } finally { setBusy(false); } };
+  const remove = async () => { if (!window.confirm('确定移除百炼 API Key 吗？核心 Agent 和依赖该连接的任务策略会被清除。')) return; setBusy(true); try { await webAgent.removeCredential(); setStatus({ provider: 'BAILIAN', configured: false, status: 'UNCONFIGURED' }); setApiKey(''); onChanged(); setNotice({ type: 'success', text: '已移除' }); } catch (error) { setNotice({ type: 'error', text: displayError(error, '移除失败。') }); } finally { setBusy(false); } };
+  const configured = Boolean(status?.configured); const state = status?.status ?? 'UNCONFIGURED';
+  return <section className="bailian-web-settings"><div className="core-agent-head"><div><h2>百炼</h2><small>{state === 'READY' ? '已验证，可同步模型并分配任务' : state === 'ERROR' ? status?.lastError : configured ? '已保存，等待检测' : '尚未配置'}</small></div><div className="credential-actions"><span className={`chip ${state === 'READY' ? 'mint' : state === 'ERROR' ? 'red' : 'yellow'}`}>{state === 'READY' ? '可用' : state === 'ERROR' ? '异常' : configured ? '待验证' : '待配置'}</span>{configured && <button className="text-button danger" disabled={busy} onClick={() => void remove()}>移除</button>}</div></div><div className="bailian-web-grid"><label>百炼 API Key<input type="password" value={apiKey} onChange={(event) => { setApiKey(event.target.value); setNotice(null); }} placeholder={configured ? '输入新 Key 以替换' : '粘贴百炼 API Key'} autoComplete="off" /></label>{apiKey.trim() ? <button className="button primary" disabled={busy} onClick={() => void saveAndTest()}>{busy ? '检测中' : '保存并检测'}</button> : <button className="button" disabled={busy || !configured} onClick={() => void retest()}>{busy ? '检测中' : '重新检测'}</button>}</div>{status?.lastTestedAt && <small className="credential-time">最近检测：{new Date(status.lastTestedAt).toLocaleString('zh-CN', { hour12: false })}</small>}{notice && <p className={notice.type === 'success' ? 'web-search-success' : 'form-error'} aria-live="polite">{notice.text}</p>}</section>;
 }
 
-function CoreAgentSettings() {
-  const [configured, setConfigured] = useState(false); const [model, setModel] = useState(''); const [busy, setBusy] = useState(false); const [notice, setNotice] = useState('');
-  useEffect(() => { const load = async () => { try { const [credential, policy] = await Promise.all([webAgent.credentialStatus(), webAgent.policy()]); setConfigured(Boolean(credential.configured)); setModel(policy.model ?? ''); } catch (error) { setNotice(displayError(error, '无法读取核心 Agent 配置。')); } }; void load(); }, []);
-  const saveModel = async () => { if (!model.trim()) return; setBusy(true); setNotice(''); try { await webAgent.savePolicy(model.trim()); setNotice('已保存'); } catch (error) { setNotice(displayError(error, '保存失败。')); } finally { setBusy(false); } };
-  return <section className="core-agent-settings"><div className="core-agent-head"><div><h2>核心 Agent</h2><small>{configured ? '复用百炼 Key' : '请先配置百炼 Key'}</small></div><span className={`chip ${configured ? 'mint' : 'yellow'}`}>{configured ? '可配置' : '待配置百炼'}</span></div><div className="core-agent-grid model-only"><label>规划模型<input value={model} onChange={(event) => { setModel(event.target.value); setNotice(''); }} placeholder="例如：qwen-plus" /></label><button className="button primary" disabled={busy || !configured || !model.trim()} onClick={() => void saveModel()}>{busy ? '保存中' : '保存模型'}</button></div>{notice && <p className={notice === '已保存' ? 'web-search-success' : 'form-error'} aria-live="polite">{notice}</p>}</section>;
+function CoreAgentSettings({ catalog, onSynced }: { catalog: ModelCatalogItem[]; onSynced: () => void }) {
+  const [credential, setCredential] = useState<CredentialStatus | null>(null); const [model, setModel] = useState(''); const [busy, setBusy] = useState(false); const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  useEffect(() => { const load = async () => { try { const [status, policy] = await Promise.all([webAgent.credentialStatus(), webAgent.policy()]); setCredential(status); setModel(policy.model ?? ''); } catch (error) { setNotice({ type: 'error', text: displayError(error, '无法读取核心 Agent 配置。') }); } }; void load(); }, []);
+  const models = catalog.filter((item) => item.provider === 'BAILIAN_CLI' && item.capabilities.includes('TEXT'));
+  const sync = async () => { setBusy(true); setNotice(null); try { const result = await webModels.syncCatalog(); onSynced(); setNotice(result.errors[0] ? { type: 'error', text: result.errors[0].message } : { type: 'success', text: `已同步 ${result.items.length} 个模型` }); } catch (error) { setNotice({ type: 'error', text: displayError(error, '同步失败。') }); } finally { setBusy(false); } };
+  const saveModel = async () => { if (!model.trim()) return; setBusy(true); setNotice(null); try { await webAgent.savePolicy(model); setNotice({ type: 'success', text: '已保存' }); } catch (error) { setNotice({ type: 'error', text: displayError(error, '保存失败。') }); } finally { setBusy(false); } };
+  const ready = credential?.status === 'READY';
+  return <section className="core-agent-settings"><div className="core-agent-head"><div><h2>核心 Agent</h2><small>{ready ? '复用百炼连接' : '请先完成百炼检测'}</small></div><span className={`chip ${ready ? 'mint' : 'yellow'}`}>{ready ? '可配置' : '待验证百炼'}</span></div><div className="core-agent-grid model-only"><label>规划模型<select value={model} onChange={(event) => { setModel(event.target.value); setNotice(null); }} disabled={!ready}><option value="">选择已同步模型</option>{models.map((item) => <option key={item.id} value={item.model}>{item.model}</option>)}</select></label><button className="button" disabled={busy || !ready} onClick={() => void sync()}>{busy ? '同步中' : '同步模型'}</button><button className="button primary" disabled={busy || !ready || !model.trim()} onClick={() => void saveModel()}>{busy ? '保存中' : '保存模型'}</button></div>{notice && <p className={notice.type === 'success' ? 'web-search-success' : 'form-error'} aria-live="polite">{notice.text}</p>}</section>;
 }
 
 function WebSearchPanel({ onSave, onNavigate }: { onSave: (item: LocalState['intelligence'][number]) => void; onNavigate: (view: View) => void }) {

@@ -206,3 +206,10 @@ API：`http://127.0.0.1:8787/health`
 | 端到端 | 真实情报 → 选题 → 内容包 → 人工发布 → 数据回填 |
 
 每项验收都需标注为“代码完成”“自动化通过”“真实用户验收”三种之一，不能混用。
+# 2026-07-25 实现记录：服务端模型设置
+
+- 新增迁移 `server/migrations/004_model_settings.sql`：扩展 `credential_vault` 验证元数据，增加工作空间级 `model_connections` 和 `model_catalog`，任务策略支持外部连接引用。
+- 新增凭据接口：列表、读取、保存、检测和移除。百炼检测同时验证服务器内置 CLI 可启动和 DashScope `/models` 可访问；Tavily检测调用最小搜索请求。
+- 新增外部 API 连接、检测、模型目录同步、任务策略和用量读取接口。模型目录不再写入静态猜测列表，只持久化连接实际返回的模型标识。
+- Web 前端已移除对模型目录、策略、外部连接、用量的 `window.contentEngine` 依赖；桌面端保留原 IPC 分支以兼容旧壳。
+- `bailianCliMediaCatalog()` 依据已安装 `bailian-cli 1.10.1` 的真实命令定义登记图像与视频能力；`/models` 的账户目录和 CLI 媒体目录以 `origin` 区分并合并去重。

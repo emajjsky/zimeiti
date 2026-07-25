@@ -4,15 +4,18 @@ const jwt = require('@fastify/jwt');
 const { z } = require('zod');
 const config = require('./config.cjs');
 const { query, transaction } = require('./db.cjs');
-const { encrypt, hashPassword, verifyPassword } = require('./crypto.cjs');
+const { encrypt, decrypt, hashPassword, verifyPassword } = require('./crypto.cjs');
 const { clipPublicLink } = require('./services/public-web.cjs');
 const { searchTavily } = require('./services/tavily.cjs');
 const { listSources, createSources, removeSource, listItems, refreshWorkspaceRss } = require('./services/intelligenceRepository.cjs');
 const { enqueue } = require('./queue.cjs');
 const { listAvailableSkills } = require('./agent/skillRegistry.cjs');
+const { runBailianCli } = require('./runner/bailian.cjs');
 
 const app = Fastify({ logger: true, bodyLimit: 5 * 1024 * 1024 });
 const credentials = new Set(['TAVILY', 'BAILIAN']);
+const modelTasks = ['INTELLIGENCE_ANALYSIS', 'TOPIC_RECOMMENDATION', 'CONTENT_WRITING', 'CONTENT_REWRITE', 'CONTENT_LAYOUT', 'IMAGE_GENERATION', 'SPEECH_SYNTHESIS', 'VIDEO_GENERATION'];
+const externalProviders = new Set(['DASHSCOPE', 'SILICONFLOW', 'VOLCENGINE_ARK', 'KIMI', 'ZHIPU', 'OPENAI', 'OPENAI_COMPATIBLE']);
 const sourceInput = z.object({ name: z.string().max(160), type: z.literal('RSS'), url: z.string().url().max(2_000), category: z.string().max(120), includeKeywords: z.array(z.string().max(120)).optional(), excludeKeywords: z.array(z.string().max(120)).optional(), language: z.enum(['ALL', 'ZH', 'EN']).optional(), enabled: z.boolean(), refreshMinutes: z.number().min(5).max(10_080), trust: z.string().max(80) });
 
 app.register(cors, { origin: config.corsOrigin, credentials: false });
@@ -81,21 +84,195 @@ app.put('/api/v1/workspace/state', { preHandler: authenticate }, async (request)
   return { revision: result.rows[0].revision, updatedAt: result.rows[0].updated_at };
 });
 
-app.get('/api/v1/settings/credentials/:provider', { preHandler: authenticate }, async (request) => {
-  const provider = String(request.params.provider || '').toUpperCase();
-  if (!credentials.has(provider)) { const error = new Error('不支持的凭据类型。'); error.statusCode = 404; throw error; }
+app.get('/api/v1/settings/credentials', { preHandler: authenticate }, async (request) => {
   const workspace = await currentWorkspace(request.user.sub);
-  const result = await query('SELECT updated_at FROM credential_vault WHERE workspace_id = $1 AND provider = $2', [workspace.id, provider]);
-  return { configured: Boolean(result.rowCount), updatedAt: result.rows[0]?.updated_at ?? null };
+  const result = await query(`SELECT provider, status, updated_at, last_tested_at, last_error
+    FROM credential_vault WHERE workspace_id = $1 AND provider = ANY($2::text[]) ORDER BY updated_at DESC`, [workspace.id, [...credentials]]);
+  const rows = new Map(result.rows.map((row) => [row.provider, credentialView(row.provider, row)]));
+  return [...credentials].map((provider) => rows.get(provider) ?? credentialView(provider));
+});
+
+app.get('/api/v1/settings/credentials/:provider', { preHandler: authenticate }, async (request) => {
+  const provider = credentialProvider(request.params.provider);
+  const workspace = await currentWorkspace(request.user.sub);
+  const result = await query('SELECT provider, status, updated_at, last_tested_at, last_error FROM credential_vault WHERE workspace_id = $1 AND provider = $2', [workspace.id, provider]);
+  return credentialView(provider, result.rows[0]);
 });
 
 app.put('/api/v1/settings/credentials/:provider', { preHandler: authenticate }, async (request) => {
-  const provider = String(request.params.provider || '').toUpperCase();
+  const provider = credentialProvider(request.params.provider);
   const input = z.object({ apiKey: z.string().min(1).max(1_000) }).parse(request.body);
-  if (!credentials.has(provider)) { const error = new Error('不支持的凭据类型。'); error.statusCode = 404; throw error; }
   const workspace = await currentWorkspace(request.user.sub);
-  await query(`INSERT INTO credential_vault (workspace_id, provider, encrypted_secret) VALUES ($1, $2, $3) ON CONFLICT (workspace_id, provider) DO UPDATE SET encrypted_secret = excluded.encrypted_secret, updated_at = now()`, [workspace.id, provider, encrypt(input.apiKey.trim())]);
-  return { configured: true };
+  const result = await query(`INSERT INTO credential_vault (workspace_id, provider, encrypted_secret, status, last_tested_at, last_error)
+    VALUES ($1, $2, $3, 'UNVERIFIED', NULL, NULL)
+    ON CONFLICT (workspace_id, provider) DO UPDATE SET encrypted_secret = excluded.encrypted_secret, status = 'UNVERIFIED', last_tested_at = NULL, last_error = NULL, updated_at = now()
+    RETURNING provider, status, updated_at, last_tested_at, last_error`, [workspace.id, provider, encrypt(input.apiKey.trim())]);
+  return credentialView(provider, result.rows[0]);
+});
+
+app.post('/api/v1/settings/credentials/:provider/test', { preHandler: authenticate }, async (request) => {
+  const provider = credentialProvider(request.params.provider);
+  const workspace = await currentWorkspace(request.user.sub);
+  const key = await credentialSecret(workspace.id, provider);
+  try {
+    if (provider === 'BAILIAN') {
+      await Promise.all([runBailianCli(['--version'], undefined, 15_000), fetchAvailableModels('https://dashscope.aliyuncs.com/compatible-mode/v1', key)]);
+    } else {
+      await testTavilyKey(key);
+    }
+    const result = await query(`UPDATE credential_vault SET status = 'READY', last_tested_at = now(), last_error = NULL, updated_at = now()
+      WHERE workspace_id = $1 AND provider = $2 RETURNING provider, status, updated_at, last_tested_at, last_error`, [workspace.id, provider]);
+    return credentialView(provider, result.rows[0]);
+  } catch (error) {
+    const message = readableProviderError(provider, error);
+    const result = await query(`UPDATE credential_vault SET status = 'ERROR', last_tested_at = now(), last_error = $3, updated_at = now()
+      WHERE workspace_id = $1 AND provider = $2 RETURNING provider, status, updated_at, last_tested_at, last_error`, [workspace.id, provider, message.slice(0, 2_000)]);
+    return credentialView(provider, result.rows[0]);
+  }
+});
+
+app.delete('/api/v1/settings/credentials/:provider', { preHandler: authenticate }, async (request, reply) => {
+  const provider = credentialProvider(request.params.provider);
+  const workspace = await currentWorkspace(request.user.sub);
+  await transaction(async (client) => {
+    await client.query('DELETE FROM credential_vault WHERE workspace_id = $1 AND provider = $2', [workspace.id, provider]);
+    if (provider === 'BAILIAN') {
+      await client.query("DELETE FROM model_catalog WHERE workspace_id = $1 AND item_json->>'provider' = 'BAILIAN_CLI'", [workspace.id]);
+      await client.query("DELETE FROM agent_model_policies WHERE workspace_id = $1 AND provider = 'BAILIAN_CLI'", [workspace.id]);
+    }
+  });
+  reply.code(204).send();
+});
+
+app.get('/api/v1/models/connections', { preHandler: authenticate }, async (request) => {
+  const workspace = await currentWorkspace(request.user.sub);
+  const result = await query(`SELECT id, provider, label, base_url, status, last_tested_at, last_error, updated_at
+    FROM model_connections WHERE workspace_id = $1 ORDER BY updated_at DESC`, [workspace.id]);
+  return result.rows.map(modelConnectionView);
+});
+
+app.post('/api/v1/models/connections', { preHandler: authenticate }, async (request, reply) => {
+  const input = modelConnectionInput(true).parse(request.body);
+  const workspace = await currentWorkspace(request.user.sub);
+  const result = await query(`INSERT INTO model_connections (workspace_id, provider, label, base_url, encrypted_secret)
+    VALUES ($1, $2, $3, $4, $5) RETURNING id, provider, label, base_url, status, last_tested_at, last_error, updated_at`, [workspace.id, input.provider, input.label.trim(), normalizedBaseUrl(input.baseUrl), encrypt(input.apiKey.trim())]);
+  reply.code(201).send(modelConnectionView(result.rows[0]));
+});
+
+app.put('/api/v1/models/connections/:id', { preHandler: authenticate }, async (request) => {
+  const input = modelConnectionInput(false).parse(request.body);
+  const workspace = await currentWorkspace(request.user.sub);
+  const existing = await query('SELECT encrypted_secret FROM model_connections WHERE id = $1 AND workspace_id = $2', [request.params.id, workspace.id]);
+  if (!existing.rowCount) { const error = new Error('未找到外部 API 连接。'); error.statusCode = 404; throw error; }
+  const secret = input.apiKey?.trim() ? encrypt(input.apiKey.trim()) : existing.rows[0].encrypted_secret;
+  const result = await query(`UPDATE model_connections SET provider = $3, label = $4, base_url = $5, encrypted_secret = $6,
+    status = 'UNVERIFIED', last_tested_at = NULL, last_error = NULL, updated_at = now()
+    WHERE id = $1 AND workspace_id = $2
+    RETURNING id, provider, label, base_url, status, last_tested_at, last_error, updated_at`, [request.params.id, workspace.id, input.provider, input.label.trim(), normalizedBaseUrl(input.baseUrl), secret]);
+  return modelConnectionView(result.rows[0]);
+});
+
+app.post('/api/v1/models/connections/:id/test', { preHandler: authenticate }, async (request) => {
+  const workspace = await currentWorkspace(request.user.sub);
+  const existing = await query('SELECT id, base_url, encrypted_secret FROM model_connections WHERE id = $1 AND workspace_id = $2', [request.params.id, workspace.id]);
+  if (!existing.rowCount) { const error = new Error('未找到外部 API 连接。'); error.statusCode = 404; throw error; }
+  try {
+    await fetchAvailableModels(existing.rows[0].base_url, decrypt(existing.rows[0].encrypted_secret));
+    const result = await query(`UPDATE model_connections SET status = 'READY', last_tested_at = now(), last_error = NULL, updated_at = now()
+      WHERE id = $1 AND workspace_id = $2 RETURNING id, provider, label, base_url, status, last_tested_at, last_error, updated_at`, [request.params.id, workspace.id]);
+    return modelConnectionView(result.rows[0]);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '外部 API 检测失败。';
+    const result = await query(`UPDATE model_connections SET status = 'ERROR', last_tested_at = now(), last_error = $3, updated_at = now()
+      WHERE id = $1 AND workspace_id = $2 RETURNING id, provider, label, base_url, status, last_tested_at, last_error, updated_at`, [request.params.id, workspace.id, message.slice(0, 2_000)]);
+    return modelConnectionView(result.rows[0]);
+  }
+});
+
+app.delete('/api/v1/models/connections/:id', { preHandler: authenticate }, async (request, reply) => {
+  const workspace = await currentWorkspace(request.user.sub);
+  await transaction(async (client) => {
+    const removed = await client.query('DELETE FROM model_connections WHERE id = $1 AND workspace_id = $2 RETURNING id', [request.params.id, workspace.id]);
+    if (!removed.rowCount) { const error = new Error('未找到外部 API 连接。'); error.statusCode = 404; throw error; }
+    await client.query("DELETE FROM model_catalog WHERE workspace_id = $1 AND item_json->>'connectionId' = $2", [workspace.id, request.params.id]);
+    await client.query('DELETE FROM agent_model_policies WHERE workspace_id = $1 AND connection_id = $2', [workspace.id, request.params.id]);
+  });
+  reply.code(204).send();
+});
+
+app.get('/api/v1/models/catalog', { preHandler: authenticate }, async (request) => {
+  const workspace = await currentWorkspace(request.user.sub);
+  const result = await query('SELECT item_json, updated_at FROM model_catalog WHERE workspace_id = $1 ORDER BY updated_at DESC, id', [workspace.id]);
+  return result.rows.map((row) => ({ ...row.item_json, syncedAt: row.updated_at }));
+});
+
+app.post('/api/v1/models/catalog/sync', { preHandler: authenticate }, async (request) => {
+  const workspace = await currentWorkspace(request.user.sub);
+  const items = []; const errors = [];
+  const bailian = await query("SELECT encrypted_secret FROM credential_vault WHERE workspace_id = $1 AND provider = 'BAILIAN' AND status = 'READY'", [workspace.id]);
+  if (bailian.rowCount) {
+    try {
+      const models = await fetchAvailableModels('https://dashscope.aliyuncs.com/compatible-mode/v1', decrypt(bailian.rows[0].encrypted_secret));
+      items.push(...models.map((model) => modelCatalogItem({ provider: 'BAILIAN_CLI', connectionLabel: '阿里云百炼', model, origin: 'ACCOUNT_CATALOG' })));
+      items.push(...bailianCliMediaCatalog());
+    } catch (error) { errors.push({ connectionLabel: '阿里云百炼', message: error instanceof Error ? error.message : '模型目录同步失败。' }); }
+  }
+  const external = await query("SELECT id, label, base_url, encrypted_secret FROM model_connections WHERE workspace_id = $1 AND status = 'READY'", [workspace.id]);
+  for (const connection of external.rows) {
+    try {
+      const models = await fetchAvailableModels(connection.base_url, decrypt(connection.encrypted_secret));
+      items.push(...models.map((model) => modelCatalogItem({ provider: 'EXTERNAL_API', connectionId: connection.id, connectionLabel: connection.label, model })));
+    } catch (error) { errors.push({ connectionLabel: connection.label, message: error instanceof Error ? error.message : '模型目录同步失败。' }); }
+  }
+  const uniqueItems = [...items.reduce((catalog, item) => {
+    const current = catalog.get(item.id);
+    if (!current || item.origin === 'ACCOUNT_CATALOG') catalog.set(item.id, item);
+    return catalog;
+  }, new Map()).values()];
+  await transaction(async (client) => {
+    await client.query('DELETE FROM model_catalog WHERE workspace_id = $1', [workspace.id]);
+    for (const item of uniqueItems) await client.query('INSERT INTO model_catalog (workspace_id, id, item_json) VALUES ($1, $2, $3)', [workspace.id, item.id, JSON.stringify(item)]);
+  });
+  return { items: uniqueItems, errors };
+});
+
+app.get('/api/v1/models/task-policies', { preHandler: authenticate }, async (request) => {
+  const workspace = await currentWorkspace(request.user.sub);
+  const result = await query('SELECT scope, provider, connection_id, model, updated_at FROM agent_model_policies WHERE workspace_id = $1 AND scope = ANY($2::text[])', [workspace.id, modelTasks]);
+  const saved = new Map(result.rows.map((row) => [row.scope, { task: row.scope, provider: row.provider, connectionId: row.connection_id ?? undefined, model: row.model, updatedAt: row.updated_at }]));
+  return modelTasks.map((task) => saved.get(task) ?? { task });
+});
+
+app.put('/api/v1/models/task-policies/:task', { preHandler: authenticate }, async (request) => {
+  const task = String(request.params.task);
+  if (!modelTasks.includes(task)) { const error = new Error('不支持的任务策略。'); error.statusCode = 400; throw error; }
+  const input = z.object({ provider: z.enum(['BAILIAN_CLI', 'EXTERNAL_API']).optional(), connectionId: z.string().uuid().optional(), model: z.string().max(160).optional() }).parse(request.body);
+  const workspace = await currentWorkspace(request.user.sub);
+  if (!input.provider || !input.model?.trim()) {
+    await query('DELETE FROM agent_model_policies WHERE workspace_id = $1 AND scope = $2', [workspace.id, task]);
+    return { task };
+  }
+  if (input.provider === 'EXTERNAL_API' && !input.connectionId) { const error = new Error('外部 API 策略必须选择具体连接。'); error.statusCode = 400; throw error; }
+  await ensureCatalogModel(workspace.id, input.provider, input.connectionId, input.model.trim());
+  const result = await query(`INSERT INTO agent_model_policies (workspace_id, scope, provider, connection_id, model)
+    VALUES ($1, $2, $3, $4, $5) ON CONFLICT (workspace_id, scope) DO UPDATE SET provider = excluded.provider, connection_id = excluded.connection_id, model = excluded.model, updated_at = now()
+    RETURNING scope, provider, connection_id, model, updated_at`, [workspace.id, task, input.provider, input.connectionId ?? null, input.model.trim()]);
+  const row = result.rows[0];
+  return { task: row.scope, provider: row.provider, connectionId: row.connection_id ?? undefined, model: row.model, updatedAt: row.updated_at };
+});
+
+app.get('/api/v1/models/usage', { preHandler: authenticate }, async (request) => {
+  const workspace = await currentWorkspace(request.user.sub);
+  const [summary, rows] = await Promise.all([
+    query(`SELECT COUNT(*)::int AS total_calls, COUNT(*) FILTER (WHERE status = 'SUCCESS')::int AS success_calls,
+      COUNT(*) FILTER (WHERE status <> 'SUCCESS')::int AS failed_calls,
+      COUNT(*) FILTER (WHERE created_at >= date_trunc('day', now()))::int AS today_calls,
+      COALESCE(SUM(input_tokens), 0)::int AS input_tokens, COALESCE(SUM(output_tokens), 0)::int AS output_tokens
+      FROM api_usage_logs WHERE workspace_id = $1`, [workspace.id]),
+    query('SELECT id, provider, model, operation, status, duration_ms, input_tokens, output_tokens, error, created_at FROM api_usage_logs WHERE workspace_id = $1 ORDER BY created_at DESC LIMIT 80', [workspace.id]),
+  ]);
+  const total = summary.rows[0];
+  return { summary: { totalCalls: total.total_calls, todayCalls: total.today_calls, successCalls: total.success_calls, failedCalls: total.failed_calls, inputTokens: total.input_tokens, outputTokens: total.output_tokens }, logs: rows.rows.map(usageLogView) };
 });
 
 app.post('/api/v1/intelligence/clip', { preHandler: authenticate }, async (request) => clipPublicLink(z.object({ url: z.string().url().max(2_000) }).parse(request.body).url));
@@ -123,8 +300,7 @@ app.put('/api/v1/agent/model-policies/:scope', { preHandler: authenticate }, asy
   const scope = String(request.params.scope);
   if (scope !== 'AGENT_PLANNER') { const error = new Error('当前只支持配置核心 Agent 规划模型。'); error.statusCode = 400; throw error; }
   const workspace = await currentWorkspace(request.user.sub);
-  const credential = await query('SELECT 1 FROM credential_vault WHERE workspace_id = $1 AND provider = $2', [workspace.id, 'BAILIAN']);
-  if (!credential.rowCount) { const error = new Error('请先保存百炼 Key。'); error.statusCode = 400; throw error; }
+  await ensureCatalogModel(workspace.id, 'BAILIAN_CLI', undefined, input.model.trim());
   const result = await query(`INSERT INTO agent_model_policies (workspace_id, scope, provider, model) VALUES ($1, $2, 'BAILIAN_CLI', $3) ON CONFLICT (workspace_id, scope) DO UPDATE SET model = excluded.model, updated_at = now() RETURNING scope, provider, model, updated_at`, [workspace.id, scope, input.model.trim()]);
   return result.rows[0];
 });
@@ -180,6 +356,110 @@ app.get('/api/v1/jobs/:id', { preHandler: authenticate }, async (request) => {
   if (!result.rowCount) { const error = new Error('未找到任务。'); error.statusCode = 404; throw error; }
   return result.rows[0];
 });
+
+function credentialProvider(value) {
+  const provider = String(value || '').toUpperCase();
+  if (!credentials.has(provider)) { const error = new Error('不支持的凭据类型。'); error.statusCode = 404; throw error; }
+  return provider;
+}
+
+function credentialView(provider, row) {
+  return { provider, configured: Boolean(row), status: row?.status ?? 'UNCONFIGURED', updatedAt: row?.updated_at ?? null, lastTestedAt: row?.last_tested_at ?? null, lastError: row?.last_error ?? null };
+}
+
+async function credentialSecret(workspaceId, provider) {
+  const result = await query('SELECT encrypted_secret FROM credential_vault WHERE workspace_id = $1 AND provider = $2', [workspaceId, provider]);
+  if (!result.rowCount) { const error = new Error('请先保存 API Key。'); error.statusCode = 400; throw error; }
+  return decrypt(result.rows[0].encrypted_secret);
+}
+
+function modelConnectionInput(requireKey) {
+  return z.object({
+    provider: z.enum(['DASHSCOPE', 'SILICONFLOW', 'VOLCENGINE_ARK', 'KIMI', 'ZHIPU', 'OPENAI', 'OPENAI_COMPATIBLE']),
+    label: z.string().min(1).max(100),
+    baseUrl: z.string().url().max(1_000),
+    apiKey: requireKey ? z.string().min(1).max(1_000) : z.string().min(1).max(1_000).optional(),
+  });
+}
+
+function normalizedBaseUrl(value) {
+  const url = new URL(value.trim());
+  if (!['https:', 'http:'].includes(url.protocol)) throw new Error('API 地址必须使用 HTTP 或 HTTPS。');
+  return url.toString().replace(/\/$/, '');
+}
+
+function modelConnectionView(row) {
+  return { id: row.id, provider: row.provider, label: row.label, baseUrl: row.base_url, model: '', purposes: [], status: row.status === 'UNVERIFIED' ? 'UNTESTED' : row.status, lastTestedAt: row.last_tested_at ?? undefined, lastError: row.last_error ?? undefined, updatedAt: row.updated_at };
+}
+
+async function fetchAvailableModels(baseUrl, apiKey) {
+  let response;
+  try {
+    response = await fetch(`${baseUrl.replace(/\/$/, '')}/models`, { signal: AbortSignal.timeout(15_000), headers: { Authorization: `Bearer ${apiKey}` } });
+  } catch (error) {
+    throw new Error(`无法访问模型目录：${error instanceof Error ? error.message : '网络错误'}`);
+  }
+  if (!response.ok) {
+    let detail = '';
+    try { const payload = await response.json(); detail = [payload?.code, payload?.message, payload?.error?.message].filter((item) => typeof item === 'string').join(' / '); } catch { /* HTTP 状态足以说明失败。 */ }
+    throw new Error(`模型目录请求失败（HTTP ${response.status}${detail ? `：${detail}` : ''}）。`);
+  }
+  const payload = await response.json();
+  const values = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload?.models) ? payload.models : [];
+  const models = values.map((item) => typeof item === 'string' ? item : item?.id ?? item?.model_id ?? item?.model).filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim());
+  if (!models.length) throw new Error('模型目录未返回可选模型。');
+  return [...new Set(models)];
+}
+
+function modelCatalogItem({ provider, connectionId, connectionLabel, model, origin = 'ACCOUNT_CATALOG' }) {
+  return { id: `${provider === 'BAILIAN_CLI' ? 'bailian' : `external:${connectionId}`}:${model}`, provider, ...(connectionId ? { connectionId } : {}), connectionLabel, model, capabilities: classifyModelCapabilities(model), origin };
+}
+
+function bailianCliMediaCatalog() {
+  // 来源：当前安装的 bailian-cli 1.10.1 命令定义。媒体接口不是 OpenAI 兼容 /models 的一部分。
+  const entries = [
+    ['qwen-image-2.0', 'IMAGE'], ['qwen-image-2.0-pro', 'IMAGE'], ['qwen-image-max', 'IMAGE'], ['wan2.7-image', 'IMAGE'], ['wan2.6-t2i', 'IMAGE'],
+    ['happyhorse-1.1-t2v', 'VIDEO'], ['happyhorse-1.1-i2v', 'VIDEO'], ['happyhorse-1.1-r2v', 'VIDEO'], ['happyhorse-1.0-video-edit', 'VIDEO'], ['wan2.6-t2v', 'VIDEO'], ['wan2.6-r2v', 'VIDEO'],
+  ];
+  return entries.map(([model, capability]) => modelCatalogItem({ provider: 'BAILIAN_CLI', connectionLabel: '阿里云百炼 · CLI 媒体', model, origin: 'CLI_MEDIA', capabilities: [capability] }));
+}
+
+function classifyModelCapabilities(model) {
+  const value = String(model).toLowerCase();
+  if (/embed|rerank/.test(value)) return ['EMBEDDING'];
+  if (/asr|paraformer|fun-asr/.test(value)) return ['ASR'];
+  if (/music/.test(value)) return ['MUSIC'];
+  if (/omni/.test(value)) return ['TEXT', 'VISION', 'MULTIMODAL'];
+  if (/\bvl\b|vision/.test(value)) return ['TEXT', 'VISION'];
+  if (/tts|cosy|voice|speech/.test(value)) return ['AUDIO'];
+  if (/video|wanx|wan\d+\.\d+-(t2v|i2v|r2v|videoedit)|hailuo|seedance|happyhorse/.test(value)) return ['VIDEO'];
+  if (/image|flux|z-image|cogview|stable-diffusion|sdxl|wan\d+\.\d+-t2i/.test(value)) return ['IMAGE'];
+  if (/code|coder/.test(value)) return ['CODE'];
+  if (/reasoner|reasoning|r1/.test(value)) return ['TEXT', 'REASONING'];
+  return ['TEXT'];
+}
+
+async function ensureCatalogModel(workspaceId, provider, connectionId, model) {
+  const catalog = await query('SELECT 1 FROM model_catalog WHERE workspace_id = $1 AND item_json->>\'provider\' = $2 AND item_json->>\'model\' = $3 AND COALESCE(item_json->>\'connectionId\', \'\') = $4', [workspaceId, provider, model, connectionId ?? '']);
+  if (!catalog.rowCount) { const error = new Error('模型不在已同步且可用的目录中。请先完成连接检测并同步模型。'); error.statusCode = 400; throw error; }
+}
+
+async function testTavilyKey(apiKey) {
+  let response;
+  try {
+    response = await fetch('https://api.tavily.com/search', { method: 'POST', signal: AbortSignal.timeout(15_000), headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ query: 'Tavily', search_depth: 'basic', max_results: 1 }) });
+  } catch (error) { throw new Error(`无法访问 Tavily：${error instanceof Error ? error.message : '网络错误'}`); }
+  if (!response.ok) throw new Error(`Tavily 检测失败（HTTP ${response.status}）。`);
+}
+
+function readableProviderError(provider, error) {
+  const message = error instanceof Error ? error.message : '检测失败。';
+  return provider === 'BAILIAN' ? `百炼检测失败：${message}` : message;
+}
+
+function usageLogView(row) {
+  return { id: row.id, task: row.operation, provider: row.provider, connectionLabel: row.provider === 'BAILIAN_CLI' ? '阿里云百炼' : '外部 API', model: row.model ?? '-', status: row.status === 'SUCCESS' ? 'SUCCESS' : 'ERROR', startedAt: row.created_at, durationMs: row.duration_ms, requestChars: 0, responseChars: 0, inputTokens: row.input_tokens ?? undefined, outputTokens: row.output_tokens ?? undefined, error: row.error ?? undefined };
+}
 
 async function start() {
   await app.listen({ port: config.port, host: config.host });

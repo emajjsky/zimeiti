@@ -22,6 +22,7 @@ export interface ModelCatalogItem {
   connectionLabel: string;
   model: string;
   capabilities: ModelCapability[];
+  origin?: 'ACCOUNT_CATALOG' | 'CLI_MEDIA';
   syncedAt?: string;
 }
 
@@ -89,6 +90,7 @@ export interface ModelConnection {
   status: 'UNTESTED' | 'READY' | 'ERROR';
   lastTestedAt?: string;
   lastError?: string;
+  updatedAt?: string;
 }
 
 export interface ModelConnectionInput extends Omit<ModelConnection, 'id' | 'status' | 'lastTestedAt' | 'lastError'> {

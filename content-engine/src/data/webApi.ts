@@ -1,4 +1,5 @@
 import type { LocalState } from './localRepository';
+import type { ApiUsageLog, ApiUsageSummary, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelTaskPolicy } from '../domain/integrations';
 
 const tokenKey = 'content-engine-web-session-v1';
 const apiBase = import.meta.env.VITE_API_BASE ?? '/api/v1';
@@ -11,7 +12,7 @@ function readSession(): WebSession | null {
 
 async function request<T>(path: string, options: RequestInit = {}, authenticated = true): Promise<T> {
   const session = readSession();
-  const response = await fetch(`${apiBase}${path}`, { ...options, headers: { 'Content-Type': 'application/json', ...(authenticated && session ? { Authorization: `Bearer ${session.accessToken}` } : {}), ...(options.headers ?? {}) } });
+  const response = await fetch(`${apiBase}${path}`, { ...options, headers: { ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(authenticated && session ? { Authorization: `Bearer ${session.accessToken}` } : {}), ...(options.headers ?? {}) } });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload?.error?.message || `请求失败（HTTP ${response.status}）。`);
   return payload as T;
@@ -43,14 +44,37 @@ export const webIntelligence = {
   listItems: () => request<LocalState['intelligence']>('/intelligence/items'),
   refreshRss: () => request<{ items: LocalState['intelligence']; results: { sourceId: string; ok: boolean; count: number; error?: string }[]; sources: LocalState['sources'] }>('/intelligence/rss/refresh', { method: 'POST', body: '{}' }),
   previewLink: (url: string) => request<{ url: string; title: string; summary: string; source: string }>('/intelligence/clip', { method: 'POST', body: JSON.stringify({ url }) }),
-  webSearchStatus: () => request<{ configured: boolean }>('/settings/credentials/TAVILY'),
-  saveWebSearchKey: (apiKey: string) => request<{ configured: boolean }>('/settings/credentials/TAVILY', { method: 'PUT', body: JSON.stringify({ apiKey }) }),
+  webSearchStatus: () => request<CredentialStatus>('/settings/credentials/TAVILY'),
+  saveWebSearchKey: (apiKey: string) => request<CredentialStatus>('/settings/credentials/TAVILY', { method: 'PUT', body: JSON.stringify({ apiKey }) }),
   searchWeb: (input: { query: string; category: string; domains: string[] }) => request<LocalState['intelligence']>('/intelligence/search', { method: 'POST', body: JSON.stringify(input) }),
 };
 
+export type CredentialStatus = { provider: 'BAILIAN' | 'TAVILY'; configured: boolean; status: 'UNCONFIGURED' | 'UNVERIFIED' | 'READY' | 'ERROR'; updatedAt?: string | null; lastTestedAt?: string | null; lastError?: string | null };
+
 export const webAgent = {
-  credentialStatus: () => request<{ configured: boolean; updatedAt?: string | null }>('/settings/credentials/BAILIAN'),
-  saveCredential: (apiKey: string) => request<{ configured: boolean }>('/settings/credentials/BAILIAN', { method: 'PUT', body: JSON.stringify({ apiKey }) }),
+  credentialStatus: () => request<CredentialStatus>('/settings/credentials/BAILIAN'),
+  saveCredential: (apiKey: string) => request<CredentialStatus>('/settings/credentials/BAILIAN', { method: 'PUT', body: JSON.stringify({ apiKey }) }),
+  testCredential: () => request<CredentialStatus>('/settings/credentials/BAILIAN/test', { method: 'POST', body: '{}' }),
+  removeCredential: () => request<void>('/settings/credentials/BAILIAN', { method: 'DELETE' }),
   policy: () => request<{ scope: string; configured?: boolean; model?: string }>('/agent/model-policies/AGENT_PLANNER'),
   savePolicy: (model: string) => request<{ scope: string; provider: string; model: string }>('/agent/model-policies/AGENT_PLANNER', { method: 'PUT', body: JSON.stringify({ model }) }),
+};
+
+export const webSettings = {
+  credentials: () => request<CredentialStatus[]>('/settings/credentials'),
+  testCredential: (provider: CredentialStatus['provider']) => request<CredentialStatus>(`/settings/credentials/${provider}/test`, { method: 'POST', body: '{}' }),
+  removeCredential: (provider: CredentialStatus['provider']) => request<void>(`/settings/credentials/${provider}`, { method: 'DELETE' }),
+};
+
+export const webModels = {
+  connections: () => request<ModelConnection[]>('/models/connections'),
+  createConnection: (input: ModelConnectionInput) => request<ModelConnection>('/models/connections', { method: 'POST', body: JSON.stringify(input) }),
+  updateConnection: (id: string, input: ModelConnectionInput) => request<ModelConnection>(`/models/connections/${id}`, { method: 'PUT', body: JSON.stringify(input) }),
+  testConnection: (id: string) => request<ModelConnection>(`/models/connections/${id}/test`, { method: 'POST', body: '{}' }),
+  removeConnection: (id: string) => request<void>(`/models/connections/${id}`, { method: 'DELETE' }),
+  catalog: () => request<ModelCatalogItem[]>('/models/catalog'),
+  syncCatalog: () => request<{ items: ModelCatalogItem[]; errors: { connectionLabel: string; message: string }[] }>('/models/catalog/sync', { method: 'POST', body: '{}' }),
+  taskPolicies: () => request<ModelTaskPolicy[]>('/models/task-policies'),
+  saveTaskPolicy: (policy: ModelTaskPolicy) => request<ModelTaskPolicy>(`/models/task-policies/${policy.task}`, { method: 'PUT', body: JSON.stringify(policy) }),
+  usage: () => request<{ summary: ApiUsageSummary; logs: ApiUsageLog[] }>('/models/usage'),
 };
