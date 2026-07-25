@@ -222,7 +222,7 @@ function registerIpc() {
   });
 }
 
-const modelTasks = ['INTELLIGENCE_ANALYSIS', 'TOPIC_RECOMMENDATION', 'CONTENT_WRITING', 'CONTENT_REWRITE', 'CONTENT_LAYOUT', 'IMAGE_GENERATION', 'SPEECH_SYNTHESIS', 'VIDEO_GENERATION'];
+const modelTasks = ['INTELLIGENCE_ANALYSIS', 'TOPIC_RECOMMENDATION', 'CONTENT_WRITING', 'CONTENT_REWRITE', 'CONTENT_LAYOUT', 'TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE', 'SPEECH_SYNTHESIS', 'SPEECH_RECOGNITION', 'TEXT_TO_VIDEO', 'IMAGE_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO', 'REFERENCE_TO_VIDEO', 'VIDEO_EDIT'];
 
 function listTaskPolicies() {
   const saved = new Map(database.prepare('SELECT task, config_json, updated_at FROM model_task_policies').all().map((row) => [row.task, { ...JSON.parse(row.config_json), task: row.task, updatedAt: row.updated_at }]));
@@ -253,6 +253,7 @@ async function syncModelCatalog() {
     const config = JSON.parse(bailianRow.config_json);
     if (config.status === 'READY') {
       items.push(...bailianCliBuiltInModels());
+      items.push(...bailianModelMarketModels());
       try {
         const models = await fetchAvailableModels('https://dashscope.aliyuncs.com/compatible-mode/v1', safeStorage.decryptString(bailianRow.api_key_encrypted));
         items.push(...models.map((model) => ({ id: `bailian:${model}`, provider: 'BAILIAN_CLI', connectionLabel: '阿里云百炼 CLI', model, capabilities: classifyModelCapabilities(model) })));
@@ -295,10 +296,6 @@ function bailianCliBuiltInModels() {
     ['happyhorse-1.0-video-edit', ['VIDEO']],
     ['wan2.6-t2v', ['VIDEO']],
     ['wan2.6-r2v', ['VIDEO']],
-    ['wan2.7-t2v', ['VIDEO']],
-    ['wan2.7-i2v', ['VIDEO']],
-    ['wan2.7-r2v', ['VIDEO']],
-    ['wan2.7-videoedit', ['VIDEO']],
     ['cosyvoice-v3-flash', ['AUDIO']],
     ['cosyvoice-v3.5-flash', ['AUDIO']],
     ['qwen-audio-3.0-tts-plus', ['MULTIMODAL']],
@@ -307,6 +304,20 @@ function bailianCliBuiltInModels() {
     ['fun-music-v1', ['MUSIC']],
   ];
   return models.map(([model, capabilities]) => ({ id: `bailian:${model}`, provider: 'BAILIAN_CLI', connectionLabel: '阿里云百炼 CLI', model, capabilities }));
+}
+
+function bailianModelMarketModels() {
+  const models = [
+    ['qwen3-tts-flash', ['AUDIO'], []],
+    ['qwen3-asr-flash', ['ASR'], []],
+    ['fun-asr', ['ASR'], []],
+    ['wan2.7-t2v-2026-06-12', ['VIDEO'], ['TEXT_TO_VIDEO']],
+    ['wan2.7-i2v-2026-04-25', ['VIDEO'], ['IMAGE_TO_VIDEO']],
+    ['wan2.7-r2v-2026-06-12', ['VIDEO'], ['REFERENCE_TO_VIDEO']],
+    ['wan2.7-videoedit', ['VIDEO'], ['VIDEO_EDIT']],
+    ['wan2.2-kf2v-flash', ['VIDEO'], ['FIRST_LAST_FRAME_TO_VIDEO']],
+  ];
+  return models.map(([model, capabilities, operations]) => ({ id: `bailian:${model}`, provider: 'BAILIAN_CLI', connectionLabel: '阿里云百炼 · 模型市场', model, capabilities, operations, origin: 'MARKET_CATALOG' }));
 }
 
 function classifyModelCapabilities(model) {

@@ -14,7 +14,7 @@ const { runBailianCli } = require('./runner/bailian.cjs');
 
 const app = Fastify({ logger: true, bodyLimit: 5 * 1024 * 1024 });
 const credentials = new Set(['TAVILY', 'BAILIAN']);
-const modelTasks = ['INTELLIGENCE_ANALYSIS', 'TOPIC_RECOMMENDATION', 'CONTENT_WRITING', 'CONTENT_REWRITE', 'CONTENT_LAYOUT', 'TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE', 'SPEECH_SYNTHESIS', 'TEXT_TO_VIDEO', 'IMAGE_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO', 'REFERENCE_TO_VIDEO', 'VIDEO_EDIT'];
+const modelTasks = ['INTELLIGENCE_ANALYSIS', 'TOPIC_RECOMMENDATION', 'CONTENT_WRITING', 'CONTENT_REWRITE', 'CONTENT_LAYOUT', 'TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE', 'SPEECH_SYNTHESIS', 'SPEECH_RECOGNITION', 'TEXT_TO_VIDEO', 'IMAGE_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO', 'REFERENCE_TO_VIDEO', 'VIDEO_EDIT'];
 const externalProviders = new Set(['DASHSCOPE', 'SILICONFLOW', 'VOLCENGINE_ARK', 'KIMI', 'ZHIPU', 'OPENAI', 'OPENAI_COMPATIBLE']);
 const sourceInput = z.object({ name: z.string().max(160), type: z.literal('RSS'), url: z.string().url().max(2_000), category: z.string().max(120), includeKeywords: z.array(z.string().max(120)).optional(), excludeKeywords: z.array(z.string().max(120)).optional(), language: z.enum(['ALL', 'ZH', 'EN']).optional(), enabled: z.boolean(), refreshMinutes: z.number().min(5).max(10_080), trust: z.string().max(80) });
 
@@ -215,6 +215,7 @@ app.post('/api/v1/models/catalog/sync', { preHandler: authenticate }, async (req
       const models = await fetchAvailableModels('https://dashscope.aliyuncs.com/compatible-mode/v1', decrypt(bailian.rows[0].encrypted_secret));
       items.push(...models.map((model) => modelCatalogItem({ provider: 'BAILIAN_CLI', connectionLabel: '阿里云百炼', model, origin: 'ACCOUNT_CATALOG' })));
       items.push(...bailianCliMediaCatalog());
+      items.push(...bailianModelMarketCatalog());
     } catch (error) { errors.push({ connectionLabel: '阿里云百炼', message: error instanceof Error ? error.message : '模型目录同步失败。' }); }
   }
   const external = await query("SELECT id, label, base_url, encrypted_secret FROM model_connections WHERE workspace_id = $1 AND status = 'READY'", [workspace.id]);
@@ -425,6 +426,28 @@ function bailianCliMediaCatalog() {
   return entries.map(([model, operations]) => modelCatalogItem({ provider: 'BAILIAN_CLI', connectionLabel: '阿里云百炼 · CLI 媒体', model, origin: 'CLI_MEDIA', capabilities: [String(model).includes('image') || String(model).includes('t2i') ? 'IMAGE' : 'VIDEO'], operations }));
 }
 
+function bailianModelMarketCatalog() {
+  // 2026-07-25 核对自百炼控制台“模型广场”。这些模型不由 OpenAI 兼容 /models 返回。
+  const entries = [
+    ['qwen3-tts-flash', ['AUDIO'], []],
+    ['qwen3-asr-flash', ['ASR'], []],
+    ['fun-asr', ['ASR'], []],
+    ['wan2.7-t2v-2026-06-12', ['VIDEO'], ['TEXT_TO_VIDEO']],
+    ['wan2.7-i2v-2026-04-25', ['VIDEO'], ['IMAGE_TO_VIDEO']],
+    ['wan2.7-r2v-2026-06-12', ['VIDEO'], ['REFERENCE_TO_VIDEO']],
+    ['wan2.7-videoedit', ['VIDEO'], ['VIDEO_EDIT']],
+    ['wan2.2-kf2v-flash', ['VIDEO'], ['FIRST_LAST_FRAME_TO_VIDEO']],
+  ];
+  return entries.map(([model, capabilities, operations]) => modelCatalogItem({
+    provider: 'BAILIAN_CLI',
+    connectionLabel: '阿里云百炼 · 模型市场',
+    model,
+    origin: 'MARKET_CATALOG',
+    capabilities,
+    operations,
+  }));
+}
+
 function classifyModelCapabilities(model) {
   const value = String(model).toLowerCase();
   if (/embed|rerank/.test(value)) return ['EMBEDDING'];
@@ -465,6 +488,7 @@ function catalogSupportsTask(item, task) {
   const operationTasks = new Set(['TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE', 'TEXT_TO_VIDEO', 'IMAGE_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO', 'REFERENCE_TO_VIDEO', 'VIDEO_EDIT']);
   if (operationTasks.has(task)) return operations.includes(task);
   if (task === 'SPEECH_SYNTHESIS') return capabilities.includes('AUDIO');
+  if (task === 'SPEECH_RECOGNITION') return capabilities.includes('ASR');
   return capabilities.includes('TEXT');
 }
 

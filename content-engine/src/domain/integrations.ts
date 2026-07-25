@@ -11,6 +11,7 @@ export type ModelTask =
   | 'TEXT_TO_IMAGE'
   | 'IMAGE_TO_IMAGE'
   | 'SPEECH_SYNTHESIS'
+  | 'SPEECH_RECOGNITION'
   | 'TEXT_TO_VIDEO'
   | 'IMAGE_TO_VIDEO'
   | 'FIRST_LAST_FRAME_TO_VIDEO'
@@ -29,7 +30,7 @@ export interface ModelCatalogItem {
   model: string;
   capabilities: ModelCapability[];
   operations?: ModelOperation[];
-  origin?: 'ACCOUNT_CATALOG' | 'CLI_MEDIA';
+  origin?: 'ACCOUNT_CATALOG' | 'CLI_MEDIA' | 'MARKET_CATALOG';
   syncedAt?: string;
 }
 

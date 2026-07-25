@@ -210,7 +210,15 @@ API：`http://127.0.0.1:8787/health`
 
 - 新增迁移 `server/migrations/004_model_settings.sql`：扩展 `credential_vault` 验证元数据，增加工作空间级 `model_connections` 和 `model_catalog`，任务策略支持外部连接引用。
 - 新增凭据接口：列表、读取、保存、检测和移除。百炼检测同时验证服务器内置 CLI 可启动和 DashScope `/models` 可访问；Tavily检测调用最小搜索请求。
-- 新增外部 API 连接、检测、模型目录同步、任务策略和用量读取接口。模型目录不再写入静态猜测列表，只持久化连接实际返回的模型标识。
+- 新增外部 API 连接、检测、模型目录同步、任务策略和用量读取接口。账户目录和外部连接只持久化接口实际返回的模型标识；异步媒体模型使用经过官方模型市场核验的目录项补齐，并标记为 `MARKET_CATALOG`，不冒充账号已开通。
 - Web 前端已移除对模型目录、策略、外部连接、用量的 `window.contentEngine` 依赖；桌面端保留原 IPC 分支以兼容旧壳。
 - `bailianCliMediaCatalog()` 依据已安装 `bailian-cli 1.10.1` 的真实命令定义登记图像与视频能力；`/models` 的账户目录和 CLI 媒体目录以 `origin` 区分并合并去重。
 - `005_model_task_scopes.sql` 将旧图片/视频策略迁移为具体操作 Scope。目录项新增 `operations`，任务策略保存时由服务端校验模型是否支持对应输入输出契约。
+
+# 2026-07-25 实现记录：媒体市场目录与语音识别
+
+- 新增 `SPEECH_RECOGNITION` Scope，前端音频分组包含“配音与口播”和“语音识别”，服务端分别按 `AUDIO`、`ASR` 能力校验。
+- 新增 `MARKET_CATALOG` 来源，补充百炼 `/models` 不返回的异步媒体和语音模型；任务下拉明确显示“百炼模型市场”。
+- 已核实 Wan 2.7 模型：`wan2.7-t2v-2026-06-12`、`wan2.7-i2v-2026-04-25`、`wan2.7-r2v-2026-06-12`、`wan2.7-videoedit`。
+- 首尾帧使用模型市场当前可检索的 `wan2.2-kf2v-flash`。未把 HappyHorse 或 Wan 2.7 I2V 错标为首尾帧能力。
+- 语音识别市场项包含 `qwen3-asr-flash` 和 `fun-asr`；账号 `/models` 返回的日期版本和实时版本也按 ASR 能力进入同一 Scope。
