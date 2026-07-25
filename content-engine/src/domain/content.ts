@@ -19,6 +19,7 @@ export interface IntelligenceItem {
   title: string;
   summary: string;
   category: string;
+  keywords?: string[];
   source: string;
   publishedAt: string;
   heat: number;

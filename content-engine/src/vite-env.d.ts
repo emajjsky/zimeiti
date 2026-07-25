@@ -17,7 +17,7 @@ declare global {
           items: LocalState['intelligence'];
           results: { sourceId: string; ok: boolean; count: number; error?: string }[];
         }>;
-        previewLink: (url: string) => Promise<{ url: string; title: string; summary: string; source: string }>;
+        previewLink: (url: string) => Promise<{ url: string; title: string; summary: string; source: string; category: string; keywords: string[] }>;
         webSearchStatus: () => Promise<{ configured: boolean }>;
         saveWebSearchKey: (apiKey: string) => Promise<{ configured: boolean }>;
         searchWeb: (input: { query: string; category: string; domains: string[] }) => Promise<LocalState['intelligence']>;

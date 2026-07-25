@@ -378,7 +378,8 @@ function LinkClipEditor({ onSave, onCancel }: { onSave: (item: Omit<LocalState['
   const [title, setTitle] = useState('');
   const [source, setSource] = useState('');
   const [summary, setSummary] = useState('');
-  const [category, setCategory] = useState('未分类');
+  const [category, setCategory] = useState('其它');
+  const [keywords, setKeywords] = useState<string[]>([]);
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -386,7 +387,7 @@ function LinkClipEditor({ onSave, onCancel }: { onSave: (item: Omit<LocalState['
     setLoading(true); setError('');
     try {
       const result = await previewPublicLink(url);
-      setUrl(result.url); setTitle(result.title); setSummary(result.summary); setSource(result.source);
+      setUrl(result.url); setTitle(result.title); setSummary(result.summary); setSource(result.source); setCategory(result.category); setKeywords(result.keywords);
     } catch (error) { setError(displayError(error, '读取链接失败。')); }
     finally { setLoading(false); }
   };
@@ -394,7 +395,7 @@ function LinkClipEditor({ onSave, onCancel }: { onSave: (item: Omit<LocalState['
     event.preventDefault();
     try { new URL(url); } catch { setError('请输入有效链接。'); return; }
     if (!title.trim()) { setError('请先读取链接或补充文章标题。'); return; }
-    onSave({ title: title.trim(), summary: summary.trim() || '用户主动剪藏，待补充摘要。', source: source.trim() || '手工剪藏', category: category.trim() || '未分类', publishedAt: '刚刚', heat: 0, trust: '待核验', url: url.trim(), note: note.trim(), captureMethod: 'MANUAL_LINK' });
+    onSave({ title: title.trim(), summary: summary.trim() || '用户主动剪藏，待补充摘要。', source: source.trim() || '手工剪藏', category: category.trim() || '其它', keywords, publishedAt: '刚刚', heat: 0, trust: '待核验', url: url.trim(), note: note.trim(), captureMethod: 'MANUAL_LINK' });
   };
   return <section className="topic-editor-page"><div className="editor-page-head"><div><div className="eyebrow">DISCOVER / 链接剪藏</div><h1 className="page-title">收藏链接</h1></div><button className="text-button" onClick={onCancel}>返回热点</button></div><form className="topic-form" onSubmit={submit}><label className="form-title">原文链接<div className="link-input-row"><input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="公众号、X、今日头条或公开网页链接" autoFocus /><button type="button" className="button" disabled={loading || !url.trim()} onClick={() => void preview()}>{loading ? '读取中' : '读取链接'}</button></div></label><div className="form-grid"><label>文章标题<input value={title} onChange={(event) => setTitle(event.target.value)} /></label><label>来源<input value={source} onChange={(event) => setSource(event.target.value)} /></label></div><label>摘要<textarea value={summary} onChange={(event) => setSummary(event.target.value)} rows={5} /></label><div className="form-grid"><label>归属题材<input value={category} onChange={(event) => setCategory(event.target.value)} /></label><label>收藏备注<input value={note} onChange={(event) => setNote(event.target.value)} /></label></div>{error && <p className="form-error">{error}</p>}<footer><button className="text-button" type="button" onClick={onCancel}>取消</button><button className="button primary" type="submit">保存到热点池 <ChevronRight size={17}/></button></footer></form></section>;
 }

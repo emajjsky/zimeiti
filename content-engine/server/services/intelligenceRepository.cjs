@@ -1,12 +1,13 @@
 const { query, transaction } = require('../db.cjs');
 const { refreshRss } = require('./rss.cjs');
+const { normalizeCanonicalUrl } = require('./urlNormalizer.cjs');
 
 function sourceDto(row) {
   return { id: row.id, name: row.name, type: 'RSS', url: row.url, category: row.category, includeKeywords: row.include_keywords ?? [], excludeKeywords: row.exclude_keywords ?? [], language: row.language, enabled: row.enabled, refreshMinutes: row.refresh_minutes, trust: row.trust, lastSyncedAt: row.last_synced_at?.toISOString?.() ?? row.last_synced_at ?? undefined, lastError: row.last_error ?? undefined };
 }
 
 function itemDto(row) {
-  return { id: row.id, title: row.title, summary: row.summary, category: row.category, source: row.source_name, publishedAt: row.published_at?.toISOString?.() ?? row.published_at ?? row.created_at?.toISOString?.() ?? new Date().toISOString(), heat: row.heat, trust: row.trust, url: row.canonical_url ?? undefined, captureMethod: row.capture_method, language: row.language, note: row.note ?? undefined };
+  return { id: row.id, title: row.title, summary: row.summary, category: row.category, keywords: row.matched_keywords ?? [], source: row.source_name, publishedAt: row.published_at?.toISOString?.() ?? row.published_at ?? row.created_at?.toISOString?.() ?? new Date().toISOString(), heat: row.heat, trust: row.trust, url: row.canonical_url ?? undefined, captureMethod: row.capture_method, language: row.language, note: row.note ?? undefined };
 }
 
 async function listSources(workspaceId) {
@@ -51,11 +52,14 @@ async function refreshWorkspaceRss(workspaceId) {
       if (isExpired(item.publishedAt)) continue;
       const source = sources.find((candidate) => candidate.id === item.sourceId);
       if (!source) continue;
-      const sourceKey = item.url ? `url:${item.url}` : `title:${normalize(item.title)}`;
-      const result = await client.query(`INSERT INTO intelligence_items (workspace_id, source_id, source_key, title, summary, category, source_name, canonical_url, language, capture_method, trust, heat, published_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'RSS', $10, $11, $12)
-        ON CONFLICT (workspace_id, source_id, source_key) WHERE source_key IS NOT NULL DO UPDATE SET title = excluded.title, summary = excluded.summary, category = excluded.category, canonical_url = excluded.canonical_url, language = excluded.language, trust = excluded.trust, published_at = excluded.published_at
-        RETURNING *`, [workspaceId, source.id, sourceKey, item.title, item.summary, item.category, item.source, item.url ?? null, item.language ?? 'other', item.trust, item.heat ?? 0, item.publishedAt ? new Date(item.publishedAt) : null]);
+      const canonicalUrl = normalizeCanonicalUrl(item.url);
+      const sourceKey = canonicalUrl ? null : `title:${normalize(item.title)}`;
+      const fields = [workspaceId, source.id, sourceKey, item.title, item.summary, item.category, JSON.stringify(item.keywords ?? []), item.source, canonicalUrl, item.language ?? 'other', item.trust, item.heat ?? 0, item.publishedAt ? new Date(item.publishedAt) : null];
+      const insert = `INSERT INTO intelligence_items (workspace_id, source_id, source_key, title, summary, category, matched_keywords, source_name, canonical_url, language, capture_method, trust, heat, published_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'RSS', $11, $12, $13)`;
+      const result = canonicalUrl
+        ? await client.query(`${insert} ON CONFLICT (workspace_id, canonical_url) WHERE canonical_url IS NOT NULL DO UPDATE SET source_id = excluded.source_id, title = excluded.title, summary = excluded.summary, category = excluded.category, matched_keywords = excluded.matched_keywords, source_name = excluded.source_name, language = excluded.language, trust = excluded.trust, published_at = excluded.published_at RETURNING *`, fields)
+        : await client.query(`${insert} ON CONFLICT (workspace_id, source_id, source_key) WHERE source_key IS NOT NULL DO UPDATE SET title = excluded.title, summary = excluded.summary, category = excluded.category, matched_keywords = excluded.matched_keywords, language = excluded.language, trust = excluded.trust, published_at = excluded.published_at RETURNING *`, fields);
       savedItems.push(itemDto(result.rows[0]));
     }
     for (const status of collected.results) await client.query('UPDATE intelligence_sources SET last_synced_at = CASE WHEN $1 THEN now() ELSE last_synced_at END, last_error = CASE WHEN $1 THEN NULL ELSE $2 END WHERE id = $3 AND workspace_id = $4', [status.ok, status.error ?? null, status.sourceId, workspaceId]);
@@ -76,4 +80,4 @@ function isExpired(value) {
 
 function normalize(value) { return String(value).replace(/\s+/g, ' ').trim().toLowerCase(); }
 
-module.exports = { listSources, createSources, removeSource, listItems, refreshWorkspaceRss, purgeExpiredItems };
+module.exports = { listSources, createSources, removeSource, listItems, refreshWorkspaceRss, purgeExpiredItems, itemDto };

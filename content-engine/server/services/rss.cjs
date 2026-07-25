@@ -1,5 +1,6 @@
 const { XMLParser } = require('fast-xml-parser');
 const { validatePublicUrl, sourceName } = require('./public-web.cjs');
+const { classifyIntelligence } = require('./intelligenceClassifier.cjs');
 
 async function refreshRss(sources) {
   const enabled = Array.isArray(sources) ? sources.filter((source) => source?.enabled && source?.type === 'RSS') : [];
@@ -22,11 +23,33 @@ async function collectRss(source) {
   const parsed = new XMLParser({ ignoreAttributes: false, trimValues: true }).parse(xml);
   const entries = asArray(parsed?.rss?.channel?.item ?? parsed?.feed?.entry).slice(0, 60);
   const include = keywords(source.includeKeywords); const exclude = keywords(source.excludeKeywords);
-  return entries.map((entry, index) => {
-    const title = clean(entry?.title); const summary = clean(entry?.description ?? entry?.summary ?? entry?.content ?? ''); const combined = `${title} ${summary}`;
-    const link = linkFor(entry); if (!title || !match(combined, include, exclude) || !languageMatches(combined, source.language)) return null;
-    return { id: `rss-${source.id}-${Date.now()}-${index}`, sourceId: source.id, title: title.slice(0, 240), summary: summary.slice(0, 500), category: source.category || '未分类', source: source.name || sourceName(url), publishedAt: formatTime(entry?.pubDate ?? entry?.published ?? entry?.updated), heat: 0, trust: source.trust || '待核验', url: link || undefined, captureMethod: 'RSS', language: detectLanguage(combined) };
-  }).filter(Boolean);
+  const now = Date.now();
+  return entries.map((entry, index) => rssEntryToItem(source, entry, index, now, { include, exclude, fallbackSource: sourceName(url) })).filter(Boolean);
+}
+
+function rssEntryToItem(source, entry, index = 0, now = Date.now(), filters = {}) {
+  const title = clean(entry?.title);
+  const summary = clean(entry?.description ?? entry?.summary ?? entry?.content ?? '');
+  const combined = `${title} ${summary}`;
+  const include = filters.include ?? keywords(source.includeKeywords);
+  const exclude = filters.exclude ?? keywords(source.excludeKeywords);
+  if (!title || !match(combined, include, exclude) || !languageMatches(combined, source.language)) return null;
+  const classification = classifyIntelligence({ title, summary, fallbackCategory: source.category });
+  return {
+    id: `rss-${source.id}-${now}-${index}`,
+    sourceId: source.id,
+    title: title.slice(0, 240),
+    summary: summary.slice(0, 500),
+    category: classification.category,
+    keywords: classification.keywords,
+    source: source.name || filters.fallbackSource || 'RSS',
+    publishedAt: formatTime(entry?.pubDate ?? entry?.published ?? entry?.updated),
+    heat: 0,
+    trust: source.trust || '待核验',
+    url: linkFor(entry) || undefined,
+    captureMethod: 'RSS',
+    language: detectLanguage(combined),
+  };
 }
 
 function asArray(value) { return Array.isArray(value) ? value : value ? [value] : []; }
@@ -38,4 +61,4 @@ function detectLanguage(value) { if (/[\u3400-\u9fff]/.test(value)) return 'zh';
 function languageMatches(value, language) { return !language || language === 'ALL' || (language === 'ZH' && detectLanguage(value) === 'zh') || (language === 'EN' && detectLanguage(value) === 'en'); }
 function formatTime(value) { const date = new Date(String(value ?? '')); return Number.isNaN(date.valueOf()) ? new Date().toISOString() : date.toISOString(); }
 
-module.exports = { refreshRss };
+module.exports = { refreshRss, rssEntryToItem };

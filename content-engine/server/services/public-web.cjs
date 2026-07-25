@@ -1,4 +1,5 @@
 const { lookup } = require('node:dns/promises');
+const { classifyIntelligence } = require('./intelligenceClassifier.cjs');
 
 async function validatePublicUrl(rawUrl) {
   if (typeof rawUrl !== 'string' || rawUrl.trim().length > 2_000) throw new Error('请输入有效的公开网页链接。');
@@ -31,7 +32,14 @@ async function clipPublicLink(rawUrl) {
   if (html.length > 1_000_000) throw new Error('网页内容超过 1MB，无法剪藏。');
   const title = htmlMeta(html, 'og:title') || htmlMeta(html, 'twitter:title') || htmlTitle(html) || '未命名文章';
   const summary = htmlMeta(html, 'og:description') || htmlMeta(html, 'description') || '';
-  return { url: url.toString(), title: clean(title).slice(0, 240), summary: clean(summary).slice(0, 500), source: sourceName(url) };
+  return buildPublicPreview(url, title, summary);
+}
+
+function buildPublicPreview(url, rawTitle, rawSummary) {
+  const title = clean(rawTitle).slice(0, 240);
+  const summary = clean(rawSummary).slice(0, 500);
+  const classification = classifyIntelligence({ title, summary, fallbackCategory: '其它' });
+  return { url: url.toString(), title, summary, source: sourceName(url), category: classification.category, keywords: classification.keywords };
 }
 
 function sourceName(url) {
@@ -39,7 +47,7 @@ function sourceName(url) {
   if (host === 'mp.weixin.qq.com') return '公众号文章';
   if (host === 'x.com' || host.endsWith('.x.com') || host === 'twitter.com' || host.endsWith('.twitter.com')) return 'X';
   if (host.includes('toutiao.com')) return '今日头条';
-  if (host.includes('cctv.com')) return '央视频';
+  if (host.includes('cctv.com')) return '央视网';
   return host.replace(/^www\./, '');
 }
 
@@ -53,4 +61,4 @@ function htmlTitle(html) { return /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?
 function clean(value) { return String(value).replace(/<[^>]+>/g, ' ').replace(/&quot;/gi, '"').replace(/&#39;/gi, "'").replace(/&amp;/gi, '&').replace(/\s+/g, ' ').trim(); }
 function isPrivateAddress(address) { const value = address.toLowerCase(); if (value === '::1' || value.startsWith('fc') || value.startsWith('fd') || value.startsWith('fe80:')) return true; if (!/^\d+\.\d+\.\d+\.\d+$/.test(value)) return false; const [a, b] = value.split('.').map(Number); return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168); }
 
-module.exports = { clipPublicLink, sourceName, validatePublicUrl };
+module.exports = { clipPublicLink, sourceName, validatePublicUrl, buildPublicPreview };

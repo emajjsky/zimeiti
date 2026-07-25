@@ -1,6 +1,8 @@
 const { decrypt } = require('../crypto.cjs');
 const { query } = require('../db.cjs');
 const { sourceName } = require('./public-web.cjs');
+const { classifyIntelligence } = require('./intelligenceClassifier.cjs');
+const crypto = require('node:crypto');
 
 async function searchTavily(workspaceId, input) {
   const row = await query('SELECT encrypted_secret FROM credential_vault WHERE workspace_id = $1 AND provider = $2', [workspaceId, 'TAVILY']);
@@ -22,13 +24,19 @@ async function searchTavily(workspaceId, input) {
   const payload = await response.json();
   return (Array.isArray(payload?.results) ? payload.results : []).flatMap((result) => {
     try {
-      const url = new URL(String(result?.url ?? ''));
-      const title = String(result?.title ?? '').trim();
-      if (!title) return [];
-      return [{ id: crypto.randomUUID(), title, summary: String(result?.content ?? '').trim().slice(0, 500), url: url.toString(), source: sourceName(url), category: String(input?.category || '未分类').trim() || '未分类', publishedAt: result?.published_date || null, heat: 0, trust: '待核验', captureMethod: 'SEARCH', language: /[\u3400-\u9fff]/.test(`${title} ${result?.content ?? ''}`) ? 'zh' : 'en' }];
+      const item = tavilyResultToItem(result, input, crypto.randomUUID());
+      return item ? [item] : [];
     } catch { return []; }
   });
 }
 
-const crypto = require('node:crypto');
-module.exports = { searchTavily };
+function tavilyResultToItem(result, input, id = crypto.randomUUID()) {
+  const url = new URL(String(result?.url ?? ''));
+  const title = String(result?.title ?? '').trim();
+  if (!title) return null;
+  const summary = String(result?.content ?? '').trim().slice(0, 500);
+  const classification = classifyIntelligence({ title, summary, fallbackCategory: String(input?.category || '其它').trim() || '其它' });
+  return { id, title, summary, url: url.toString(), source: sourceName(url), category: classification.category, keywords: classification.keywords, publishedAt: result?.published_date || new Date().toISOString(), heat: 0, trust: '待核验', captureMethod: 'SEARCH', language: /[\u3400-\u9fff]/.test(`${title} ${summary}`) ? 'zh' : 'en' };
+}
+
+module.exports = { searchTavily, tavilyResultToItem };
