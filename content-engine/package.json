@@ -5,6 +5,7 @@
   "description": "内容引擎桌面端 MVP",
   "main": "electron/main.cjs",
   "scripts": {
+    "test": "node --test tests/*.test.mjs",
     "dev": "concurrently -k \"npm:dev:api\" \"npm:dev:web\"",
     "dev:web": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "dev:api": "node --watch server/index.cjs",

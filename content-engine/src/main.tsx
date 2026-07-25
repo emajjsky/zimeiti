@@ -673,8 +673,19 @@ const modelTaskNames: Record<ModelTask, string> = {
   VIDEO_EDIT: '视频编辑',
 };
 
+type ModelSettingsSection = 'bailian' | 'agent' | 'search' | 'connections' | 'policies' | 'usage';
+
+const modelSettingsScreenTitles: Record<ModelSettingsSection, string> = {
+  bailian: '百炼',
+  agent: '核心 Agent',
+  search: '检索 API',
+  connections: '外部 API',
+  policies: '任务策略',
+  usage: '调用记录',
+};
+
 function ModelSettingsScreen() {
-  const [screen, setScreen] = useState<'bailian' | 'agent' | 'search' | 'connections' | 'policies' | 'usage' | 'editor'>('bailian');
+  const [screen, setScreen] = useState<ModelSettingsSection | 'editor'>('bailian');
   const [connections, setConnections] = useState<ModelConnection[]>([]);
   const [bailian, setBailian] = useState<BailianCliStatus>(emptyBailianStatus);
   const [catalog, setCatalog] = useState<ModelCatalogItem[]>([]);
@@ -682,39 +693,37 @@ function ModelSettingsScreen() {
   const [usage, setUsage] = useState<ApiUsageSummary>({ totalCalls: 0, todayCalls: 0, successCalls: 0, failedCalls: 0, inputTokens: 0, outputTokens: 0 });
   const [logs, setLogs] = useState<ApiUsageLog[]>([]);
   const [editing, setEditing] = useState<ModelConnection | undefined>();
-  const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [connectionRevision, setConnectionRevision] = useState(0);
+  const [notice, setNotice] = useState<{ screen: ModelSettingsSection; type: 'success' | 'error'; text: string } | null>(null);
   const isDesktop = Boolean(window.contentEngine);
   const loadConnections = () => {
     const source = window.contentEngine ? window.contentEngine.models.list() : webModels.connections();
-    void source.then(setConnections).catch((error) => setNotice({ type: 'error', text: error instanceof Error ? error.message : '读取外部 API 连接失败。' }));
+    void source.then(setConnections).catch((error) => setNotice({ screen: 'connections', type: 'error', text: error instanceof Error ? error.message : '读取外部 API 连接失败。' }));
   };
   const loadBailian = () => {
-    if (window.contentEngine) { void window.contentEngine.bailian.status().then(setBailian).catch((error) => setNotice({ type: 'error', text: error instanceof Error ? error.message : '读取百炼 CLI 状态失败。' })); }
+    if (window.contentEngine) { void window.contentEngine.bailian.status().then(setBailian).catch((error) => setNotice({ screen: 'bailian', type: 'error', text: error instanceof Error ? error.message : '读取百炼 CLI 状态失败。' })); }
   };
   const loadCatalog = () => { const source = window.contentEngine ? window.contentEngine.models.listCatalog() : webModels.catalog(); void source.then(setCatalog).catch(() => undefined); };
   const loadPolicies = () => {
     const source = window.contentEngine ? window.contentEngine.models.taskPolicies() : webModels.taskPolicies();
-    void source.then(setPolicies).catch((error) => setNotice({ type: 'error', text: error instanceof Error ? error.message : '读取任务策略失败。' }));
+    void source.then(setPolicies).catch((error) => setNotice({ screen: 'policies', type: 'error', text: error instanceof Error ? error.message : '读取任务策略失败。' }));
   };
   const loadUsage = () => {
     if (window.contentEngine) { void window.contentEngine.models.usageSummary().then(setUsage).catch(() => undefined); void window.contentEngine.models.usageLogs().then(setLogs).catch(() => undefined); }
     else { void webModels.usage().then((result) => { setUsage(result.summary); setLogs(result.logs); }).catch(() => undefined); }
   };
-  const refreshModelSettings = () => { loadConnections(); loadCatalog(); loadPolicies(); setConnectionRevision((value) => value + 1); };
-  useEffect(() => { loadConnections(); loadBailian(); loadCatalog(); loadPolicies(); loadUsage(); }, []);
+  const refreshModelSettings = () => { loadConnections(); loadCatalog(); loadPolicies(); };
+  useEffect(() => { loadConnections(); loadBailian(); loadCatalog(); loadPolicies(); }, []);
   const syncCatalog = async () => {
     setNotice(null);
     try {
       const result = window.contentEngine ? await window.contentEngine.models.syncCatalog() : await webModels.syncCatalog();
       setCatalog(result.items);
-      setNotice(result.errors[0] ? { type: 'error', text: result.errors[0].message } : { type: 'success', text: `已同步 ${result.items.length} 个可选模型。` });
-    } catch (error) { setNotice({ type: 'error', text: error instanceof Error ? error.message : '同步模型目录失败。' }); }
+      setNotice(result.errors[0] ? { screen: 'policies', type: 'error', text: result.errors[0].message } : { screen: 'policies', type: 'success', text: `已同步 ${result.items.length} 个可选模型。` });
+    } catch (error) { setNotice({ screen: 'policies', type: 'error', text: error instanceof Error ? error.message : '同步模型目录失败。' }); }
   };
   const saveExternal = async (input: ModelConnectionInput) => {
     const saved = window.contentEngine ? await window.contentEngine.models.save(input) : input.id ? await webModels.updateConnection(input.id, input) : await webModels.createConnection(input);
     setConnections((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
-    setConnectionRevision((value) => value + 1);
     return saved;
   };
   const testExternal = async (input: ModelConnectionInput) => {
@@ -748,24 +757,28 @@ function ModelSettingsScreen() {
     const saved = window.contentEngine ? await window.contentEngine.models.saveTaskPolicy(policy) : await webModels.saveTaskPolicy(policy);
     setPolicies((current) => [saved, ...current.filter((item) => item.task !== saved.task)]);
   };
+  const openSection = (next: ModelSettingsSection) => {
+    setNotice(null);
+    setScreen(next);
+    if (next === 'usage') loadUsage();
+  };
+  const renderSection = () => {
+    if (screen === 'bailian') return window.contentEngine ? <BailianCliCenter status={bailian} onSave={saveBailian} onTest={testBailian} onRemove={removeBailian} /> : <BailianCredentialSettings onChanged={refreshModelSettings} />;
+    if (screen === 'agent') return <CoreAgentSettings catalog={catalog} onSynced={refreshModelSettings} />;
+    if (screen === 'search') return <WebSearchSettings embedded onChanged={refreshModelSettings} />;
+    if (screen === 'connections') return <ExternalApiConnections connections={connections} onNew={() => { setEditing(undefined); setNotice(null); setScreen('editor'); }} onEdit={(connection) => { setEditing(connection); setNotice(null); setScreen('editor'); }} onRemove={removeExternal} />;
+    if (screen === 'policies') return <TaskPolicyScreen catalog={catalog} policies={policies} onSync={() => void syncCatalog()} onSave={savePolicy} />;
+    return <UsageLogScreen logs={logs} />;
+  };
   if (screen === 'editor') return <ExternalApiEditor key={editing?.id ?? 'new'} connection={editing} onBack={() => setScreen('connections')} onSave={saveExternal} onTest={testExternal} />;
-  return <div className="ai-settings"><PageHeader eyebrow="SETTINGS / 模型与 API" title="模型路由" />
-    <UsageOverview usage={usage} />
-    <nav className="ai-section-nav" aria-label="AI 设置分区"><button className={screen === 'bailian' ? 'active' : ''} onClick={() => setScreen('bailian')}><BrainCircuit size={18}/>百炼</button>{!isDesktop && <><button className={screen === 'agent' ? 'active' : ''} onClick={() => setScreen('agent')}><BrainCircuit size={18}/>核心 Agent</button><button className={screen === 'search' ? 'active' : ''} onClick={() => setScreen('search')}><Search size={18}/>检索 API</button></>}<button className={screen === 'connections' ? 'active' : ''} onClick={() => setScreen('connections')}><KeyRound size={18}/>外部 API <span>{connections.length}</span></button><button className={screen === 'policies' ? 'active' : ''} onClick={() => setScreen('policies')}><Settings size={18}/>任务策略</button><button className={screen === 'usage' ? 'active' : ''} onClick={() => { setScreen('usage'); loadUsage(); }}><ChartColumn size={18}/>调用记录</button></nav>
-    {!isDesktop && <CredentialInventory refreshKey={connectionRevision} onOpen={(target) => setScreen(target)} />}
-    {notice && <p className={`model-notice ${notice.type}`} aria-live="polite">{notice.type === 'success' ? <CircleCheck size={17}/> : <CircleAlert size={17}/>} {notice.text}</p>}
-    {screen === 'bailian' ? (window.contentEngine ? <BailianCliCenter status={bailian} onSave={saveBailian} onTest={testBailian} onRemove={removeBailian} /> : <BailianCredentialSettings onChanged={refreshModelSettings} />) : screen === 'agent' ? <CoreAgentSettings catalog={catalog} onSynced={refreshModelSettings} /> : screen === 'search' ? <WebSearchSettings embedded onChanged={refreshModelSettings} /> : screen === 'connections' ? <ExternalApiConnections connections={connections} onNew={() => { setEditing(undefined); setNotice(null); setScreen('editor'); }} onEdit={(connection) => { setEditing(connection); setNotice(null); setScreen('editor'); }} onRemove={removeExternal} /> : screen === 'policies' ? <TaskPolicyScreen catalog={catalog} policies={policies} onSync={() => void syncCatalog()} onSave={savePolicy} /> : <UsageLogScreen logs={logs} />}
+  return <div className="ai-settings"><PageHeader eyebrow="SETTINGS / 模型与 API" title={modelSettingsScreenTitles[screen]} />
+    <nav className="ai-section-nav" aria-label="模型与 API 分区"><button className={screen === 'bailian' ? 'active' : ''} onClick={() => openSection('bailian')}><BrainCircuit size={18}/>百炼</button>{!isDesktop && <><button className={screen === 'agent' ? 'active' : ''} onClick={() => openSection('agent')}><BrainCircuit size={18}/>核心 Agent</button><button className={screen === 'search' ? 'active' : ''} onClick={() => openSection('search')}><Search size={18}/>检索 API</button></>}<button className={screen === 'connections' ? 'active' : ''} onClick={() => openSection('connections')}><KeyRound size={18}/>外部 API <span>{connections.length}</span></button><button className={screen === 'policies' ? 'active' : ''} onClick={() => openSection('policies')}><Settings size={18}/>任务策略</button><button className={screen === 'usage' ? 'active' : ''} onClick={() => openSection('usage')}><ChartColumn size={18}/>调用记录</button></nav>
+    <div className={`ai-section-content ai-section-content-${screen}`}>
+      {notice?.screen === screen && <p className={`model-notice ${notice.type}`} aria-live="polite">{notice.type === 'success' ? <CircleCheck size={17}/> : <CircleAlert size={17}/>} {notice.text}</p>}
+      {screen === 'usage' && <UsageOverview usage={usage} />}
+      {renderSection()}
+    </div>
   </div>;
-}
-
-function CredentialInventory({ refreshKey, onOpen }: { refreshKey: number; onOpen: (screen: 'bailian' | 'search' | 'connections') => void }) {
-  const [credentials, setCredentials] = useState<CredentialStatus[]>([]); const [connections, setConnections] = useState<ModelConnection[]>([]);
-  useEffect(() => { void Promise.all([webSettings.credentials(), webModels.connections()]).then(([savedCredentials, savedConnections]) => { setCredentials(savedCredentials); setConnections(savedConnections); }).catch(() => undefined); }, [refreshKey]);
-  const rows = [
-    ...credentials.map((item) => ({ id: item.provider, label: item.provider === 'BAILIAN' ? '阿里云百炼' : 'Tavily 检索', status: item.status, updatedAt: item.updatedAt, screen: item.provider === 'BAILIAN' ? 'bailian' as const : 'search' as const })),
-    ...connections.map((item) => ({ id: item.id, label: item.label, status: item.status === 'UNTESTED' ? 'UNVERIFIED' : item.status, updatedAt: item.updatedAt, screen: 'connections' as const })),
-  ];
-  return <section className="credential-inventory" aria-label="已配置连接">{rows.map((row) => <button type="button" key={row.id} onClick={() => onOpen(row.screen)}><span className={`connection-status ${row.status.toLowerCase()}`} /><span><b>{row.label}</b><small>{row.status === 'READY' ? '可用' : row.status === 'ERROR' ? '异常' : row.status === 'UNVERIFIED' ? '待验证' : '未配置'}</small></span><time>{row.updatedAt ? new Date(row.updatedAt).toLocaleDateString('zh-CN') : ''}</time><ChevronRight size={16}/></button>)}</section>;
 }
 
 function UsageOverview({ usage }: { usage: ApiUsageSummary }) {
