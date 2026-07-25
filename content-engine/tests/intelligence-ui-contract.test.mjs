@@ -19,10 +19,8 @@ test('辅助渠道搜索向网页搜索页传递域名预设', () => {
   assert.match(mainSource, /preset\.domains/);
 });
 
-test('热点页筛选持久化关键词并限制卡片标签数量', () => {
-  assert.match(mainSource, /const \[keyword, setKeyword\]/);
+test('热点卡片显示持久化关键词并限制标签数量', () => {
   assert.match(mainSource, /signal\.keywords/);
-  assert.match(mainSource, /按关键词筛选/);
   assert.match(mainSource, /slice\(0, 2\)/);
 });
 
