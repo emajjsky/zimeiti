@@ -31,6 +31,15 @@
         { "name": "Google AI", "url": "https://blog.google/technology/ai/rss/", "category": "AI", "language": "EN" },
         { "name": "OpenAI News", "url": "https://openai.com/news/rss.xml", "category": "AI", "language": "EN" }
       ]
+    },
+    {
+      "id": "international-finance",
+      "label": "国际财经",
+      "sources": [
+        { "name": "美联储新闻稿", "url": "https://www.federalreserve.gov/feeds/press_all.xml", "category": "财经", "language": "EN" },
+        { "name": "美国 SEC 新闻稿", "url": "https://www.sec.gov/news/pressreleases.rss", "category": "财经", "language": "EN" },
+        { "name": "欧洲央行新闻稿", "url": "https://www.ecb.europa.eu/rss/press.html", "category": "财经", "language": "EN" }
+      ]
     }
   ],
   "assisted": [
