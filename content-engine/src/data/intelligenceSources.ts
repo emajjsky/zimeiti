@@ -6,9 +6,10 @@ type SourceDraft = Omit<IntelligenceSource, 'id' | 'lastSyncedAt' | 'lastError'>
 type RawSource = Pick<SourceDraft, 'name' | 'url' | 'category' | 'language'>;
 
 export interface AssistedChannel {
-  id: 'WEIBO' | 'TOUTIAO' | 'CCTV' | 'X' | 'WECHAT';
+  id: 'WEIBO' | 'TOUTIAO' | 'CCTV' | 'X' | 'WECHAT' | 'FINANCE_MEDIA' | 'FINANCE_OFFICIAL';
   label: string;
   domains: string[];
+  defaultCategory?: string;
   supportsClip: boolean;
   supportsSearch: boolean;
 }

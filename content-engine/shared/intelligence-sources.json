@@ -47,6 +47,8 @@
     { "id": "TOUTIAO", "label": "今日头条", "domains": ["toutiao.com"], "supportsClip": true, "supportsSearch": true },
     { "id": "CCTV", "label": "央视网", "domains": ["cctv.com", "news.cctv.com"], "supportsClip": true, "supportsSearch": true },
     { "id": "X", "label": "X", "domains": ["x.com"], "supportsClip": true, "supportsSearch": true },
-    { "id": "WECHAT", "label": "公众号", "domains": ["mp.weixin.qq.com"], "supportsClip": true, "supportsSearch": true }
+    { "id": "WECHAT", "label": "公众号", "domains": ["mp.weixin.qq.com"], "supportsClip": true, "supportsSearch": true },
+    { "id": "FINANCE_MEDIA", "label": "财经媒体", "domains": ["finance.qq.com", "new.qq.com", "finance.sina.com.cn", "10jqka.com.cn", "eastmoney.com", "cls.cn"], "defaultCategory": "财经", "supportsClip": true, "supportsSearch": true },
+    { "id": "FINANCE_OFFICIAL", "label": "官方公告", "domains": ["pbc.gov.cn", "stats.gov.cn", "csrc.gov.cn", "safe.gov.cn", "sse.com.cn", "szse.cn", "bse.cn", "hkex.com.hk", "hkexnews.hk", "alibabagroup.com", "tencent.com"], "defaultCategory": "财经", "supportsClip": true, "supportsSearch": true }
   ]
 }

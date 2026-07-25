@@ -33,8 +33,8 @@ test('国际财经自动源只包含已核验的官方 RSS', () => {
   });
 });
 
-test('辅助渠道包含五个合规入口及其能力', () => {
-  assert.deepEqual(catalog.assisted.map((item) => item.id), ['WEIBO', 'TOUTIAO', 'CCTV', 'X', 'WECHAT']);
+test('辅助渠道包含七个合规入口及其能力', () => {
+  assert.deepEqual(catalog.assisted.map((item) => item.id), ['WEIBO', 'TOUTIAO', 'CCTV', 'X', 'WECHAT', 'FINANCE_MEDIA', 'FINANCE_OFFICIAL']);
   for (const channel of catalog.assisted) {
     assert.ok(channel.domains.length > 0);
     assert.equal(channel.supportsClip, true);
@@ -45,4 +45,27 @@ test('辅助渠道包含五个合规入口及其能力', () => {
 test('央视网渠道同时覆盖主站与新闻域名', () => {
   const cctv = catalog.assisted.find((item) => item.id === 'CCTV');
   assert.deepEqual(cctv.domains, ['cctv.com', 'news.cctv.com']);
+});
+
+test('财经媒体通过主动限定域名搜索接入', () => {
+  const channel = catalog.assisted.find((item) => item.id === 'FINANCE_MEDIA');
+  assert.deepEqual(channel, {
+    id: 'FINANCE_MEDIA',
+    label: '财经媒体',
+    domains: ['finance.qq.com', 'new.qq.com', 'finance.sina.com.cn', '10jqka.com.cn', 'eastmoney.com', 'cls.cn'],
+    defaultCategory: '财经',
+    supportsClip: true,
+    supportsSearch: true,
+  });
+});
+
+test('官方财经公告通过主动限定域名搜索接入', () => {
+  const channel = catalog.assisted.find((item) => item.id === 'FINANCE_OFFICIAL');
+  assert.ok(channel, '缺少 FINANCE_OFFICIAL 渠道');
+  assert.equal(channel.defaultCategory, '财经');
+  assert.deepEqual(channel.domains, [
+    'pbc.gov.cn', 'stats.gov.cn', 'csrc.gov.cn', 'safe.gov.cn',
+    'sse.com.cn', 'szse.cn', 'bse.cn', 'hkex.com.hk', 'hkexnews.hk',
+    'alibabagroup.com', 'tencent.com',
+  ]);
 });

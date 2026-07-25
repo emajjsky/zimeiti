@@ -11,6 +11,7 @@ import { matchesIntelligenceQuery } from '../shared/intelligence-filters.mjs';
 import './styles.css';
 
 type View = 'today' | 'discover' | 'sources' | 'clip' | 'plan' | 'topicEditor' | 'create' | 'publish' | 'review' | 'assets' | 'automation' | 'models' | 'settings';
+type SearchPreset = { label: string; domains: string[]; defaultCategory?: string };
 
 function displayError(error: unknown, fallback: string) {
   const message = error instanceof Error ? error.message : fallback;
@@ -54,7 +55,7 @@ function App() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [refreshFeedback, setRefreshFeedback] = useState<{ status: 'idle' | 'running' | 'success' | 'empty' | 'error'; message: string }>({ status: 'idle', message: '' });
   const [analysisFeedback, setAnalysisFeedback] = useState<{ status: 'idle' | 'running' | 'error'; message: string }>({ status: 'idle', message: '' });
-  const [searchPreset, setSearchPreset] = useState<{ label: string; domains: string[] } | null>(null);
+  const [searchPreset, setSearchPreset] = useState<SearchPreset | null>(null);
 
   const selectedIntel = state.intelligence.find((item) => item.id === selectedIntelId) ?? state.intelligence[0];
   const selectedTopic = state.topics.find((item) => item.id === selectedTopicId) ?? state.topics[0];
@@ -253,7 +254,7 @@ function App() {
     <main className="main-content">
       {view === 'today' && <Today onNavigate={setView} projects={state.projects} intelligence={state.intelligence} />}
       {view === 'discover' && <Discover item={selectedIntel} intelligence={state.intelligence} sources={state.sources} topics={state.topics} projects={state.projects} onSelect={setSelectedIntelId} onCreateTopic={createTopicFromIntel} onRefresh={refreshRss} refreshFeedback={refreshFeedback} analysisFeedback={analysisFeedback} onAnalyze={analyzeIntelligence} />}
-      {view === 'sources' && <SettingsHub sources={state.sources} onAddSource={addSource} onAddSources={addSources} onRemoveSource={removeSource} onOpenClip={() => setView('clip')} onOpenSearch={(channel) => { setSearchPreset({ label: channel.label, domains: channel.domains }); setView('automation'); }} />}
+      {view === 'sources' && <SettingsHub sources={state.sources} onAddSource={addSource} onAddSources={addSources} onRemoveSource={removeSource} onOpenClip={() => setView('clip')} onOpenSearch={(channel) => { setSearchPreset({ label: channel.label, domains: channel.domains, defaultCategory: channel.defaultCategory }); setView('automation'); }} />}
       {view === 'clip' && <LinkClipEditor onSave={saveClippedLink} onCancel={() => setView('discover')} />}
       {view === 'plan' && selectedTopic && <Plan topics={state.topics} selected={selectedTopic} onSelect={setSelectedTopicId} onCreateProject={createProjectFromTopic} onEdit={openTopicEditor} onDelete={deleteTopic} />}
       {view === 'topicEditor' && <TopicEditor key={editingTopicId ?? 'new'} topic={state.topics.find((topic) => topic.id === editingTopicId)} defaultCategory={state.workspace.primaryTopics[0] ?? '未分类'} onSave={saveTopic} onCancel={() => { setEditingTopicId(null); setView('plan'); }} />}
@@ -1051,10 +1052,10 @@ function CoreAgentSettings({ catalog, onSynced }: { catalog: ModelCatalogItem[];
   return <section className="core-agent-settings"><div className="core-agent-head"><div><h2>核心 Agent</h2><small>{ready ? '复用百炼连接' : '请先完成百炼检测'}</small></div><span className={`chip ${ready ? 'mint' : 'yellow'}`}>{ready ? '可配置' : '待验证百炼'}</span></div><div className="core-agent-grid model-only"><label>规划模型<select value={model} onChange={(event) => { setModel(event.target.value); setNotice(null); }} disabled={!ready}><option value="">选择已同步模型</option>{models.map((item) => <option key={item.id} value={item.model}>{item.model}</option>)}</select></label><button className="button" disabled={busy || !ready} onClick={() => void sync()}>{busy ? '同步中' : '同步模型'}</button><button className="button primary" disabled={busy || !ready || !model.trim()} onClick={() => void saveModel()}>{busy ? '保存中' : '保存模型'}</button></div>{notice && <p className={notice.type === 'success' ? 'web-search-success' : 'form-error'} aria-live="polite">{notice.text}</p>}</section>;
 }
 
-function WebSearchPanel({ preset, onSave, onNavigate }: { preset: { label: string; domains: string[] } | null; onSave: (item: LocalState['intelligence'][number]) => void; onNavigate: (view: View) => void }) {
+function WebSearchPanel({ preset, onSave, onNavigate }: { preset: SearchPreset | null; onSave: (item: LocalState['intelligence'][number]) => void; onNavigate: (view: View) => void }) {
   const [configured, setConfigured] = useState(false); const [checking, setChecking] = useState(true); const [query, setQuery] = useState(''); const [category, setCategory] = useState('科技'); const [domains, setDomains] = useState<string[]>([]); const [results, setResults] = useState<LocalState['intelligence']>([]); const [busy, setBusy] = useState(false); const [notice, setNotice] = useState(''); const [added, setAdded] = useState<string[]>([]);
   useEffect(() => { const load = async () => { try { const result = await webSearchStatus(); setConfigured(Boolean(result?.configured)); } catch { setConfigured(false); } finally { setChecking(false); } }; void load(); }, []);
-  useEffect(() => { if (preset) setDomains(preset.domains); }, [preset]);
+  useEffect(() => { if (preset) { setDomains(preset.domains); if (preset.defaultCategory) setCategory(preset.defaultCategory); } }, [preset]);
   const toggleChannel = (channel: AssistedChannel) => setDomains((current) => channel.domains.every((domain) => current.includes(domain)) ? current.filter((domain) => !channel.domains.includes(domain)) : [...new Set([...current, ...channel.domains])]);
   const search = async () => { if (!configured || !query.trim()) return; setBusy(true); setNotice(''); setAdded([]); try { const items = await searchWeb({ query: query.trim(), category: category.trim() || '其它', domains }); setResults(items ?? []); } catch (error) { setNotice(displayError(error, '搜索失败。')); } finally { setBusy(false); } };
   const saveCandidate = (item: LocalState['intelligence'][number]) => { onSave(item); setAdded((current) => [...current, item.id]); };
