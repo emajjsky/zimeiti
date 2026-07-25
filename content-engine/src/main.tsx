@@ -4,6 +4,7 @@ import { animate, createScope, stagger } from 'animejs';
 import { ArrowLeft, AudioLines, Bell, BrainCircuit, CalendarDays, ChartColumn, CheckCircle2, ChevronRight, CircleAlert, CircleCheck, ClipboardList, Compass, FolderOpen, Image, KeyRound, Lightbulb, PenLine, Pencil, Plus, RefreshCw, Search, Send, Settings, ShieldCheck, Trash2, Video, Zap } from 'lucide-react';
 import { intelligenceKey, loadState, persistState, seedState, type FeishuLibraryTemplate, type LocalState, type WorkspaceProfile } from './data/localRepository';
 import { webAgent, webAuth, webIntelligence, webModels, webSettings, type CredentialStatus, type WebSession } from './data/webApi';
+import { automaticSourceGroups } from './data/intelligenceSources';
 import { platformName, projectStatusName, type ContentProject, type ContentVersion, type IntelligenceSource, type Platform, type TopicCandidate } from './domain/content';
 import type { ApiUsageLog, ApiUsageSummary, BailianCapabilityScope, BailianCliStatus, ModelCapability, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelOperation, ModelProvider, ModelTask, ModelTaskPolicy } from './domain/integrations';
 import './styles.css';
@@ -975,19 +976,8 @@ function ExternalApiEditor({ connection, onBack, onSave, onTest }: { connection?
   return <div className="external-editor"><button className="back-button" onClick={onBack}><ArrowLeft size={17}/>返回</button><PageHeader eyebrow="SETTINGS / 外部 API" title={connection ? `编辑 ${connection.label}` : '新增外部 API'} /><section className="external-provider-picker"><div className="provider-grid">{externalModelProviders.map((item) => <button type="button" key={item.provider} className={`provider-card ${draft.provider === item.provider ? 'selected' : ''}`} onClick={() => { setDraft(connectionDraftForProvider(item.provider)); setNotice(null); }}><b>{item.label}</b><small>{item.detail}</small></button>)}</div></section><section className="external-editor-form"><label>连接名称<input value={draft.label} onChange={(event) => setDraft({ ...draft, label: event.target.value })} /></label><label>API 地址<input value={draft.baseUrl} onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })} /></label><label>API Key<input type="password" value={draft.apiKey} onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} placeholder={draft.id ? '留空表示不更新' : '粘贴 API Key'} autoComplete="off" /></label>{notice && <p className={`model-notice ${notice.type}`} aria-live="polite">{notice.type === 'success' ? <CircleCheck size={17}/> : <CircleAlert size={17}/>} {notice.text}</p>}<footer><button className="button" type="button" disabled={busy !== 'idle'} onClick={() => void test()}><KeyRound size={16}/>{busy === 'testing' ? '检查中' : '保存并检查'}</button><button className="button primary" type="button" disabled={busy !== 'idle'} onClick={() => void save()}>{busy === 'saving' ? '保存中' : '保存'}</button></footer></section></div>;
 }
 
-const domesticRssSources: Omit<IntelligenceSource, 'id' | 'lastSyncedAt' | 'lastError'>[] = [
-  { name: '36Kr', type: 'RSS', url: 'https://36kr.com/feed', category: '科技', includeKeywords: ['AI', '人工智能', '大模型', '模型', '机器人', '芯片'], enabled: true, refreshMinutes: 60, trust: '待核验', language: 'ZH' },
-  { name: 'IT之家', type: 'RSS', url: 'https://www.ithome.com/rss/', category: '科技', includeKeywords: ['AI', '人工智能', '大模型', '模型', '机器人', '芯片'], enabled: true, refreshMinutes: 60, trust: '待核验', language: 'ZH' },
-  { name: '少数派', type: 'RSS', url: 'https://sspai.com/feed', category: '创作', includeKeywords: ['AI', '工具', '效率', '创作'], enabled: true, refreshMinutes: 120, trust: '待核验', language: 'ZH' },
-  { name: '中国新闻网', type: 'RSS', url: 'https://www.chinanews.com.cn/rss/scroll-news.xml', category: '时事', enabled: true, refreshMinutes: 120, trust: '可信', language: 'ZH' },
-];
-const internationalRssSources: Omit<IntelligenceSource, 'id' | 'lastSyncedAt' | 'lastError'>[] = [
-  { name: 'TechCrunch AI', type: 'RSS', url: 'https://techcrunch.com/category/artificial-intelligence/feed/', category: 'AI', enabled: true, refreshMinutes: 60, trust: '待核验', language: 'EN' },
-  { name: 'MIT Technology Review', type: 'RSS', url: 'https://www.technologyreview.com/feed/', category: '科技', includeKeywords: ['AI', 'artificial intelligence', 'model', 'robot', 'OpenAI', 'Google'], enabled: true, refreshMinutes: 120, trust: '待核验', language: 'EN' },
-  { name: 'Hacker News 高热', type: 'RSS', url: 'https://hnrss.org/newest?points=100', category: '科技', enabled: true, refreshMinutes: 60, trust: '待核验', language: 'EN' },
-  { name: 'Google AI', type: 'RSS', url: 'https://blog.google/technology/ai/rss/', category: 'AI', enabled: true, refreshMinutes: 120, trust: '可信', language: 'EN' },
-  { name: 'OpenAI News', type: 'RSS', url: 'https://openai.com/news/rss.xml', category: 'AI', enabled: true, refreshMinutes: 120, trust: '可信', language: 'EN' },
-];
+const domesticRssSources = automaticSourceGroups.filter((group) => group.id !== 'international-tech').flatMap((group) => group.sources);
+const internationalRssSources = automaticSourceGroups.find((group) => group.id === 'international-tech')?.sources ?? [];
 const recommendedRssSources = [...domesticRssSources, ...internationalRssSources];
 
 function SettingsHub({ sources, onAddSource, onAddSources, onRemoveSource }: { sources: IntelligenceSource[]; onAddSource: (source: Omit<IntelligenceSource, 'id' | 'lastSyncedAt' | 'lastError'>) => void; onAddSources: (sources: Omit<IntelligenceSource, 'id' | 'lastSyncedAt' | 'lastError'>[]) => void; onRemoveSource: (id: string) => void }) {

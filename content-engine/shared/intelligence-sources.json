@@ -1,0 +1,43 @@
+{
+  "automatic": [
+    {
+      "id": "domestic-mainstream",
+      "label": "国内综合",
+      "sources": [
+        { "name": "中国新闻网·国内", "url": "https://www.chinanews.com.cn/rss/china.xml", "category": "时政", "language": "ZH" },
+        { "name": "中国新闻网·国际", "url": "https://www.chinanews.com.cn/rss/world.xml", "category": "国际", "language": "ZH" },
+        { "name": "中国新闻网·财经", "url": "https://www.chinanews.com.cn/rss/finance.xml", "category": "财经", "language": "ZH" },
+        { "name": "中国新闻网·体育", "url": "https://www.chinanews.com.cn/rss/sports.xml", "category": "体育", "language": "ZH" },
+        { "name": "中国新闻网·娱乐", "url": "https://www.chinanews.com.cn/rss/ent.xml", "category": "娱乐", "language": "ZH" },
+        { "name": "中国新闻网·生活", "url": "https://www.chinanews.com.cn/rss/life.xml", "category": "社会", "language": "ZH" }
+      ]
+    },
+    {
+      "id": "domestic-tech",
+      "label": "科技商业",
+      "sources": [
+        { "name": "36Kr", "url": "https://36kr.com/feed", "category": "财经", "language": "ZH" },
+        { "name": "IT之家", "url": "https://www.ithome.com/rss/", "category": "科技", "language": "ZH" },
+        { "name": "少数派", "url": "https://sspai.com/feed", "category": "科技", "language": "ZH" }
+      ]
+    },
+    {
+      "id": "international-tech",
+      "label": "国际科技",
+      "sources": [
+        { "name": "TechCrunch AI", "url": "https://techcrunch.com/category/artificial-intelligence/feed/", "category": "AI", "language": "EN" },
+        { "name": "MIT Technology Review", "url": "https://www.technologyreview.com/feed/", "category": "科技", "language": "EN" },
+        { "name": "Hacker News 高热", "url": "https://hnrss.org/newest?points=100", "category": "科技", "language": "EN" },
+        { "name": "Google AI", "url": "https://blog.google/technology/ai/rss/", "category": "AI", "language": "EN" },
+        { "name": "OpenAI News", "url": "https://openai.com/news/rss.xml", "category": "AI", "language": "EN" }
+      ]
+    }
+  ],
+  "assisted": [
+    { "id": "WEIBO", "label": "微博", "domains": ["weibo.com"], "supportsClip": true, "supportsSearch": true },
+    { "id": "TOUTIAO", "label": "今日头条", "domains": ["toutiao.com"], "supportsClip": true, "supportsSearch": true },
+    { "id": "CCTV", "label": "央视网", "domains": ["cctv.com", "news.cctv.com"], "supportsClip": true, "supportsSearch": true },
+    { "id": "X", "label": "X", "domains": ["x.com"], "supportsClip": true, "supportsSearch": true },
+    { "id": "WECHAT", "label": "公众号", "domains": ["mp.weixin.qq.com"], "supportsClip": true, "supportsSearch": true }
+  ]
+}
