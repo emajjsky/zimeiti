@@ -2,9 +2,11 @@
 
 import type { LocalState } from './data/localRepository';
 import type { ApiUsageLog, ApiUsageSummary, BailianCliInput, BailianCliStatus, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelTaskPolicy } from './domain/integrations';
+import type { Root } from 'react-dom/client';
 
 declare global {
   interface Window {
+    contentEngineReactRoot?: Root;
     contentEngine?: {
       platform: string;
       version: string;

@@ -7,7 +7,7 @@ import { webAgent, webAuth, webIntelligence, webModels, webSettings, type Creden
 import { assistedChannels, automaticSourceGroups, intelligenceCategories, type AssistedChannel } from './data/intelligenceSources';
 import { platformName, projectStatusName, type ContentProject, type ContentVersion, type IntelligenceSource, type Platform, type TopicCandidate } from './domain/content';
 import type { ApiUsageLog, ApiUsageSummary, BailianCapabilityScope, BailianCliStatus, ModelCapability, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelOperation, ModelProvider, ModelTask, ModelTaskPolicy } from './domain/integrations';
-import { matchesIntelligenceQuery } from '../shared/intelligence-filters.mjs';
+import { filterIntelligenceItems, intelligenceSourceLabel } from '../shared/intelligence-filters.mjs';
 import './styles.css';
 
 type View = 'today' | 'discover' | 'sources' | 'clip' | 'plan' | 'topicEditor' | 'create' | 'publish' | 'review' | 'assets' | 'automation' | 'models' | 'settings';
@@ -318,20 +318,10 @@ function Discover({ item, intelligence, sources: configuredSources, topics, proj
   const [timeRange, setTimeRange] = useState<'DAY' | 'WEEK' | 'MONTH'>('MONTH');
   const [query, setQuery] = useState('');
   const categories = [...new Set(intelligence.map((signal) => signal.category).filter(Boolean))];
-  const sourceNames = [...new Set(intelligence.map((signal) => signal.source).filter(Boolean))].sort((left, right) => left.localeCompare(right, 'zh-CN'));
-  const detect = (value: string) => /[\u3400-\u9fff]/.test(value) ? 'zh' : /[a-z]/i.test(value) ? 'en' : 'other';
-  const rangeStart = { DAY: 24 * 60 * 60 * 1000, WEEK: 7 * 24 * 60 * 60 * 1000, MONTH: 30 * 24 * 60 * 60 * 1000 }[timeRange];
-  const isWithinRange = (publishedAt: string) => {
-    if (publishedAt === '刚刚') return true;
-    const timestamp = new Date(publishedAt).valueOf();
-    return !Number.isFinite(timestamp) || timestamp >= Date.now() - rangeStart;
-  };
-  const visible = intelligence.filter((signal) => {
-    const signalLanguage = signal.language ?? detect(`${signal.title} ${signal.summary}`);
-    return isWithinRange(signal.publishedAt) && (category === 'ALL' || signal.category === category) && (source === 'ALL' || signal.source === source) && (language === 'ALL' || signalLanguage === language) && matchesIntelligenceQuery(signal, query);
-  });
+  const sourceNames = [...new Set(intelligence.map(intelligenceSourceLabel).filter(Boolean))].sort((left, right) => left.localeCompare(right, 'zh-CN'));
+  const visible = filterIntelligenceItems(intelligence, { category, source, language, timeRange, query });
   const selected = visible.find((signal) => signal.id === item?.id) ?? visible[0];
-  const sourceLabel = (signal: LocalState['intelligence'][number]) => signal.captureMethod === 'SEARCH' ? '网页检索' : signal.captureMethod === 'MANUAL_LINK' ? '链接剪藏' : signal.source;
+  const sourceLabel = intelligenceSourceLabel;
   const projectTitles = useMemo(() => new Set(projects.map((project) => project.title)), [projects]);
   const projectSourceIds = useMemo(() => new Set(topics.filter((topic) => topic.status === 'PROJECT_CREATED' && projectTitles.has(topic.title)).flatMap((topic) => topic.sourceIds)), [topics, projectTitles]);
   const categoryTone = (value: string) => {
@@ -1081,4 +1071,7 @@ function WebAuthScreen({ onAuthenticated }: { onAuthenticated: (session: WebSess
   return <main className="web-auth"><section className="web-auth-panel"><div className="eyebrow">CONTENT ENGINE / WEB</div><h1>{mode === 'login' ? '进入内容工作室' : '创建内容工作室'}</h1><form onSubmit={submit}>{mode === 'register' && <><label>你的名称<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoFocus /></label><label>工作室名称<input value={workspaceName} onChange={(event) => setWorkspaceName(event.target.value)} /></label></>}<label>邮箱<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required autoFocus={mode === 'login'} /></label><label>密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={8} required /></label>{error && <p className="form-error">{error}</p>}<button className="button primary wide" disabled={busy} type="submit">{busy ? '处理中' : mode === 'login' ? '登录' : '创建并进入'}</button></form><button className="text-button" type="button" onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(''); }}>{mode === 'login' ? '创建新工作室' : '已有账号，去登录'}</button></section></main>;
 }
 
-createRoot(document.getElementById('root')!).render(<WebEntry />);
+const rootElement = document.getElementById('root')!;
+const root = window.contentEngineReactRoot ?? createRoot(rootElement);
+window.contentEngineReactRoot = root;
+root.render(<WebEntry />);

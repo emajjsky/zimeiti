@@ -35,3 +35,8 @@ test('辅助渠道长域名不会撑破卡片网格', () => {
   assert.match(styleSource, /\.assisted-channel-card header\{[^}]*min-width:0/);
   assert.match(styleSource, /\.assisted-channel-card header>div\{flex:1;min-width:0\}/);
 });
+
+test('开发热更新复用 React 根节点', () => {
+  assert.match(mainSource, /window\.contentEngineReactRoot \?\? createRoot/);
+  assert.match(mainSource, /window\.contentEngineReactRoot = root/);
+});
