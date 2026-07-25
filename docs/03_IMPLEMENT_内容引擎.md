@@ -50,7 +50,7 @@ Fastify API
 | 表 | 用途 |
 | --- | --- |
 | `users` / `workspaces` / `workspace_members` | 身份和工作空间边界 |
-| `credential_vault` | 加密的 Tavily、百炼等凭据 |
+| `credential_vault` | 加密的 Tavily、百炼等凭据；百炼凭据由核心 Agent 与 Worker 复用，不重复保存 |
 | `intelligence_sources` / `intelligence_items` | 资讯来源和情报记录；服务端在读取与 RSS 刷新时删除超过 30 天的数据 |
 | `jobs` / `api_usage_logs` | 异步任务、模型调用与错误记录 |
 | `workspace_snapshots` | 从早期原型迁移的临时状态桥 |
