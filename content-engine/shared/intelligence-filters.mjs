@@ -10,7 +10,7 @@ export function matchesIntelligenceQuery(item, query) {
 
 export function intelligenceSourceLabel(item) {
   if (item?.captureMethod === 'SEARCH') return '网页检索';
-  if (item?.captureMethod === 'MANUAL_LINK') return '链接剪藏';
+  if (item?.captureMethod === 'MANUAL_LINK') return String(item?.source ?? '').trim() || '导入链接';
   return String(item?.source ?? '').trim();
 }
 

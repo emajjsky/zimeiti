@@ -32,6 +32,7 @@
     "ioredis": "^5.11.1",
     "lucide-react": "latest",
     "pg": "^8.22.0",
+    "playwright-core": "^1.62.0",
     "react": "latest",
     "react-dom": "latest",
     "vite": "latest",

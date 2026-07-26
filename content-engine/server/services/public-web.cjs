@@ -1,5 +1,6 @@
 const { lookup } = require('node:dns/promises');
 const { classifyIntelligence } = require('./intelligenceClassifier.cjs');
+const { readWeChatArticleWithBrowser } = require('./browser-reader.cjs');
 
 async function validatePublicUrl(rawUrl) {
   if (typeof rawUrl !== 'string' || rawUrl.trim().length > 2_000) throw new Error('请输入有效的公开网页链接。');
@@ -13,25 +14,108 @@ async function validatePublicUrl(rawUrl) {
 }
 
 async function clipPublicLink(rawUrl) {
-  let url = await validatePublicUrl(rawUrl);
-  if (url.hostname.toLowerCase() === 'mp.weixin.qq.com' && /\/mp\/wappoc_appmsgcaptcha/i.test(url.pathname)) {
-    throw new Error('这是微信的人机验证页，不是文章正文。请完成验证后复制公众号文章链接；系统不会绕过验证码。');
-  }
+  const page = await fetchPublicPage(rawUrl);
+  return buildPublicPreviewFromHtml(page.url, page.html);
+}
+
+async function fetchPublicPage(rawUrl, { fetchImpl = fetch, validateUrl = validatePublicUrl, browserFetch = readWeChatArticleWithBrowser } = {}) {
+  let url = await validateUrl(rawUrl);
+  assertNotVerificationPage(url);
+  const requestedUrl = url;
   let response;
   for (let redirects = 0; redirects < 4; redirects += 1) {
-    response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(15_000), headers: { 'User-Agent': 'ContentEngine/1.0 Link Clip' } });
+    response = await fetchImpl(url, {
+      redirect: 'manual',
+      signal: AbortSignal.timeout(15_000),
+      headers: requestHeaders(url),
+    });
     if (![301, 302, 303, 307, 308].includes(response.status)) break;
     const location = response.headers.get('location');
     if (!location) throw new Error('链接跳转缺少目标地址。');
-    url = await validatePublicUrl(new URL(location, url).toString());
+    url = await validateUrl(new URL(location, url).toString());
+    if (isWeChatVerificationUrl(url)) return browserFallback(requestedUrl, browserFetch, validateUrl);
+    assertNotVerificationPage(url);
   }
   if (!response?.ok) throw new Error(`读取链接失败（HTTP ${response?.status ?? '网络错误'}）。`);
   const contentType = response.headers.get('content-type') || '';
   if (contentType && !/text\/html|application\/xhtml\+xml/i.test(contentType)) throw new Error('该链接不是可读取的网页。');
-  const html = await response.text();
-  if (html.length > 1_000_000) throw new Error('网页内容超过 1MB，无法剪藏。');
+  const html = await readTextLimited(response, maxHtmlBytes(url));
+  if (isWeChatHost(requestedUrl) && (isWeChatVerificationHtml(html) || !isWeChatArticleHtml(html))) {
+    return browserFallback(requestedUrl, browserFetch, validateUrl);
+  }
+  return { url, html };
+}
+
+async function browserFallback(requestedUrl, browserFetch, validateUrl) {
+  if (!browserFetch || !isWeChatHost(requestedUrl) || !/^\/s\//i.test(requestedUrl.pathname)) {
+    throwVerificationError();
+  }
+  let result;
+  try {
+    result = await browserFetch(requestedUrl);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '浏览器读取失败。';
+    throw new Error(`微信轻量读取触发了人机验证，浏览器辅助读取失败：${message}`);
+  }
+  const finalUrl = await validateUrl(result.url.toString());
+  assertNotVerificationPage(finalUrl);
+  if (isWeChatVerificationHtml(result.html)) throwVerificationError();
+  if (!isWeChatArticleHtml(result.html)) throw new Error('浏览器未读取到公众号文章正文。请确认链接仍然有效，且不是登录或验证页面。');
+  if (Buffer.byteLength(result.html, 'utf8') > maxHtmlBytes(finalUrl)) throw new Error('公众号页面内容超过 5MB，无法导入。');
+  return { url: finalUrl, html: result.html };
+}
+
+function requestHeaders(url) {
+  if (isWeChatHost(url)) {
+    return {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
+      Accept: 'text/html,application/xhtml+xml',
+      'Accept-Language': 'zh-CN,zh;q=0.9',
+    };
+  }
+  return { 'User-Agent': 'ContentEngine/1.0 Link Import', Accept: 'text/html,application/xhtml+xml' };
+}
+
+function maxHtmlBytes(url) { return isWeChatHost(url) ? 5_000_000 : 1_000_000; }
+
+async function readTextLimited(response, maxBytes) {
+  const contentLength = Number(response.headers.get('content-length'));
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) throw new Error(`网页内容超过 ${formatMegabytes(maxBytes)}，无法导入。`);
+  if (!response.body?.getReader) {
+    const text = await response.text();
+    if (Buffer.byteLength(text, 'utf8') > maxBytes) throw new Error(`网页内容超过 ${formatMegabytes(maxBytes)}，无法导入。`);
+    return text;
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let total = 0;
+  let text = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      throw new Error(`网页内容超过 ${formatMegabytes(maxBytes)}，无法导入。`);
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+  return text + decoder.decode();
+}
+
+function formatMegabytes(bytes) { return `${Math.round(bytes / 1_000_000)}MB`; }
+function isWeChatHost(url) { return url.hostname.toLowerCase() === 'mp.weixin.qq.com'; }
+function isWeChatVerificationUrl(url) { return isWeChatHost(url) && /\/mp\/wappoc_appmsgcaptcha/i.test(url.pathname); }
+function isWeChatVerificationHtml(html) { return /wappoc_appmsgcaptcha|appmsgcaptcha/i.test(html) && !/id=["']js_content["']/i.test(html); }
+function isWeChatArticleHtml(html) { return /id=["']js_content["']/i.test(html) && /(?:property|name)=["']og:title["']/i.test(html); }
+function assertNotVerificationPage(url) {
+  if (isWeChatVerificationUrl(url)) throwVerificationError();
+}
+function throwVerificationError() { throw new Error('这是微信的人机验证页，不是文章正文。请在浏览器中完成验证后重新提交原始文章链接；系统不会绕过验证码。'); }
+
+function buildPublicPreviewFromHtml(url, html) {
   const title = htmlMeta(html, 'og:title') || htmlMeta(html, 'twitter:title') || htmlTitle(html) || '未命名文章';
-  const summary = htmlMeta(html, 'og:description') || htmlMeta(html, 'description') || '';
+  const summary = htmlMeta(html, 'og:description') || htmlMeta(html, 'description') || htmlArticleText(html) || '';
   return buildPublicPreview(url, title, summary);
 }
 
@@ -58,7 +142,40 @@ function htmlMeta(html, key) {
 }
 
 function htmlTitle(html) { return /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1] ?? ''; }
-function clean(value) { return String(value).replace(/<[^>]+>/g, ' ').replace(/&quot;/gi, '"').replace(/&#39;/gi, "'").replace(/&amp;/gi, '&').replace(/\s+/g, ' ').trim(); }
+function htmlArticleText(html) {
+  const weChat = htmlElementInnerById(html, 'js_content');
+  const article = /<article\b[^>]*>([\s\S]*?)<\/article>/i.exec(html)?.[1];
+  return clean((weChat || article || '').replace(/<script\b[\s\S]*?<\/script>/gi, ' ').replace(/<style\b[\s\S]*?<\/style>/gi, ' ').replace(/<br\s*\/?>/gi, ' ').replace(/<\/p>/gi, ' '));
+}
+function htmlElementInnerById(html, id) {
+  const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const opening = new RegExp(`<([a-z][\\w:-]*)\\b[^>]*\\bid=["']${escaped}["'][^>]*>`, 'i').exec(html);
+  if (!opening) return '';
+  const tagName = opening[1];
+  const start = opening.index + opening[0].length;
+  const tags = new RegExp(`<\\/?${tagName}\\b[^>]*>`, 'gi');
+  tags.lastIndex = start;
+  let depth = 1;
+  let match;
+  while ((match = tags.exec(html))) {
+    if (/^<\//.test(match[0])) depth -= 1;
+    else if (!/\/\s*>$/.test(match[0])) depth += 1;
+    if (depth === 0) return html.slice(start, match.index);
+  }
+  return '';
+}
+function clean(value) {
+  return String(value)
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&#(x[\da-f]+|\d+);?/gi, (match, entity) => {
+      const raw = String(entity);
+      const code = raw.toLowerCase().startsWith('x') ? Number.parseInt(raw.slice(1), 16) : Number.parseInt(raw, 10);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : match;
+    })
+    .replace(/&(nbsp|quot|apos|amp|lt|gt);/gi, (match, entity) => ({ nbsp: ' ', quot: '"', apos: "'", amp: '&', lt: '<', gt: '>' })[String(entity).toLowerCase()] ?? match)
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 function isPrivateAddress(address) { const value = address.toLowerCase(); if (value === '::1' || value.startsWith('fc') || value.startsWith('fd') || value.startsWith('fe80:')) return true; if (!/^\d+\.\d+\.\d+\.\d+$/.test(value)) return false; const [a, b] = value.split('.').map(Number); return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168); }
 
-module.exports = { clipPublicLink, sourceName, validatePublicUrl, buildPublicPreview };
+module.exports = { clipPublicLink, fetchPublicPage, buildPublicPreviewFromHtml, sourceName, validatePublicUrl, buildPublicPreview };

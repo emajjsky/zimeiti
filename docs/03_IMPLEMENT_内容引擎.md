@@ -288,6 +288,18 @@ API：`http://127.0.0.1:8787/health`
 - 删除 `main.tsx` 中无引用的旧发现页、旧链接导入页、旧模型设置页、旧资讯来源页和旧网络搜索页。
 - 生产构建检查覆盖 Desktop、V0.1、桌面客户端、剪藏链接、辅助渠道和本地素材目录，当前构建结果均无命中。
 
+# 2026-07-26 实现记录：公众号文章导入
+
+- `server/services/public-web.cjs` 新增 `fetchPublicPage()`，统一处理公开网页请求、有限重定向、内容类型和流式体积限制。
+- `mp.weixin.qq.com` 使用普通 Chrome 桌面请求头；不携带 Cookie，不使用微信登录态，不处理人机验证。
+- 新增 `server/services/browser-reader.cjs` 和 `playwright-core`。轻量 HTTP 触发微信验证页时，使用系统 Chrome 创建一次性隔离上下文，只放行 `mp.weixin.qq.com` 主文档请求。
+- Chrome 路径优先读取 `PLAYWRIGHT_CHROME_PATH` 或 `CHROME_PATH`，再探测 Windows、Linux 和 macOS 常见安装位置；不随应用下载浏览器。
+- 初始 URL、重定向 URL 和返回 HTML 均检查微信验证页；HTTP 200 但缺少 `js_content` 与 `og:title` 的微信异常页同样触发隔离浏览器回退。
+- 浏览器回退始终以用户提交的原始 `/s/` 链接为入口；验证页 URL 不会被当作文章读取或保存。成功预览后，Web 输入框与“查看原文”均保持原始文章地址。
+- 公众号页面上限为 5MB，其它网页保持 1MB；读取过程按字节流限制，超过上限时取消响应体。
+- `buildPublicPreviewFromHtml()` 在 description 为空时从 `js_content` 平衡提取正文，清理标签和实体后生成摘要。
+- `intelligenceSourceLabel()` 对手工导入内容保留实际来源，公众号卡片显示“公众号文章”。
+
 ## 视觉和响应式
 
 - 视觉参数为 `DESIGN_VARIANCE 4 / MOTION_INTENSITY 2 / VISUAL_DENSITY 6`。

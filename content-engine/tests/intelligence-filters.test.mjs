@@ -57,3 +57,19 @@ test('来源筛选与卡片统一使用展示来源', () => {
 
   assert.deepEqual(visible.map((signal) => signal.id), ['search']);
 });
+
+test('导入链接保留文章真实来源而不是显示旧剪藏文案', () => {
+  const intelligence = [
+    { id: 'wechat', title: '公众号文章', summary: '正文摘要', source: '公众号文章', captureMethod: 'MANUAL_LINK', category: 'AI', language: 'zh', publishedAt: '2026-07-25T10:00:00.000Z' },
+  ];
+
+  const visible = filterIntelligenceItems(intelligence, {
+    source: '公众号文章',
+    category: 'ALL',
+    language: 'ALL',
+    timeRange: 'MONTH',
+    query: '',
+  }, Date.parse('2026-07-25T12:00:00.000Z'));
+
+  assert.deepEqual(visible.map((signal) => signal.id), ['wechat']);
+});
