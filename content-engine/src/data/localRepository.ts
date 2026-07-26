@@ -16,6 +16,8 @@ export interface WorkspaceProfile {
   name: string;
   materialRoot: string;
   primaryTopics: string[];
+  accountPositioning?: string;
+  targetAudience?: string;
   enabledPlatforms: Platform[];
   setupCompleted: boolean;
 }
@@ -33,6 +35,8 @@ export const seedState: LocalState = {
     name: '我的内容工作室',
     materialRoot: '',
     primaryTopics: ['AI 工具实战'],
+    accountPositioning: '',
+    targetAudience: '',
     enabledPlatforms: ['WECHAT', 'XIAOHONGSHU', 'VIDEO_CHANNEL'],
     setupCompleted: false,
   },
