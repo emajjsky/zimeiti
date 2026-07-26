@@ -300,6 +300,15 @@ API：`http://127.0.0.1:8787/health`
 - `buildPublicPreviewFromHtml()` 在 description 为空时从 `js_content` 平衡提取正文，清理标签和实体后生成摘要。
 - `intelligenceSourceLabel()` 对手工导入内容保留实际来源，公众号卡片显示“公众号文章”。
 
+# 2026-07-26 待实施设计：AI 热点分析
+
+- 已确认采用单次结构化文本模型调用，综合分由服务端根据五个分项计算，不直接信任模型输出的总分。
+- 计划新增 `prompt_template_versions` 与 `intelligence_analyses`，复用任务策略、`generation_runs` 和调用记录。
+- 计划增加提示词模板查看、保存、恢复默认和版本接口，以及分析准备、确认、取消和最新结果接口。
+- 模型输出必须经过固定 Schema 校验；首次格式错误允许一次结构修复，仍失败则记录失败且不覆盖上次成功结果。
+- 热点详情沿用现有抽屉，增加平台勾选确认卡、五维结果、角度选择和创建选题预填，不新增一级页面。
+- 本节仅记录已确认的实施边界，业务代码尚未完成；详细规格见 `docs/superpowers/specs/2026-07-26-ai-intelligence-analysis-design.md`。
+
 ## 视觉和响应式
 
 - 视觉参数为 `DESIGN_VARIANCE 4 / MOTION_INTENSITY 2 / VISUAL_DENSITY 6`。
