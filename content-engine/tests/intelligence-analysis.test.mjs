@@ -34,3 +34,27 @@ test('拒绝未知变量和超过上限的业务提示词', () => {
   assert.throws(() => analysis.validateTemplate('分析 {{unknown}}'), /未知变量/);
   assert.throws(() => analysis.validateTemplate('x'.repeat(12_001)), /12,000/);
 });
+
+test('从模型返回的代码块中提取并校验结构化分析', () => {
+  const payload = {
+    decisionReason: '适合跟进。', timingWindow: 'TODAY', dimensions,
+    angles: [], platforms: [{ platform: 'WECHAT', fitScore: 85, recommendedFormat: '深度解读', reason: '适合展开。' }], factsToVerify: [], risks: [],
+  };
+  const result = analysis.parseAnalysisContent(['```json', JSON.stringify(payload), '```'].join('\n'), ['WECHAT']);
+  assert.equal(result.decisionReason, '适合跟进。');
+  assert.equal(result.platforms[0].platform, 'WECHAT');
+});
+
+test('准备分析时要求题材、原文、平台和模型路由完整', () => {
+  const input = {
+    item: { id: 'item-1', title: '标题', summary: '摘要', source: '来源', url: 'https://example.com', category: 'AI', keywords: [], publishedAt: '2026-07-26T00:00:00.000Z' },
+    profile: { primaryTopics: ['AI'], accountPositioning: '', targetAudience: '' },
+    platforms: ['WECHAT'],
+    template: { id: 'template-1', version: 1, body: '分析 {{title}}' },
+    route: { provider: 'BAILIAN_CLI', model: 'qwen-plus' },
+  };
+  const prepared = analysis.prepareAnalysisInput(input);
+  assert.equal(prepared.generalAudienceWarning, true);
+  assert.deepEqual(prepared.input.selectedPlatforms, ['WECHAT']);
+  assert.throws(() => analysis.prepareAnalysisInput({ ...input, platforms: [] }), /平台/);
+});

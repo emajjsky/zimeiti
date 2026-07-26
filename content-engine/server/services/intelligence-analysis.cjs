@@ -40,6 +40,15 @@ function validateAnalysisOutput(value, selectedPlatforms) {
   return output;
 }
 
+function parseAnalysisContent(content, selectedPlatforms) {
+  if (typeof content !== 'string') throw new Error('模型没有返回分析内容。');
+  const normalized = content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+  let value;
+  try { value = JSON.parse(normalized); }
+  catch { throw new Error('模型返回的分析格式无效。'); }
+  return validateAnalysisOutput(value, selectedPlatforms);
+}
+
 function validateTemplate(body) {
   if (typeof body !== 'string' || !body.trim()) throw new Error('提示词不能为空。');
   if (body.length > MAX_TEMPLATE_LENGTH) throw new Error(`提示词不能超过 ${MAX_TEMPLATE_LENGTH.toLocaleString('en-US')} 个字符。`);
@@ -77,6 +86,20 @@ function buildAnalysisPrompt({ template, item, profile, platforms }) {
   return { system, message: JSON.stringify({ businessTemplate, context }) };
 }
 
+function prepareAnalysisInput({ item, profile, platforms, template, route }) {
+  if (!item?.title?.trim() || !item?.summary?.trim() || !item?.source?.trim() || !item?.url?.trim()) throw new Error('资讯缺少标题、摘要、来源或原文链接，暂不能分析。');
+  const selectedPlatforms = [...new Set(platforms ?? [])];
+  if (!selectedPlatforms.length || selectedPlatforms.some((value) => !['WECHAT', 'XIAOHONGSHU', 'VIDEO_CHANNEL'].includes(value))) throw new Error('请至少选择一个有效的平台。');
+  if (!(profile?.primaryTopics ?? []).map((value) => String(value).trim()).filter(Boolean).length) throw new Error('请先在工作空间设置至少一个默认题材。');
+  if (!route?.provider || !route?.model?.trim()) throw new Error('请先为热点分析配置可用文本模型。');
+  if (!template?.id || !template?.version || !template?.body) throw new Error('热点分析提示词模板不可用。');
+  return {
+    sourceSnapshot: { item, profile },
+    input: { selectedPlatforms, template: { id: template.id, version: template.version, body: template.body }, route: { provider: route.provider, connectionId: route.connectionId ?? null, model: route.model } },
+    generalAudienceWarning: !String(profile.accountPositioning ?? '').trim() || !String(profile.targetAudience ?? '').trim(),
+  };
+}
+
 function createTemplateStore({ query }) {
   async function latest(workspaceId, scope = ANALYSIS_SCOPE) {
     const result = await query('SELECT id, workspace_id, scope, version, body, source, created_at FROM prompt_template_versions WHERE workspace_id = $1 AND scope = $2 ORDER BY version DESC LIMIT 1', [workspaceId, scope]);
@@ -103,4 +126,4 @@ function createTemplateStore({ query }) {
   };
 }
 
-module.exports = { ANALYSIS_SCOPE, MAX_TEMPLATE_LENGTH, templateVariables, weights, calculateOverallScore, decisionForScore, validateAnalysisOutput, validateTemplate, defaultTemplate, buildAnalysisPrompt, createTemplateStore };
+module.exports = { ANALYSIS_SCOPE, MAX_TEMPLATE_LENGTH, templateVariables, weights, calculateOverallScore, decisionForScore, validateAnalysisOutput, parseAnalysisContent, validateTemplate, defaultTemplate, buildAnalysisPrompt, prepareAnalysisInput, createTemplateStore };

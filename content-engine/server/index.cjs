@@ -11,7 +11,7 @@ const { listSources, createSources, updateSource, removeSource, listItems, refre
 const { enqueue } = require('./queue.cjs');
 const { listAvailableSkills } = require('./agent/skillRegistry.cjs');
 const { runBailianCli } = require('./runner/bailian.cjs');
-const { ANALYSIS_SCOPE, createTemplateStore } = require('./services/intelligence-analysis.cjs');
+const { ANALYSIS_SCOPE, createTemplateStore, prepareAnalysisInput } = require('./services/intelligence-analysis.cjs');
 
 const app = Fastify({ logger: true, bodyLimit: 5 * 1024 * 1024 });
 const credentials = new Set(['TAVILY', 'BAILIAN']);
@@ -303,6 +303,75 @@ app.put('/api/v1/settings/prompt-templates/:scope', { preHandler: authenticate }
 app.post('/api/v1/settings/prompt-templates/:scope/reset', { preHandler: authenticate }, async (request) => {
   const workspace = await currentWorkspace(request.user.sub);
   return promptTemplateView(await templateStore.reset(workspace.id, analysisTemplateScope(request.params.scope)));
+});
+
+async function analysisProfile(workspaceId) {
+  const result = await query('SELECT state_json FROM workspace_snapshots WHERE workspace_id = $1', [workspaceId]);
+  return result.rows[0]?.state_json?.workspace ?? {};
+}
+
+async function analysisRoute(workspaceId) {
+  const result = await query('SELECT provider, connection_id, model FROM agent_model_policies WHERE workspace_id = $1 AND scope = $2', [workspaceId, ANALYSIS_SCOPE]);
+  if (!result.rowCount) throw new Error('请先为热点分析配置可用文本模型。');
+  const route = { provider: result.rows[0].provider, connectionId: result.rows[0].connection_id ?? undefined, model: result.rows[0].model };
+  if (route.provider === 'BAILIAN_CLI') {
+    const credential = await query("SELECT 1 FROM credential_vault WHERE workspace_id = $1 AND provider = 'BAILIAN' AND status = 'READY'", [workspaceId]);
+    if (!credential.rowCount) throw new Error('百炼 Key 尚未验证可用。请先在百炼设置中保存并检查。');
+  } else {
+    const connection = await query("SELECT 1 FROM model_connections WHERE id = $1 AND workspace_id = $2 AND status = 'READY'", [route.connectionId, workspaceId]);
+    if (!connection.rowCount) throw new Error('热点分析使用的外部 API 连接不可用。');
+  }
+  return route;
+}
+
+function analysisItem(row) {
+  return { id: row.id, title: row.title, summary: row.summary, source: row.source_name, url: row.canonical_url, category: row.category, keywords: row.matched_keywords ?? [], publishedAt: row.published_at?.toISOString?.() ?? row.published_at ?? row.created_at };
+}
+
+app.post('/api/v1/intelligence/items/:id/analyses/prepare', { preHandler: authenticate }, async (request, reply) => {
+  const input = z.object({ platforms: z.array(z.enum(['WECHAT', 'XIAOHONGSHU', 'VIDEO_CHANNEL'])).min(1).max(3) }).parse(request.body);
+  const workspace = await currentWorkspace(request.user.sub);
+  const itemResult = await query('SELECT * FROM intelligence_items WHERE id = $1 AND workspace_id = $2', [request.params.id, workspace.id]);
+  if (!itemResult.rowCount) { const error = new Error('未找到这条资讯。'); error.statusCode = 404; throw error; }
+  const [profile, route, template] = await Promise.all([analysisProfile(workspace.id), analysisRoute(workspace.id), templateStore.get(workspace.id, ANALYSIS_SCOPE)]);
+  const prepared = prepareAnalysisInput({ item: analysisItem(itemResult.rows[0]), profile, platforms: input.platforms, template, route });
+  const run = await query(`INSERT INTO generation_runs (workspace_id, skill_version_id, status, source_snapshot_json, input_json, model, prompt_version, estimated_cost)
+    VALUES ($1, 'intelligence-analysis:1.0.0', 'DRAFT', $2, $3, $4, $5, $6)
+    RETURNING id, status, created_at`, [workspace.id, JSON.stringify(prepared.sourceSnapshot), JSON.stringify(prepared.input), route.model, String(template.version), JSON.stringify(null)]);
+  reply.code(201).send({ id: run.rows[0].id, status: run.rows[0].status, createdAt: run.rows[0].created_at, confirmation: { sourceCount: 1, platforms: prepared.input.selectedPlatforms, model: route.model, promptVersion: template.version, generalAudienceWarning: prepared.generalAudienceWarning, costEstimate: null } });
+});
+
+app.post('/api/v1/generation-runs/:id/confirm', { preHandler: authenticate }, async (request, reply) => {
+  const workspace = await currentWorkspace(request.user.sub);
+  const run = await query("UPDATE generation_runs SET status = 'QUEUED' WHERE id = $1 AND workspace_id = $2 AND status = 'DRAFT' RETURNING id, workspace_id, status", [request.params.id, workspace.id]);
+  if (!run.rowCount) { const error = new Error('该分析任务当前不能确认。'); error.statusCode = 409; throw error; }
+  const job = await query("INSERT INTO jobs (workspace_id, job_type, payload_json) VALUES ($1, 'INTELLIGENCE_ANALYSIS', $2) RETURNING *", [workspace.id, JSON.stringify({ runId: run.rows[0].id })]);
+  try { await enqueue(job.rows[0]); }
+  catch (error) {
+    const message = error instanceof Error ? error.message : '任务入队失败。';
+    await query("UPDATE generation_runs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1", [run.rows[0].id, message.slice(0, 2_000)]);
+    await query("UPDATE jobs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1", [job.rows[0].id, message.slice(0, 2_000)]);
+    throw error;
+  }
+  reply.code(202).send({ id: run.rows[0].id, status: 'QUEUED', jobId: job.rows[0].id });
+});
+
+app.post('/api/v1/generation-runs/:id/cancel', { preHandler: authenticate }, async (request) => {
+  const workspace = await currentWorkspace(request.user.sub);
+  const result = await query("UPDATE generation_runs SET status = 'CANCELLED', completed_at = now() WHERE id = $1 AND workspace_id = $2 AND status IN ('DRAFT', 'QUEUED') RETURNING id, status", [request.params.id, workspace.id]);
+  if (!result.rowCount) { const error = new Error('该分析任务当前不能取消。'); error.statusCode = 409; throw error; }
+  await query("UPDATE jobs SET status = 'CANCELLED', completed_at = now() WHERE workspace_id = $1 AND payload_json->>'runId' = $2 AND status = 'PENDING'", [workspace.id, request.params.id]);
+  return result.rows[0];
+});
+
+app.get('/api/v1/intelligence/items/:id/analyses/latest', { preHandler: authenticate }, async (request) => {
+  const workspace = await currentWorkspace(request.user.sub);
+  const result = await query(`SELECT a.id, a.selected_platforms, a.output_json, a.overall_score, a.decision, a.created_at, r.model, r.prompt_version
+    FROM intelligence_analyses a JOIN generation_runs r ON r.id = a.generation_run_id
+    WHERE a.workspace_id = $1 AND a.intelligence_item_id = $2 ORDER BY a.created_at DESC LIMIT 1`, [workspace.id, request.params.id]);
+  if (!result.rowCount) return null;
+  const row = result.rows[0];
+  return { id: row.id, platforms: row.selected_platforms, ...row.output_json, overallScore: row.overall_score, decision: row.decision, model: row.model, promptVersion: row.prompt_version, analyzedAt: row.created_at };
 });
 
 app.post('/api/v1/intelligence/clip', { preHandler: authenticate }, async (request) => clipPublicLink(z.object({ url: z.string().url().max(2_000) }).parse(request.body).url));
