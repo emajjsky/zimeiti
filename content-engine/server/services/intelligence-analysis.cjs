@@ -64,6 +64,19 @@ function defaultTemplate() {
 
 function buildAnalysisPrompt({ template, item, profile, platforms }) {
   const businessTemplate = validateTemplate(template);
+  const selectedPlatforms = [...new Set(platforms)];
+  const platformExample = selectedPlatforms.map((platform) => ({ platform, fitScore: 0, recommendedFormat: '建议形式', reason: '适配原因' }));
+  const outputExample = {
+    decisionReason: '一句话判断',
+    timingWindow: 'TODAY',
+    dimensions: {
+      timeliness: { score: 0, reason: '原因' }, accountFit: { score: 0, reason: '原因' }, contentValue: { score: 0, reason: '原因' }, spreadPotential: { score: 0, reason: '原因' }, feasibilityAndSafety: { score: 0, reason: '原因' },
+    },
+    angles: [{ title: '角度标题', coreViewpoint: '核心观点', targetAudience: '目标受众' }],
+    platforms: platformExample,
+    factsToVerify: ['待核验事实'],
+    risks: ['风险提示'],
+  };
   const context = {
     title: item.title,
     summary: item.summary,
@@ -81,9 +94,10 @@ function buildAnalysisPrompt({ template, item, profile, platforms }) {
     '必须只返回 JSON，不要 Markdown 或解释文字。',
     'JSON 必须包含 decisionReason、timingWindow、dimensions、angles、platforms、factsToVerify、risks。',
     'dimensions 必须包含 timeliness、accountFit、contentValue、spreadPotential、feasibilityAndSafety，每项有 0-100 整数 score 和简短 reason。',
-    `timingWindow 只能是 TODAY|THREE_DAYS|ONE_WEEK|EVERGREEN 之一。platforms 必须且只能覆盖本次选择的平台。angles 最多 3 条，factsToVerify 与 risks 各最多 5 条。`,
+    `timingWindow 只能是 TODAY|THREE_DAYS|ONE_WEEK|EVERGREEN 之一。angles 最多 3 条，factsToVerify 与 risks 各最多 5 条。`,
+    `本次必须返回的平台代码：${selectedPlatforms.join('、')}。platforms 数组必须恰好包含这 ${selectedPlatforms.length} 个代码各一次，不得省略、重复、改为中文名称或添加其它平台。`,
     '严格按以下 JSON 形状返回。angles 和 platforms 中的每一项必须是对象，不能是字符串：',
-    '{"decisionReason":"一句话判断","timingWindow":"TODAY","dimensions":{"timeliness":{"score":0,"reason":"原因"},"accountFit":{"score":0,"reason":"原因"},"contentValue":{"score":0,"reason":"原因"},"spreadPotential":{"score":0,"reason":"原因"},"feasibilityAndSafety":{"score":0,"reason":"原因"}},"angles":[{"title":"角度标题","coreViewpoint":"核心观点","targetAudience":"目标受众"}],"platforms":[{"platform":"WECHAT","fitScore":0,"recommendedFormat":"建议形式","reason":"适配原因"}],"factsToVerify":["待核验事实"],"risks":["风险提示"]}',
+    JSON.stringify(outputExample),
   ].join('\n');
   return { system, message: JSON.stringify({ businessTemplate, context }) };
 }
