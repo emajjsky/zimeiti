@@ -95,7 +95,25 @@ function App() {
     if (!selectedIntel) return;
     const angle = analysis?.angles[angleIndex];
     const id = `topic-${Date.now()}`;
-    const next = { ...state, topics: [{ id, title: angle?.title || selectedIntel.title, category: selectedIntel.category, platforms: analysis?.selectedPlatforms ?? ['WECHAT', 'XIAOHONGSHU', 'VIDEO_CHANNEL'] as Platform[], urgency: analysis?.decision === 'FOLLOW' ? '高' as const : '中' as const, status: 'PENDING' as const, coreViewpoint: angle?.coreViewpoint || selectedIntel.summary, factsToVerify: analysis?.factsToVerify ?? [], sourceIds: [selectedIntel.id] }, ...state.topics] };
+    const next = { ...state, topics: [{
+      id,
+      title: angle?.title || selectedIntel.title,
+      category: selectedIntel.category,
+      platforms: analysis?.selectedPlatforms ?? ['WECHAT', 'XIAOHONGSHU', 'VIDEO_CHANNEL'] as Platform[],
+      urgency: analysis?.decision === 'FOLLOW' ? '高' as const : '中' as const,
+      status: 'PENDING' as const,
+      coreViewpoint: angle?.coreViewpoint || selectedIntel.summary,
+      targetAudience: angle?.targetAudience,
+      factsToVerify: analysis?.factsToVerify ?? [],
+      sourceIds: [selectedIntel.id],
+      analysisSnapshot: analysis ? {
+        score: analysis.overallScore,
+        decision: analysis.decision,
+        reason: analysis.decisionReason,
+        timingWindow: analysis.timingWindow,
+        platformRecommendations: analysis.platforms,
+      } : undefined,
+    }, ...state.topics] };
     updateState(next); setSelectedTopicId(id); setView('plan');
   };
   const openTopicFromIntel = (sourceId: string) => {
@@ -260,7 +278,7 @@ function App() {
     <main className="main-content">
       {view === 'today' && <Today onNavigate={setView} projects={state.projects} intelligence={state.intelligence} />}
       {view === 'discover' && <DiscoverWorkspace section={discoverSection} onSectionChange={setDiscoverSection} inbox={<IntelligenceInbox item={selectedIntel} intelligence={state.intelligence} sources={state.sources} topics={state.topics} projects={state.projects} defaultPlatforms={state.workspace.enabledPlatforms} onSelect={setSelectedIntelId} onCreateTopic={createTopicFromIntel} onOpenTopic={openTopicFromIntel} onSaveAnalysis={saveAnalysis} onRefresh={refreshRss} onOpenSources={() => openSettings('sources')} refreshFeedback={refreshFeedback} />} search={<NetworkSearchPanel preset={searchPreset} onSave={saveSearchCandidate} onOpenSearchSettings={() => openSettings('models', 'search')} checkStatus={webSearchStatus} searchWeb={searchWeb} />} linkImport={<LinkImportPanel onSave={saveClippedLink} onShowInbox={() => openDiscover('inbox')} previewLink={previewPublicLink} />} />}
-      {view === 'plan' && selectedTopic && <Plan topics={state.topics} selected={selectedTopic} onSelect={setSelectedTopicId} onCreateProject={createProjectFromTopic} onEdit={openTopicEditor} onDelete={deleteTopic} />}
+      {view === 'plan' && selectedTopic && <Plan topics={state.topics} selected={selectedTopic} intelligence={state.intelligence} onSelect={setSelectedTopicId} onCreateProject={createProjectFromTopic} onEdit={openTopicEditor} onDelete={deleteTopic} />}
       {view === 'topicEditor' && <TopicEditor key={editingTopicId ?? 'new'} topic={state.topics.find((topic) => topic.id === editingTopicId)} defaultCategory={state.workspace.primaryTopics[0] ?? '未分类'} onSave={saveTopic} onCancel={() => { setEditingTopicId(null); setView('plan'); }} />}
       {view === 'create' && <Create project={featuredProject} activePlatform={activePlatform} onPlatform={setActivePlatform} activeVersion={activeVersion} progress={platformProgress} onSaveVersion={saveContentVersion} />}
       {view === 'publish' && <Publish project={featuredProject} onNavigate={setView} />}
@@ -339,10 +357,18 @@ function TopicEditor({ topic, defaultCategory, onSave, onCancel }: { topic?: Top
   </section>;
 }
 
-function Plan({ topics, selected, onSelect, onCreateProject, onEdit, onDelete }: { topics: LocalState['topics']; selected: LocalState['topics'][number]; onSelect: (id: string) => void; onCreateProject: () => void; onEdit: (topic: TopicCandidate) => void; onDelete: (topic: TopicCandidate) => void }) { return <>
-  <PageHeader eyebrow="PLAN / 内容规划" title="选题池" subtitle="从热点里选择值得投入制作成本的内容。" />
-  <div className="plan-layout"><section><div className="filter-row slim"><div>{['全部','AI 工具实战','财经政策解读','历史人文'].map((label,index) => <button key={label} className={`filter ${index === 0 ? 'active' : ''}`}>{label}</button>)}</div></div><table><thead><tr><th>选题</th><th>题材</th><th>目标平台</th><th>时效</th><th>状态</th><th>计划日期</th></tr></thead><tbody>{topics.map((topic) => <tr key={topic.id} className={topic.id === selected.id ? 'selected-row' : ''} onClick={() => onSelect(topic.id)}><td>{topic.title}</td><td>{topic.category}</td><td>{topic.platforms.map((platform) => platformName[platform]).join(' / ')}</td><td>{topic.urgency}</td><td><span className="chip yellow">{topic.status === 'PENDING' ? '待判断' : topic.status === 'ACCEPTED' ? '已采纳' : '已立项'}</span></td><td>{topic.plannedDate ?? '未安排'}</td></tr>)}</tbody></table></section><aside className="topic-detail"><h2>选题详情</h2><DetailBlock label="核心观点" value={selected.coreViewpoint}/><DetailBlock label="目标受众" value="新中产职场人、AI 工具爱好者"/><DetailBlock label="关联热点" value="#视频生成 #创作者工具 #工作流"/><DetailBlock label="执行备注" value="补充 2 个真实案例，避免只讲提示词。"/><div className="topic-detail-actions"><button className="text-button" onClick={() => onEdit(selected)}>编辑</button><button className="text-button danger" onClick={() => onDelete(selected)}>删除</button></div><button className="button primary wide" onClick={onCreateProject}>确认立项</button></aside></div>
-  </>; }
+function Plan({ topics, selected, intelligence, onSelect, onCreateProject, onEdit, onDelete }: { topics: LocalState['topics']; selected: LocalState['topics'][number]; intelligence: LocalState['intelligence']; onSelect: (id: string) => void; onCreateProject: () => void; onEdit: (topic: TopicCandidate) => void; onDelete: (topic: TopicCandidate) => void }) {
+  const related = intelligence.filter((item) => selected.sourceIds.includes(item.id));
+  const analysis = selected.analysisSnapshot;
+  const decision = analysis?.decision === 'FOLLOW' ? '建议跟进' : analysis?.decision === 'WATCH' ? '继续观察' : analysis?.decision === 'SKIP' ? '暂不建议' : '未分析';
+  const timing = analysis?.timingWindow === 'TODAY' ? '今天发布' : analysis?.timingWindow === 'THREE_DAYS' ? '三天内有效' : analysis?.timingWindow === 'ONE_WEEK' ? '一周内有效' : analysis?.timingWindow === 'EVERGREEN' ? '长期可做' : '未分析';
+  const platformAdvice = analysis?.platformRecommendations.map((item) => `${platformName[item.platform]}：${item.recommendedFormat}`).join('；') || '未生成平台建议';
+  const relatedText = related.length ? related.map((item) => `${item.source} · ${item.title}`).join('\n') : '未关联热点';
+  return <>
+    <PageHeader eyebrow="PLAN / 内容规划" title="选题池" subtitle="从热点里选择值得投入制作成本的内容。" />
+    <div className="plan-layout"><section><div className="filter-row slim"><div>{['全部','AI 工具实战','财经政策解读','历史人文'].map((label,index) => <button key={label} className={`filter ${index === 0 ? 'active' : ''}`}>{label}</button>)}</div></div><table><thead><tr><th>选题</th><th>题材</th><th>目标平台</th><th>时效</th><th>状态</th><th>计划日期</th></tr></thead><tbody>{topics.map((topic) => <tr key={topic.id} className={topic.id === selected.id ? 'selected-row' : ''} onClick={() => onSelect(topic.id)}><td>{topic.title}</td><td>{topic.category}</td><td>{topic.platforms.map((platform) => platformName[platform]).join(' / ')}</td><td>{topic.urgency}</td><td><span className="chip yellow">{topic.status === 'PENDING' ? '待判断' : topic.status === 'ACCEPTED' ? '已采纳' : '已立项'}</span></td><td>{topic.plannedDate ?? '未安排'}</td></tr>)}</tbody></table></section><aside className="topic-detail"><h2>选题详情</h2><DetailBlock label="核心观点" value={selected.coreViewpoint}/><DetailBlock label="目标受众" value={selected.targetAudience || '未填写'}/><DetailBlock label="关联热点" value={relatedText}/>{analysis && <><DetailBlock label={`分析建议 · ${analysis.score} 分`} value={`${decision} · ${timing}\n${analysis.reason}`}/><DetailBlock label="平台建议" value={platformAdvice}/></>}<DetailBlock label="待核验" value={selected.factsToVerify?.join('；') || '暂无待核验事项'}/><div className="topic-detail-actions"><button className="text-button" onClick={() => onEdit(selected)}>编辑</button><button className="text-button danger" onClick={() => onDelete(selected)}>删除</button></div><button className="button primary wide" onClick={onCreateProject}>{selected.status === 'PROJECT_CREATED' ? '查看内容项目' : '确认立项'}</button></aside></div>
+  </>;
+}
 
 function DetailBlock({ label, value }: { label: string; value: string }) { return <div className="detail-block"><small>{label}</small><p>{value}</p></div>; }
 

@@ -69,3 +69,11 @@ test('已完成分析的资讯卡片显示已分析状态', async () => {
   const source = await readFile(new URL('../src/workspaces/discover/IntelligenceInbox.tsx', import.meta.url), 'utf8');
   assert.match(source, /entry\.analysis && <em className="analyzed">已分析<\/em>/);
 });
+
+test('分析创建选题会冻结选中角度与分析快照，并由规划页显示真实资讯', async () => {
+  const source = await readFile(new URL('../src/main.tsx', import.meta.url), 'utf8');
+  assert.match(source, /analysisSnapshot: analysis \? \{/);
+  assert.match(source, /targetAudience: angle\?\.targetAudience/);
+  assert.match(source, /<Plan topics=\{state\.topics\} selected=\{selectedTopic\} intelligence=\{state\.intelligence\}/);
+  assert.doesNotMatch(source, /value="新中产职场人、AI 工具爱好者"/);
+});

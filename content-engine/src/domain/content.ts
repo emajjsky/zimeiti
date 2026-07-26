@@ -78,8 +78,16 @@ export interface TopicCandidate {
   status: TopicStatus;
   plannedDate?: string;
   coreViewpoint: string;
+  targetAudience?: string;
   factsToVerify?: string[];
   sourceIds: string[];
+  analysisSnapshot?: {
+    score: number;
+    decision: AnalysisDecision;
+    reason: string;
+    timingWindow: TimingWindow;
+    platformRecommendations: PlatformRecommendation[];
+  };
 }
 
 export interface ContentVersion {

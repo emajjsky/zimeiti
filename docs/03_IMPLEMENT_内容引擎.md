@@ -313,6 +313,12 @@ API：`http://127.0.0.1:8787/health`
 
 ## 2026-07-26 实现记录：AI 分析状态恢复与输出修复
 
+## 2026-07-26 实现记录：分析结果创建选题
+
+- `TopicCandidate` 新增目标受众和分析快照，保存评分、结论、时效窗口和平台建议。
+- `createTopicFromIntel()` 根据用户选中的推荐角度创建待判断选题，冻结分析快照、待核验项和原资讯 ID。
+- `Plan` 读取真实关联资讯与选题快照，展示核心观点、目标受众、分析建议、平台建议和待核验项，移除硬编码示例详情。
+
 - `GET /api/v1/intelligence/items/:id/analyses/latest-run` 从 `generation_runs` 返回最近一条分析运行的状态、错误、任务 ID 与确认卡数据。
 - `IntelligenceInbox.tsx` 在详情抽屉打开时并行读取最近成功结果和最近运行状态：DRAFT 恢复确认卡，QUEUED/RUNNING 继续轮询，FAILED 展示服务端错误；通过 `useRef` 避免同一任务重复轮询。
 - `buildAnalysisPrompt()` 明确 `timingWindow` 枚举和嵌套对象数组 JSON 样例。`buildAnalysisRepairPrompt()` 接收结构化校验错误；Worker 在首次校验失败后把真实错误传入一次性修复调用。
