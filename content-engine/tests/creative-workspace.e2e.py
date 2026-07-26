@@ -73,5 +73,16 @@ with sync_playwright() as playwright:
     page.screenshot(path=ARTIFACTS / "creative-brief-mobile.png", full_page=True)
     assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
     assert page.locator(".sidebar").bounding_box()["x"] < 0
+
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    page.wait_for_timeout(350)
+    page.get_by_role("button", name="今天", exact=True).click()
+    page.wait_for_selector(".today-layout")
+    current = datetime.now()
+    assert page.get_by_role("heading", name=f"今天，{current.month} 月 {current.day} 日").count() == 1
+    assert page.get_by_text("完善创作设定：普通人如何判断一个 AI 工具是否值得使用", exact=True).count() == 1
+    assert page.get_by_text("今天，7 月 22 日", exact=True).count() == 0
+    assert page.get_by_text("审核小红书 8 页图文", exact=True).count() == 0
+    page.screenshot(path=ARTIFACTS / "today-real-data.png", full_page=True)
     assert not console_errors, console_errors
     browser.close()

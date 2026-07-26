@@ -97,6 +97,7 @@
   .discover-filter-controls { grid-template-columns:1fr; }
 }
 .credential-actions{display:flex;align-items:center;gap:10px}.credential-time{display:block;margin-top:8px;color:var(--muted)}
+.today-empty{display:grid;min-height:94px;place-items:center;padding:20px;color:var(--muted);font-size:13px}
 
 /* 创作工作台：主流程只包含图文生产，视频保持独立。 */
 .creative-stepper{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0;margin:22px 0 24px;padding:0;border:1px solid var(--ink);background:#fff}

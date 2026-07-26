@@ -377,3 +377,10 @@ API：`http://127.0.0.1:8787/health`
 - 工作空间加载完成后才同步 URL，避免初始种子数据在真实数据返回前覆盖刷新地址。
 - URL 按页面清理无关参数：创作保存 `project` 与 `platform`，规划保存 `topic`，发现保存 `discover` 与 `intel`，设置保存 `settings` 与可选 `model`。
 - 该实现使用浏览器 `history.replaceState`，不产生每次字段选择一个历史记录的噪音。
+
+## 2026-07-26 实现记录：行动中心真实化
+
+- `src/domain/today.mjs` 使用 `Intl.DateTimeFormat` 和 `Asia/Shanghai` 时区生成当天标题，并把项目状态映射为真实下一步动作。
+- `Today` 从 `topics` 生成待确认选题，从 `projects` 生成创作、发布或复盘任务，不再内置示例任务。
+- 近期排期只读取 `TopicCandidate.plannedDate`；热点最多展示当前工作空间前 8 条资讯；所有列表提供真实空状态。
+- 项目卡和优先事项点击时先设置真实项目/选题 ID，再进入目标页面，URL 持久化随后记录该对象。
