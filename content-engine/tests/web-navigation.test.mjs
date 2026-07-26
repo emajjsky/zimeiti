@@ -41,6 +41,17 @@ test('设置跳转可定位检索 API', () => {
   });
 });
 
+test('切换工作页时将页面滚动位置复位到顶部', () => {
+  const calls = [];
+  navigation.resetViewport({ scrollTo: (options) => calls.push(options) });
+  assert.deepEqual(calls, [{ top: 0, left: 0, behavior: 'auto' }]);
+});
+
+test('主入口监听视图变化并复位浏览器滚动位置', async () => {
+  const source = await readFile(new URL('../src/main.tsx', import.meta.url), 'utf8');
+  assert.match(source, /useLayoutEffect\(\(\) => \{\s*resetViewport\(\);\s*\}, \[view\]\)/);
+});
+
 test('发现工作区只提供三个采集入口', () => {
   assert.deepEqual(navigation.discoverTabs, [
     { id: 'inbox', label: '热点情报' },

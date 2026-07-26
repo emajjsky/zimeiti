@@ -58,3 +58,9 @@ export function settingsIntent(
   settingsSection: SettingsSection;
   modelSection: ModelSection | null;
 };
+
+export interface ViewportScrollTarget {
+  scrollTo(options: ScrollToOptions): void;
+}
+
+export function resetViewport(scrollTarget?: ViewportScrollTarget): void;

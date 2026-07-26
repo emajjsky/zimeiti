@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { animate, createScope, stagger } from 'animejs';
 import { ArrowLeft, Bell, BrainCircuit, CalendarDays, ChartColumn, CheckCircle2, ChevronRight, CircleAlert, CircleCheck, ClipboardList, Compass, FilePenLine, FolderOpen, KeyRound, Lightbulb, Menu, PenLine, Pencil, Plus, RefreshCw, Search, Send, Settings, Trash2 } from 'lucide-react';
@@ -6,7 +6,7 @@ import { intelligenceKey, loadState, persistState, seedState, type FeishuLibrary
 import { webAgent, webAuth, webIntelligence, webModels, webSettings, type CredentialStatus, type WebSession } from './data/webApi';
 import { platformName, projectStatusName, type ContentProject, type ContentVersion, type IntelligenceSource, type Platform, type TopicCandidate } from './domain/content';
 import type { ApiUsageLog, ApiUsageSummary, ModelCapability, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelOperation, ModelProvider, ModelTask, ModelTaskPolicy } from './domain/integrations';
-import { navigationGroups, type DiscoverSection, type ModelSection, type SearchPreset, type SettingsSection, type View } from './app/navigation.mjs';
+import { navigationGroups, resetViewport, type DiscoverSection, type ModelSection, type SearchPreset, type SettingsSection, type View } from './app/navigation.mjs';
 import { PageHeader } from './components/workspace/PageHeader';
 import { DiscoverWorkspace } from './workspaces/DiscoverWorkspace';
 import { SettingsWorkspace } from './workspaces/SettingsWorkspace';
@@ -62,6 +62,10 @@ function App() {
   const selectedIntel = state.intelligence.find((item) => item.id === selectedIntelId) ?? state.intelligence[0];
   const selectedTopic = state.topics.find((item) => item.id === selectedTopicId) ?? state.topics[0];
   const featuredProject = state.projects.find((item) => item.id === selectedProjectId) ?? state.projects[0];
+
+  useLayoutEffect(() => {
+    resetViewport();
+  }, [view]);
 
   useEffect(() => {
     void loadState().then((loaded) => {

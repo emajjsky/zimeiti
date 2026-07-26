@@ -44,3 +44,8 @@ export function discoverIntent(discoverSection = 'inbox', searchPreset = null) {
 export function settingsIntent(settingsSection = 'workspace', modelSection = null) {
   return { view: 'settings', settingsSection, modelSection };
 }
+
+export function resetViewport(scrollTarget = globalThis.window) {
+  if (typeof scrollTarget?.scrollTo !== 'function') return;
+  scrollTarget.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+}

@@ -345,3 +345,9 @@ API：`http://127.0.0.1:8787/health`
 - 保留暖白、钴蓝和马卡龙标签，取消普通按钮和卡片的红色偏移硬阴影。
 - 959px 以下使用图标侧栏，719px 以下使用移动抽屉导航。
 - 所有动效遵循 `prefers-reduced-motion`，本轮未增加 Anime.js 动画。
+
+## 2026-07-26 实现记录：跨页面滚动位置复位
+
+- `src/app/navigation.mjs` 新增 `resetViewport()`，统一将浏览器页面滚动到 `top: 0`、`left: 0`。
+- `App` 使用 `useLayoutEffect` 监听 `view`，在新工作页绘制前调用该方法，防止吸顶顶栏遮挡新页面标题。
+- `tests/web-navigation.test.mjs` 覆盖滚动参数和主入口监听关系。
