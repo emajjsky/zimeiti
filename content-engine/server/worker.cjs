@@ -8,6 +8,7 @@ const { listAvailableSkills, plannerSkillView } = require('./agent/skillRegistry
 const { parsePlan } = require('./agent/planValidation.cjs');
 const { createTextModelRunner } = require('./services/text-model.cjs');
 const { buildAnalysisPrompt, buildAnalysisRepairPrompt, calculateOverallScore, decisionForScore, parseAnalysisContent } = require('./services/intelligence-analysis.cjs');
+const { buildOutlinePrompt, buildOutlineRepairPrompt, parseOutlineContent } = require('./services/creative-outline.cjs');
 
 const connection = new IORedis(config.redisUrl, { maxRetriesPerRequest: null });
 const textRunner = createTextModelRunner();
@@ -19,6 +20,7 @@ async function processJob(queueJob) {
   try {
     if (queueJob.name === 'AGENT_PLAN') return await generateAgentPlan({ jobId, workspaceId, planId: payload.planId });
     if (queueJob.name === 'INTELLIGENCE_ANALYSIS') return await generateIntelligenceAnalysis({ jobId, workspaceId, runId: payload.runId });
+    if (queueJob.name === 'CREATIVE_OUTLINE') return await generateCreativeOutline({ jobId, workspaceId, runId: payload.runId });
     if (queueJob.name !== 'BAILIAN_TEXT') throw new Error(`暂不支持的任务类型：${queueJob.name}`);
     const keyRow = await query('SELECT encrypted_secret FROM credential_vault WHERE workspace_id = $1 AND provider = $2', [workspaceId, 'BAILIAN']);
     if (!keyRow.rowCount) throw new Error('工作空间未配置百炼 Key。');
@@ -31,6 +33,17 @@ async function processJob(queueJob) {
     await query('UPDATE jobs SET status = $1, error = $2, completed_at = now() WHERE id = $3', ['FAILED', message.slice(0, 2_000), jobId]);
     throw error;
   }
+}
+
+async function textConnectionInput(workspaceId, route) {
+  if (route.provider === 'BAILIAN_CLI') {
+    const credential = await query("SELECT encrypted_secret FROM credential_vault WHERE workspace_id = $1 AND provider = 'BAILIAN' AND status = 'READY'", [workspaceId]);
+    if (!credential.rowCount) throw new Error('百炼 Key 当前不可用。');
+    return { apiKey: decrypt(credential.rows[0].encrypted_secret) };
+  }
+  const external = await query("SELECT base_url, encrypted_secret FROM model_connections WHERE id = $1 AND workspace_id = $2 AND status = 'READY'", [route.connectionId, workspaceId]);
+  if (!external.rowCount) throw new Error('外部 API 连接当前不可用。');
+  return { connection: { baseUrl: external.rows[0].base_url, apiKey: decrypt(external.rows[0].encrypted_secret) } };
 }
 
 async function generateIntelligenceAnalysis({ jobId, workspaceId, runId }) {
@@ -47,16 +60,7 @@ async function generateIntelligenceAnalysis({ jobId, workspaceId, runId }) {
     const input = run.input_json;
     route = input.route;
     const prompt = buildAnalysisPrompt({ template: input.template.body, item: snapshot.item, profile: snapshot.profile, platforms: input.selectedPlatforms });
-    let connectionInput;
-    if (route.provider === 'BAILIAN_CLI') {
-      const credential = await query("SELECT encrypted_secret FROM credential_vault WHERE workspace_id = $1 AND provider = 'BAILIAN' AND status = 'READY'", [workspaceId]);
-      if (!credential.rowCount) throw new Error('百炼 Key 当前不可用。');
-      connectionInput = { apiKey: decrypt(credential.rows[0].encrypted_secret) };
-    } else {
-      const external = await query("SELECT base_url, encrypted_secret FROM model_connections WHERE id = $1 AND workspace_id = $2 AND status = 'READY'", [route.connectionId, workspaceId]);
-      if (!external.rowCount) throw new Error('外部 API 连接当前不可用。');
-      connectionInput = { connection: { baseUrl: external.rows[0].base_url, apiKey: decrypt(external.rows[0].encrypted_secret) } };
-    }
+    const connectionInput = await textConnectionInput(workspaceId, route);
     const first = await textRunner.runText({ provider: route.provider, model: route.model, system: prompt.system, message: prompt.message, ...connectionInput });
     inputTokens = first.inputTokens;
     outputTokens = first.outputTokens;
@@ -85,9 +89,56 @@ async function generateIntelligenceAnalysis({ jobId, workspaceId, runId }) {
   } catch (error) {
     const message = error instanceof Error ? error.message : '热点分析失败。';
     await transaction(async (client) => {
-      await client.query("UPDATE generation_runs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1 AND workspace_id = $3", [runId, message.slice(0, 2_000), workspaceId]);
+      await client.query("UPDATE generation_runs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1 AND workspace_id = $3 AND status <> 'CANCELLED'", [runId, message.slice(0, 2_000), workspaceId]);
       await client.query(`INSERT INTO api_usage_logs (workspace_id, job_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens, error)
         VALUES ($1, $2, $3, $4, 'INTELLIGENCE_ANALYSIS', 'FAILED', $5, $6, $7, $8)`, [workspaceId, jobId, route?.provider ?? 'UNKNOWN', route?.model ?? null, Date.now() - startedAt, inputTokens ?? null, outputTokens ?? null, message.slice(0, 2_000)]);
+    });
+    throw error;
+  }
+}
+
+async function generateCreativeOutline({ jobId, workspaceId, runId }) {
+  const startedAt = Date.now();
+  let route;
+  let inputTokens;
+  let outputTokens;
+  try {
+    const runResult = await query("SELECT id, source_snapshot_json, input_json FROM generation_runs WHERE id = $1 AND workspace_id = $2 AND action_version_id = 'creative-outline:1.0.0' AND status = 'QUEUED'", [runId, workspaceId]);
+    if (!runResult.rowCount) throw new Error('大纲任务当前不能执行。');
+    await query("UPDATE generation_runs SET status = 'RUNNING', started_at = now() WHERE id = $1 AND workspace_id = $2", [runId, workspaceId]);
+    const snapshot = runResult.rows[0].source_snapshot_json;
+    route = runResult.rows[0].input_json.route;
+    const connectionInput = await textConnectionInput(workspaceId, route);
+    const prompt = buildOutlinePrompt(snapshot);
+    const first = await textRunner.runText({ provider: route.provider, model: route.model, system: prompt.system, message: prompt.message, ...connectionInput });
+    inputTokens = first.inputTokens;
+    outputTokens = first.outputTokens;
+    let output;
+    try { output = parseOutlineContent(first.content); }
+    catch (error) {
+      const validationError = error instanceof Error ? error.message : '输出不符合大纲 JSON 契约。';
+      const repaired = await textRunner.runText({ provider: route.provider, model: route.model, system: buildOutlineRepairPrompt(prompt.system, validationError), message: first.content, ...connectionInput });
+      inputTokens = (inputTokens ?? 0) + (repaired.inputTokens ?? 0);
+      outputTokens = (outputTokens ?? 0) + (repaired.outputTokens ?? 0);
+      output = parseOutlineContent(repaired.content);
+    }
+    const candidate = await transaction(async (client) => {
+      await client.query("UPDATE generation_runs SET status = 'SUCCEEDED', output_json = $2, usage_json = $3, completed_at = now() WHERE id = $1", [runId, JSON.stringify(output), JSON.stringify({ inputTokens, outputTokens })]);
+      const saved = await client.query(`INSERT INTO creative_outline_candidates
+        (workspace_id, project_id, platform, generation_run_id, output_json)
+        VALUES ($1, $2, $3, $4, $5) RETURNING id`, [workspaceId, snapshot.project.id, snapshot.platform, runId, JSON.stringify(output)]);
+      await client.query("UPDATE jobs SET status = 'SUCCEEDED', result_json = $2, completed_at = now() WHERE id = $1", [jobId, JSON.stringify({ candidateId: saved.rows[0].id })]);
+      await client.query(`INSERT INTO api_usage_logs (workspace_id, job_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens)
+        VALUES ($1, $2, $3, $4, 'CONTENT_WRITING', 'SUCCESS', $5, $6, $7)`, [workspaceId, jobId, route.provider, route.model, Date.now() - startedAt, inputTokens ?? null, outputTokens ?? null]);
+      return saved.rows[0];
+    });
+    return { candidateId: candidate.id };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '大纲生成失败。';
+    await transaction(async (client) => {
+      await client.query("UPDATE generation_runs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1 AND workspace_id = $3", [runId, message.slice(0, 2_000), workspaceId]);
+      await client.query(`INSERT INTO api_usage_logs (workspace_id, job_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens, error)
+        VALUES ($1, $2, $3, $4, 'CONTENT_WRITING', 'FAILED', $5, $6, $7, $8)`, [workspaceId, jobId, route?.provider ?? 'UNKNOWN', route?.model ?? null, Date.now() - startedAt, inputTokens ?? null, outputTokens ?? null, message.slice(0, 2_000)]);
     });
     throw error;
   }

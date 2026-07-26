@@ -59,6 +59,22 @@ function createCreativeSkillStore({ query, transaction }) {
     return briefView(result.rows[0]);
   }
 
+  async function getContext(workspaceId, projectId) {
+    const brief = await getBrief(workspaceId, projectId);
+    if (!brief) return null;
+    const requested = DIMENSIONS.map((dimension) => brief.selectedSkills[dimension]);
+    const result = await query(`SELECT d.id, d.dimension, d.slug, d.name, d.description, d.sort_order,
+      v.id AS version_id, v.version, v.instructions_md, v.rules_json
+      FROM creative_skill_versions v
+      JOIN creative_skill_definitions d ON d.id = v.definition_id
+      WHERE v.id = ANY($1::text[]) AND d.enabled = true
+        AND (d.workspace_id IS NULL OR d.workspace_id = $2)`, [requested, workspaceId]);
+    const byVersion = new Map(result.rows.map((row) => [row.version_id, skillView(row)]));
+    const skills = requested.map((id) => byVersion.get(id)).filter(Boolean);
+    if (skills.length !== DIMENSIONS.length) throw new Error('项目绑定的 Skill 版本已不可用，请重新保存创作设定。');
+    return { brief, skills };
+  }
+
   async function saveBrief(workspaceId, projectId, input) {
     const requested = DIMENSIONS.map((dimension) => input.selectedSkills[dimension]);
     const catalog = await query(`SELECT v.id, d.dimension
@@ -97,7 +113,7 @@ function createCreativeSkillStore({ query, transaction }) {
     });
   }
 
-  return { list, getBrief, saveBrief };
+  return { list, getBrief, getContext, saveBrief };
 }
 
 module.exports = { DIMENSIONS, createCreativeSkillStore };

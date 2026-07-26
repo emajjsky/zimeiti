@@ -243,3 +243,17 @@
 | 示例清理 | 自动化通过 | 源码不再包含旧日期、示例审核任务、Notion 教程排期和周报大纲排期。 |
 | 空状态 | 浏览器通过 | 测试工作空间没有热点与计划日期时，分别显示“暂无热点资讯”和“暂无已安排选题”。 |
 | 回归与构建 | 通过 | `npm test` 85 项通过；类型检查、生产构建、`git diff --check` 和 Playwright 行动中心链路通过。 |
+
+## A20. 受控创作大纲（2026-07-27）
+
+| 验收项 | 状态 | 证据 |
+| --- | --- | --- |
+| 动作与 Skill 分层 | 自动化通过 | `creative-outline:1.0.0` 使用独立动作定义和 `action_version_id`；五维 Skill 只作为冻结规则输入，迁移不删除或修改旧 `skill_definitions`。 |
+| 确认前不调用 | 自动化通过 | prepare 只创建 DRAFT 运行；测试确认 prepare 路由不调用 `enqueue`，confirm 路由才创建并投递 Worker Job。 |
+| 候选隔离 | 自动化通过 | Worker 只写 `creative_outline_candidates`；服务端仅在 accept 事务中更新 `workspace_snapshots` 和候选 `ACCEPTED` 状态。 |
+| 模型路由与日志 | 代码通过 | 只读取 `CONTENT_WRITING` 任务策略，统一支持百炼 CLI/外部 API；成功和失败均写 Token、时长、模型和错误。 |
+| 数据库迁移 | 通过 | `npm run db:migrate` 已应用 `009_creative_outline_action.sql`。 |
+| 无模型阻断 | 浏览器通过 | 独立测试工作室点击“生成大纲”显示“请先为文案生成配置可用文本模型”，并可跳到“任务策略”；没有创建模型任务。 |
+| 候选视觉 | 浏览器 mock 通过 | 测试级 mock 展示标题单选、摘要、三节大纲、待核验项和采用/重新生成操作；1440px 与 390px 无横向溢出，mock 未进入产品数据。 |
+| 回归与构建 | 通过 | `npm test` 92 项通过；`npm run typecheck`、`npm run build`、API/Worker/大纲服务语法检查、`git diff --check` 和创作 E2E 均通过。 |
+| 真实模型调用 | 待用户验收 | 本轮未触发付费模型。用户需配置 `CONTENT_WRITING` 后手工确认一次，核对候选、采用后的正式文案和调用日志。 |

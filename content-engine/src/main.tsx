@@ -227,6 +227,12 @@ function App() {
     };
     updateState(next);
   };
+  const acceptProjectFromServer = (acceptedProject: ContentProject) => {
+    setState((current) => ({
+      ...current,
+      projects: current.projects.map((project) => project.id === acceptedProject.id ? acceptedProject : project),
+    }));
+  };
   const refreshRss = async () => {
     if (state.sources.filter((source) => source.enabled).length === 0) {
       setRefreshFeedback({ status: 'error', message: '尚未启用资讯来源，请先完成配置。' });
@@ -301,7 +307,7 @@ function App() {
       {view === 'discover' && <DiscoverWorkspace section={discoverSection} onSectionChange={setDiscoverSection} inbox={<IntelligenceInbox item={selectedIntel} intelligence={state.intelligence} sources={state.sources} topics={state.topics} projects={state.projects} defaultPlatforms={state.workspace.enabledPlatforms} onSelect={setSelectedIntelId} onCreateTopic={createTopicFromIntel} onOpenTopic={openTopicFromIntel} onSaveAnalysis={saveAnalysis} onRefresh={refreshRss} onOpenSources={() => openSettings('sources')} refreshFeedback={refreshFeedback} />} search={<NetworkSearchPanel preset={searchPreset} onSave={saveSearchCandidate} onOpenSearchSettings={() => openSettings('models', 'search')} checkStatus={webSearchStatus} searchWeb={searchWeb} />} linkImport={<LinkImportPanel onSave={saveClippedLink} onShowInbox={() => openDiscover('inbox')} previewLink={previewPublicLink} />} />}
       {view === 'plan' && selectedTopic && <Plan topics={state.topics} selected={selectedTopic} intelligence={state.intelligence} onSelect={setSelectedTopicId} onCreateProject={createProjectFromTopic} onEdit={openTopicEditor} onDelete={deleteTopic} />}
       {view === 'topicEditor' && <TopicEditor key={editingTopicId ?? 'new'} topic={state.topics.find((topic) => topic.id === editingTopicId)} defaultCategory={state.workspace.primaryTopics[0] ?? '未分类'} onSave={saveTopic} onCancel={() => { setEditingTopicId(null); setView('plan'); }} />}
-      {view === 'create' && <CreateWorkspace project={featuredProject} activePlatform={activePlatform} onPlatform={setActivePlatform} activeVersion={activeVersion} onSaveVersion={saveContentVersion} />}
+      {view === 'create' && <CreateWorkspace project={featuredProject} activePlatform={activePlatform} onPlatform={setActivePlatform} activeVersion={activeVersion} onSaveVersion={saveContentVersion} onProjectAccepted={acceptProjectFromServer} onOpenModelSettings={() => openSettings('models', 'policies')} />}
       {view === 'publish' && <Publish project={featuredProject} onNavigate={setView} />}
       {view === 'review' && <Review onNavigate={setView} />}
       {view === 'assets' && <Utility title="素材库" description="素材将按目录、类型和所属项目统一管理。" />}

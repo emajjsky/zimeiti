@@ -33,3 +33,54 @@ export interface WritingBrief {
 }
 
 export type WritingBriefInput = Omit<WritingBrief, 'id' | 'projectId' | 'updatedAt'>;
+
+export type CreativeOutlineRunStatus = 'DRAFT' | 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
+export type CreativeOutlineCandidateStatus = 'CANDIDATE' | 'ACCEPTED' | 'REJECTED';
+
+export interface CreativeOutlineSkillSnapshot {
+  dimension: CreativeSkillDimension;
+  name: string;
+  version: string;
+}
+
+export interface CreativeOutlineConfirmation {
+  model: string;
+  platform: Exclude<Platform, 'VIDEO_CHANNEL'>;
+  actionVersion: string;
+  skills: CreativeOutlineSkillSnapshot[];
+  costEstimate?: number | null;
+}
+
+export interface CreativeOutlinePreparation {
+  id: string;
+  status: 'DRAFT';
+  createdAt: string;
+  confirmation: CreativeOutlineConfirmation;
+}
+
+export interface CreativeOutlineRun extends Omit<CreativeOutlinePreparation, 'status'> {
+  status: CreativeOutlineRunStatus;
+  error?: string;
+  jobId?: string;
+}
+
+export interface CreativeOutlineSection {
+  heading: string;
+  purpose: string;
+  keyPoints: string[];
+}
+
+export interface CreativeOutlineCandidate {
+  id: string;
+  projectId: string;
+  platform: Exclude<Platform, 'VIDEO_CHANNEL'>;
+  status: CreativeOutlineCandidateStatus;
+  selectedTitle: string | null;
+  titleOptions: string[];
+  summary: string;
+  sections: CreativeOutlineSection[];
+  factsToVerify: string[];
+  model?: string;
+  createdAt: string;
+  acceptedAt: string | null;
+}

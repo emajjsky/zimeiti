@@ -1,7 +1,7 @@
 import type { LocalState } from './localRepository';
 import type { ApiUsageLog, ApiUsageSummary, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelTaskPolicy } from '../domain/integrations';
-import type { IntelligenceAnalysis, Platform } from '../domain/content';
-import type { CreativeSkillDefinition, WritingBrief, WritingBriefInput } from '../domain/creative';
+import type { ContentProject, IntelligenceAnalysis, Platform } from '../domain/content';
+import type { CreativeOutlineCandidate, CreativeOutlinePreparation, CreativeOutlineRun, CreativeSkillDefinition, WritingBrief, WritingBriefInput } from '../domain/creative';
 
 const tokenKey = 'content-engine-web-session-v1';
 const apiBase = import.meta.env.VITE_API_BASE ?? '/api/v1';
@@ -43,6 +43,13 @@ export const webCreative = {
   skills: () => request<CreativeSkillDefinition[]>('/creative/skills'),
   brief: (projectId: string) => request<{ brief: WritingBrief | null }>(`/creative/projects/${encodeURIComponent(projectId)}/brief`),
   saveBrief: (projectId: string, input: WritingBriefInput) => request<{ brief: WritingBrief }>(`/creative/projects/${encodeURIComponent(projectId)}/brief`, { method: 'PUT', body: JSON.stringify(input) }),
+  prepareOutline: (projectId: string, platform: Exclude<Platform, 'VIDEO_CHANNEL'>) => request<CreativeOutlinePreparation>(`/creative/projects/${encodeURIComponent(projectId)}/outline/prepare`, { method: 'POST', body: JSON.stringify({ platform }) }),
+  confirmOutline: (runId: string) => request<{ id: string; status: 'QUEUED'; jobId: string }>(`/creative/outline-runs/${encodeURIComponent(runId)}/confirm`, { method: 'POST', body: '{}' }),
+  cancelOutline: (runId: string) => request<{ id: string; status: 'CANCELLED' }>(`/creative/outline-runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST', body: '{}' }),
+  latestOutlineRun: (projectId: string, platform: Exclude<Platform, 'VIDEO_CHANNEL'>) => request<CreativeOutlineRun | null>(`/creative/projects/${encodeURIComponent(projectId)}/outline/latest-run?platform=${encodeURIComponent(platform)}`),
+  latestOutline: (projectId: string, platform: Exclude<Platform, 'VIDEO_CHANNEL'>) => request<CreativeOutlineCandidate | null>(`/creative/projects/${encodeURIComponent(projectId)}/outline/latest?platform=${encodeURIComponent(platform)}`),
+  acceptOutline: (candidateId: string, selectedTitle: string) => request<{ candidate: CreativeOutlineCandidate; project: ContentProject }>(`/creative/outline-candidates/${encodeURIComponent(candidateId)}/accept`, { method: 'POST', body: JSON.stringify({ selectedTitle }) }),
+  job: (jobId: string) => request<{ id: string; status: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED'; error?: string }>(`/jobs/${encodeURIComponent(jobId)}`),
 };
 
 export const webIntelligence = {

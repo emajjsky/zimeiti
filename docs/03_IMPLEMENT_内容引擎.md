@@ -384,3 +384,16 @@ API：`http://127.0.0.1:8787/health`
 - `Today` 从 `topics` 生成待确认选题，从 `projects` 生成创作、发布或复盘任务，不再内置示例任务。
 - 近期排期只读取 `TopicCandidate.plannedDate`；热点最多展示当前工作空间前 8 条资讯；所有列表提供真实空状态。
 - 项目卡和优先事项点击时先设置真实项目/选题 ID，再进入目标页面，URL 持久化随后记录该对象。
+
+## 2026-07-27 实现记录：受控创作大纲
+
+- `009_creative_outline_action.sql` 新增 `agent_action_definitions`、`agent_action_versions` 和 `creative_outline_candidates`；`generation_runs` 增加可空的 `action_version_id`，并要求 Skill 或动作执行引用至少存在一个。迁移已应用到本地开发库。
+- `server/services/creative-outline.cjs` 定义 `creative-outline:1.0.0`、`CONTENT_WRITING` Scope、严格 Zod 输出 Schema、生成提示、单次修复提示、Markdown 渲染和候选 DTO。
+- `creativeSkills.getContext()` 读取项目 WritingBrief 和冻结的五维 Skill 版本、规则；任一版本失效时拒绝准备动作。
+- API 新增大纲 `prepare/confirm/cancel/latest-run/latest/accept`。最近运行按项目与平台隔离；prepare 不入队，confirm 才创建 `CREATIVE_OUTLINE` Job；accept 使用行锁和事务更新工作空间快照。
+- Worker 复用统一文本模型执行器，支持百炼 CLI 和 OpenAI 兼容外部连接。首次 JSON 结构失败只修复一次，并将调用写入 `api_usage_logs.operation = CONTENT_WRITING`。
+- `CreateWorkspace.tsx` 实现准备、待确认、排队、执行、失败、候选和已采用状态。候选审核区位于正式编辑器上方，标题单选、章节和待核验项集中展示，不创建多个输出框或伪聊天窗口。
+- 服务端接受候选后，`App` 仅用返回项目更新 React 状态，不再次调用全量 `persistState`，避免旧快照覆盖事务结果。
+- `package.json` 的 `dev` 同时启动 API、Web 和 Worker。自动化新增 7 项大纲契约测试，完整 Node 测试为 92 项。
+- Playwright 使用独立测试用户验证未配置模型的真实阻断与任务策略跳转，并使用测试级 API mock 验证候选桌面和 390px 布局。产品运行时没有示例候选，未触发真实模型调用。
+- 本轮视觉参数为 `DESIGN_VARIANCE 4 / MOTION_INTENSITY 2 / VISUAL_DENSITY 6`。沿用暖白、钴蓝、淡蓝和薄荷绿，只使用状态反馈动画，并支持 `prefers-reduced-motion`。

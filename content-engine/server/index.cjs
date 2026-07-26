@@ -13,6 +13,7 @@ const { listAvailableSkills } = require('./agent/skillRegistry.cjs');
 const { runBailianCli } = require('./runner/bailian.cjs');
 const { ANALYSIS_SCOPE, createTemplateStore, prepareAnalysisInput } = require('./services/intelligence-analysis.cjs');
 const { createCreativeSkillStore } = require('./services/creativeSkills.cjs');
+const { OUTLINE_ACTION_VERSION, OUTLINE_SCOPE, renderOutlineMarkdown, outlineCandidateView } = require('./services/creative-outline.cjs');
 
 const app = Fastify({ logger: true, bodyLimit: 5 * 1024 * 1024 });
 const credentials = new Set(['TAVILY', 'BAILIAN']);
@@ -329,15 +330,19 @@ async function analysisProfile(workspaceId) {
 }
 
 async function analysisRoute(workspaceId) {
-  const result = await query('SELECT provider, connection_id, model FROM agent_model_policies WHERE workspace_id = $1 AND scope = $2', [workspaceId, ANALYSIS_SCOPE]);
-  if (!result.rowCount) throw new Error('请先为热点分析配置可用文本模型。');
+  return textTaskRoute(workspaceId, ANALYSIS_SCOPE, '热点分析');
+}
+
+async function textTaskRoute(workspaceId, scope, label) {
+  const result = await query('SELECT provider, connection_id, model FROM agent_model_policies WHERE workspace_id = $1 AND scope = $2', [workspaceId, scope]);
+  if (!result.rowCount) throw new Error(`请先为${label}配置可用文本模型。`);
   const route = { provider: result.rows[0].provider, connectionId: result.rows[0].connection_id ?? undefined, model: result.rows[0].model };
   if (route.provider === 'BAILIAN_CLI') {
     const credential = await query("SELECT 1 FROM credential_vault WHERE workspace_id = $1 AND provider = 'BAILIAN' AND status = 'READY'", [workspaceId]);
     if (!credential.rowCount) throw new Error('百炼 Key 尚未验证可用。请先在百炼设置中保存并检查。');
   } else {
     const connection = await query("SELECT 1 FROM model_connections WHERE id = $1 AND workspace_id = $2 AND status = 'READY'", [route.connectionId, workspaceId]);
-    if (!connection.rowCount) throw new Error('热点分析使用的外部 API 连接不可用。');
+    if (!connection.rowCount) throw new Error(`${label}使用的外部 API 连接不可用。`);
   }
   return route;
 }
@@ -453,6 +458,118 @@ app.put('/api/v1/creative/projects/:projectId/brief', { preHandler: authenticate
   const input = writingBriefInput.parse(request.body);
   const workspace = await currentWorkspace(request.user.sub);
   return { brief: await creativeSkillStore.saveBrief(workspace.id, projectId, input) };
+});
+
+async function creativeProject(workspaceId, projectId) {
+  const result = await query('SELECT state_json FROM workspace_snapshots WHERE workspace_id = $1', [workspaceId]);
+  const project = result.rows[0]?.state_json?.projects?.find((item) => item.id === projectId);
+  if (!project) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
+  return project;
+}
+
+app.post('/api/v1/creative/projects/:projectId/outline/prepare', { preHandler: authenticate }, async (request, reply) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const input = z.object({ platform: z.enum(['WECHAT', 'XIAOHONGSHU']) }).parse(request.body);
+  const workspace = await currentWorkspace(request.user.sub);
+  const [project, context, route] = await Promise.all([
+    creativeProject(workspace.id, projectId),
+    creativeSkillStore.getContext(workspace.id, projectId),
+    textTaskRoute(workspace.id, OUTLINE_SCOPE, '文案生成'),
+  ]);
+  if (!context) throw new Error('请先保存创作设定和 Skill 组合。');
+  if (!context.brief.selectedPlatforms.includes(input.platform)) throw new Error('目标平台不在已保存的创作设定中。');
+  const platformVersion = project.versions?.find((version) => version.platform === input.platform);
+  if (!platformVersion) throw new Error('项目没有对应的图文平台版本。');
+  const sourceSnapshot = { project, brief: context.brief, skills: context.skills, platform: input.platform };
+  const runInput = { route: { provider: route.provider, connectionId: route.connectionId ?? null, model: route.model } };
+  const run = await query(`INSERT INTO generation_runs
+    (workspace_id, action_version_id, status, source_snapshot_json, input_json, model, prompt_version, estimated_cost)
+    VALUES ($1, $2, 'DRAFT', $3, $4, $5, '1.0.0', 'null'::jsonb)
+    RETURNING id, status, created_at`, [workspace.id, OUTLINE_ACTION_VERSION, JSON.stringify(sourceSnapshot), JSON.stringify(runInput), route.model]);
+  reply.code(201).send({
+    id: run.rows[0].id,
+    status: run.rows[0].status,
+    createdAt: run.rows[0].created_at,
+    confirmation: { model: route.model, platform: input.platform, actionVersion: OUTLINE_ACTION_VERSION, skills: context.skills.map((skill) => ({ dimension: skill.dimension, name: skill.name, version: skill.version.version })), costEstimate: null },
+  });
+});
+
+app.post('/api/v1/creative/outline-runs/:id/confirm', { preHandler: authenticate }, async (request, reply) => {
+  const runId = z.string().uuid().parse(request.params.id);
+  const workspace = await currentWorkspace(request.user.sub);
+  const run = await query("UPDATE generation_runs SET status = 'QUEUED' WHERE id = $1 AND workspace_id = $2 AND action_version_id = $3 AND status = 'DRAFT' RETURNING id", [runId, workspace.id, OUTLINE_ACTION_VERSION]);
+  if (!run.rowCount) { const error = new Error('该大纲任务当前不能确认。'); error.statusCode = 409; throw error; }
+  const job = await query("INSERT INTO jobs (workspace_id, job_type, payload_json) VALUES ($1, 'CREATIVE_OUTLINE', $2) RETURNING *", [workspace.id, JSON.stringify({ runId: run.rows[0].id })]);
+  try { await enqueue(job.rows[0]); }
+  catch (error) {
+    const message = error instanceof Error ? error.message : '任务入队失败。';
+    await query("UPDATE generation_runs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1", [run.rows[0].id, message.slice(0, 2_000)]);
+    await query("UPDATE jobs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1", [job.rows[0].id, message.slice(0, 2_000)]);
+    throw error;
+  }
+  reply.code(202).send({ id: run.rows[0].id, status: 'QUEUED', jobId: job.rows[0].id });
+});
+
+app.post('/api/v1/creative/outline-runs/:id/cancel', { preHandler: authenticate }, async (request) => {
+  const runId = z.string().uuid().parse(request.params.id);
+  const workspace = await currentWorkspace(request.user.sub);
+  const result = await query("UPDATE generation_runs SET status = 'CANCELLED', completed_at = now() WHERE id = $1 AND workspace_id = $2 AND action_version_id = $3 AND status IN ('DRAFT', 'QUEUED') RETURNING id, status", [runId, workspace.id, OUTLINE_ACTION_VERSION]);
+  if (!result.rowCount) { const error = new Error('该大纲任务当前不能取消。'); error.statusCode = 409; throw error; }
+  await query("UPDATE jobs SET status = 'CANCELLED', completed_at = now() WHERE workspace_id = $1 AND payload_json->>'runId' = $2 AND status = 'PENDING'", [workspace.id, runId]);
+  return result.rows[0];
+});
+
+app.get('/api/v1/creative/projects/:projectId/outline/latest-run', { preHandler: authenticate }, async (request) => {
+  const input = z.object({ platform: z.enum(['WECHAT', 'XIAOHONGSHU']) }).parse(request.query);
+  const workspace = await currentWorkspace(request.user.sub);
+  const result = await query(`SELECT r.id, r.status, r.error, r.model, r.source_snapshot_json, r.created_at,
+      (SELECT j.id FROM jobs j WHERE j.workspace_id = r.workspace_id AND j.payload_json->>'runId' = r.id::text ORDER BY j.created_at DESC LIMIT 1) AS job_id
+    FROM generation_runs r
+    WHERE r.workspace_id = $1 AND r.action_version_id = $2 AND r.source_snapshot_json->'project'->>'id' = $3
+      AND r.source_snapshot_json->>'platform' = $4
+    ORDER BY r.created_at DESC LIMIT 1`, [workspace.id, OUTLINE_ACTION_VERSION, request.params.projectId, input.platform]);
+  if (!result.rowCount) return null;
+  const row = result.rows[0];
+  return { id: row.id, status: row.status, error: row.error ?? undefined, jobId: row.job_id ?? undefined, createdAt: row.created_at, confirmation: { model: row.model, platform: row.source_snapshot_json.platform, actionVersion: OUTLINE_ACTION_VERSION, skills: (row.source_snapshot_json.skills ?? []).map((skill) => ({ dimension: skill.dimension, name: skill.name, version: skill.version?.version ?? skill.version })) } };
+});
+
+app.get('/api/v1/creative/projects/:projectId/outline/latest', { preHandler: authenticate }, async (request) => {
+  const input = z.object({ platform: z.enum(['WECHAT', 'XIAOHONGSHU']) }).parse(request.query);
+  const workspace = await currentWorkspace(request.user.sub);
+  const result = await query(`SELECT c.*, r.model FROM creative_outline_candidates c
+    JOIN generation_runs r ON r.id = c.generation_run_id
+    WHERE c.workspace_id = $1 AND c.project_id = $2 AND c.platform = $3
+    ORDER BY c.created_at DESC LIMIT 1`, [workspace.id, request.params.projectId, input.platform]);
+  return outlineCandidateView(result.rows[0]);
+});
+
+app.post('/api/v1/creative/outline-candidates/:id/accept', { preHandler: authenticate }, async (request) => {
+  const candidateId = z.string().uuid().parse(request.params.id);
+  const input = z.object({ selectedTitle: z.string().min(1).max(120) }).parse(request.body);
+  const workspace = await currentWorkspace(request.user.sub);
+  return transaction(async (client) => {
+    const candidateResult = await client.query(`SELECT c.*, r.model FROM creative_outline_candidates c
+      JOIN generation_runs r ON r.id = c.generation_run_id
+      WHERE c.id = $1 AND c.workspace_id = $2 AND c.status = 'CANDIDATE' FOR UPDATE OF c`, [candidateId, workspace.id]);
+    if (!candidateResult.rowCount) { const error = new Error('该大纲候选当前不能接受。'); error.statusCode = 409; throw error; }
+    const candidate = candidateResult.rows[0];
+    if (!candidate.output_json.titleOptions.includes(input.selectedTitle)) throw new Error('请选择候选中提供的标题。');
+    const snapshotResult = await client.query('SELECT state_json FROM workspace_snapshots WHERE workspace_id = $1 FOR UPDATE', [workspace.id]);
+    const state = snapshotResult.rows[0]?.state_json;
+    const project = state?.projects?.find((item) => item.id === candidate.project_id);
+    const version = project?.versions?.find((item) => item.platform === candidate.platform);
+    if (!project || !version) throw new Error('正式文案版本已不存在，无法接受大纲。');
+    const updatedAt = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
+    version.title = input.selectedTitle;
+    version.body = renderOutlineMarkdown(candidate.output_json);
+    version.status = 'DRAFT';
+    version.updatedAt = updatedAt;
+    project.status = 'WRITING';
+    project.updatedAt = updatedAt;
+    await client.query('UPDATE workspace_snapshots SET state_json = $2, revision = revision + 1, updated_at = now() WHERE workspace_id = $1', [workspace.id, JSON.stringify(state)]);
+    const accepted = await client.query("UPDATE creative_outline_candidates SET status = 'ACCEPTED', selected_title = $3, accepted_at = now(), updated_at = now() WHERE id = $1 AND workspace_id = $2 RETURNING *", [candidate.id, workspace.id, input.selectedTitle]);
+    return { candidate: outlineCandidateView({ ...accepted.rows[0], model: candidate.model }), project };
+  });
 });
 
 app.get('/api/v1/agent/skills', { preHandler: authenticate }, async (request) => listAvailableSkills((await currentWorkspace(request.user.sub)).id));

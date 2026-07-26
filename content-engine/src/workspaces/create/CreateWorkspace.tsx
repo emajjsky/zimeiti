@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, CircleAlert, LoaderCircle } from 'lucide-react';
+import { Check, CheckCircle2, CircleAlert, LoaderCircle, RotateCcw, Sparkles, X } from 'lucide-react';
 import { webCreative } from '../../data/webApi';
 import type { ContentProject, ContentVersion, Platform } from '../../domain/content';
 import { platformName, projectStatusName } from '../../domain/content';
-import type { CreativeSkillDefinition, CreativeSkillDimension, CreativeSkillSelection, WritingBriefInput } from '../../domain/creative';
+import type { CreativeOutlineCandidate, CreativeOutlineRun, CreativeSkillDefinition, CreativeSkillDimension, CreativeSkillSelection, WritingBriefInput } from '../../domain/creative';
 
 type CreateStage = 'brief' | 'copy' | 'visual' | 'layout' | 'review';
 type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
@@ -62,12 +62,14 @@ function defaultBrief(project: ContentProject, skills: CreativeSkillDefinition[]
   };
 }
 
-export function CreateWorkspace({ project, activePlatform, onPlatform, activeVersion, onSaveVersion }: {
+export function CreateWorkspace({ project, activePlatform, onPlatform, activeVersion, onSaveVersion, onProjectAccepted, onOpenModelSettings }: {
   project: ContentProject | undefined;
   activePlatform: Platform;
   onPlatform: (platform: Platform) => void;
   activeVersion: ContentVersion | undefined;
   onSaveVersion: (projectId: string, versionId: string, patch: Pick<ContentVersion, 'title' | 'body'>) => void;
+  onProjectAccepted: (project: ContentProject) => void;
+  onOpenModelSettings: () => void;
 }) {
   const [stage, setStage] = useState<CreateStage>('brief');
   const [skills, setSkills] = useState<CreativeSkillDefinition[]>([]);
@@ -77,6 +79,11 @@ export function CreateWorkspace({ project, activePlatform, onPlatform, activeVer
   const [savedAt, setSavedAt] = useState('');
   const [draft, setDraft] = useState<Pick<ContentVersion, 'title' | 'body'>>({ title: activeVersion?.title ?? '', body: activeVersion?.body ?? '' });
   const [copyState, setCopyState] = useState<'saved' | 'saving'>('saved');
+  const [outlineRun, setOutlineRun] = useState<CreativeOutlineRun | null>(null);
+  const [outlineCandidate, setOutlineCandidate] = useState<CreativeOutlineCandidate | null>(null);
+  const [selectedTitle, setSelectedTitle] = useState('');
+  const [outlineBusy, setOutlineBusy] = useState<'idle' | 'loading' | 'preparing' | 'confirming' | 'cancelling' | 'accepting'>('idle');
+  const [outlineError, setOutlineError] = useState('');
   const contentVersions = useMemo(() => project?.versions.filter((version) => version.platform !== 'VIDEO_CHANNEL') ?? [], [project?.versions]);
 
   useEffect(() => {
@@ -111,11 +118,58 @@ export function CreateWorkspace({ project, activePlatform, onPlatform, activeVer
   useEffect(() => {
     setDraft({ title: activeVersion?.title ?? '', body: activeVersion?.body ?? '' });
     setCopyState('saved');
-  }, [activeVersion?.id]);
+  }, [activeVersion?.body, activeVersion?.id, activeVersion?.title]);
 
   useEffect(() => {
     if (contentVersions.length && !contentVersions.some((version) => version.platform === activePlatform)) onPlatform(contentVersions[0].platform);
   }, [activePlatform, contentVersions, onPlatform]);
+
+  const outlinePlatform = activeVersion?.platform === 'WECHAT' || activeVersion?.platform === 'XIAOHONGSHU' ? activeVersion.platform : null;
+
+  useEffect(() => {
+    if (!project || !outlinePlatform || stage !== 'copy') return;
+    let cancelled = false;
+    setOutlineBusy('loading');
+    setOutlineError('');
+    void Promise.all([
+      webCreative.latestOutlineRun(project.id, outlinePlatform),
+      webCreative.latestOutline(project.id, outlinePlatform),
+    ]).then(([run, candidate]) => {
+      if (cancelled) return;
+      setOutlineRun(run);
+      const visibleCandidate = run?.status === 'SUCCEEDED' || (!run && candidate?.status === 'ACCEPTED') ? candidate : null;
+      setOutlineCandidate(visibleCandidate);
+      setSelectedTitle(visibleCandidate?.selectedTitle ?? visibleCandidate?.titleOptions[0] ?? '');
+    }).catch((error) => {
+      if (!cancelled) setOutlineError(error instanceof Error ? error.message : '大纲状态读取失败。');
+    }).finally(() => {
+      if (!cancelled) setOutlineBusy('idle');
+    });
+    return () => { cancelled = true; };
+  }, [outlinePlatform, project?.id, stage]);
+
+  useEffect(() => {
+    if (!project || !outlinePlatform || !outlineRun || !['QUEUED', 'RUNNING'].includes(outlineRun.status)) return;
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const run = await webCreative.latestOutlineRun(project.id, outlinePlatform);
+        if (cancelled || !run) return;
+        setOutlineRun(run);
+        if (run.status === 'SUCCEEDED') {
+          const candidate = await webCreative.latestOutline(project.id, outlinePlatform);
+          if (cancelled) return;
+          setOutlineCandidate(candidate);
+          setSelectedTitle(candidate?.selectedTitle ?? candidate?.titleOptions[0] ?? '');
+        }
+      } catch (error) {
+        if (!cancelled) setOutlineError(error instanceof Error ? error.message : '大纲任务状态更新失败。');
+      }
+    };
+    const timer = window.setInterval(() => { void refresh(); }, 1500);
+    void refresh();
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [outlinePlatform, outlineRun?.id, outlineRun?.status, project?.id]);
 
   const skillGroups = useMemo(() => new Map(dimensions.map(({ id }) => [id, skills.filter((skill) => skill.dimension === id)])), [skills]);
   const selectedSkillDetails = useMemo(() => new Map(dimensions.map(({ id }) => [id, skills.find((skill) => skill.version.id === brief?.selectedSkills[id])])), [brief?.selectedSkills, skills]);
@@ -169,6 +223,72 @@ export function CreateWorkspace({ project, activePlatform, onPlatform, activeVer
     setCopyState('saved');
   };
 
+  const prepareOutline = async () => {
+    if (!project || !outlinePlatform) return;
+    if (briefState !== 'saved') {
+      setOutlineError('请先保存创作设定，再生成大纲。');
+      return;
+    }
+    setOutlineBusy('preparing');
+    setOutlineError('');
+    try {
+      const run = await webCreative.prepareOutline(project.id, outlinePlatform);
+      setOutlineRun(run);
+      setOutlineCandidate(null);
+      setSelectedTitle('');
+    } catch (error) {
+      setOutlineError(error instanceof Error ? error.message : '大纲准备失败。');
+    } finally {
+      setOutlineBusy('idle');
+    }
+  };
+
+  const confirmOutline = async () => {
+    if (!outlineRun || outlineRun.status !== 'DRAFT') return;
+    setOutlineBusy('confirming');
+    setOutlineError('');
+    try {
+      const result = await webCreative.confirmOutline(outlineRun.id);
+      setOutlineRun({ ...outlineRun, status: 'QUEUED', jobId: result.jobId });
+    } catch (error) {
+      setOutlineError(error instanceof Error ? error.message : '大纲任务确认失败。');
+    } finally {
+      setOutlineBusy('idle');
+    }
+  };
+
+  const cancelOutline = async () => {
+    if (!outlineRun || !['DRAFT', 'QUEUED'].includes(outlineRun.status)) return;
+    setOutlineBusy('cancelling');
+    setOutlineError('');
+    try {
+      await webCreative.cancelOutline(outlineRun.id);
+      setOutlineRun({ ...outlineRun, status: 'CANCELLED' });
+    } catch (error) {
+      setOutlineError(error instanceof Error ? error.message : '取消大纲任务失败。');
+    } finally {
+      setOutlineBusy('idle');
+    }
+  };
+
+  const acceptOutline = async () => {
+    if (!outlineCandidate || !selectedTitle || outlineCandidate.status !== 'CANDIDATE') return;
+    setCopyState('saved');
+    setOutlineBusy('accepting');
+    setOutlineError('');
+    try {
+      const result = await webCreative.acceptOutline(outlineCandidate.id, selectedTitle);
+      setOutlineCandidate(result.candidate);
+      onProjectAccepted(result.project);
+      const version = result.project.versions.find((item) => item.platform === outlineCandidate.platform);
+      if (version) setDraft({ title: version.title, body: version.body });
+    } catch (error) {
+      setOutlineError(error instanceof Error ? error.message : '采用大纲失败。');
+    } finally {
+      setOutlineBusy('idle');
+    }
+  };
+
   if (!project) return <section className="empty-workbench"><h1>还没有内容项目</h1><p>请先从选题池确认立项。</p></section>;
 
   return <>
@@ -196,6 +316,28 @@ export function CreateWorkspace({ project, activePlatform, onPlatform, activeVer
       </>}
     </section>}
 
-    {stage === 'copy' && (activeVersion && activeVersion.platform !== 'VIDEO_CHANNEL' ? <div className="create-layout editable"><section className="editor"><div className="editor-head"><div className="tabs">{contentVersions.map((version) => <button key={version.platform} className={version.platform === activePlatform ? 'active' : ''} onClick={() => onPlatform(version.platform)}>{platformName[version.platform]}</button>)}</div><button className="text-button" onClick={saveCopy}>保存草稿</button></div><div className="editor-tools">{platformName[activeVersion.platform]}文案</div><div className="document editor-document"><label>标题<input value={draft.title} onChange={(event) => changeDraft({ title: event.target.value })} onBlur={saveCopy}/></label><label>正文<textarea value={draft.body} onChange={(event) => changeDraft({ body: event.target.value })} onBlur={saveCopy} placeholder="从核心观点开始，写出这期内容的完整表达。"/></label></div></section><aside className="assistant-panel"><h2>创作检查</h2><div className="assist-card"><b>平台版本</b><p>{contentVersions.length} 个图文平台版本已创建，可分别编辑。</p></div><div className="assist-card"><b>事实核验</b><p>{project.factChecks.length ? `还有 ${project.factChecks.length} 项待确认` : '尚未添加待核验事项'}</p></div></aside></div> : <section className="empty-workbench"><h1>还没有图文平台版本</h1><p>当前主流程支持公众号和小红书。</p></section>)}
+    {stage === 'copy' && (activeVersion && activeVersion.platform !== 'VIDEO_CHANNEL' ? <div className="create-layout editable creative-copy-layout"><section className="editor"><div className="editor-head"><div className="tabs">{contentVersions.map((version) => <button type="button" key={version.platform} className={version.platform === activePlatform ? 'active' : ''} onClick={() => onPlatform(version.platform)}>{platformName[version.platform]}</button>)}</div><button className="text-button" type="button" onClick={saveCopy}>保存草稿</button></div><div className="editor-tools">{platformName[activeVersion.platform]}文案</div>
+      {outlineCandidate && <section className={`outline-review ${outlineCandidate.status === 'ACCEPTED' ? 'accepted' : ''}`} aria-label="大纲候选">
+        <header><div><span>{outlineCandidate.status === 'ACCEPTED' ? '已采用' : '候选大纲'}</span><b>{outlineCandidate.model}</b></div>{outlineCandidate.status === 'ACCEPTED' && <CheckCircle2 size={20}/>}</header>
+        <div className="outline-review-body">
+          <fieldset disabled={outlineCandidate.status === 'ACCEPTED'}><legend>标题方案</legend>{outlineCandidate.titleOptions.map((title) => <label key={title}><input type="radio" name={`outline-title-${outlineCandidate.id}`} checked={selectedTitle === title} onChange={() => setSelectedTitle(title)}/><span>{title}</span></label>)}</fieldset>
+          <p className="outline-summary">{outlineCandidate.summary}</p>
+          <ol className="outline-sections">{outlineCandidate.sections.map((section) => <li key={section.heading}><div><b>{section.heading}</b><span>{section.purpose}</span></div><ul>{section.keyPoints.map((point) => <li key={point}>{point}</li>)}</ul></li>)}</ol>
+          {outlineCandidate.factsToVerify.length > 0 && <div className="outline-facts"><b>待核验</b><ul>{outlineCandidate.factsToVerify.map((fact) => <li key={fact}>{fact}</li>)}</ul></div>}
+        </div>
+        {outlineCandidate.status === 'CANDIDATE' && <footer><button className="text-button" type="button" disabled={outlineBusy !== 'idle'} onClick={() => void prepareOutline()}><RotateCcw size={15}/>重新生成</button><button className="button primary" type="button" disabled={!selectedTitle || outlineBusy !== 'idle'} onClick={() => void acceptOutline()}>{outlineBusy === 'accepting' ? <LoaderCircle size={16}/> : <Check size={16}/>}采用大纲</button></footer>}
+      </section>}
+      <div className="document editor-document"><label>标题<input value={draft.title} onChange={(event) => changeDraft({ title: event.target.value })} onBlur={saveCopy}/></label><label>正文<textarea value={draft.body} onChange={(event) => changeDraft({ body: event.target.value })} onBlur={saveCopy} placeholder="从核心观点开始，写出这期内容的完整表达。"/></label></div></section>
+      <aside className="assistant-panel creative-agent-panel"><header><div><Sparkles size={18}/><h2>大纲 Agent</h2></div><span>{platformName[activeVersion.platform]}</span></header>
+        {outlineBusy === 'loading' && <div className="outline-state loading"><LoaderCircle size={18}/><span>读取任务状态</span></div>}
+        {outlineBusy !== 'loading' && !outlineRun && <div className="outline-state idle"><p>从当前创作设定生成大纲候选。</p><button className="button primary" type="button" disabled={outlineBusy !== 'idle'} onClick={() => void prepareOutline()}>{outlineBusy === 'preparing' ? <LoaderCircle size={16}/> : <Sparkles size={16}/>}生成大纲</button></div>}
+        {outlineRun?.status === 'DRAFT' && <div className="outline-confirmation"><div className="outline-confirmation-head"><b>确认本次生成</b><span>{outlineRun.confirmation.actionVersion}</span></div><dl><div><dt>模型</dt><dd>{outlineRun.confirmation.model}</dd></div><div><dt>平台</dt><dd>{platformName[outlineRun.confirmation.platform]}</dd></div></dl><div className="outline-skill-list">{outlineRun.confirmation.skills.map((skill) => <div key={skill.dimension}><span>{dimensions.find((item) => item.id === skill.dimension)?.label}</span><b>{skill.name}</b><small>v{skill.version}</small></div>)}</div><footer><button className="icon-button" type="button" title="取消" aria-label="取消本次生成" disabled={outlineBusy !== 'idle'} onClick={() => void cancelOutline()}><X size={17}/></button><button className="button primary" type="button" disabled={outlineBusy !== 'idle'} onClick={() => void confirmOutline()}>{outlineBusy === 'confirming' ? <LoaderCircle size={16}/> : <Check size={16}/>}确认生成</button></footer></div>}
+        {outlineRun && ['QUEUED', 'RUNNING'].includes(outlineRun.status) && <div className="outline-state running"><LoaderCircle size={20}/><b>{outlineRun.status === 'QUEUED' ? '等待执行' : '正在生成大纲'}</b>{outlineRun.status === 'QUEUED' && <button className="text-button" type="button" disabled={outlineBusy !== 'idle'} onClick={() => void cancelOutline()}>取消任务</button>}</div>}
+        {outlineRun?.status === 'FAILED' && <div className="outline-state failed"><CircleAlert size={19}/><b>生成失败</b><p>{outlineRun.error || '模型任务执行失败。'}</p><button className="text-button" type="button" onClick={() => void prepareOutline()}>重新准备</button></div>}
+        {outlineRun?.status === 'CANCELLED' && <div className="outline-state cancelled"><b>已取消</b><button className="button primary" type="button" onClick={() => void prepareOutline()}>重新生成</button></div>}
+        {outlineRun?.status === 'SUCCEEDED' && outlineCandidate && <div className={`outline-state ${outlineCandidate.status === 'ACCEPTED' ? 'accepted' : 'ready'}`}><CheckCircle2 size={19}/><b>{outlineCandidate.status === 'ACCEPTED' ? '大纲已写入文案' : '大纲等待审核'}</b></div>}
+        {outlineError && <div className="outline-inline-error" role="alert"><CircleAlert size={17}/><p>{outlineError}</p>{/配置可用文本模型|配置可用/.test(outlineError) && <button className="text-button" type="button" onClick={onOpenModelSettings}>去配置任务策略</button>}</div>}
+        <div className="creative-checks"><div><b>平台版本</b><span>{contentVersions.length} 个</span></div><div><b>待核验事实</b><span>{project.factChecks.length} 项</span></div></div>
+      </aside></div> : <section className="empty-workbench"><h1>还没有图文平台版本</h1><p>当前主流程支持公众号和小红书。</p></section>)}
   </>;
 }

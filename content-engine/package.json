@@ -5,7 +5,7 @@
   "description": "内容引擎 Web 应用",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "dev": "concurrently -k \"npm:dev:api\" \"npm:dev:web\"",
+    "dev": "concurrently -k \"npm:dev:api\" \"npm:dev:web\" \"npm:dev:worker\"",
     "dev:web": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "dev:api": "node --watch server/index.cjs",
     "dev:worker": "node --watch server/worker.cjs",
