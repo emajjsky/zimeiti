@@ -1,5 +1,6 @@
 import type { LocalState } from './localRepository';
 import type { ApiUsageLog, ApiUsageSummary, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelTaskPolicy } from '../domain/integrations';
+import type { IntelligenceAnalysis, Platform } from '../domain/content';
 
 const tokenKey = 'content-engine-web-session-v1';
 const apiBase = import.meta.env.VITE_API_BASE ?? '/api/v1';
@@ -48,7 +49,14 @@ export const webIntelligence = {
   webSearchStatus: () => request<CredentialStatus>('/settings/credentials/TAVILY'),
   saveWebSearchKey: (apiKey: string) => request<CredentialStatus>('/settings/credentials/TAVILY', { method: 'PUT', body: JSON.stringify({ apiKey }) }),
   searchWeb: (input: { query: string; category: string; domains: string[] }) => request<LocalState['intelligence']>('/intelligence/search', { method: 'POST', body: JSON.stringify(input) }),
+  prepareAnalysis: (itemId: string, platforms: Platform[]) => request<AnalysisPreparation>(`/intelligence/items/${itemId}/analyses/prepare`, { method: 'POST', body: JSON.stringify({ platforms }) }),
+  confirmAnalysis: (runId: string) => request<{ id: string; status: 'QUEUED'; jobId: string }>(`/generation-runs/${runId}/confirm`, { method: 'POST', body: '{}' }),
+  cancelAnalysis: (runId: string) => request<{ id: string; status: 'CANCELLED' }>(`/generation-runs/${runId}/cancel`, { method: 'POST', body: '{}' }),
+  latestAnalysis: (itemId: string) => request<IntelligenceAnalysis | null>(`/intelligence/items/${itemId}/analyses/latest`),
+  job: (jobId: string) => request<{ id: string; status: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED'; error?: string }>(`/jobs/${jobId}`),
 };
+
+export type AnalysisPreparation = { id: string; status: 'DRAFT'; createdAt: string; confirmation: { sourceCount: number; platforms: Platform[]; model: string; promptVersion: number; generalAudienceWarning: boolean; costEstimate: number | null } };
 
 export type CredentialStatus = { provider: 'BAILIAN' | 'TAVILY'; configured: boolean; status: 'UNCONFIGURED' | 'UNVERIFIED' | 'READY' | 'ERROR'; updatedAt?: string | null; lastTestedAt?: string | null; lastError?: string | null };
 export type PromptTemplate = { id: string; scope: 'INTELLIGENCE_ANALYSIS'; version: number; body: string; source: 'DEFAULT' | 'CUSTOM'; updatedAt: string };

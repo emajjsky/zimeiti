@@ -14,6 +14,28 @@ export type ProjectStatus =
 export type Platform = 'WECHAT' | 'XIAOHONGSHU' | 'VIDEO_CHANNEL';
 export type ContentVersionStatus = 'DRAFT' | 'PREFLIGHT_PASSED' | 'WAITING_CONFIRMATION' | 'PUBLISHED' | 'FAILED' | 'CANCELLED';
 
+export type AnalysisDecision = 'FOLLOW' | 'WATCH' | 'SKIP';
+export type TimingWindow = 'TODAY' | 'THREE_DAYS' | 'ONE_WEEK' | 'EVERGREEN';
+export type AnalysisDimension = { score: number; reason: string };
+export type AnalysisAngle = { title: string; coreViewpoint: string; targetAudience: string };
+export type PlatformRecommendation = { platform: Platform; fitScore: number; recommendedFormat: string; reason: string };
+export interface IntelligenceAnalysis {
+  id: string;
+  selectedPlatforms: Platform[];
+  decisionReason: string;
+  timingWindow: TimingWindow;
+  dimensions: { timeliness: AnalysisDimension; accountFit: AnalysisDimension; contentValue: AnalysisDimension; spreadPotential: AnalysisDimension; feasibilityAndSafety: AnalysisDimension };
+  angles: AnalysisAngle[];
+  platforms: PlatformRecommendation[];
+  factsToVerify: string[];
+  risks: string[];
+  overallScore: number;
+  decision: AnalysisDecision;
+  model: string;
+  promptVersion: string;
+  analyzedAt: string;
+}
+
 export interface IntelligenceItem {
   id: string;
   title: string;
@@ -28,14 +50,7 @@ export interface IntelligenceItem {
   captureMethod?: 'RSS' | 'MANUAL_LINK' | 'SEARCH';
   language?: 'zh' | 'en' | 'other';
   note?: string;
-  analysis?: {
-    summary: string;
-    heat: number;
-    suggestedAngle: string;
-    factsToVerify: string[];
-    model: string;
-    analyzedAt: string;
-  };
+  analysis?: IntelligenceAnalysis;
 }
 
 export interface IntelligenceSource {
@@ -63,6 +78,7 @@ export interface TopicCandidate {
   status: TopicStatus;
   plannedDate?: string;
   coreViewpoint: string;
+  factsToVerify?: string[];
   sourceIds: string[];
 }
 

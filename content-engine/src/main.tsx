@@ -53,7 +53,6 @@ function App() {
   const [activePlatform, setActivePlatform] = useState<Platform>('WECHAT');
   const [isLoaded, setIsLoaded] = useState(false);
   const [refreshFeedback, setRefreshFeedback] = useState<{ status: 'idle' | 'running' | 'success' | 'empty' | 'error'; message: string }>({ status: 'idle', message: '' });
-  const [analysisFeedback, setAnalysisFeedback] = useState<{ status: 'idle' | 'running' | 'error'; message: string }>({ status: 'idle', message: '' });
   const [searchPreset, setSearchPreset] = useState<SearchPreset | null>(null);
   const [discoverSection, setDiscoverSection] = useState<DiscoverSection>('inbox');
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('workspace');
@@ -92,10 +91,11 @@ function App() {
   const completeSetup = (workspace: WorkspaceProfile) => {
     updateState({ ...state, workspace: { ...workspace, setupCompleted: true } });
   };
-  const createTopicFromIntel = () => {
+  const createTopicFromIntel = (analysis?: LocalState['intelligence'][number]['analysis'], angleIndex = 0) => {
     if (!selectedIntel) return;
+    const angle = analysis?.angles[angleIndex];
     const id = `topic-${Date.now()}`;
-    const next = { ...state, topics: [{ id, title: selectedIntel.title, category: selectedIntel.category, platforms: ['WECHAT', 'XIAOHONGSHU', 'VIDEO_CHANNEL'] as Platform[], urgency: '中' as const, status: 'PENDING' as const, coreViewpoint: selectedIntel.summary, sourceIds: [selectedIntel.id] }, ...state.topics] };
+    const next = { ...state, topics: [{ id, title: angle?.title || selectedIntel.title, category: selectedIntel.category, platforms: analysis?.selectedPlatforms ?? ['WECHAT', 'XIAOHONGSHU', 'VIDEO_CHANNEL'] as Platform[], urgency: analysis?.decision === 'FOLLOW' ? '高' as const : '中' as const, status: 'PENDING' as const, coreViewpoint: angle?.coreViewpoint || selectedIntel.summary, factsToVerify: analysis?.factsToVerify ?? [], sourceIds: [selectedIntel.id] }, ...state.topics] };
     updateState(next); setSelectedTopicId(id); setView('plan');
   };
   const openTopicFromIntel = (sourceId: string) => {
@@ -152,7 +152,7 @@ function App() {
       title: selectedTopic.title,
       status: 'BRIEF',
       coreViewpoint: selectedTopic.coreViewpoint,
-      factChecks: [],
+      factChecks: selectedTopic.factsToVerify ?? [],
       updatedAt: now,
       versions: selectedTopic.platforms.map((platform) => ({
         id: `${id}-${platform.toLowerCase()}`,
@@ -224,10 +224,7 @@ function App() {
     const saved = await webIntelligence.updateSource(sourceId, source);
     updateState({ ...state, sources: state.sources.map((item) => item.id === sourceId ? saved : item) });
   };
-  const analyzeIntelligence = async () => {
-    if (!selectedIntel) return;
-    setAnalysisFeedback({ status: 'error', message: 'AI 分析服务尚未接入 Web 任务执行器。' });
-  };
+  const saveAnalysis = (itemId: string, analysis: NonNullable<LocalState['intelligence'][number]['analysis']>) => updateState({ ...state, intelligence: state.intelligence.map((item) => item.id === itemId ? { ...item, analysis } : item) });
   const removeSource = async (sourceId: string) => {
     await webIntelligence.removeSource(sourceId);
     updateState({ ...state, sources: state.sources.filter((source) => source.id !== sourceId) });
@@ -262,7 +259,7 @@ function App() {
     {sidebarOpen && <button className="sidebar-backdrop" type="button" aria-label="关闭导航" onClick={() => setSidebarOpen(false)} />}
     <main className="main-content">
       {view === 'today' && <Today onNavigate={setView} projects={state.projects} intelligence={state.intelligence} />}
-      {view === 'discover' && <DiscoverWorkspace section={discoverSection} onSectionChange={setDiscoverSection} inbox={<IntelligenceInbox item={selectedIntel} intelligence={state.intelligence} sources={state.sources} topics={state.topics} projects={state.projects} onSelect={setSelectedIntelId} onCreateTopic={createTopicFromIntel} onOpenTopic={openTopicFromIntel} onRefresh={refreshRss} onOpenSources={() => openSettings('sources')} refreshFeedback={refreshFeedback} analysisFeedback={analysisFeedback} onAnalyze={analyzeIntelligence} />} search={<NetworkSearchPanel preset={searchPreset} onSave={saveSearchCandidate} onOpenSearchSettings={() => openSettings('models', 'search')} checkStatus={webSearchStatus} searchWeb={searchWeb} />} linkImport={<LinkImportPanel onSave={saveClippedLink} onShowInbox={() => openDiscover('inbox')} previewLink={previewPublicLink} />} />}
+      {view === 'discover' && <DiscoverWorkspace section={discoverSection} onSectionChange={setDiscoverSection} inbox={<IntelligenceInbox item={selectedIntel} intelligence={state.intelligence} sources={state.sources} topics={state.topics} projects={state.projects} defaultPlatforms={state.workspace.enabledPlatforms} onSelect={setSelectedIntelId} onCreateTopic={createTopicFromIntel} onOpenTopic={openTopicFromIntel} onSaveAnalysis={saveAnalysis} onRefresh={refreshRss} onOpenSources={() => openSettings('sources')} refreshFeedback={refreshFeedback} />} search={<NetworkSearchPanel preset={searchPreset} onSave={saveSearchCandidate} onOpenSearchSettings={() => openSettings('models', 'search')} checkStatus={webSearchStatus} searchWeb={searchWeb} />} linkImport={<LinkImportPanel onSave={saveClippedLink} onShowInbox={() => openDiscover('inbox')} previewLink={previewPublicLink} />} />}
       {view === 'plan' && selectedTopic && <Plan topics={state.topics} selected={selectedTopic} onSelect={setSelectedTopicId} onCreateProject={createProjectFromTopic} onEdit={openTopicEditor} onDelete={deleteTopic} />}
       {view === 'topicEditor' && <TopicEditor key={editingTopicId ?? 'new'} topic={state.topics.find((topic) => topic.id === editingTopicId)} defaultCategory={state.workspace.primaryTopics[0] ?? '未分类'} onSave={saveTopic} onCancel={() => { setEditingTopicId(null); setView('plan'); }} />}
       {view === 'create' && <Create project={featuredProject} activePlatform={activePlatform} onPlatform={setActivePlatform} activeVersion={activeVersion} progress={platformProgress} onSaveVersion={saveContentVersion} />}

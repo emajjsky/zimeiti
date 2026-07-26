@@ -309,6 +309,17 @@ API：`http://127.0.0.1:8787/health`
 - 热点详情沿用现有抽屉，增加平台勾选确认卡、五维结果、角度选择和创建选题预填，不新增一级页面。
 - 本节仅记录已确认的实施边界，业务代码尚未完成；详细规格见 `docs/superpowers/specs/2026-07-26-ai-intelligence-analysis-design.md`。
 
+# 2026-07-26 实现记录：AI 热点分析
+
+- `007_intelligence_analysis.sql` 新增分析结果和提示词模板版本表；迁移已在本地开发库应用。
+- `server/services/intelligence-analysis.cjs` 实现五维评分权重、FOLLOW/WATCH/SKIP 决策、业务模板变量校验、默认模板、三层提示词、模型 JSON 代码块提取和输出/平台契约校验。
+- `server/services/text-model.cjs` 为百炼 CLI 与 OpenAI 兼容外部 API 提供统一文本执行器。
+- `server/index.cjs` 增加模板 `GET/PUT/reset`、分析 `prepare/confirm/cancel/latest` 接口；分析准备必须验证当前任务策略存在可用文本模型。
+- `server/worker.cjs` 增加 `INTELLIGENCE_ANALYSIS` Worker：读取冻结来源、模板与模型路由，首次结构不合格时只修复一次，并记录 `generation_runs`、`intelligence_analyses` 与 `api_usage_logs`。
+- `PromptTemplateSettings.tsx` 提供可编辑业务模板和恢复默认；系统约束不进入可编辑区。
+- `IntelligenceInbox.tsx` 增加平台勾选、确认卡、任务轮询、五维结果、角度选择及创建选题预填；`TopicCandidate` 与内容项目传递待核验事实。
+- 自动化覆盖业务契约、API 和统一文本执行器。真实模型执行被有意保留给用户验收，未用测试 Key 或模拟成功结果替代。
+
 ## 视觉和响应式
 
 - 视觉参数为 `DESIGN_VARIANCE 4 / MOTION_INTENSITY 2 / VISUAL_DENSITY 6`。
