@@ -7,7 +7,7 @@ import publicWeb from '../server/services/public-web.cjs';
 import tavilyService from '../server/services/tavily.cjs';
 
 const { rssEntryToItem } = rssService;
-const { itemDto } = repository;
+const { itemDto, normalizeSourceInput } = repository;
 const { normalizeCanonicalUrl } = urlService;
 const { buildPublicPreview } = publicWeb;
 const { tavilyResultToItem } = tavilyService;
@@ -57,4 +57,29 @@ test('Tavily 结果按内容分类而不是固定使用输入题材', () => {
   );
   assert.equal(item.category, '财经');
   assert.ok(item.keywords.includes('央行'));
+});
+
+test('来源更新会规范化可编辑字段和刷新频率', () => {
+  assert.equal(typeof normalizeSourceInput, 'function');
+  assert.deepEqual(normalizeSourceInput({
+    name: '  央视新闻  ',
+    url: ' https://news.cctv.com/rss/index.xml ',
+    category: ' 时政 ',
+    includeKeywords: [' 政策 ', ''],
+    excludeKeywords: [' 广告 '],
+    language: 'ZH',
+    enabled: false,
+    refreshMinutes: 2,
+    trust: '可信',
+  }), {
+    name: '央视新闻',
+    url: 'https://news.cctv.com/rss/index.xml',
+    category: '时政',
+    includeKeywords: ['政策'],
+    excludeKeywords: ['广告'],
+    language: 'ZH',
+    enabled: false,
+    refreshMinutes: 5,
+    trust: '可信',
+  });
 });

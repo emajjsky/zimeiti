@@ -10,6 +10,21 @@ function itemDto(row) {
   return { id: row.id, title: row.title, summary: row.summary, category: row.category, keywords: row.matched_keywords ?? [], source: row.source_name, publishedAt: row.published_at?.toISOString?.() ?? row.published_at ?? row.created_at?.toISOString?.() ?? new Date().toISOString(), heat: row.heat, trust: row.trust, url: row.canonical_url ?? undefined, captureMethod: row.capture_method, language: row.language, note: row.note ?? undefined };
 }
 
+function normalizeSourceInput(source) {
+  const cleanKeywords = (values) => (values ?? []).map((value) => String(value).trim()).filter(Boolean);
+  return {
+    name: String(source.name ?? '').trim() || '未命名 RSS 源',
+    url: String(source.url ?? '').trim(),
+    category: String(source.category ?? '').trim() || '其它',
+    includeKeywords: cleanKeywords(source.includeKeywords),
+    excludeKeywords: cleanKeywords(source.excludeKeywords),
+    language: source.language ?? 'ALL',
+    enabled: source.enabled !== false,
+    refreshMinutes: Math.max(5, Number(source.refreshMinutes) || 60),
+    trust: String(source.trust ?? '').trim() || '待核验',
+  };
+}
+
 async function listSources(workspaceId) {
   const result = await query('SELECT * FROM intelligence_sources WHERE workspace_id = $1 ORDER BY created_at ASC', [workspaceId]);
   return result.rows.map(sourceDto);
@@ -27,6 +42,29 @@ async function createSources(workspaceId, sources) {
     }
     return saved;
   });
+}
+
+async function updateSource(workspaceId, sourceId, source) {
+  const input = normalizeSourceInput(source);
+  const result = await query(`UPDATE intelligence_sources SET
+    name = $3, url = $4, category = $5, include_keywords = $6,
+    exclude_keywords = $7, language = $8, enabled = $9,
+    refresh_minutes = $10, trust = $11
+    WHERE id = $1 AND workspace_id = $2 RETURNING *`, [
+    sourceId,
+    workspaceId,
+    input.name,
+    input.url,
+    input.category,
+    JSON.stringify(input.includeKeywords),
+    JSON.stringify(input.excludeKeywords),
+    input.language,
+    input.enabled,
+    input.refreshMinutes,
+    input.trust,
+  ]);
+  if (!result.rowCount) throw new Error('未找到资讯来源。');
+  return sourceDto(result.rows[0]);
 }
 
 async function removeSource(workspaceId, sourceId) {
@@ -80,4 +118,4 @@ function isExpired(value) {
 
 function normalize(value) { return String(value).replace(/\s+/g, ' ').trim().toLowerCase(); }
 
-module.exports = { listSources, createSources, removeSource, listItems, refreshWorkspaceRss, purgeExpiredItems, itemDto };
+module.exports = { listSources, createSources, updateSource, removeSource, listItems, refreshWorkspaceRss, purgeExpiredItems, itemDto, normalizeSourceInput };

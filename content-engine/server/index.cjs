@@ -7,7 +7,7 @@ const { query, transaction } = require('./db.cjs');
 const { encrypt, decrypt, hashPassword, verifyPassword } = require('./crypto.cjs');
 const { clipPublicLink } = require('./services/public-web.cjs');
 const { searchTavily } = require('./services/tavily.cjs');
-const { listSources, createSources, removeSource, listItems, refreshWorkspaceRss } = require('./services/intelligenceRepository.cjs');
+const { listSources, createSources, updateSource, removeSource, listItems, refreshWorkspaceRss } = require('./services/intelligenceRepository.cjs');
 const { enqueue } = require('./queue.cjs');
 const { listAvailableSkills } = require('./agent/skillRegistry.cjs');
 const { runBailianCli } = require('./runner/bailian.cjs');
@@ -284,6 +284,11 @@ app.post('/api/v1/intelligence/sources', { preHandler: authenticate }, async (re
   const input = z.object({ sources: z.array(sourceInput).min(1).max(30) }).parse(request.body);
   const workspace = await currentWorkspace(request.user.sub);
   reply.code(201).send(await createSources(workspace.id, input.sources));
+});
+app.put('/api/v1/intelligence/sources/:id', { preHandler: authenticate }, async (request) => {
+  const input = sourceInput.parse(request.body);
+  const workspace = await currentWorkspace(request.user.sub);
+  return updateSource(workspace.id, request.params.id, input);
 });
 app.delete('/api/v1/intelligence/sources/:id', { preHandler: authenticate }, async (request, reply) => { await removeSource((await currentWorkspace(request.user.sub)).id, request.params.id); reply.code(204).send(); });
 app.get('/api/v1/intelligence/items', { preHandler: authenticate }, async (request) => listItems((await currentWorkspace(request.user.sub)).id));

@@ -213,7 +213,7 @@ API：`http://127.0.0.1:8787/health`
 - 新增迁移 `server/migrations/004_model_settings.sql`：扩展 `credential_vault` 验证元数据，增加工作空间级 `model_connections` 和 `model_catalog`，任务策略支持外部连接引用。
 - 新增凭据接口：列表、读取、保存、检测和移除。百炼检测同时验证服务器内置 CLI 可启动和 DashScope `/models` 可访问；Tavily检测调用最小搜索请求。
 - 新增外部 API 连接、检测、模型目录同步、任务策略和用量读取接口。账户目录和外部连接只持久化接口实际返回的模型标识；异步媒体模型使用经过官方模型市场核验的目录项补齐，并标记为 `MARKET_CATALOG`，不冒充账号已开通。
-- Web 前端已移除对模型目录、策略、外部连接、用量的 `window.contentEngine` 依赖；桌面端保留原 IPC 分支以兼容旧壳。
+- Web 前端的模型目录、策略、外部连接、用量、百炼凭据和检索凭据均通过服务端 API 访问；`ModelSettingsScreen` 不再包含桌面 IPC 分支。
 - `bailianCliMediaCatalog()` 依据已安装 `bailian-cli 1.10.1` 的真实命令定义登记图像与视频能力；`/models` 的账户目录和 CLI 媒体目录以 `origin` 区分并合并去重。
 - `005_model_task_scopes.sql` 将旧图片/视频策略迁移为具体操作 Scope。目录项新增 `operations`，任务策略保存时由服务端校验模型是否支持对应输入输出契约。
 
@@ -257,4 +257,40 @@ API：`http://127.0.0.1:8787/health`
 - 新增 `filterIntelligenceItems`，统一处理来源、题材、语言、时间和搜索条件，页面不再内联拼接筛选逻辑。
 - 新增 `intelligenceSourceLabel`，来源下拉选项、卡片来源横条和详情抽屉共用同一展示值；搜索结果和链接剪藏不会再出现原始来源与展示来源不一致。
 - 增加单一来源筛选回归测试，覆盖“美国 SEC 新闻稿”与“网页检索”两类来源。
-- Web/Vite 热更新复用 `window.contentEngineReactRoot`，避免重复 `createRoot` 导致旧卡片 DOM 与新筛选状态混杂。
+- Web 入口只创建一个 React Root；页面状态由 Vite React Fast Refresh 管理，不再使用桌面壳全局对象保存 Root。
+
+# 2026-07-26 实现记录：Web 信息架构与前端重构
+
+## 导航和页面壳
+
+- `src/app/navigation.mjs` 和 `navigation.d.mts` 是一级导航、发现局部页签、设置局部页签和跨页面跳转意图的共享模型。
+- `DiscoverWorkspace` 只负责热点情报、网络搜索、导入链接的局部切换。
+- `SettingsWorkspace` 只负责工作空间、资讯来源、模型与 API、飞书 Base、账号授权的局部切换。
+- `PageHeader` 和 `WorkspaceTabs` 统一标题、操作、反馈和页签无障碍属性。
+
+## 发现工作区
+
+- `IntelligenceInbox` 使用来源、题材、时间、立项状态和关键词搜索筛选真实情报。
+- 热点卡片在 1280 宽度为三列、1024 为两列、768 及以下为单列；详情使用右侧抽屉，不再挤压卡片网格。
+- `shared/intelligence-presentation.mjs` 统一确定性标签配色和“今天、昨天、月日”时间展示。
+- `NetworkSearchPanel` 使用来源范围下拉，不再渲染辅助渠道卡片。
+- `LinkImportPanel` 使用“导入链接”文案，具备空输入禁用、读取骨架、预览、错误和成功后的下一步。
+
+## 设置工作区
+
+- `SourceSettings` 只管理自动来源，支持目录批量接入、自定义 RSS、行内编辑、启停和删除。
+- `PUT /api/v1/intelligence/sources/:id` 持久化来源可编辑字段；`normalizeSourceInput` 统一清理关键词和刷新频率。
+- `WorkspaceProfileSettings` 不再展示本地素材路径。
+- `ModelSettingsScreen` 统一调用 Web 模型 API，通过 `initialSection` 接受“检索 API”等深层跳转；百炼、核心 Agent、检索 API、外部 API、任务策略和调用记录不再按桌面环境分叉。
+
+## 遗留实现清理
+
+- 删除 `main.tsx` 中无引用的旧发现页、旧链接导入页、旧模型设置页、旧资讯来源页和旧网络搜索页。
+- 生产构建检查覆盖 Desktop、V0.1、桌面客户端、剪藏链接、辅助渠道和本地素材目录，当前构建结果均无命中。
+
+## 视觉和响应式
+
+- 视觉参数为 `DESIGN_VARIANCE 4 / MOTION_INTENSITY 2 / VISUAL_DENSITY 6`。
+- 保留暖白、钴蓝和马卡龙标签，取消普通按钮和卡片的红色偏移硬阴影。
+- 959px 以下使用图标侧栏，719px 以下使用移动抽屉导航。
+- 所有动效遵循 `prefers-reduced-motion`，本轮未增加 Anime.js 动画。

@@ -40,6 +40,7 @@ export const webState = {
 export const webIntelligence = {
   listSources: () => request<LocalState['sources']>('/intelligence/sources'),
   createSources: (sources: Omit<LocalState['sources'][number], 'id' | 'lastSyncedAt' | 'lastError'>[]) => request<LocalState['sources']>('/intelligence/sources', { method: 'POST', body: JSON.stringify({ sources }) }),
+  updateSource: (sourceId: string, source: Omit<LocalState['sources'][number], 'id' | 'lastSyncedAt' | 'lastError'>) => request<LocalState['sources'][number]>(`/intelligence/sources/${sourceId}`, { method: 'PUT', body: JSON.stringify(source) }),
   removeSource: (sourceId: string) => request<void>(`/intelligence/sources/${sourceId}`, { method: 'DELETE' }),
   listItems: () => request<LocalState['intelligence']>('/intelligence/items'),
   refreshRss: () => request<{ items: LocalState['intelligence']; results: { sourceId: string; ok: boolean; count: number; error?: string }[]; sources: LocalState['sources'] }>('/intelligence/rss/refresh', { method: 'POST', body: '{}' }),

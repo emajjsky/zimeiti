@@ -4,7 +4,7 @@ import test from 'node:test';
 
 const mainSource = await readFile(new URL('../src/main.tsx', import.meta.url), 'utf8');
 const stylesSource = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
-const screenStart = mainSource.indexOf('function ModelSettingsScreen()');
+const screenStart = mainSource.indexOf('function ModelSettingsScreen(');
 const screenEnd = mainSource.indexOf('function UsageOverview', screenStart);
 const screenSource = mainSource.slice(screenStart, screenEnd);
 
@@ -34,4 +34,16 @@ test('模型设置内容宽度与其他后台页面保持一致', () => {
   assert.match(stylesSource, /\.ai-settings\s*\{[^}]*max-width:\s*1400px/);
   assert.match(stylesSource, /\.ai-section-content-policies \.policy-split\s*\{[^}]*max-width:\s*1180px/);
   assert.doesNotMatch(stylesSource, /\.core-agent-settings,\.bailian-web-settings\s*\{[^}]*max-width:\s*760px/);
+});
+
+test('模型设置统一使用 Web 服务端接口', () => {
+  assert.doesNotMatch(screenSource, /window\.contentEngine|isDesktop|BailianCliCenter/);
+  assert.match(screenSource, /webModels\.connections\(\)/);
+  assert.match(screenSource, /webModels\.syncCatalog\(\)/);
+  assert.match(screenSource, /<BailianCredentialSettings/);
+});
+
+test('主入口不再保留旧页面实现和桌面提示', () => {
+  assert.doesNotMatch(mainSource, /function (?:LegacyDiscover|LinkClipEditor|LegacyLinkClipEditor|SettingsHub|WebSearchPanel|BailianCliCenter)/);
+  assert.doesNotMatch(mainSource, /请在桌面端|DESKTOP|V0\.1|剪藏链接/);
 });
