@@ -49,3 +49,55 @@ export function resetViewport(scrollTarget = globalThis.window) {
   if (typeof scrollTarget?.scrollTo !== 'function') return;
   scrollTarget.scrollTo({ top: 0, left: 0, behavior: 'auto' });
 }
+
+const views = new Set([...navigationGroups.flatMap((group) => group.items.map((item) => item.view)), 'topicEditor']);
+const discoverSections = new Set(discoverTabs.map((item) => item.id));
+const settingsSections = new Set(settingsTabs.map((item) => item.id));
+const modelSections = new Set(['bailian', 'agent', 'search', 'connections', 'policies', 'usage']);
+const platforms = new Set(['WECHAT', 'XIAOHONGSHU', 'VIDEO_CHANNEL']);
+
+function allowed(value, values, fallback = null) {
+  return typeof value === 'string' && values.has(value) ? value : fallback;
+}
+
+export function readWorkspaceLocation(locationTarget = globalThis.location) {
+  const params = new URLSearchParams(locationTarget?.search ?? '');
+  return {
+    view: allowed(params.get('view'), views, 'today'),
+    discoverSection: allowed(params.get('discover'), discoverSections, 'inbox'),
+    settingsSection: allowed(params.get('settings'), settingsSections, 'workspace'),
+    modelSection: allowed(params.get('model'), modelSections),
+    intelligenceId: params.get('intel') || null,
+    topicId: params.get('topic') || null,
+    projectId: params.get('project') || null,
+    platform: allowed(params.get('platform'), platforms, 'WECHAT'),
+  };
+}
+
+export function workspaceLocationUrl(route, locationTarget = globalThis.location) {
+  const url = new URL(locationTarget?.href ?? 'http://localhost/');
+  const params = url.searchParams;
+  ['discover', 'settings', 'model', 'intel', 'topic', 'project', 'platform'].forEach((key) => params.delete(key));
+  params.set('view', allowed(route.view, views, 'today'));
+  if (route.view === 'discover') {
+    params.set('discover', allowed(route.discoverSection, discoverSections, 'inbox'));
+    if (route.intelligenceId) params.set('intel', route.intelligenceId);
+  }
+  if (route.view === 'settings') {
+    params.set('settings', allowed(route.settingsSection, settingsSections, 'workspace'));
+    if (route.settingsSection === 'models' && allowed(route.modelSection, modelSections)) params.set('model', route.modelSection);
+  }
+  if (route.view === 'plan' || route.view === 'topicEditor') {
+    if (route.topicId) params.set('topic', route.topicId);
+  }
+  if (route.view === 'create' || route.view === 'publish') {
+    if (route.projectId) params.set('project', route.projectId);
+  }
+  if (route.view === 'create') params.set('platform', allowed(route.platform, platforms, 'WECHAT'));
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
+export function replaceWorkspaceLocation(route, historyTarget = globalThis.history, locationTarget = globalThis.location) {
+  if (typeof historyTarget?.replaceState !== 'function') return;
+  historyTarget.replaceState(historyTarget.state ?? null, '', workspaceLocationUrl(route, locationTarget));
+}

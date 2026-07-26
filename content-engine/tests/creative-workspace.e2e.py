@@ -59,11 +59,12 @@ with sync_playwright() as playwright:
     with page.expect_response(lambda response: "/creative/projects/" in response.url and response.request.method == "PUT" and response.status == 200):
         page.get_by_role("button", name="保存设定").click()
     page.get_by_text("已保存", exact=False).wait_for()
+    assert "view=create" in page.url
+    assert "project=" in page.url
     page.screenshot(path=ARTIFACTS / "creative-brief-desktop.png", full_page=True)
 
     page.reload()
     page.wait_for_load_state("networkidle")
-    page.get_by_role("button", name="创作", exact=True).click()
     page.wait_for_selector(".creative-brief-form")
     assert page.get_by_label("目标受众").input_value() == "想提高内容效率但不熟悉技术的普通创作者"
 

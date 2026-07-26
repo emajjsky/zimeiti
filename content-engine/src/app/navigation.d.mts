@@ -64,3 +64,28 @@ export interface ViewportScrollTarget {
 }
 
 export function resetViewport(scrollTarget?: ViewportScrollTarget): void;
+
+export interface WorkspaceLocationState {
+  view: View;
+  discoverSection: DiscoverSection;
+  settingsSection: SettingsSection;
+  modelSection: ModelSection | null;
+  intelligenceId: string | null;
+  topicId: string | null;
+  projectId: string | null;
+  platform: 'WECHAT' | 'XIAOHONGSHU' | 'VIDEO_CHANNEL';
+}
+
+export interface WorkspaceLocationTarget {
+  href?: string;
+  search?: string;
+}
+
+export interface WorkspaceHistoryTarget {
+  state?: unknown;
+  replaceState(state: unknown, unused: string, url?: string | URL | null): void;
+}
+
+export function readWorkspaceLocation(locationTarget?: WorkspaceLocationTarget): WorkspaceLocationState;
+export function workspaceLocationUrl(route: WorkspaceLocationState, locationTarget?: WorkspaceLocationTarget): string;
+export function replaceWorkspaceLocation(route: WorkspaceLocationState, historyTarget?: WorkspaceHistoryTarget, locationTarget?: WorkspaceLocationTarget): void;

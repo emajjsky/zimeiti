@@ -369,3 +369,11 @@ API：`http://127.0.0.1:8787/health`
 - 图文主流程只读取公众号和小红书版本。旧视频号版本保留在项目数据中，但不进入 Brief 平台选择和文案页签。
 - 本轮设计采用 `DESIGN_VARIANCE 4 / MOTION_INTENSITY 2 / VISUAL_DENSITY 5`。只用 CSS 提供状态反馈，没有为表单引入 Anime.js 动画。
 - Skill 调研、许可证和采用结论记录在 `docs/05_SKILL_RESEARCH_自媒体.md`。
+
+## 2026-07-26 实现记录：URL 工作位置持久化
+
+- `navigation.mjs` 新增 `readWorkspaceLocation()`、`workspaceLocationUrl()` 和 `replaceWorkspaceLocation()`，集中解析、生成和替换工作区 URL。
+- `App` 首次渲染从 URL 初始化页面、发现/设置分区、资讯、选题、项目和平台；服务端状态加载后校验对象 ID，不存在时回退到同类第一条。
+- 工作空间加载完成后才同步 URL，避免初始种子数据在真实数据返回前覆盖刷新地址。
+- URL 按页面清理无关参数：创作保存 `project` 与 `platform`，规划保存 `topic`，发现保存 `discover` 与 `intel`，设置保存 `settings` 与可选 `model`。
+- 该实现使用浏览器 `history.replaceState`，不产生每次字段选择一个历史记录的噪音。

@@ -52,6 +52,33 @@ test('主入口监听视图变化并复位浏览器滚动位置', async () => {
   assert.match(source, /useLayoutEffect\(\(\) => \{\s*resetViewport\(\);\s*\}, \[view\]\)/);
 });
 
+test('刷新地址可以恢复创作项目和平台', () => {
+  assert.deepEqual(navigation.readWorkspaceLocation({ search: '?view=create&project=project-42&platform=XIAOHONGSHU' }), {
+    view: 'create',
+    discoverSection: 'inbox',
+    settingsSection: 'workspace',
+    modelSection: null,
+    intelligenceId: null,
+    topicId: null,
+    projectId: 'project-42',
+    platform: 'XIAOHONGSHU',
+  });
+});
+
+test('页面地址只保留当前工作区相关参数', () => {
+  const url = navigation.workspaceLocationUrl({
+    view: 'settings', discoverSection: 'search', settingsSection: 'models', modelSection: 'policies',
+    intelligenceId: 'intel-1', topicId: 'topic-1', projectId: 'project-1', platform: 'WECHAT',
+  }, { href: 'http://127.0.0.1:5173/?view=create&project=old&platform=WECHAT' });
+  assert.equal(url, '/?view=settings&settings=models&model=policies');
+});
+
+test('主入口在数据加载后同步当前页面地址', async () => {
+  const source = await readFile(new URL('../src/main.tsx', import.meta.url), 'utf8');
+  assert.match(source, /initialRoute = useRef\(readWorkspaceLocation\(\)\)\.current/);
+  assert.match(source, /replaceWorkspaceLocation\(\{/);
+});
+
 test('发现工作区只提供三个采集入口', () => {
   assert.deepEqual(navigation.discoverTabs, [
     { id: 'inbox', label: '热点情报' },

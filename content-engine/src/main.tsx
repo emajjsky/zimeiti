@@ -6,7 +6,7 @@ import { intelligenceKey, loadState, persistState, seedState, type FeishuLibrary
 import { webAgent, webAuth, webIntelligence, webModels, webSettings, type CredentialStatus, type WebSession } from './data/webApi';
 import { platformName, projectStatusName, type ContentProject, type ContentVersion, type IntelligenceSource, type Platform, type TopicCandidate } from './domain/content';
 import type { ApiUsageLog, ApiUsageSummary, ModelCapability, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelOperation, ModelProvider, ModelTask, ModelTaskPolicy } from './domain/integrations';
-import { navigationGroups, resetViewport, type DiscoverSection, type ModelSection, type SearchPreset, type SettingsSection, type View } from './app/navigation.mjs';
+import { navigationGroups, readWorkspaceLocation, replaceWorkspaceLocation, resetViewport, type DiscoverSection, type ModelSection, type SearchPreset, type SettingsSection, type View } from './app/navigation.mjs';
 import { PageHeader } from './components/workspace/PageHeader';
 import { DiscoverWorkspace } from './workspaces/DiscoverWorkspace';
 import { SettingsWorkspace } from './workspaces/SettingsWorkspace';
@@ -45,19 +45,20 @@ const navigationIcons: Record<Exclude<View, 'topicEditor'>, typeof CalendarDays>
 };
 
 function App() {
-  const [view, setView] = useState<View>('today');
+  const initialRoute = useRef(readWorkspaceLocation()).current;
+  const [view, setView] = useState<View>(initialRoute.view);
   const [state, setState] = useState<LocalState>(seedState);
-  const [selectedIntelId, setSelectedIntelId] = useState('intel-sora');
-  const [selectedTopicId, setSelectedTopicId] = useState('topic-ai-video');
+  const [selectedIntelId, setSelectedIntelId] = useState(initialRoute.intelligenceId ?? 'intel-sora');
+  const [selectedTopicId, setSelectedTopicId] = useState(initialRoute.topicId ?? 'topic-ai-video');
   const [editingTopicId, setEditingTopicId] = useState<string | null>(null);
-  const [selectedProjectId, setSelectedProjectId] = useState('project-ai-video');
-  const [activePlatform, setActivePlatform] = useState<Platform>('WECHAT');
+  const [selectedProjectId, setSelectedProjectId] = useState(initialRoute.projectId ?? 'project-ai-video');
+  const [activePlatform, setActivePlatform] = useState<Platform>(initialRoute.platform);
   const [isLoaded, setIsLoaded] = useState(false);
   const [refreshFeedback, setRefreshFeedback] = useState<{ status: 'idle' | 'running' | 'success' | 'empty' | 'error'; message: string }>({ status: 'idle', message: '' });
   const [searchPreset, setSearchPreset] = useState<SearchPreset | null>(null);
-  const [discoverSection, setDiscoverSection] = useState<DiscoverSection>('inbox');
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>('workspace');
-  const [requestedModelSection, setRequestedModelSection] = useState<ModelSection | null>(null);
+  const [discoverSection, setDiscoverSection] = useState<DiscoverSection>(initialRoute.discoverSection);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>(initialRoute.settingsSection);
+  const [requestedModelSection, setRequestedModelSection] = useState<ModelSection | null>(initialRoute.modelSection);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const selectedIntel = state.intelligence.find((item) => item.id === selectedIntelId) ?? state.intelligence[0];
@@ -71,11 +72,27 @@ function App() {
   useEffect(() => {
     void loadState().then((loaded) => {
       setState(loaded);
-      setSelectedIntelId(loaded.intelligence[0]?.id ?? '');
+      setSelectedIntelId((current) => loaded.intelligence.some((item) => item.id === current) ? current : loaded.intelligence[0]?.id ?? '');
+      setSelectedTopicId((current) => loaded.topics.some((item) => item.id === current) ? current : loaded.topics[0]?.id ?? '');
+      setSelectedProjectId((current) => loaded.projects.some((item) => item.id === current) ? current : loaded.projects[0]?.id ?? '');
     }).catch((error) => {
       console.error('加载本地工作空间失败', error);
     }).finally(() => setIsLoaded(true));
   }, []);
+
+  useEffect(() => {
+    if (!isLoaded) return;
+    replaceWorkspaceLocation({
+      view,
+      discoverSection,
+      settingsSection,
+      modelSection: requestedModelSection,
+      intelligenceId: selectedIntelId || null,
+      topicId: selectedTopicId || null,
+      projectId: selectedProjectId || null,
+      platform: activePlatform,
+    });
+  }, [activePlatform, discoverSection, isLoaded, requestedModelSection, selectedIntelId, selectedProjectId, selectedTopicId, settingsSection, view]);
 
   const updateState = (next: LocalState) => {
     setState(next);
