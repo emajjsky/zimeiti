@@ -51,6 +51,7 @@ export const webIntelligence = {
 };
 
 export type CredentialStatus = { provider: 'BAILIAN' | 'TAVILY'; configured: boolean; status: 'UNCONFIGURED' | 'UNVERIFIED' | 'READY' | 'ERROR'; updatedAt?: string | null; lastTestedAt?: string | null; lastError?: string | null };
+export type PromptTemplate = { id: string; scope: 'INTELLIGENCE_ANALYSIS'; version: number; body: string; source: 'DEFAULT' | 'CUSTOM'; updatedAt: string };
 
 export const webAgent = {
   credentialStatus: () => request<CredentialStatus>('/settings/credentials/BAILIAN'),
@@ -78,4 +79,7 @@ export const webModels = {
   taskPolicies: () => request<ModelTaskPolicy[]>('/models/task-policies'),
   saveTaskPolicy: (policy: ModelTaskPolicy) => request<ModelTaskPolicy>(`/models/task-policies/${policy.task}`, { method: 'PUT', body: JSON.stringify(policy) }),
   usage: () => request<{ summary: ApiUsageSummary; logs: ApiUsageLog[] }>('/models/usage'),
+  promptTemplate: () => request<PromptTemplate>('/settings/prompt-templates/INTELLIGENCE_ANALYSIS'),
+  savePromptTemplate: (body: string) => request<PromptTemplate>('/settings/prompt-templates/INTELLIGENCE_ANALYSIS', { method: 'PUT', body: JSON.stringify({ body }) }),
+  resetPromptTemplate: () => request<PromptTemplate>('/settings/prompt-templates/INTELLIGENCE_ANALYSIS/reset', { method: 'POST', body: '{}' }),
 };

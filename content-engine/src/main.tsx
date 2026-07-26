@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { animate, createScope, stagger } from 'animejs';
-import { ArrowLeft, Bell, BrainCircuit, CalendarDays, ChartColumn, CheckCircle2, ChevronRight, CircleAlert, CircleCheck, ClipboardList, Compass, FolderOpen, KeyRound, Lightbulb, Menu, PenLine, Pencil, Plus, RefreshCw, Search, Send, Settings, Trash2 } from 'lucide-react';
+import { ArrowLeft, Bell, BrainCircuit, CalendarDays, ChartColumn, CheckCircle2, ChevronRight, CircleAlert, CircleCheck, ClipboardList, Compass, FilePenLine, FolderOpen, KeyRound, Lightbulb, Menu, PenLine, Pencil, Plus, RefreshCw, Search, Send, Settings, Trash2 } from 'lucide-react';
 import { intelligenceKey, loadState, persistState, seedState, type FeishuLibraryTemplate, type LocalState, type WorkspaceProfile } from './data/localRepository';
 import { webAgent, webAuth, webIntelligence, webModels, webSettings, type CredentialStatus, type WebSession } from './data/webApi';
 import { platformName, projectStatusName, type ContentProject, type ContentVersion, type IntelligenceSource, type Platform, type TopicCandidate } from './domain/content';
@@ -16,6 +16,7 @@ import { LinkImportPanel } from './workspaces/discover/LinkImportPanel';
 import { IntelligenceInbox } from './workspaces/discover/IntelligenceInbox';
 import { WorkspaceProfileSettings } from './workspaces/settings/WorkspaceProfileSettings';
 import { AccountAuthorizationSettings } from './workspaces/settings/AccountAuthorizationSettings';
+import { PromptTemplateSettings } from './workspaces/settings/PromptTemplateSettings';
 import './styles.css';
 
 function displayError(error: unknown, fallback: string) {
@@ -439,7 +440,7 @@ const modelTaskNames: Record<ModelTask, string> = {
   VIDEO_EDIT: '视频编辑',
 };
 
-type ModelSettingsSection = ModelSection;
+type ModelSettingsSection = ModelSection | 'templates';
 
 const modelSettingsScreenTitles: Record<ModelSettingsSection, string> = {
   bailian: '百炼',
@@ -447,6 +448,7 @@ const modelSettingsScreenTitles: Record<ModelSettingsSection, string> = {
   search: '检索 API',
   connections: '外部 API',
   policies: '任务策略',
+  templates: '提示词模板',
   usage: '调用记录',
 };
 
@@ -544,6 +546,7 @@ function ModelSettingsScreen({ initialSection = null }: { initialSection?: Model
     if (screen === 'search') return <WebSearchSettings embedded onChanged={refreshModelSettings} />;
     if (screen === 'connections') return <ExternalApiConnections connections={connections} onNew={() => { setEditing(undefined); setNotice(null); setScreen('editor'); }} onEdit={(connection) => { setEditing(connection); setNotice(null); setScreen('editor'); }} onRemove={removeExternal} />;
     if (screen === 'policies') return <TaskPolicyScreen catalog={catalog} policies={policies} onSync={() => void syncCatalog()} onSave={savePolicy} />;
+    if (screen === 'templates') return <PromptTemplateSettings />;
     return <UsageLogScreen logs={logs} />;
   };
 
@@ -559,6 +562,7 @@ function ModelSettingsScreen({ initialSection = null }: { initialSection?: Model
       <button className={screen === 'search' ? 'active' : ''} onClick={() => openSection('search')}><Search size={18}/>检索 API</button>
       <button className={screen === 'connections' ? 'active' : ''} onClick={() => openSection('connections')}><KeyRound size={18}/>外部 API <span>{connections.length}</span></button>
       <button className={screen === 'policies' ? 'active' : ''} onClick={() => openSection('policies')}><Settings size={18}/>任务策略</button>
+      <button className={screen === 'templates' ? 'active' : ''} onClick={() => openSection('templates')}><FilePenLine size={18}/>提示词模板</button>
       <button className={screen === 'usage' ? 'active' : ''} onClick={() => openSection('usage')}><ChartColumn size={18}/>调用记录</button>
     </nav>
     <div className={`ai-section-content ai-section-content-${screen}`}>

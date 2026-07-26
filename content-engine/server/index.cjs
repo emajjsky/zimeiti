@@ -11,12 +11,14 @@ const { listSources, createSources, updateSource, removeSource, listItems, refre
 const { enqueue } = require('./queue.cjs');
 const { listAvailableSkills } = require('./agent/skillRegistry.cjs');
 const { runBailianCli } = require('./runner/bailian.cjs');
+const { ANALYSIS_SCOPE, createTemplateStore } = require('./services/intelligence-analysis.cjs');
 
 const app = Fastify({ logger: true, bodyLimit: 5 * 1024 * 1024 });
 const credentials = new Set(['TAVILY', 'BAILIAN']);
 const modelTasks = ['INTELLIGENCE_ANALYSIS', 'TOPIC_RECOMMENDATION', 'CONTENT_WRITING', 'CONTENT_REWRITE', 'CONTENT_LAYOUT', 'TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE', 'SPEECH_SYNTHESIS', 'SPEECH_RECOGNITION', 'TEXT_TO_VIDEO', 'IMAGE_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO', 'REFERENCE_TO_VIDEO', 'VIDEO_EDIT'];
 const externalProviders = new Set(['DASHSCOPE', 'SILICONFLOW', 'VOLCENGINE_ARK', 'KIMI', 'ZHIPU', 'OPENAI', 'OPENAI_COMPATIBLE']);
 const sourceInput = z.object({ name: z.string().max(160), type: z.literal('RSS'), url: z.string().url().max(2_000), category: z.string().max(120), includeKeywords: z.array(z.string().max(120)).optional(), excludeKeywords: z.array(z.string().max(120)).optional(), language: z.enum(['ALL', 'ZH', 'EN']).optional(), enabled: z.boolean(), refreshMinutes: z.number().min(5).max(10_080), trust: z.string().max(80) });
+const templateStore = createTemplateStore({ query });
 
 app.register(cors, { origin: config.corsOrigin, credentials: false });
 app.register(jwt, { secret: config.jwtSecret });
@@ -275,6 +277,32 @@ app.get('/api/v1/models/usage', { preHandler: authenticate }, async (request) =>
   ]);
   const total = summary.rows[0];
   return { summary: { totalCalls: total.total_calls, todayCalls: total.today_calls, successCalls: total.success_calls, failedCalls: total.failed_calls, inputTokens: total.input_tokens, outputTokens: total.output_tokens }, logs: rows.rows.map(usageLogView) };
+});
+
+function analysisTemplateScope(value) {
+  const scope = String(value || '');
+  if (scope !== ANALYSIS_SCOPE) { const error = new Error('当前提示词模板尚未接入执行器。'); error.statusCode = 400; throw error; }
+  return scope;
+}
+
+function promptTemplateView(row) {
+  return { id: row.id, scope: row.scope, version: row.version, body: row.body, source: row.source, updatedAt: row.created_at };
+}
+
+app.get('/api/v1/settings/prompt-templates/:scope', { preHandler: authenticate }, async (request) => {
+  const workspace = await currentWorkspace(request.user.sub);
+  return promptTemplateView(await templateStore.get(workspace.id, analysisTemplateScope(request.params.scope)));
+});
+
+app.put('/api/v1/settings/prompt-templates/:scope', { preHandler: authenticate }, async (request) => {
+  const workspace = await currentWorkspace(request.user.sub);
+  const input = z.object({ body: z.string().min(1).max(12_000) }).parse(request.body);
+  return promptTemplateView(await templateStore.save(workspace.id, analysisTemplateScope(request.params.scope), input.body));
+});
+
+app.post('/api/v1/settings/prompt-templates/:scope/reset', { preHandler: authenticate }, async (request) => {
+  const workspace = await currentWorkspace(request.user.sub);
+  return promptTemplateView(await templateStore.reset(workspace.id, analysisTemplateScope(request.params.scope)));
 });
 
 app.post('/api/v1/intelligence/clip', { preHandler: authenticate }, async (request) => clipPublicLink(z.object({ url: z.string().url().max(2_000) }).parse(request.body).url));

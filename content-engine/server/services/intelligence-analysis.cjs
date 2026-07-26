@@ -77,4 +77,30 @@ function buildAnalysisPrompt({ template, item, profile, platforms }) {
   return { system, message: JSON.stringify({ businessTemplate, context }) };
 }
 
-module.exports = { ANALYSIS_SCOPE, MAX_TEMPLATE_LENGTH, templateVariables, weights, calculateOverallScore, decisionForScore, validateAnalysisOutput, validateTemplate, defaultTemplate, buildAnalysisPrompt };
+function createTemplateStore({ query }) {
+  async function latest(workspaceId, scope = ANALYSIS_SCOPE) {
+    const result = await query('SELECT id, workspace_id, scope, version, body, source, created_at FROM prompt_template_versions WHERE workspace_id = $1 AND scope = $2 ORDER BY version DESC LIMIT 1', [workspaceId, scope]);
+    return result.rows[0] ?? null;
+  }
+
+  async function insert(workspaceId, scope, body, source) {
+    const current = await latest(workspaceId, scope);
+    const version = (current?.version ?? 0) + 1;
+    const result = await query('INSERT INTO prompt_template_versions (workspace_id, scope, version, body, source) VALUES ($1, $2, $3, $4, $5) RETURNING id, workspace_id, scope, version, body, source, created_at', [workspaceId, scope, version, body, source]);
+    return result.rows[0];
+  }
+
+  return {
+    async get(workspaceId, scope = ANALYSIS_SCOPE) {
+      return (await latest(workspaceId, scope)) ?? insert(workspaceId, scope, defaultTemplate(), 'DEFAULT');
+    },
+    async save(workspaceId, scope, body) {
+      return insert(workspaceId, scope, validateTemplate(body), 'CUSTOM');
+    },
+    async reset(workspaceId, scope = ANALYSIS_SCOPE) {
+      return insert(workspaceId, scope, defaultTemplate(), 'DEFAULT');
+    },
+  };
+}
+
+module.exports = { ANALYSIS_SCOPE, MAX_TEMPLATE_LENGTH, templateVariables, weights, calculateOverallScore, decisionForScore, validateAnalysisOutput, validateTemplate, defaultTemplate, buildAnalysisPrompt, createTemplateStore };
