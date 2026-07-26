@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0"
 
-if not exist "node_modules\.bin\electron.cmd" (
+if not exist "node_modules\.package-lock.json" (
   echo Installing project dependencies...
   call npm install --no-audit --no-fund
   if errorlevel 1 (

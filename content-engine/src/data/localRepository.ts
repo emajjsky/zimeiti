@@ -79,7 +79,7 @@ export async function loadState(): Promise<LocalState> {
     return normalizeState({ ...result.state, sources, intelligence });
   }
 
-  // 仅用于从早期原型迁移。正式桌面端不会继续把 localStorage 作为数据层。
+  // 仅用于早期原型数据迁移；正式 Web 数据以服务端工作空间为准。
   const value = window.localStorage.getItem(key);
   if (!value) return seedState;
   try { return normalizeState(JSON.parse(value) as LocalState); } catch { return seedState; }

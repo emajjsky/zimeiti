@@ -2,22 +2,18 @@
   "name": "content-engine",
   "version": "0.1.0",
   "private": true,
-  "description": "内容引擎桌面端 MVP",
-  "main": "electron/main.cjs",
+  "description": "内容引擎 Web 应用",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
     "dev": "concurrently -k \"npm:dev:api\" \"npm:dev:web\"",
     "dev:web": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "dev:api": "node --watch server/index.cjs",
     "dev:worker": "node --watch server/worker.cjs",
-    "dev:desktop": "concurrently -k \"vite --host 127.0.0.1 --port 5173 --strictPort\" \"wait-on http://127.0.0.1:5173 && cross-env ELECTRON_RENDERER_URL=http://127.0.0.1:5173 electron .\"",
     "start": "node server/index.cjs",
     "db:migrate": "node server/migrate.cjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "typecheck": "tsc -b --pretty false",
-    "package:dir": "npm run build && electron-builder --win --dir",
-    "package:win": "npm run build && electron-builder --win"
+    "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",
@@ -43,29 +39,6 @@
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "concurrently": "latest",
-    "cross-env": "latest",
-    "electron": "39.8.10",
-    "electron-builder": "^26.15.3",
-    "typescript": "latest",
-    "wait-on": "latest"
-  },
-  "build": {
-    "appId": "com.zhineng.contentengine",
-    "productName": "内容引擎",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "dist/**",
-      "electron/**",
-      "package.json"
-    ],
-    "asar": true,
-    "win": {
-      "target": [
-        "nsis"
-      ],
-      "artifactName": "${productName}-${version}-setup.${ext}"
-    }
+    "typescript": "latest"
   }
 }

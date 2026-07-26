@@ -1252,7 +1252,7 @@ WorkspaceTabs
 PageHeader
 ```
 
-说明 Electron 兼容分支仍保留，但用户可见层已纯 Web 化。
+历史执行说明：当时 Electron 兼容分支仍保留。该状态已被 2026-07-26 的 Web-only 架构决策取代，Electron 代码与依赖现已删除。
 
 - [ ] **Step 4: 更新验收日志**
 

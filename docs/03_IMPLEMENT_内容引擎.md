@@ -1,14 +1,12 @@
 # 内容引擎技术实施方案
 
-> 版本：Web-first v1.0
+> 版本：Web-only v1.0
 > 更新：2026-07-24
 > 适用阶段：P0-P2
 
 ## 1. 架构决策
 
-产品采用 Web-first 架构。浏览器负责交互和内容编辑；服务端负责身份、主数据、外部调用、凭据保护和任务调度；异步 Worker 负责百炼 CLI、媒体任务和后续渲染。
-
-Electron 不再是产品运行时依赖，仅保留为早期原型与迁移参考。用户不需要安装桌面客户端。
+产品采用 Web-only 架构。浏览器负责交互和内容编辑；服务端负责身份、主数据、外部调用、凭据保护和任务调度；异步 Worker 负责百炼 CLI、媒体任务和后续渲染。仓库不保留 Electron 兼容层、桌面打包配置或桌面专用依赖。
 
 ```text
 React/Vite Web
@@ -30,7 +28,7 @@ Fastify API
 | PostgreSQL | 用户、工作空间、凭据、情报、任务和审计主数据 | 已建立初始迁移 |
 | Redis/BullMQ | 延迟任务、异步任务、重试与 Worker 通信 | 已建立骨架 |
 | 百炼 CLI Runner | 每个任务临时注入 Key 并执行 CLI | 已建立骨架 |
-| Skill 注册表与 Agent 计划 | 内置 Skill、受限计划、确认前运行记录 | 已建立，真实百炼计划待用户验收 |
+| Agent 动作与 Skill 组合 | 受限动作计划、五维创作规则、确认前运行记录 | 热点分析动作已建立，创作组合待实施 |
 | RSS/剪藏/Tavily 服务 | 合规信息采集、统一分类和候选搜索 | RSS 目录与分类已验收，Tavily/剪藏待真实用户验收 |
 | 飞书适配器 | OAuth、模板、字段映射、同步 | 未实现 |
 | 发布扩展 | 浏览器预填与人工确认 | 未实现 |
@@ -134,30 +132,31 @@ Worker 从凭据库读取并临时解密百炼 Key，调用内置 `bailian-cli`�
 
 任务无有效 Scope 或模型策略时必须失败并提示配置路径，不能静默回退到硬编码模型。每次成功或失败调用均回写 `generation_runs` 与 `api_usage_logs`，供项目页和设置用量页查询。
 
-## 7. 核心 Agent 与 Skill 注册表
+## 7. 核心 Agent、动作注册表与 Skill 组合
 
 ### 7.1 Agent 边界
 
-核心 Agent 运行在服务端，是“计划器”而不是自由执行器。它只能从注册表选择已启用的 Skill，Skill 只能调用其清单中允许的工具。任何工具调用都通过 API/Worker 执行，不允许模型自行构造任意命令、URL、数据库查询或发布动作。
+核心 Agent 运行在服务端，是“计划器”而不是自由执行器。它只能从动作注册表选择已启用动作，并读取项目冻结的 Skill 组合约束输出。只有动作定义可以声明工具白名单；Skill 不能授予工具、命令或数据库权限。任何工具调用都通过 API/Worker 执行，不允许模型自行构造任意命令、URL、数据库查询或发布动作。
 
 ### 7.2 数据模型
 
 | 表 | 责任 |
 | --- | --- |
-| `skill_definitions` | 平台内置或工作空间自定义 Skill 的稳定 ID、所有者、执行目标和启用状态 |
-| `skill_versions` | 输入/输出契约、提示词、工具白名单、Scope、质量规则和版本号 |
-| `topic_skill_packs` | 题材包对基础 Skill 的规则覆盖和启用组合 |
+| `agent_action_definitions` | 生成、改写、配图、排版等受限动作的输入/输出、工具白名单、Scope 和写入范围 |
+| `skill_definitions` | 题材、内容类型、语言风格、排版、渠道规则的稳定 ID、维度、所有者和启用状态 |
+| `skill_versions` | 结构化规则、来源要求、禁用表达、质量检查和版本号 |
+| `skill_compositions` | 项目选择的五维 Skill 版本组合及覆盖字段 |
 | `agent_model_policies` | 工作空间中 Agent 规划与各 Skill Scope 可用的模型路由 |
 | `agent_plans` | 用户请求、上下文快照、结构化步骤、状态与确认时间 |
 | `generation_runs` | 单个 Skill 运行的来源、模型、提示词、用量、结果与错误 |
 
 ### 7.3 计划协议
 
-核心 Agent 输出严格 JSON：`goal`、`contextSummary`、`steps[]`、`risks[]`、`estimatedCost`。每个步骤必须引用一个 `skillVersionId`、声明输入资产、预期输出和是否需要确认。API 在保存计划前验证所有 Skill、Scope、输入和权限；无效步骤直接拒绝，不进入 Worker。
+核心 Agent 输出严格 JSON：`goal`、`contextSummary`、`steps[]`、`risks[]`、`estimatedCost`。每个步骤必须引用一个 `actionDefinitionId`，并声明当前 `skillCompositionId`、输入资产、预期输出和是否需要确认。API 在保存计划前校验动作白名单、Skill 组合、Scope、输入和权限；无效步骤直接拒绝，不进入 Worker。
 
 ### 7.4 P0 实现方式
 
-P0 先提供代码内置、数据库登记的通用 Skill。用户可以选择题材包，但不能在 P0 上传任意脚本或 Prompt 执行。P1 再提供受限的 Skill 编辑器和审批流程。
+P0 先提供代码内置、数据库登记的五维 Skill 预设。用户可按维度组合，复制内置预设后编辑结构化规则，但不能上传任意脚本。Agent 动作由系统维护，用户不能通过修改 Skill 扩大工具权限或模型 Scope。P1 再提供团队共享、版本审批和样文辅助提取规则。
 
 ## 8. 信息采集安全
 
@@ -351,3 +350,10 @@ API：`http://127.0.0.1:8787/health`
 - `src/app/navigation.mjs` 新增 `resetViewport()`，统一将浏览器页面滚动到 `top: 0`、`left: 0`。
 - `App` 使用 `useLayoutEffect` 监听 `view`，在新工作页绘制前调用该方法，防止吸顶顶栏遮挡新页面标题。
 - `tests/web-navigation.test.mjs` 覆盖滚动参数和主入口监听关系。
+
+## 2026-07-26 架构收敛：移除桌面运行时
+
+- 删除 `electron/main.cjs`、`electron/preload.cjs`、`dev:desktop`、Windows 桌面打包配置和 Electron 相关依赖。
+- `package.json` 只保留 Web、API、Worker、迁移、测试、类型检查和 Web 构建命令；本地启动脚本不再检查 Electron。
+- 创作实现采用“Agent 动作 + Skill 组合 + 模型 Scope”：动作决定能做什么，Skill 决定按什么题材、内容类型、语言风格、排版和渠道规则完成，百炼 CLI 只负责模型执行。
+- 视频作为独立媒体项目读取既有文稿与素材，不进入图文创作主状态机。
