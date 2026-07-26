@@ -269,7 +269,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .intelligence-card:hover { border-color:#8c9ab0; transform:translateY(-2px); box-shadow:0 8px 20px rgba(28,45,75,.09); }
 .intelligence-source-bar { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:0 12px; color:#26364d; font-size:11px; font-weight:700; }
 .intelligence-source-bar span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.intelligence-card-status { display:flex; align-items:center; justify-content:flex-end; gap:5px; min-width:0; }
 .intelligence-source-bar em { flex:none; padding:3px 6px; border:1px solid currentColor; border-radius:4px; background:rgba(255,255,255,.7); font-size:10px; font-style:normal; }
+.intelligence-source-bar em.analyzed { border-color:#3860ae; background:#edf3ff; color:#2d559f; }
 .intelligence-card h2 { display:-webkit-box; min-height:54px; margin:0; padding:13px 13px 0; overflow:hidden; font-size:17px; line-height:1.45; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
 .intelligence-card>p { display:-webkit-box; margin:8px 13px; overflow:hidden; color:var(--muted); font-size:13px; line-height:1.65; -webkit-box-orient:vertical; -webkit-line-clamp:4; }
 .intelligence-tags { display:flex; gap:5px; min-width:0; padding:0 13px 10px; overflow:hidden; }

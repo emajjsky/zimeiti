@@ -7,7 +7,17 @@ function sourceDto(row) {
 }
 
 function itemDto(row) {
-  return { id: row.id, title: row.title, summary: row.summary, category: row.category, keywords: row.matched_keywords ?? [], source: row.source_name, publishedAt: row.published_at?.toISOString?.() ?? row.published_at ?? row.created_at?.toISOString?.() ?? new Date().toISOString(), heat: row.heat, trust: row.trust, url: row.canonical_url ?? undefined, captureMethod: row.capture_method, language: row.language, note: row.note ?? undefined };
+  const analysis = row.analysis_id ? {
+    id: row.analysis_id,
+    selectedPlatforms: row.selected_platforms,
+    ...row.output_json,
+    overallScore: row.overall_score,
+    decision: row.decision,
+    model: row.analysis_model,
+    promptVersion: row.analysis_prompt_version,
+    analyzedAt: row.analyzed_at,
+  } : undefined;
+  return { id: row.id, title: row.title, summary: row.summary, category: row.category, keywords: row.matched_keywords ?? [], source: row.source_name, publishedAt: row.published_at?.toISOString?.() ?? row.published_at ?? row.created_at?.toISOString?.() ?? new Date().toISOString(), heat: row.heat, trust: row.trust, url: row.canonical_url ?? undefined, captureMethod: row.capture_method, language: row.language, note: row.note ?? undefined, analysis };
 }
 
 function normalizeSourceInput(source) {
@@ -74,9 +84,18 @@ async function removeSource(workspaceId, sourceId) {
 
 async function listItems(workspaceId) {
   await purgeExpiredItems(workspaceId);
-  const result = await query(`SELECT * FROM intelligence_items
-    WHERE workspace_id = $1 AND COALESCE(published_at, created_at) >= now() - interval '30 days'
-    ORDER BY COALESCE(published_at, created_at) DESC LIMIT 500`, [workspaceId]);
+  const result = await query(`SELECT i.*, latest.analysis_id, latest.selected_platforms, latest.output_json, latest.overall_score, latest.decision, latest.analysis_model, latest.analysis_prompt_version, latest.analyzed_at
+    FROM intelligence_items i
+    LEFT JOIN LATERAL (
+      SELECT a.id AS analysis_id, a.selected_platforms, a.output_json, a.overall_score, a.decision,
+        r.model AS analysis_model, r.prompt_version AS analysis_prompt_version, a.created_at AS analyzed_at
+      FROM intelligence_analyses a
+      JOIN generation_runs r ON r.id = a.generation_run_id
+      WHERE a.workspace_id = i.workspace_id AND a.intelligence_item_id = i.id
+      ORDER BY a.created_at DESC LIMIT 1
+    ) latest ON true
+    WHERE i.workspace_id = $1 AND COALESCE(i.published_at, i.created_at) >= now() - interval '30 days'
+    ORDER BY COALESCE(i.published_at, i.created_at) DESC LIMIT 500`, [workspaceId]);
   return result.rows.map(itemDto);
 }
 

@@ -64,3 +64,8 @@ test('热点详情重新打开时读取最近分析运行状态', async () => {
   assert.match(source, /latestAnalysisRun\(selected\.id\)/);
   assert.match(source, /resumeAnalysisPolling/);
 });
+
+test('已完成分析的资讯卡片显示已分析状态', async () => {
+  const source = await readFile(new URL('../src/workspaces/discover/IntelligenceInbox.tsx', import.meta.url), 'utf8');
+  assert.match(source, /entry\.analysis && <em className="analyzed">已分析<\/em>/);
+});

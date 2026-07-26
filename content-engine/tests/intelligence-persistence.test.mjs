@@ -28,6 +28,17 @@ test('仓储 DTO 返回持久化关键词', () => {
   assert.deepEqual(itemDto({}).keywords, []);
 });
 
+test('仓储 DTO 保留最新成功分析，供热点卡片恢复状态', () => {
+  const item = itemDto({
+    analysis_id: 'analysis-1', selected_platforms: ['WECHAT'], output_json: { timingWindow: 'TODAY' },
+    overall_score: 86, decision: 'FOLLOW', analysis_model: 'qwen-plus', analysis_prompt_version: 2,
+    analyzed_at: '2026-07-26T10:00:00.000Z',
+  });
+  assert.equal(item.analysis.id, 'analysis-1');
+  assert.equal(item.analysis.decision, 'FOLLOW');
+  assert.equal(item.analysis.overallScore, 86);
+});
+
 test('规范化 URL 去除追踪参数、片段并稳定排序查询参数', () => {
   assert.equal(
     normalizeCanonicalUrl('HTTPS://Example.COM:443/a?utm_source=x&b=2&a=1&spm=abc#section'),
