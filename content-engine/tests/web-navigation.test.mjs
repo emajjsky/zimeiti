@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const navigation = await import('../src/app/navigation.mjs').catch(() => null);
@@ -56,4 +57,10 @@ test('设置工作区统一管理五类配置', () => {
     { id: 'feishu', label: '飞书 Base' },
     { id: 'accounts', label: '账号授权' },
   ]);
+});
+
+test('热点详情重新打开时读取最近分析运行状态', async () => {
+  const source = await readFile(new URL('../src/workspaces/discover/IntelligenceInbox.tsx', import.meta.url), 'utf8');
+  assert.match(source, /latestAnalysisRun\(selected\.id\)/);
+  assert.match(source, /resumeAnalysisPolling/);
 });

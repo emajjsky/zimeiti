@@ -7,7 +7,7 @@ const { runBailianCli } = require('./runner/bailian.cjs');
 const { listAvailableSkills, plannerSkillView } = require('./agent/skillRegistry.cjs');
 const { parsePlan } = require('./agent/planValidation.cjs');
 const { createTextModelRunner } = require('./services/text-model.cjs');
-const { buildAnalysisPrompt, calculateOverallScore, decisionForScore, parseAnalysisContent } = require('./services/intelligence-analysis.cjs');
+const { buildAnalysisPrompt, buildAnalysisRepairPrompt, calculateOverallScore, decisionForScore, parseAnalysisContent } = require('./services/intelligence-analysis.cjs');
 
 const connection = new IORedis(config.redisUrl, { maxRetriesPerRequest: null });
 const textRunner = createTextModelRunner();
@@ -62,8 +62,9 @@ async function generateIntelligenceAnalysis({ jobId, workspaceId, runId }) {
     outputTokens = first.outputTokens;
     let output;
     try { output = parseAnalysisContent(first.content, input.selectedPlatforms); }
-    catch {
-      const repaired = await textRunner.runText({ provider: route.provider, model: route.model, system: `${prompt.system}\n上一次输出无法解析。请只返回符合要求的 JSON。`, message: first.content, ...connectionInput });
+    catch (error) {
+      const validationError = error instanceof Error ? error.message : '输出不符合 JSON 契约。';
+      const repaired = await textRunner.runText({ provider: route.provider, model: route.model, system: buildAnalysisRepairPrompt(prompt.system, validationError), message: first.content, ...connectionInput });
       inputTokens = (inputTokens ?? 0) + (repaired.inputTokens ?? 0);
       outputTokens = (outputTokens ?? 0) + (repaired.outputTokens ?? 0);
       output = parseAnalysisContent(repaired.content, input.selectedPlatforms);

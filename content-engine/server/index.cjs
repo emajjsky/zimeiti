@@ -374,6 +374,34 @@ app.get('/api/v1/intelligence/items/:id/analyses/latest', { preHandler: authenti
   return { id: row.id, selectedPlatforms: row.selected_platforms, ...row.output_json, overallScore: row.overall_score, decision: row.decision, model: row.model, promptVersion: row.prompt_version, analyzedAt: row.created_at };
 });
 
+app.get('/api/v1/intelligence/items/:id/analyses/latest-run', { preHandler: authenticate }, async (request) => {
+  const workspace = await currentWorkspace(request.user.sub);
+  const result = await query(`SELECT r.id, r.status, r.error, r.model, r.prompt_version, r.input_json, r.created_at,
+      (SELECT j.id FROM jobs j WHERE j.workspace_id = r.workspace_id AND j.payload_json->>'runId' = r.id::text ORDER BY j.created_at DESC LIMIT 1) AS job_id
+    FROM generation_runs r
+    WHERE r.workspace_id = $1
+      AND r.skill_version_id = 'intelligence-analysis:1.0.0'
+      AND r.source_snapshot_json->'item'->>'id' = $2
+    ORDER BY r.created_at DESC LIMIT 1`, [workspace.id, request.params.id]);
+  if (!result.rowCount) return null;
+  const row = result.rows[0];
+  return {
+    id: row.id,
+    status: row.status,
+    error: row.error ?? undefined,
+    jobId: row.job_id ?? undefined,
+    createdAt: row.created_at,
+    confirmation: {
+      sourceCount: 1,
+      platforms: row.input_json?.selectedPlatforms ?? [],
+      model: row.model,
+      promptVersion: Number(row.prompt_version),
+      generalAudienceWarning: !String(row.source_snapshot_json?.profile?.accountPositioning ?? '').trim() || !String(row.source_snapshot_json?.profile?.targetAudience ?? '').trim(),
+      costEstimate: null,
+    },
+  };
+});
+
 app.post('/api/v1/intelligence/clip', { preHandler: authenticate }, async (request) => clipPublicLink(z.object({ url: z.string().url().max(2_000) }).parse(request.body).url));
 app.post('/api/v1/intelligence/search', { preHandler: authenticate }, async (request) => searchTavily((await currentWorkspace(request.user.sub)).id, z.object({ query: z.string(), category: z.string().optional(), domains: z.array(z.string()).optional() }).parse(request.body)));
 app.get('/api/v1/intelligence/sources', { preHandler: authenticate }, async (request) => listSources((await currentWorkspace(request.user.sub)).id));

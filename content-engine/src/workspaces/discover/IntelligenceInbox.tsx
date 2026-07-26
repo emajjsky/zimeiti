@@ -1,5 +1,5 @@
 import { BrainCircuit, CheckCircle2, LoaderCircle, Search, X } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { PageHeader } from '../../components/workspace/PageHeader';
 import type { LocalState } from '../../data/localRepository';
 import { webIntelligence, type AnalysisPreparation } from '../../data/webApi';
@@ -42,6 +42,7 @@ export function IntelligenceInbox({
   const [analysis, setAnalysis] = useState<IntelligenceAnalysis | undefined>();
   const [analysisState, setAnalysisState] = useState<AnalysisState>({ status: 'idle', message: '' });
   const [angleIndex, setAngleIndex] = useState(0);
+  const pollingJobId = useRef<string | null>(null);
 
   const categories = useMemo(() => [...new Set(intelligence.map((entry) => entry.category).filter(Boolean))], [intelligence]);
   const sourceNames = useMemo(() => [...new Set(intelligence.map(intelligenceSourceLabel).filter(Boolean))].sort((left, right) => left.localeCompare(right, 'zh-CN')), [intelligence]);
@@ -51,12 +52,42 @@ export function IntelligenceInbox({
   const visible = filtered.filter((entry) => projectState === 'ALL' || (projectState === 'PROJECTED' ? projectedIds.has(entry.id) : !projectedIds.has(entry.id)));
   const selected = visible.find((entry) => entry.id === item?.id) ?? visible[0];
 
+  const resumeAnalysisPolling = async (itemId: string, jobId: string) => {
+    if (pollingJobId.current === jobId) return;
+    pollingJobId.current = jobId;
+    setAnalysisState({ status: 'running', message: '分析中' });
+    try {
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1_000));
+        const job = await webIntelligence.job(jobId);
+        if (job.status === 'FAILED' || job.status === 'CANCELLED') throw new Error(job.error || '分析任务未完成。');
+        if (job.status !== 'SUCCEEDED') continue;
+        const result = await webIntelligence.latestAnalysis(itemId);
+        if (!result) throw new Error('分析完成但未读取到结果。');
+        setAnalysis(result); onSaveAnalysis(itemId, result); setAnalysisState({ status: 'idle', message: '' }); return;
+      }
+      setAnalysisState({ status: 'error', message: '任务仍在队列中，请稍后重新打开详情查看结果。' });
+    } catch (error) { setAnalysisState({ status: 'error', message: error instanceof Error ? error.message : '分析失败。' }); }
+    finally { if (pollingJobId.current === jobId) pollingJobId.current = null; }
+  };
+
   useEffect(() => {
     if (!drawerOpen || !selected) return;
     setPlatforms(defaultPlatforms); setPrepared(null); setAngleIndex(0); setAnalysis(selected.analysis); setAnalysisState({ status: 'idle', message: '' });
-    void webIntelligence.latestAnalysis(selected.id).then((result) => {
-      if (!result) return;
-      setAnalysis(result); onSaveAnalysis(selected.id, result);
+    void Promise.all([webIntelligence.latestAnalysis(selected.id), webIntelligence.latestAnalysisRun(selected.id)]).then(([result, run]) => {
+      if (result) { setAnalysis(result); onSaveAnalysis(selected.id, result); }
+      if (!run || run.status === 'SUCCEEDED' || run.status === 'CANCELLED') return;
+      if (run.status === 'DRAFT') {
+        setPrepared({
+          id: run.id,
+          status: 'DRAFT',
+          createdAt: run.createdAt,
+          confirmation: run.confirmation,
+        });
+        return;
+      }
+      if (run.status === 'FAILED') { setAnalysisState({ status: 'error', message: run.error || '分析失败。' }); return; }
+      if (run.jobId) void resumeAnalysisPolling(selected.id, run.jobId);
     }).catch(() => { /* 历史分析读取失败不阻断当前详情。 */ });
   }, [drawerOpen, selected?.id]);
 
@@ -78,17 +109,7 @@ export function IntelligenceInbox({
     setAnalysisState({ status: 'confirming', message: '' });
     try {
       const confirmed = await webIntelligence.confirmAnalysis(prepared.id);
-      setPrepared(null); setAnalysisState({ status: 'running', message: '分析中' });
-      for (let attempt = 0; attempt < 30; attempt += 1) {
-        await new Promise((resolve) => window.setTimeout(resolve, 1_000));
-        const job = await webIntelligence.job(confirmed.jobId);
-        if (job.status === 'FAILED' || job.status === 'CANCELLED') throw new Error(job.error || '分析任务未完成。');
-        if (job.status !== 'SUCCEEDED') continue;
-        const result = await webIntelligence.latestAnalysis(selected.id);
-        if (!result) throw new Error('分析完成但未读取到结果。');
-        setAnalysis(result); onSaveAnalysis(selected.id, result); setAnalysisState({ status: 'idle', message: '' }); return;
-      }
-      setAnalysisState({ status: 'error', message: '任务仍在队列中，请稍后重新打开详情查看结果。' });
+      setPrepared(null); void resumeAnalysisPolling(selected.id, confirmed.jobId);
     } catch (error) { setAnalysisState({ status: 'error', message: error instanceof Error ? error.message : '分析失败。' }); }
   };
 

@@ -81,9 +81,15 @@ function buildAnalysisPrompt({ template, item, profile, platforms }) {
     '必须只返回 JSON，不要 Markdown 或解释文字。',
     'JSON 必须包含 decisionReason、timingWindow、dimensions、angles、platforms、factsToVerify、risks。',
     'dimensions 必须包含 timeliness、accountFit、contentValue、spreadPotential、feasibilityAndSafety，每项有 0-100 整数 score 和简短 reason。',
-    'platforms 必须且只能覆盖本次选择的平台。angles 最多 3 条，factsToVerify 与 risks 各最多 5 条。',
+    `timingWindow 只能是 TODAY|THREE_DAYS|ONE_WEEK|EVERGREEN 之一。platforms 必须且只能覆盖本次选择的平台。angles 最多 3 条，factsToVerify 与 risks 各最多 5 条。`,
+    '严格按以下 JSON 形状返回。angles 和 platforms 中的每一项必须是对象，不能是字符串：',
+    '{"decisionReason":"一句话判断","timingWindow":"TODAY","dimensions":{"timeliness":{"score":0,"reason":"原因"},"accountFit":{"score":0,"reason":"原因"},"contentValue":{"score":0,"reason":"原因"},"spreadPotential":{"score":0,"reason":"原因"},"feasibilityAndSafety":{"score":0,"reason":"原因"}},"angles":[{"title":"角度标题","coreViewpoint":"核心观点","targetAudience":"目标受众"}],"platforms":[{"platform":"WECHAT","fitScore":0,"recommendedFormat":"建议形式","reason":"适配原因"}],"factsToVerify":["待核验事实"],"risks":["风险提示"]}',
   ].join('\n');
   return { system, message: JSON.stringify({ businessTemplate, context }) };
+}
+
+function buildAnalysisRepairPrompt(system, validationError) {
+  return `${system}\n上一次输出未通过结构校验。请只返回修正后的 JSON，不要解释。校验错误如下：${validationError}`;
 }
 
 function prepareAnalysisInput({ item, profile, platforms, template, route }) {
@@ -126,4 +132,4 @@ function createTemplateStore({ query }) {
   };
 }
 
-module.exports = { ANALYSIS_SCOPE, MAX_TEMPLATE_LENGTH, templateVariables, weights, calculateOverallScore, decisionForScore, validateAnalysisOutput, parseAnalysisContent, validateTemplate, defaultTemplate, buildAnalysisPrompt, prepareAnalysisInput, createTemplateStore };
+module.exports = { ANALYSIS_SCOPE, MAX_TEMPLATE_LENGTH, templateVariables, weights, calculateOverallScore, decisionForScore, validateAnalysisOutput, parseAnalysisContent, validateTemplate, defaultTemplate, buildAnalysisPrompt, buildAnalysisRepairPrompt, prepareAnalysisInput, createTemplateStore };

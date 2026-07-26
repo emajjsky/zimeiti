@@ -311,6 +311,13 @@ API：`http://127.0.0.1:8787/health`
 
 # 2026-07-26 实现记录：AI 热点分析
 
+## 2026-07-26 实现记录：AI 分析状态恢复与输出修复
+
+- `GET /api/v1/intelligence/items/:id/analyses/latest-run` 从 `generation_runs` 返回最近一条分析运行的状态、错误、任务 ID 与确认卡数据。
+- `IntelligenceInbox.tsx` 在详情抽屉打开时并行读取最近成功结果和最近运行状态：DRAFT 恢复确认卡，QUEUED/RUNNING 继续轮询，FAILED 展示服务端错误；通过 `useRef` 避免同一任务重复轮询。
+- `buildAnalysisPrompt()` 明确 `timingWindow` 枚举和嵌套对象数组 JSON 样例。`buildAnalysisRepairPrompt()` 接收结构化校验错误；Worker 在首次校验失败后把真实错误传入一次性修复调用。
+- 新增提示词契约和运行状态读取的回归测试。真实模型调用未执行。
+
 - `007_intelligence_analysis.sql` 新增分析结果和提示词模板版本表；迁移已在本地开发库应用。
 - `server/services/intelligence-analysis.cjs` 实现五维评分权重、FOLLOW/WATCH/SKIP 决策、业务模板变量校验、默认模板、三层提示词、模型 JSON 代码块提取和输出/平台契约校验。
 - `server/services/text-model.cjs` 为百炼 CLI 与 OpenAI 兼容外部 API 提供统一文本执行器。

@@ -45,6 +45,19 @@ test('从模型返回的代码块中提取并校验结构化分析', () => {
   assert.equal(result.platforms[0].platform, 'WECHAT');
 });
 
+test('分析提示词提供枚举值和对象数组的精确 JSON 形状', () => {
+  const prompt = analysis.buildAnalysisPrompt({
+    template: '评估 {{title}}',
+    item: { title: '标题', summary: '摘要', source: '来源', publishedAt: '2026-07-26T00:00:00.000Z', category: 'AI', keywords: [] },
+    profile: { primaryTopics: ['AI'], accountPositioning: '科技解读账号', targetAudience: '普通读者' },
+    platforms: ['WECHAT', 'XIAOHONGSHU'],
+  });
+
+  assert.match(prompt.system, /TODAY\|THREE_DAYS\|ONE_WEEK\|EVERGREEN/);
+  assert.match(prompt.system, /"angles":\[\{"title"/);
+  assert.match(prompt.system, /"platforms":\[\{"platform":"WECHAT"/);
+});
+
 test('准备分析时要求题材、原文、平台和模型路由完整', () => {
   const input = {
     item: { id: 'item-1', title: '标题', summary: '摘要', source: '来源', url: 'https://example.com', category: 'AI', keywords: [], publishedAt: '2026-07-26T00:00:00.000Z' },
