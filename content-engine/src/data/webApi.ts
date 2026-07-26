@@ -1,6 +1,7 @@
 import type { LocalState } from './localRepository';
 import type { ApiUsageLog, ApiUsageSummary, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelTaskPolicy } from '../domain/integrations';
 import type { IntelligenceAnalysis, Platform } from '../domain/content';
+import type { CreativeSkillDefinition, WritingBrief, WritingBriefInput } from '../domain/creative';
 
 const tokenKey = 'content-engine-web-session-v1';
 const apiBase = import.meta.env.VITE_API_BASE ?? '/api/v1';
@@ -36,6 +37,12 @@ export const webAuth = {
 export const webState = {
   async load() { return request<{ state: LocalState; revision: number; updatedAt: string }>('/workspace/state'); },
   async save(state: LocalState) { return request<{ revision: number; updatedAt: string }>('/workspace/state', { method: 'PUT', body: JSON.stringify({ state }) }); },
+};
+
+export const webCreative = {
+  skills: () => request<CreativeSkillDefinition[]>('/creative/skills'),
+  brief: (projectId: string) => request<{ brief: WritingBrief | null }>(`/creative/projects/${encodeURIComponent(projectId)}/brief`),
+  saveBrief: (projectId: string, input: WritingBriefInput) => request<{ brief: WritingBrief }>(`/creative/projects/${encodeURIComponent(projectId)}/brief`, { method: 'PUT', body: JSON.stringify(input) }),
 };
 
 export const webIntelligence = {

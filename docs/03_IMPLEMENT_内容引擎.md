@@ -357,3 +357,15 @@ API：`http://127.0.0.1:8787/health`
 - `package.json` 只保留 Web、API、Worker、迁移、测试、类型检查和 Web 构建命令；本地启动脚本不再检查 Electron。
 - 创作实现采用“Agent 动作 + Skill 组合 + 模型 Scope”：动作决定能做什么，Skill 决定按什么题材、内容类型、语言风格、排版和渠道规则完成，百炼 CLI 只负责模型执行。
 - 视频作为独立媒体项目读取既有文稿与素材，不进入图文创作主状态机。
+
+## 2026-07-26 实现记录：WritingBrief 与创作 Skill
+
+- `008_creative_skill_system.sql` 新增 `creator_profiles`、`creative_skill_definitions`、`creative_skill_versions`、`creative_skill_compositions` 和 `writing_briefs`。
+- 新表使用 `creative_` 前缀与旧 Agent 动作注册表隔离。热点分析继续使用 `intelligence-analysis:1.0.0`，本轮没有重命名、删除或迁移旧表。
+- `server/services/creativeSkills.cjs` 提供 Skill 目录读取、Brief 读取和事务保存。写入前按工作空间权限校验五个版本，并验证每个版本属于请求中的对应维度。
+- API 新增 `GET /api/v1/creative/skills`、`GET /api/v1/creative/projects/:projectId/brief` 和 `PUT /api/v1/creative/projects/:projectId/brief`。
+- `src/domain/creative.ts` 定义前后端共享语义类型；`webCreative` 封装 Web API，不增加桌面或本地持久化分支。
+- `CreateWorkspace.tsx` 将创作页拆成创作设定和文案两个可用阶段，提供加载、未保存、保存中、已保存和错误状态。配图、排版、审核保留在步骤条但当前禁用。
+- 图文主流程只读取公众号和小红书版本。旧视频号版本保留在项目数据中，但不进入 Brief 平台选择和文案页签。
+- 本轮设计采用 `DESIGN_VARIANCE 4 / MOTION_INTENSITY 2 / VISUAL_DENSITY 5`。只用 CSS 提供状态反馈，没有为表单引入 Anime.js 动画。
+- Skill 调研、许可证和采用结论记录在 `docs/05_SKILL_RESEARCH_自媒体.md`。

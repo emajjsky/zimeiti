@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { animate, createScope, stagger } from 'animejs';
 import { ArrowLeft, Bell, BrainCircuit, CalendarDays, ChartColumn, CheckCircle2, ChevronRight, CircleAlert, CircleCheck, ClipboardList, Compass, FilePenLine, FolderOpen, KeyRound, Lightbulb, Menu, PenLine, Pencil, Plus, RefreshCw, Search, Send, Settings, Trash2 } from 'lucide-react';
@@ -17,6 +17,7 @@ import { IntelligenceInbox } from './workspaces/discover/IntelligenceInbox';
 import { WorkspaceProfileSettings } from './workspaces/settings/WorkspaceProfileSettings';
 import { AccountAuthorizationSettings } from './workspaces/settings/AccountAuthorizationSettings';
 import { PromptTemplateSettings } from './workspaces/settings/PromptTemplateSettings';
+import { CreateWorkspace } from './workspaces/create/CreateWorkspace';
 import './styles.css';
 
 function displayError(error: unknown, fallback: string) {
@@ -263,8 +264,6 @@ function App() {
   };
   const projectVersions = featuredProject?.versions ?? [];
   const activeVersion = projectVersions.find((item) => item.platform === activePlatform);
-  const platformProgress = useMemo(() => projectVersions.filter((version) => version.status === 'PREFLIGHT_PASSED').length, [projectVersions]);
-
   if (!isLoaded) return <div className="boot-screen"><div className="boot-mark">内容引擎</div><p>正在准备你的编辑部……</p></div>;
   if (!state.workspace.setupCompleted) return <Onboarding initial={state.workspace} onComplete={completeSetup} />;
 
@@ -284,7 +283,7 @@ function App() {
       {view === 'discover' && <DiscoverWorkspace section={discoverSection} onSectionChange={setDiscoverSection} inbox={<IntelligenceInbox item={selectedIntel} intelligence={state.intelligence} sources={state.sources} topics={state.topics} projects={state.projects} defaultPlatforms={state.workspace.enabledPlatforms} onSelect={setSelectedIntelId} onCreateTopic={createTopicFromIntel} onOpenTopic={openTopicFromIntel} onSaveAnalysis={saveAnalysis} onRefresh={refreshRss} onOpenSources={() => openSettings('sources')} refreshFeedback={refreshFeedback} />} search={<NetworkSearchPanel preset={searchPreset} onSave={saveSearchCandidate} onOpenSearchSettings={() => openSettings('models', 'search')} checkStatus={webSearchStatus} searchWeb={searchWeb} />} linkImport={<LinkImportPanel onSave={saveClippedLink} onShowInbox={() => openDiscover('inbox')} previewLink={previewPublicLink} />} />}
       {view === 'plan' && selectedTopic && <Plan topics={state.topics} selected={selectedTopic} intelligence={state.intelligence} onSelect={setSelectedTopicId} onCreateProject={createProjectFromTopic} onEdit={openTopicEditor} onDelete={deleteTopic} />}
       {view === 'topicEditor' && <TopicEditor key={editingTopicId ?? 'new'} topic={state.topics.find((topic) => topic.id === editingTopicId)} defaultCategory={state.workspace.primaryTopics[0] ?? '未分类'} onSave={saveTopic} onCancel={() => { setEditingTopicId(null); setView('plan'); }} />}
-      {view === 'create' && <Create project={featuredProject} activePlatform={activePlatform} onPlatform={setActivePlatform} activeVersion={activeVersion} progress={platformProgress} onSaveVersion={saveContentVersion} />}
+      {view === 'create' && <CreateWorkspace project={featuredProject} activePlatform={activePlatform} onPlatform={setActivePlatform} activeVersion={activeVersion} onSaveVersion={saveContentVersion} />}
       {view === 'publish' && <Publish project={featuredProject} onNavigate={setView} />}
       {view === 'review' && <Review onNavigate={setView} />}
       {view === 'assets' && <Utility title="素材库" description="素材将按目录、类型和所属项目统一管理。" />}
@@ -375,42 +374,6 @@ function Plan({ topics, selected, intelligence, onSelect, onCreateProject, onEdi
 }
 
 function DetailBlock({ label, value }: { label: string; value: string }) { return <div className="detail-block"><small>{label}</small><p>{value}</p></div>; }
-
-function Create({ project, activePlatform, onPlatform, activeVersion, progress, onSaveVersion }: { project: ContentProject | undefined; activePlatform: Platform; onPlatform: (platform: Platform) => void; activeVersion: ContentVersion | undefined; progress: number; onSaveVersion: (projectId: string, versionId: string, patch: Pick<ContentVersion, 'title' | 'body'>) => void }) {
-  const [draft, setDraft] = useState<Pick<ContentVersion, 'title' | 'body'>>({ title: activeVersion?.title ?? '', body: activeVersion?.body ?? '' });
-  const [saveState, setSaveState] = useState<'saved' | 'saving'>('saved');
-
-  useEffect(() => {
-    setDraft({ title: activeVersion?.title ?? '', body: activeVersion?.body ?? '' });
-    setSaveState('saved');
-  }, [activeVersion?.id]);
-
-  const changeDraft = (patch: Partial<Pick<ContentVersion, 'title' | 'body'>>) => {
-    setDraft((current) => ({ ...current, ...patch }));
-    setSaveState('saving');
-  };
-  useEffect(() => {
-    if (saveState !== 'saving' || !project || !activeVersion) return;
-    const timer = window.setTimeout(() => {
-      onSaveVersion(project.id, activeVersion.id, { title: draft.title.trim() || '未命名草稿', body: draft.body });
-      setSaveState('saved');
-    }, 700);
-    return () => window.clearTimeout(timer);
-  }, [activeVersion?.id, draft, project?.id, saveState]);
-  const save = () => {
-    if (!project || !activeVersion) return;
-    onSaveVersion(project.id, activeVersion.id, { title: draft.title.trim() || '未命名草稿', body: draft.body });
-    setSaveState('saved');
-  };
-
-  if (!project || !activeVersion) return <section className="empty-workbench"><h1>还没有可编辑的平台版本</h1><p>请先从选题池确认立项，系统会按目标平台创建草稿。</p></section>;
-  return <>
-    <div className="project-heading"><div><div className="eyebrow">CREATE / 内容项目</div><h1 className="page-title">{project.title}</h1><p className="page-subtitle">项目编号 {project.id.slice(-6).toUpperCase()} · {projectStatusName[project.status]}</p></div><span className={`chip ${saveState === 'saving' ? 'yellow' : 'mint'}`}>{saveState === 'saving' ? '正在编辑' : `已保存 ${activeVersion.updatedAt}`}</span></div>
-    <div className="stepper">{['策划','写作','视觉','视频','审核'].map((label,index) => <div className={`step ${index === 0 ? 'done' : index === 1 ? 'current' : ''}`} key={label}><b>{index === 0 ? '✓' : index + 1}</b><span>{label}</span></div>)}</div>
-    <div className="create-layout editable"><section className="editor"><div className="editor-head"><div className="tabs">{project.versions.map((version) => <button key={version.platform} className={version.platform === activePlatform ? 'active' : ''} onClick={() => onPlatform(version.platform)}>{platformName[version.platform]}</button>)}</div><button className="text-button" onClick={save}>保存草稿</button></div><div className="editor-tools">内容版本 · {platformName[activeVersion.platform]} · 文本草稿</div><div className="document editor-document"><label>标题<input value={draft.title} onChange={(event) => changeDraft({ title: event.target.value })} onBlur={save} /></label><label>正文<textarea value={draft.body} onChange={(event) => changeDraft({ body: event.target.value })} onBlur={save} placeholder="从核心观点开始，写出这期内容的完整表达。" /></label></div></section><aside className="assistant-panel"><h2>创作检查</h2><div className="assist-card"><b>平台版本</b><p>{project.versions.length} 个目标平台版本已创建，可分别编辑。</p></div><div className="assist-card"><b>事实核验</b><p>{project.factChecks.length ? `还有 ${project.factChecks.length} 项待确认` : '尚未添加待核验事项'}</p></div><div className="assist-card"><b>下一步</b><p>完成正文后进入视觉制作，补齐封面和图文素材。</p></div></aside></div>
-  </>;
-}
-
 
 function Publish({ project, onNavigate }: { project: ContentProject | undefined; onNavigate: (view: View) => void }) { return <>
   <PageHeader eyebrow="PUBLISH / 发布中心" title="内容日历" subtitle="先安排发布时间，再进入独立的发布审核。" />

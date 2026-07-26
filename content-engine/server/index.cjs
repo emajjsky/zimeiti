@@ -12,6 +12,7 @@ const { enqueue } = require('./queue.cjs');
 const { listAvailableSkills } = require('./agent/skillRegistry.cjs');
 const { runBailianCli } = require('./runner/bailian.cjs');
 const { ANALYSIS_SCOPE, createTemplateStore, prepareAnalysisInput } = require('./services/intelligence-analysis.cjs');
+const { createCreativeSkillStore } = require('./services/creativeSkills.cjs');
 
 const app = Fastify({ logger: true, bodyLimit: 5 * 1024 * 1024 });
 const credentials = new Set(['TAVILY', 'BAILIAN']);
@@ -19,6 +20,23 @@ const modelTasks = ['INTELLIGENCE_ANALYSIS', 'TOPIC_RECOMMENDATION', 'CONTENT_WR
 const externalProviders = new Set(['DASHSCOPE', 'SILICONFLOW', 'VOLCENGINE_ARK', 'KIMI', 'ZHIPU', 'OPENAI', 'OPENAI_COMPATIBLE']);
 const sourceInput = z.object({ name: z.string().max(160), type: z.literal('RSS'), url: z.string().url().max(2_000), category: z.string().max(120), includeKeywords: z.array(z.string().max(120)).optional(), excludeKeywords: z.array(z.string().max(120)).optional(), language: z.enum(['ALL', 'ZH', 'EN']).optional(), enabled: z.boolean(), refreshMinutes: z.number().min(5).max(10_080), trust: z.string().max(80) });
 const templateStore = createTemplateStore({ query });
+const creativeSkillStore = createCreativeSkillStore({ query, transaction });
+const writingBriefInput = z.object({
+  objective: z.string().max(2_000),
+  targetAudience: z.string().max(1_000),
+  coreMessage: z.string().max(4_000),
+  sourceRequirements: z.string().max(4_000),
+  lengthTarget: z.string().max(120),
+  selectedPlatforms: z.array(z.enum(['WECHAT', 'XIAOHONGSHU'])).min(1).max(2),
+  notes: z.string().max(4_000),
+  selectedSkills: z.object({
+    SUBJECT: z.string().min(1).max(160),
+    CONTENT_TYPE: z.string().min(1).max(160),
+    VOICE: z.string().min(1).max(160),
+    LAYOUT: z.string().min(1).max(160),
+    CHANNEL: z.string().min(1).max(160),
+  }),
+});
 
 app.register(cors, { origin: config.corsOrigin, credentials: false });
 app.register(jwt, { secret: config.jwtSecret });
@@ -418,6 +436,24 @@ app.put('/api/v1/intelligence/sources/:id', { preHandler: authenticate }, async 
 app.delete('/api/v1/intelligence/sources/:id', { preHandler: authenticate }, async (request, reply) => { await removeSource((await currentWorkspace(request.user.sub)).id, request.params.id); reply.code(204).send(); });
 app.get('/api/v1/intelligence/items', { preHandler: authenticate }, async (request) => listItems((await currentWorkspace(request.user.sub)).id));
 app.post('/api/v1/intelligence/rss/refresh', { preHandler: authenticate }, async (request) => refreshWorkspaceRss((await currentWorkspace(request.user.sub)).id));
+
+app.get('/api/v1/creative/skills', { preHandler: authenticate }, async (request) => {
+  const workspace = await currentWorkspace(request.user.sub);
+  return creativeSkillStore.list(workspace.id);
+});
+
+app.get('/api/v1/creative/projects/:projectId/brief', { preHandler: authenticate }, async (request) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const workspace = await currentWorkspace(request.user.sub);
+  return { brief: await creativeSkillStore.getBrief(workspace.id, projectId) };
+});
+
+app.put('/api/v1/creative/projects/:projectId/brief', { preHandler: authenticate }, async (request) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const input = writingBriefInput.parse(request.body);
+  const workspace = await currentWorkspace(request.user.sub);
+  return { brief: await creativeSkillStore.saveBrief(workspace.id, projectId, input) };
+});
 
 app.get('/api/v1/agent/skills', { preHandler: authenticate }, async (request) => listAvailableSkills((await currentWorkspace(request.user.sub)).id));
 
