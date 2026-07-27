@@ -15,6 +15,7 @@ const { runBailianCli } = require('./runner/bailian.cjs');
 const { ANALYSIS_SCOPE, createTemplateStore, prepareAnalysisInput } = require('./services/intelligence-analysis.cjs');
 const { createCreativeSkillStore } = require('./services/creativeSkills.cjs');
 const { createProjectMaterialStore } = require('./services/projectMaterials.cjs');
+const { createProjectAgentStore } = require('./services/project-agent.cjs');
 const { saveProjectUpload, removeProjectUpload, openProjectUpload, readProjectUploadText } = require('./services/projectUploadStorage.cjs');
 const { PROJECT_RESEARCH_ACTION_VERSION, PROJECT_RESEARCH_SCOPE, researchRunView, researchPlanView } = require('./services/project-research.cjs');
 const { OUTLINE_ACTION_VERSION, OUTLINE_SCOPE, OUTLINE_TEMPLATE_SCOPES, outlineTemplateScope, validateOutlineTemplate, defaultOutlineTemplate, outlineCandidateView } = require('./services/creative-outline.cjs');
@@ -40,6 +41,7 @@ const templateStore = createTemplateStore({ query }, {
 });
 const creativeSkillStore = createCreativeSkillStore({ query, transaction });
 const projectMaterialStore = createProjectMaterialStore({ query });
+const projectAgentStore = createProjectAgentStore({ query, transaction });
 const projectScope = z.enum(['PROJECT', 'RESEARCH', 'WRITING', 'IMAGING']);
 const projectPlatforms = z.array(creativePlatform).max(4);
 const projectInputPayload = z.object({
@@ -64,6 +66,11 @@ const projectResearchInput = z.object({
 }).superRefine((value, context) => {
   if (value.inputIds.length + value.referenceIds.length === 0) context.addIssue({ code: 'custom', path: ['inputIds'], message: '请至少选择一条项目资料。' });
   if (value.inputIds.length + value.referenceIds.length > 20) context.addIssue({ code: 'custom', path: ['inputIds'], message: '单次最多选择 20 条项目资料。' });
+});
+const projectAgentQuery = z.object({
+  stage: z.enum(['RESEARCH', 'COPY', 'VISUAL', 'LAYOUT', 'REVIEW']),
+  platform: creativePlatform.optional(),
+  history: z.enum(['CURRENT', 'ALL']).default('CURRENT'),
 });
 const platformSkillInput = z.object({
   LAYOUT: z.string().min(1).max(160).optional(),
@@ -651,6 +658,14 @@ async function researchMaterialIds(runId) {
     referenceIds: result.rows.flatMap((row) => row.reference_id ? [row.reference_id] : []),
   };
 }
+
+app.get('/api/v1/creative/projects/:projectId/agent', { preHandler: authenticate }, async (request) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const input = projectAgentQuery.parse(request.query);
+  const workspace = await currentWorkspace(request.user.sub);
+  await creativeProject(workspace.id, projectId);
+  return projectAgentStore.context(workspace.id, projectId, input);
+});
 
 app.get('/api/v1/creative/projects/:projectId/research', { preHandler: authenticate }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);

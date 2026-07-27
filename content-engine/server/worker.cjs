@@ -11,9 +11,11 @@ const { buildAnalysisPrompt, buildAnalysisRepairPrompt, calculateOverallScore, d
 const { buildOutlinePrompt, buildOutlineRepairPrompt, parseOutlineContent } = require('./services/creative-outline.cjs');
 const { DRAFT_ACTION_VERSION, buildDraftPrompt, buildDraftRepairPrompt, parseDraftContent } = require('./services/creative-draft.cjs');
 const { PROJECT_RESEARCH_ACTION_VERSION, buildResearchPlanPrompt, buildResearchPlanRepairPrompt, parseResearchPlan } = require('./services/project-research.cjs');
+const { createProjectAgentStore } = require('./services/project-agent.cjs');
 
 const connection = new IORedis(config.redisUrl, { maxRetriesPerRequest: null });
 const textRunner = createTextModelRunner();
+const projectAgentStore = createProjectAgentStore({ query, transaction });
 
 async function processJob(queueJob) {
   const { jobId, workspaceId, payload } = queueJob.data;
@@ -66,14 +68,40 @@ async function generateProjectResearchPlan({ jobId, workspaceId, runId }) {
     }
     const saved = await transaction(async (client) => {
       await client.query("UPDATE generation_runs SET status = 'SUCCEEDED', output_json = $2, usage_json = $3, completed_at = now() WHERE id = $1", [runId, JSON.stringify(output), JSON.stringify({ inputTokens, outputTokens })]);
-      const plan = await client.query('INSERT INTO project_research_plans (workspace_id, project_id, generation_run_id, output_json) VALUES ($1, $2, $3, $4) RETURNING id', [workspaceId, snapshot.projectId, runId, JSON.stringify(output)]);
-      await client.query('INSERT INTO project_agent_messages (workspace_id, project_id, action_run_id, role, content) VALUES ($1, $2, $3, $4, $5)', [workspaceId, snapshot.projectId, runId, 'ASSISTANT', output.summary]);
-      await client.query("UPDATE jobs SET status = 'SUCCEEDED', result_json = $2, completed_at = now() WHERE id = $1", [jobId, JSON.stringify({ planId: plan.rows[0].id })]);
+      const artifact = await projectAgentStore.createArtifact(client, {
+        workspaceId,
+        projectId: snapshot.projectId,
+        type: 'RESEARCH_PLAN',
+        stage: 'RESEARCH',
+        status: 'CANDIDATE',
+        actionRunId: runId,
+        title: output.title,
+      });
+      const plan = await client.query('INSERT INTO project_research_plans (workspace_id, project_id, generation_run_id, artifact_id, output_json) VALUES ($1, $2, $3, $4, $5) RETURNING id', [workspaceId, snapshot.projectId, runId, artifact.id, JSON.stringify(output)]);
+      const message = await client.query(`INSERT INTO project_agent_messages
+        (workspace_id, project_id, action_run_id, role, content, stage, message_type, artifact_refs_json, metadata_json)
+        VALUES ($1, $2, $3, 'ASSISTANT', $4, 'RESEARCH', 'ARTIFACT', $5, $6) RETURNING id`, [
+        workspaceId,
+        snapshot.projectId,
+        runId,
+        output.summary,
+        JSON.stringify([artifact.id]),
+        JSON.stringify({ model: route.model, action: 'PROJECT_RESEARCH_PLAN' }),
+      ]);
+      await client.query('UPDATE project_artifacts SET created_by_message_id = $1 WHERE workspace_id = $2 AND project_id = $3 AND id = $4', [message.rows[0].id, workspaceId, snapshot.projectId, artifact.id]);
+      await projectAgentStore.upsertStageSummary(client, {
+        workspaceId,
+        projectId: snapshot.projectId,
+        stage: 'RESEARCH',
+        summary: output.summary,
+        throughMessageId: message.rows[0].id,
+      });
+      await client.query("UPDATE jobs SET status = 'SUCCEEDED', result_json = $2, completed_at = now() WHERE id = $1", [jobId, JSON.stringify({ planId: plan.rows[0].id, artifactId: artifact.id })]);
       await client.query(`INSERT INTO api_usage_logs (workspace_id, job_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens)
         VALUES ($1, $2, $3, $4, 'PROJECT_RESEARCH', 'SUCCESS', $5, $6, $7)`, [workspaceId, jobId, route.provider, route.model, Date.now() - startedAt, inputTokens ?? null, outputTokens ?? null]);
-      return plan.rows[0];
+      return { ...plan.rows[0], artifactId: artifact.id };
     });
-    return { planId: saved.id };
+    return { planId: saved.id, artifactId: saved.artifactId };
   } catch (error) {
     const message = error instanceof Error ? error.message : '研究计划生成失败。';
     await transaction(async (client) => {
