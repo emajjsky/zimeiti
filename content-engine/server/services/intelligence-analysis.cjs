@@ -120,7 +120,18 @@ function prepareAnalysisInput({ item, profile, platforms, template, route }) {
   };
 }
 
-function createTemplateStore({ query }) {
+function createTemplateStore({ query }, additionalDefinitions = {}) {
+  const definitions = {
+    [ANALYSIS_SCOPE]: { defaultTemplate, validateTemplate },
+    ...additionalDefinitions,
+  };
+
+  function definition(scope) {
+    const current = definitions[scope];
+    if (!current) throw new Error('当前提示词模板尚未接入执行器。');
+    return current;
+  }
+
   async function latest(workspaceId, scope = ANALYSIS_SCOPE) {
     const result = await query('SELECT id, workspace_id, scope, version, body, source, created_at FROM prompt_template_versions WHERE workspace_id = $1 AND scope = $2 ORDER BY version DESC LIMIT 1', [workspaceId, scope]);
     return result.rows[0] ?? null;
@@ -135,13 +146,14 @@ function createTemplateStore({ query }) {
 
   return {
     async get(workspaceId, scope = ANALYSIS_SCOPE) {
-      return (await latest(workspaceId, scope)) ?? insert(workspaceId, scope, defaultTemplate(), 'DEFAULT');
+      const current = definition(scope);
+      return (await latest(workspaceId, scope)) ?? insert(workspaceId, scope, current.defaultTemplate(), 'DEFAULT');
     },
     async save(workspaceId, scope, body) {
-      return insert(workspaceId, scope, validateTemplate(body), 'CUSTOM');
+      return insert(workspaceId, scope, definition(scope).validateTemplate(body), 'CUSTOM');
     },
     async reset(workspaceId, scope = ANALYSIS_SCOPE) {
-      return insert(workspaceId, scope, defaultTemplate(), 'DEFAULT');
+      return insert(workspaceId, scope, definition(scope).defaultTemplate(), 'DEFAULT');
     },
   };
 }

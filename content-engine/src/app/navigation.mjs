@@ -53,7 +53,7 @@ export function resetViewport(scrollTarget = globalThis.window) {
 const views = new Set([...navigationGroups.flatMap((group) => group.items.map((item) => item.view)), 'topicEditor']);
 const discoverSections = new Set(discoverTabs.map((item) => item.id));
 const settingsSections = new Set(settingsTabs.map((item) => item.id));
-const modelSections = new Set(['bailian', 'agent', 'search', 'connections', 'policies', 'usage']);
+const modelSections = new Set(['bailian', 'agent', 'search', 'connections', 'policies', 'templates', 'usage']);
 const platforms = new Set(['WECHAT', 'XIAOHONGSHU', 'VIDEO_CHANNEL']);
 
 function allowed(value, values, fallback = null) {

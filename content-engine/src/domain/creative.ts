@@ -51,6 +51,7 @@ export interface CreativeOutlineConfirmation {
   model: string;
   platform: Exclude<Platform, 'VIDEO_CHANNEL'>;
   actionVersion: string;
+  promptVersion: number;
   skills: CreativeOutlineSkillSnapshot[];
   costEstimate?: number | null;
 }
@@ -85,6 +86,39 @@ export interface CreativeOutlineCandidate {
   sections: CreativeOutlineSection[];
   factsToVerify: string[];
   model?: string;
+  createdAt: string;
+  acceptedAt: string | null;
+}
+
+export type CreativeDraftRunStatus = CreativeOutlineRunStatus;
+export type CreativeDraftCandidateStatus = CreativeOutlineCandidateStatus;
+
+export interface CreativeDraftConfirmation extends CreativeOutlineConfirmation {}
+
+export interface CreativeDraftPreparation {
+  id: string;
+  status: 'DRAFT';
+  createdAt: string;
+  confirmation: CreativeDraftConfirmation;
+}
+
+export interface CreativeDraftRun extends Omit<CreativeDraftPreparation, 'status'> {
+  status: CreativeDraftRunStatus;
+  error?: string;
+  jobId?: string;
+}
+
+export interface CreativeDraftCandidate {
+  id: string;
+  projectId: string;
+  platform: Exclude<Platform, 'VIDEO_CHANNEL'>;
+  outlineCandidateId: string;
+  status: CreativeDraftCandidateStatus;
+  title: string;
+  body: string;
+  factsToVerify: string[];
+  model?: string;
+  promptVersion?: number;
   createdAt: string;
   acceptedAt: string | null;
 }

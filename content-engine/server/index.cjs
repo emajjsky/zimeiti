@@ -13,14 +13,18 @@ const { listAvailableSkills } = require('./agent/skillRegistry.cjs');
 const { runBailianCli } = require('./runner/bailian.cjs');
 const { ANALYSIS_SCOPE, createTemplateStore, prepareAnalysisInput } = require('./services/intelligence-analysis.cjs');
 const { createCreativeSkillStore } = require('./services/creativeSkills.cjs');
-const { OUTLINE_ACTION_VERSION, OUTLINE_SCOPE, outlineCandidateView } = require('./services/creative-outline.cjs');
+const { OUTLINE_ACTION_VERSION, OUTLINE_SCOPE, OUTLINE_TEMPLATE_SCOPE, validateOutlineTemplate, defaultOutlineTemplate, outlineCandidateView } = require('./services/creative-outline.cjs');
+const { DRAFT_ACTION_VERSION, DRAFT_SCOPE, DRAFT_TEMPLATE_SCOPE, validateDraftTemplate, defaultDraftTemplate, draftCandidateView } = require('./services/creative-draft.cjs');
 
 const app = Fastify({ logger: true, bodyLimit: 5 * 1024 * 1024 });
 const credentials = new Set(['TAVILY', 'BAILIAN']);
 const modelTasks = ['INTELLIGENCE_ANALYSIS', 'TOPIC_RECOMMENDATION', 'CONTENT_WRITING', 'CONTENT_REWRITE', 'CONTENT_LAYOUT', 'TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE', 'SPEECH_SYNTHESIS', 'SPEECH_RECOGNITION', 'TEXT_TO_VIDEO', 'IMAGE_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO', 'REFERENCE_TO_VIDEO', 'VIDEO_EDIT'];
 const externalProviders = new Set(['DASHSCOPE', 'SILICONFLOW', 'VOLCENGINE_ARK', 'KIMI', 'ZHIPU', 'OPENAI', 'OPENAI_COMPATIBLE']);
 const sourceInput = z.object({ name: z.string().max(160), type: z.literal('RSS'), url: z.string().url().max(2_000), category: z.string().max(120), includeKeywords: z.array(z.string().max(120)).optional(), excludeKeywords: z.array(z.string().max(120)).optional(), language: z.enum(['ALL', 'ZH', 'EN']).optional(), enabled: z.boolean(), refreshMinutes: z.number().min(5).max(10_080), trust: z.string().max(80) });
-const templateStore = createTemplateStore({ query });
+const templateStore = createTemplateStore({ query }, {
+  [OUTLINE_TEMPLATE_SCOPE]: { defaultTemplate: defaultOutlineTemplate, validateTemplate: validateOutlineTemplate },
+  [DRAFT_TEMPLATE_SCOPE]: { defaultTemplate: defaultDraftTemplate, validateTemplate: validateDraftTemplate },
+});
 const creativeSkillStore = createCreativeSkillStore({ query, transaction });
 const platformSkillInput = z.object({
   LAYOUT: z.string().min(1).max(160),
@@ -310,9 +314,9 @@ app.get('/api/v1/models/usage', { preHandler: authenticate }, async (request) =>
   return { summary: { totalCalls: total.total_calls, todayCalls: total.today_calls, successCalls: total.success_calls, failedCalls: total.failed_calls, inputTokens: total.input_tokens, outputTokens: total.output_tokens }, logs: rows.rows.map(usageLogView) };
 });
 
-function analysisTemplateScope(value) {
+function promptTemplateScope(value) {
   const scope = String(value || '');
-  if (scope !== ANALYSIS_SCOPE) { const error = new Error('当前提示词模板尚未接入执行器。'); error.statusCode = 400; throw error; }
+  if (![ANALYSIS_SCOPE, OUTLINE_TEMPLATE_SCOPE, DRAFT_TEMPLATE_SCOPE].includes(scope)) { const error = new Error('当前提示词模板尚未接入执行器。'); error.statusCode = 400; throw error; }
   return scope;
 }
 
@@ -322,18 +326,18 @@ function promptTemplateView(row) {
 
 app.get('/api/v1/settings/prompt-templates/:scope', { preHandler: authenticate }, async (request) => {
   const workspace = await currentWorkspace(request.user.sub);
-  return promptTemplateView(await templateStore.get(workspace.id, analysisTemplateScope(request.params.scope)));
+  return promptTemplateView(await templateStore.get(workspace.id, promptTemplateScope(request.params.scope)));
 });
 
 app.put('/api/v1/settings/prompt-templates/:scope', { preHandler: authenticate }, async (request) => {
   const workspace = await currentWorkspace(request.user.sub);
   const input = z.object({ body: z.string().min(1).max(12_000) }).parse(request.body);
-  return promptTemplateView(await templateStore.save(workspace.id, analysisTemplateScope(request.params.scope), input.body));
+  return promptTemplateView(await templateStore.save(workspace.id, promptTemplateScope(request.params.scope), input.body));
 });
 
 app.post('/api/v1/settings/prompt-templates/:scope/reset', { preHandler: authenticate }, async (request) => {
   const workspace = await currentWorkspace(request.user.sub);
-  return promptTemplateView(await templateStore.reset(workspace.id, analysisTemplateScope(request.params.scope)));
+  return promptTemplateView(await templateStore.reset(workspace.id, promptTemplateScope(request.params.scope)));
 });
 
 async function analysisProfile(workspaceId) {
@@ -483,26 +487,27 @@ app.post('/api/v1/creative/projects/:projectId/outline/prepare', { preHandler: a
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = z.object({ platform: z.enum(['WECHAT', 'XIAOHONGSHU']) }).parse(request.body);
   const workspace = await currentWorkspace(request.user.sub);
-  const [project, context, route] = await Promise.all([
+  const [project, context, route, template] = await Promise.all([
     creativeProject(workspace.id, projectId),
     creativeSkillStore.getContext(workspace.id, projectId, input.platform),
     textTaskRoute(workspace.id, OUTLINE_SCOPE, '文案生成'),
+    templateStore.get(workspace.id, OUTLINE_TEMPLATE_SCOPE),
   ]);
   if (!context) throw new Error('请先保存创作设定和 Skill 组合。');
   if (!context.brief.selectedPlatforms.includes(input.platform)) throw new Error('目标平台不在已保存的创作设定中。');
   const platformVersion = project.versions?.find((version) => version.platform === input.platform);
   if (!platformVersion) throw new Error('项目没有对应的图文平台版本。');
   const sourceSnapshot = { project, brief: context.brief, skills: context.skills, platform: input.platform };
-  const runInput = { route: { provider: route.provider, connectionId: route.connectionId ?? null, model: route.model } };
+  const runInput = { template: { id: template.id, version: template.version, body: template.body }, route: { provider: route.provider, connectionId: route.connectionId ?? null, model: route.model } };
   const run = await query(`INSERT INTO generation_runs
     (workspace_id, action_version_id, status, source_snapshot_json, input_json, model, prompt_version, estimated_cost)
-    VALUES ($1, $2, 'DRAFT', $3, $4, $5, '1.0.0', 'null'::jsonb)
-    RETURNING id, status, created_at`, [workspace.id, OUTLINE_ACTION_VERSION, JSON.stringify(sourceSnapshot), JSON.stringify(runInput), route.model]);
+    VALUES ($1, $2, 'DRAFT', $3, $4, $5, $6, 'null'::jsonb)
+    RETURNING id, status, created_at`, [workspace.id, OUTLINE_ACTION_VERSION, JSON.stringify(sourceSnapshot), JSON.stringify(runInput), route.model, String(template.version)]);
   reply.code(201).send({
     id: run.rows[0].id,
     status: run.rows[0].status,
     createdAt: run.rows[0].created_at,
-    confirmation: { model: route.model, platform: input.platform, actionVersion: OUTLINE_ACTION_VERSION, skills: context.skills.map((skill) => ({ dimension: skill.dimension, name: skill.name, version: skill.version.version })), costEstimate: null },
+    confirmation: { model: route.model, platform: input.platform, actionVersion: OUTLINE_ACTION_VERSION, promptVersion: template.version, skills: context.skills.map((skill) => ({ dimension: skill.dimension, name: skill.name, version: skill.version.version })), costEstimate: null },
   });
 });
 
@@ -534,7 +539,7 @@ app.post('/api/v1/creative/outline-runs/:id/cancel', { preHandler: authenticate 
 app.get('/api/v1/creative/projects/:projectId/outline/latest-run', { preHandler: authenticate }, async (request) => {
   const input = z.object({ platform: z.enum(['WECHAT', 'XIAOHONGSHU']) }).parse(request.query);
   const workspace = await currentWorkspace(request.user.sub);
-  const result = await query(`SELECT r.id, r.status, r.error, r.model, r.source_snapshot_json, r.created_at,
+  const result = await query(`SELECT r.id, r.status, r.error, r.model, r.prompt_version, r.source_snapshot_json, r.created_at,
       (SELECT j.id FROM jobs j WHERE j.workspace_id = r.workspace_id AND j.payload_json->>'runId' = r.id::text ORDER BY j.created_at DESC LIMIT 1) AS job_id
     FROM generation_runs r
     WHERE r.workspace_id = $1 AND r.action_version_id = $2 AND r.source_snapshot_json->'project'->>'id' = $3
@@ -542,7 +547,7 @@ app.get('/api/v1/creative/projects/:projectId/outline/latest-run', { preHandler:
     ORDER BY r.created_at DESC LIMIT 1`, [workspace.id, OUTLINE_ACTION_VERSION, request.params.projectId, input.platform]);
   if (!result.rowCount) return null;
   const row = result.rows[0];
-  return { id: row.id, status: row.status, error: row.error ?? undefined, jobId: row.job_id ?? undefined, createdAt: row.created_at, confirmation: { model: row.model, platform: row.source_snapshot_json.platform, actionVersion: OUTLINE_ACTION_VERSION, skills: (row.source_snapshot_json.skills ?? []).map((skill) => ({ dimension: skill.dimension, name: skill.name, version: skill.version?.version ?? skill.version })) } };
+  return { id: row.id, status: row.status, error: row.error ?? undefined, jobId: row.job_id ?? undefined, createdAt: row.created_at, confirmation: { model: row.model, platform: row.source_snapshot_json.platform, actionVersion: OUTLINE_ACTION_VERSION, promptVersion: Number(row.prompt_version), skills: (row.source_snapshot_json.skills ?? []).map((skill) => ({ dimension: skill.dimension, name: skill.name, version: skill.version?.version ?? skill.version })) } };
 });
 
 app.get('/api/v1/creative/projects/:projectId/outline/latest', { preHandler: authenticate }, async (request) => {
@@ -578,8 +583,126 @@ app.post('/api/v1/creative/outline-candidates/:id/accept', { preHandler: authent
     project.status = 'WRITING';
     project.updatedAt = updatedAt;
     await client.query('UPDATE workspace_snapshots SET state_json = $2, revision = revision + 1, updated_at = now() WHERE workspace_id = $1', [workspace.id, JSON.stringify(state)]);
+    const superseded = await client.query("UPDATE creative_outline_candidates SET status = 'REJECTED', updated_at = now() WHERE workspace_id = $1 AND project_id = $2 AND platform = $3 AND status = 'ACCEPTED' AND id <> $4 RETURNING id", [workspace.id, candidate.project_id, candidate.platform, candidate.id]);
+    const supersededIds = superseded.rows.map((row) => row.id);
+    if (supersededIds.length) await client.query("UPDATE creative_draft_candidates SET status = 'REJECTED', updated_at = now() WHERE workspace_id = $1 AND outline_candidate_id = ANY($2::uuid[]) AND status IN ('CANDIDATE', 'ACCEPTED')", [workspace.id, supersededIds]);
     const accepted = await client.query("UPDATE creative_outline_candidates SET status = 'ACCEPTED', selected_title = $3, accepted_at = now(), updated_at = now() WHERE id = $1 AND workspace_id = $2 RETURNING *", [candidate.id, workspace.id, input.selectedTitle]);
     return { candidate: outlineCandidateView({ ...accepted.rows[0], model: candidate.model }), project };
+  });
+});
+
+app.post('/api/v1/creative/projects/:projectId/draft/prepare', { preHandler: authenticate }, async (request, reply) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const input = z.object({ platform: z.enum(['WECHAT', 'XIAOHONGSHU']) }).parse(request.body);
+  const workspace = await currentWorkspace(request.user.sub);
+  const [project, context, route, template, outlineResult] = await Promise.all([
+    creativeProject(workspace.id, projectId),
+    creativeSkillStore.getContext(workspace.id, projectId, input.platform),
+    textTaskRoute(workspace.id, DRAFT_SCOPE, '文案生成'),
+    templateStore.get(workspace.id, DRAFT_TEMPLATE_SCOPE),
+    query(`SELECT * FROM creative_outline_candidates
+      WHERE workspace_id = $1 AND project_id = $2 AND platform = $3 AND status = 'ACCEPTED'
+      ORDER BY accepted_at DESC LIMIT 1`, [workspace.id, projectId, input.platform]),
+  ]);
+  if (!context) throw new Error('请先保存创作设定和 Skill 组合。');
+  if (!context.brief.selectedPlatforms.includes(input.platform)) throw new Error('目标平台不在已保存的创作设定中。');
+  if (!outlineResult.rowCount) { const error = new Error('请先采用当前平台的大纲。'); error.statusCode = 409; throw error; }
+  const platformVersion = project.versions?.find((version) => version.platform === input.platform);
+  if (!platformVersion) throw new Error('项目没有对应的图文平台版本。');
+  const outlineRow = outlineResult.rows[0];
+  const outline = { id: outlineRow.id, selectedTitle: outlineRow.selected_title, ...outlineRow.output_json };
+  const sourceSnapshot = { project, brief: context.brief, skills: context.skills, platform: input.platform, outline };
+  const runInput = { template: { id: template.id, version: template.version, body: template.body }, route: { provider: route.provider, connectionId: route.connectionId ?? null, model: route.model } };
+  const run = await query(`INSERT INTO generation_runs
+    (workspace_id, action_version_id, status, source_snapshot_json, input_json, model, prompt_version, estimated_cost)
+    VALUES ($1, $2, 'DRAFT', $3, $4, $5, $6, 'null'::jsonb)
+    RETURNING id, status, created_at`, [workspace.id, DRAFT_ACTION_VERSION, JSON.stringify(sourceSnapshot), JSON.stringify(runInput), route.model, String(template.version)]);
+  reply.code(201).send({
+    id: run.rows[0].id,
+    status: run.rows[0].status,
+    createdAt: run.rows[0].created_at,
+    confirmation: { model: route.model, platform: input.platform, actionVersion: DRAFT_ACTION_VERSION, promptVersion: template.version, skills: context.skills.map((skill) => ({ dimension: skill.dimension, name: skill.name, version: skill.version.version })), costEstimate: null },
+  });
+});
+
+app.post('/api/v1/creative/draft-runs/:id/confirm', { preHandler: authenticate }, async (request, reply) => {
+  const runId = z.string().uuid().parse(request.params.id);
+  const workspace = await currentWorkspace(request.user.sub);
+  const run = await query("UPDATE generation_runs SET status = 'QUEUED' WHERE id = $1 AND workspace_id = $2 AND action_version_id = $3 AND status = 'DRAFT' RETURNING id", [runId, workspace.id, DRAFT_ACTION_VERSION]);
+  if (!run.rowCount) { const error = new Error('该初稿任务当前不能确认。'); error.statusCode = 409; throw error; }
+  const job = await query("INSERT INTO jobs (workspace_id, job_type, payload_json) VALUES ($1, 'CREATIVE_DRAFT', $2) RETURNING *", [workspace.id, JSON.stringify({ runId: run.rows[0].id })]);
+  try { await enqueue(job.rows[0]); }
+  catch (error) {
+    const message = error instanceof Error ? error.message : '任务入队失败。';
+    await query("UPDATE generation_runs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1", [run.rows[0].id, message.slice(0, 2_000)]);
+    await query("UPDATE jobs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1", [job.rows[0].id, message.slice(0, 2_000)]);
+    throw error;
+  }
+  reply.code(202).send({ id: run.rows[0].id, status: 'QUEUED', jobId: job.rows[0].id });
+});
+
+app.post('/api/v1/creative/draft-runs/:id/cancel', { preHandler: authenticate }, async (request) => {
+  const runId = z.string().uuid().parse(request.params.id);
+  const workspace = await currentWorkspace(request.user.sub);
+  const result = await query("UPDATE generation_runs SET status = 'CANCELLED', completed_at = now() WHERE id = $1 AND workspace_id = $2 AND action_version_id = $3 AND status IN ('DRAFT', 'QUEUED') RETURNING id, status", [runId, workspace.id, DRAFT_ACTION_VERSION]);
+  if (!result.rowCount) { const error = new Error('该初稿任务当前不能取消。'); error.statusCode = 409; throw error; }
+  await query("UPDATE jobs SET status = 'CANCELLED', completed_at = now() WHERE workspace_id = $1 AND payload_json->>'runId' = $2 AND status = 'PENDING'", [workspace.id, runId]);
+  return result.rows[0];
+});
+
+app.get('/api/v1/creative/projects/:projectId/draft/latest-run', { preHandler: authenticate }, async (request) => {
+  const input = z.object({ platform: z.enum(['WECHAT', 'XIAOHONGSHU']) }).parse(request.query);
+  const workspace = await currentWorkspace(request.user.sub);
+  const result = await query(`SELECT r.id, r.status, r.error, r.model, r.prompt_version, r.source_snapshot_json, r.created_at,
+      (SELECT j.id FROM jobs j WHERE j.workspace_id = r.workspace_id AND j.payload_json->>'runId' = r.id::text ORDER BY j.created_at DESC LIMIT 1) AS job_id
+    FROM generation_runs r
+    WHERE r.workspace_id = $1 AND r.action_version_id = $2 AND r.source_snapshot_json->'project'->>'id' = $3
+      AND r.source_snapshot_json->>'platform' = $4
+      AND EXISTS (SELECT 1 FROM creative_outline_candidates o WHERE o.id::text = r.source_snapshot_json->'outline'->>'id' AND o.status = 'ACCEPTED')
+    ORDER BY r.created_at DESC LIMIT 1`, [workspace.id, DRAFT_ACTION_VERSION, request.params.projectId, input.platform]);
+  if (!result.rowCount) return null;
+  const row = result.rows[0];
+  return { id: row.id, status: row.status, error: row.error ?? undefined, jobId: row.job_id ?? undefined, createdAt: row.created_at, confirmation: { model: row.model, platform: row.source_snapshot_json.platform, actionVersion: DRAFT_ACTION_VERSION, promptVersion: Number(row.prompt_version), skills: (row.source_snapshot_json.skills ?? []).map((skill) => ({ dimension: skill.dimension, name: skill.name, version: skill.version?.version ?? skill.version })) } };
+});
+
+app.get('/api/v1/creative/projects/:projectId/draft/latest', { preHandler: authenticate }, async (request) => {
+  const input = z.object({ platform: z.enum(['WECHAT', 'XIAOHONGSHU']) }).parse(request.query);
+  const workspace = await currentWorkspace(request.user.sub);
+  const result = await query(`SELECT c.*, r.model, r.prompt_version FROM creative_draft_candidates c
+    JOIN generation_runs r ON r.id = c.generation_run_id
+    JOIN creative_outline_candidates o ON o.id = c.outline_candidate_id AND o.status = 'ACCEPTED'
+    WHERE c.workspace_id = $1 AND c.project_id = $2 AND c.platform = $3 AND c.status <> 'REJECTED'
+    ORDER BY c.created_at DESC LIMIT 1`, [workspace.id, request.params.projectId, input.platform]);
+  return draftCandidateView(result.rows[0]);
+});
+
+app.post('/api/v1/creative/draft-candidates/:id/accept', { preHandler: authenticate }, async (request) => {
+  const candidateId = z.string().uuid().parse(request.params.id);
+  const workspace = await currentWorkspace(request.user.sub);
+  return transaction(async (client) => {
+    const candidateResult = await client.query(`SELECT c.*, r.model, r.prompt_version FROM creative_draft_candidates c
+      JOIN generation_runs r ON r.id = c.generation_run_id
+      JOIN creative_outline_candidates o ON o.id = c.outline_candidate_id AND o.status = 'ACCEPTED'
+      WHERE c.id = $1 AND c.workspace_id = $2 AND c.status = 'CANDIDATE' FOR UPDATE OF c`, [candidateId, workspace.id]);
+    if (!candidateResult.rowCount) { const error = new Error('该初稿候选当前不能接受。'); error.statusCode = 409; throw error; }
+    const candidate = candidateResult.rows[0];
+    const snapshotResult = await client.query('SELECT state_json FROM workspace_snapshots WHERE workspace_id = $1 FOR UPDATE', [workspace.id]);
+    const state = snapshotResult.rows[0]?.state_json;
+    const project = state?.projects?.find((item) => item.id === candidate.project_id);
+    const version = project?.versions?.find((item) => item.platform === candidate.platform);
+    if (!project || !version) throw new Error('正式文案版本已不存在，无法接受初稿。');
+    const updatedAt = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
+    version.title = candidate.output_json.title;
+    version.body = candidate.output_json.body;
+    version.status = 'DRAFT';
+    version.updatedAt = updatedAt;
+    project.status = 'WRITING';
+    project.factChecks = [...new Set([...(project.factChecks ?? []), ...(candidate.output_json.factsToVerify ?? [])])];
+    project.updatedAt = updatedAt;
+    await client.query('UPDATE workspace_snapshots SET state_json = $2, revision = revision + 1, updated_at = now() WHERE workspace_id = $1', [workspace.id, JSON.stringify(state)]);
+    await client.query("UPDATE creative_draft_candidates SET status = 'REJECTED', updated_at = now() WHERE workspace_id = $1 AND outline_candidate_id = $2 AND id <> $3 AND status IN ('CANDIDATE', 'ACCEPTED')", [workspace.id, candidate.outline_candidate_id, candidate.id]);
+    const accepted = await client.query("UPDATE creative_draft_candidates SET status = 'ACCEPTED', accepted_at = now(), updated_at = now() WHERE id = $1 AND workspace_id = $2 RETURNING *", [candidate.id, workspace.id]);
+    return { candidate: draftCandidateView({ ...accepted.rows[0], model: candidate.model, prompt_version: candidate.prompt_version }), project };
   });
 });
 

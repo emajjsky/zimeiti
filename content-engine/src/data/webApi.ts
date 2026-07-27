@@ -1,7 +1,7 @@
 import type { LocalState } from './localRepository';
 import type { ApiUsageLog, ApiUsageSummary, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelTaskPolicy } from '../domain/integrations';
 import type { ContentProject, IntelligenceAnalysis, Platform } from '../domain/content';
-import type { CreativeOutlineCandidate, CreativeOutlinePreparation, CreativeOutlineRun, CreativeSkillDefinition, WritingBrief, WritingBriefInput } from '../domain/creative';
+import type { CreativeDraftCandidate, CreativeDraftPreparation, CreativeDraftRun, CreativeOutlineCandidate, CreativeOutlinePreparation, CreativeOutlineRun, CreativeSkillDefinition, WritingBrief, WritingBriefInput } from '../domain/creative';
 
 const tokenKey = 'content-engine-web-session-v1';
 const apiBase = import.meta.env.VITE_API_BASE ?? '/api/v1';
@@ -49,6 +49,12 @@ export const webCreative = {
   latestOutlineRun: (projectId: string, platform: Exclude<Platform, 'VIDEO_CHANNEL'>) => request<CreativeOutlineRun | null>(`/creative/projects/${encodeURIComponent(projectId)}/outline/latest-run?platform=${encodeURIComponent(platform)}`),
   latestOutline: (projectId: string, platform: Exclude<Platform, 'VIDEO_CHANNEL'>) => request<CreativeOutlineCandidate | null>(`/creative/projects/${encodeURIComponent(projectId)}/outline/latest?platform=${encodeURIComponent(platform)}`),
   acceptOutline: (candidateId: string, selectedTitle: string) => request<{ candidate: CreativeOutlineCandidate; project: ContentProject }>(`/creative/outline-candidates/${encodeURIComponent(candidateId)}/accept`, { method: 'POST', body: JSON.stringify({ selectedTitle }) }),
+  prepareDraft: (projectId: string, platform: Exclude<Platform, 'VIDEO_CHANNEL'>) => request<CreativeDraftPreparation>(`/creative/projects/${encodeURIComponent(projectId)}/draft/prepare`, { method: 'POST', body: JSON.stringify({ platform }) }),
+  confirmDraft: (runId: string) => request<{ id: string; status: 'QUEUED'; jobId: string }>(`/creative/draft-runs/${encodeURIComponent(runId)}/confirm`, { method: 'POST', body: '{}' }),
+  cancelDraft: (runId: string) => request<{ id: string; status: 'CANCELLED' }>(`/creative/draft-runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST', body: '{}' }),
+  latestDraftRun: (projectId: string, platform: Exclude<Platform, 'VIDEO_CHANNEL'>) => request<CreativeDraftRun | null>(`/creative/projects/${encodeURIComponent(projectId)}/draft/latest-run?platform=${encodeURIComponent(platform)}`),
+  latestDraft: (projectId: string, platform: Exclude<Platform, 'VIDEO_CHANNEL'>) => request<CreativeDraftCandidate | null>(`/creative/projects/${encodeURIComponent(projectId)}/draft/latest?platform=${encodeURIComponent(platform)}`),
+  acceptDraft: (candidateId: string) => request<{ candidate: CreativeDraftCandidate; project: ContentProject }>(`/creative/draft-candidates/${encodeURIComponent(candidateId)}/accept`, { method: 'POST', body: '{}' }),
   job: (jobId: string) => request<{ id: string; status: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED'; error?: string }>(`/jobs/${encodeURIComponent(jobId)}`),
 };
 
@@ -75,7 +81,8 @@ export type AnalysisPreparation = { id: string; status: 'DRAFT'; createdAt: stri
 export type AnalysisRun = Omit<AnalysisPreparation, 'status'> & { status: 'DRAFT' | 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED'; error?: string; jobId?: string };
 
 export type CredentialStatus = { provider: 'BAILIAN' | 'TAVILY'; configured: boolean; status: 'UNCONFIGURED' | 'UNVERIFIED' | 'READY' | 'ERROR'; updatedAt?: string | null; lastTestedAt?: string | null; lastError?: string | null };
-export type PromptTemplate = { id: string; scope: 'INTELLIGENCE_ANALYSIS'; version: number; body: string; source: 'DEFAULT' | 'CUSTOM'; updatedAt: string };
+export type PromptTemplateScope = 'INTELLIGENCE_ANALYSIS' | 'CREATIVE_OUTLINE' | 'CREATIVE_DRAFT';
+export type PromptTemplate = { id: string; scope: PromptTemplateScope; version: number; body: string; source: 'DEFAULT' | 'CUSTOM'; updatedAt: string };
 
 export const webAgent = {
   credentialStatus: () => request<CredentialStatus>('/settings/credentials/BAILIAN'),
@@ -103,7 +110,7 @@ export const webModels = {
   taskPolicies: () => request<ModelTaskPolicy[]>('/models/task-policies'),
   saveTaskPolicy: (policy: ModelTaskPolicy) => request<ModelTaskPolicy>(`/models/task-policies/${policy.task}`, { method: 'PUT', body: JSON.stringify(policy) }),
   usage: () => request<{ summary: ApiUsageSummary; logs: ApiUsageLog[] }>('/models/usage'),
-  promptTemplate: () => request<PromptTemplate>('/settings/prompt-templates/INTELLIGENCE_ANALYSIS'),
-  savePromptTemplate: (body: string) => request<PromptTemplate>('/settings/prompt-templates/INTELLIGENCE_ANALYSIS', { method: 'PUT', body: JSON.stringify({ body }) }),
-  resetPromptTemplate: () => request<PromptTemplate>('/settings/prompt-templates/INTELLIGENCE_ANALYSIS/reset', { method: 'POST', body: '{}' }),
+  promptTemplate: (scope: PromptTemplateScope = 'INTELLIGENCE_ANALYSIS') => request<PromptTemplate>(`/settings/prompt-templates/${scope}`),
+  savePromptTemplate: (scope: PromptTemplateScope, body: string) => request<PromptTemplate>(`/settings/prompt-templates/${scope}`, { method: 'PUT', body: JSON.stringify({ body }) }),
+  resetPromptTemplate: (scope: PromptTemplateScope) => request<PromptTemplate>(`/settings/prompt-templates/${scope}/reset`, { method: 'POST', body: '{}' }),
 };

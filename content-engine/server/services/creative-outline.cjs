@@ -2,6 +2,8 @@ const { z } = require('zod');
 
 const OUTLINE_ACTION_VERSION = 'creative-outline:1.1.0';
 const OUTLINE_SCOPE = 'CONTENT_WRITING';
+const OUTLINE_TEMPLATE_SCOPE = 'CREATIVE_OUTLINE';
+const MAX_OUTLINE_TEMPLATE_LENGTH = 12_000;
 
 const outlineSchema = z.object({
   titleOptions: z.array(z.string().trim().min(1).max(120)).min(1).max(5),
@@ -23,7 +25,18 @@ function parseOutlineContent(content) {
   return outlineSchema.parse(value);
 }
 
-function buildOutlinePrompt({ project, brief, skills, platform }) {
+function validateOutlineTemplate(body) {
+  if (typeof body !== 'string' || !body.trim()) throw new Error('生成大纲提示词不能为空。');
+  if (body.length > MAX_OUTLINE_TEMPLATE_LENGTH) throw new Error(`生成大纲提示词不能超过 ${MAX_OUTLINE_TEMPLATE_LENGTH.toLocaleString('en-US')} 个字符。`);
+  return body.trim();
+}
+
+function defaultOutlineTemplate() {
+  return '围绕核心表达设计清晰、完整、可执行的大纲。标题应准确具体，章节之间必须有推进关系，每节说明写作目的和关键要点；不确定内容列入待核验事实。';
+}
+
+function buildOutlinePrompt({ project, brief, skills, platform, template }) {
+  const businessTemplate = validateOutlineTemplate(template ?? defaultOutlineTemplate());
   const example = {
     titleOptions: ['标题方案一', '标题方案二'],
     summary: '大纲采用的叙事和论证思路',
@@ -43,6 +56,7 @@ function buildOutlinePrompt({ project, brief, skills, platform }) {
     `目标平台代码为 ${platform}。严格按以下形状返回：${JSON.stringify(example)}`,
   ].join('\n');
   const message = JSON.stringify({
+    businessTemplate,
     project: { title: project.title, coreViewpoint: project.coreViewpoint, factChecks: project.factChecks ?? [] },
     writingBrief: {
       objective: brief.objective,
@@ -77,4 +91,4 @@ function outlineCandidateView(row) {
   };
 }
 
-module.exports = { OUTLINE_ACTION_VERSION, OUTLINE_SCOPE, outlineSchema, parseOutlineContent, buildOutlinePrompt, buildOutlineRepairPrompt, outlineCandidateView };
+module.exports = { OUTLINE_ACTION_VERSION, OUTLINE_SCOPE, OUTLINE_TEMPLATE_SCOPE, outlineSchema, validateOutlineTemplate, defaultOutlineTemplate, parseOutlineContent, buildOutlinePrompt, buildOutlineRepairPrompt, outlineCandidateView };

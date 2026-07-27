@@ -311,7 +311,7 @@ function App() {
       {view === 'publish' && <Publish project={featuredProject} onNavigate={setView} />}
       {view === 'review' && <Review onNavigate={setView} />}
       {view === 'assets' && <Utility title="素材库" description="素材将按目录、类型和所属项目统一管理。" />}
-      {view === 'settings' && <SettingsWorkspace section={settingsSection} onSectionChange={setSettingsSection} workspace={<WorkspaceProfileSettings workspace={state.workspace} onChange={(workspace) => updateState({ ...state, workspace })} />} sources={<SourceSettings sources={state.sources} onAddSource={addSource} onAddSources={addSources} onUpdateSource={updateSource} onRemoveSource={removeSource} />} models={<ModelSettingsScreen initialSection={requestedModelSection} />} feishu={<WorkspaceSettings template={state.feishuTemplate} onTemplateChange={saveFeishuTemplate} />} accounts={<AccountAuthorizationSettings />} />}
+      {view === 'settings' && <SettingsWorkspace section={settingsSection} onSectionChange={setSettingsSection} workspace={<WorkspaceProfileSettings workspace={state.workspace} onChange={(workspace) => updateState({ ...state, workspace })} />} sources={<SourceSettings sources={state.sources} onAddSource={addSource} onAddSources={addSources} onUpdateSource={updateSource} onRemoveSource={removeSource} />} models={<ModelSettingsScreen initialSection={requestedModelSection} onSectionChange={setRequestedModelSection} />} feishu={<WorkspaceSettings template={state.feishuTemplate} onTemplateChange={saveFeishuTemplate} />} accounts={<AccountAuthorizationSettings />} />}
     </main>
   </div>;
 }
@@ -459,7 +459,7 @@ const modelTaskNames: Record<ModelTask, string> = {
   VIDEO_EDIT: '视频编辑',
 };
 
-type ModelSettingsSection = ModelSection | 'templates';
+type ModelSettingsSection = ModelSection;
 
 const modelSettingsScreenTitles: Record<ModelSettingsSection, string> = {
   bailian: '百炼',
@@ -471,7 +471,7 @@ const modelSettingsScreenTitles: Record<ModelSettingsSection, string> = {
   usage: '调用记录',
 };
 
-function ModelSettingsScreen({ initialSection = null }: { initialSection?: ModelSettingsSection | null }) {
+function ModelSettingsScreen({ initialSection = null, onSectionChange }: { initialSection?: ModelSettingsSection | null; onSectionChange: (section: ModelSettingsSection) => void }) {
   const [screen, setScreen] = useState<ModelSettingsSection | 'editor'>('bailian');
   const [connections, setConnections] = useState<ModelConnection[]>([]);
   const [catalog, setCatalog] = useState<ModelCatalogItem[]>([]);
@@ -558,6 +558,7 @@ function ModelSettingsScreen({ initialSection = null }: { initialSection?: Model
   const openSection = (next: ModelSettingsSection) => {
     setNotice(null);
     setScreen(next);
+    onSectionChange(next);
   };
   const renderSection = () => {
     if (screen === 'bailian') return <BailianCredentialSettings onChanged={refreshModelSettings} />;

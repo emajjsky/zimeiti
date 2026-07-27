@@ -31,12 +31,13 @@ const output = {
 };
 
 test('大纲提示词包含 Brief、平台和冻结的五维 Skill 规则', () => {
-  const prompt = buildOutlinePrompt(snapshot);
+  const prompt = buildOutlinePrompt({ ...snapshot, template: '先解释误区，再给出行动路径。' });
   assert.match(prompt.system, /只生成大纲候选/);
   assert.match(prompt.system, /WECHAT/);
   assert.match(prompt.message, /形成公众号文章/);
   assert.match(prompt.message, /解释术语，不夸大能力/);
   assert.match(prompt.message, /公众号长文/);
+  assert.match(prompt.message, /先解释误区，再给出行动路径/);
   assert.doesNotMatch(prompt.message, /selectedSkills|platformSkills/);
 });
 
@@ -67,13 +68,14 @@ test('大纲 API 仅在确认后入队，采用候选时才更新正式快照', 
   const prepareStart = server.indexOf("/outline/prepare");
   const confirmStart = server.indexOf("/outline-runs/:id/confirm");
   const acceptStart = server.indexOf("/outline-candidates/:id/accept");
-  assert.ok(prepareStart > -1 && confirmStart > prepareStart && acceptStart > confirmStart);
+  const acceptEnd = server.indexOf("/draft/prepare", acceptStart);
+  assert.ok(prepareStart > -1 && confirmStart > prepareStart && acceptStart > confirmStart && acceptEnd > acceptStart);
   assert.match(server.slice(prepareStart, confirmStart), /textTaskRoute\(workspace\.id, OUTLINE_SCOPE, '文案生成'\)/);
   assert.doesNotMatch(server.slice(prepareStart, confirmStart), /await enqueue/);
   assert.match(server.slice(confirmStart, acceptStart), /await enqueue/);
-  assert.match(server.slice(acceptStart), /UPDATE workspace_snapshots SET state_json/);
-  assert.match(server.slice(acceptStart), /status = 'ACCEPTED'/);
-  assert.doesNotMatch(server.slice(acceptStart), /version\.body\s*=/);
+  assert.match(server.slice(acceptStart, acceptEnd), /UPDATE workspace_snapshots SET state_json/);
+  assert.match(server.slice(acceptStart, acceptEnd), /status = 'ACCEPTED'/);
+  assert.doesNotMatch(server.slice(acceptStart, acceptEnd), /version\.body\s*=/);
 });
 
 test('开发环境同时启动 API、Web 与 Worker', () => {

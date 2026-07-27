@@ -18,7 +18,7 @@ export type SettingsSection =
   | 'feishu'
   | 'accounts';
 
-export type ModelSection = 'bailian' | 'agent' | 'search' | 'connections' | 'policies' | 'usage';
+export type ModelSection = 'bailian' | 'agent' | 'search' | 'connections' | 'policies' | 'templates' | 'usage';
 
 export interface SearchPreset {
   label: string;

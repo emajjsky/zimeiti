@@ -417,3 +417,18 @@ API：`http://127.0.0.1:8787/health`
 - 标题输入改为可换行 textarea，标题和正文均根据 `scrollHeight` 自动增长并设为 `overflow: hidden`，消除编辑器内部滚动条。
 - Playwright 验证候选自动弹出、关闭后编辑器恢复、右侧可重开、390px 无横向溢出、采用后状态正确且正文不含 Markdown。
 - 本轮视觉参数为 `DESIGN_VARIANCE 5 / MOTION_INTENSITY 2 / VISUAL_DENSITY 4`。继续使用现有品牌色和直角面板体系，仅增加状态反馈，不引入新动画依赖。
+
+## 2026-07-27 实现记录：受控初稿生成
+
+- `012_creative_draft_action.sql` 新增 `creative_draft_candidates`、`creative-draft:1.0.0` 和动作定义，候选通过 `outline_candidate_id` 关联已采用大纲；迁移已应用到本地开发库。
+- `server/services/creative-draft.cjs` 定义 `CREATIVE_DRAFT` 模板 Scope、严格 Zod 输出 Schema、完整初稿提示、单次 JSON 修复和候选 DTO。正文要求至少 100 字并禁止 Markdown 标题标记。
+- 大纲服务增加 `CREATIVE_OUTLINE` 可版本化业务模板；通用模板存储支持热点分析、大纲和初稿三个 Scope，运行时冻结模板 ID、版本和正文。
+- API 新增初稿 `prepare/confirm/cancel/latest-run/latest/accept`。prepare 要求当前平台存在已采用大纲；latest-run/latest 只返回仍关联当前已采用大纲的有效结果。
+- 采用新大纲时，旧已采用大纲和其初稿候选转为 `REJECTED`，但工作空间现有正文保持不变。采用初稿时才更新标题、正文、项目状态和待核验项。
+- Worker 新增 `CREATIVE_DRAFT` 分派，复用统一文本模型执行器与 `CONTENT_WRITING` 调用日志；成功只保存候选，不直接写工作空间快照。
+- `CreateWorkspace.tsx` 将右栏统一为“创作 Agent”，新增初稿准备确认、轮询、失败恢复、候选弹层和采用状态。初稿正文使用 `white-space: pre-wrap`，弹层内容区单滚动，移动端占满视口。
+- 大纲和初稿轮询都改为先读取候选、再更新成功状态，避免 React effect 清理使候选响应丢失。
+- `PromptTemplateSettings.tsx` 使用热点分析、生成大纲、生成初稿三个页签，独立维护加载、未保存、保存新版本、恢复默认和错误状态。
+- 导航模型补充 `templates` 子页白名单和类型，`?view=settings&settings=models&model=templates` 刷新后可恢复提示词模板页。
+- 新增 5 项初稿契约测试、2 项模板页导航测试并扩展创作 E2E。Node 测试共 99 项；Playwright 使用 Mock 验证采用前不覆盖正文、采用后写入完整初稿、模板页刷新恢复和 390px 无横向溢出，没有触发付费模型。
+- 本轮视觉参数保持 `DESIGN_VARIANCE 5 / MOTION_INTENSITY 2 / VISUAL_DENSITY 4`，沿用现有直角面板、钴蓝和马卡龙状态色，不新增动画依赖。

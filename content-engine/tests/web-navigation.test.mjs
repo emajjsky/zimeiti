@@ -41,6 +41,18 @@ test('设置跳转可定位检索 API', () => {
   });
 });
 
+test('刷新地址可以恢复提示词模板页', () => {
+  const route = navigation.readWorkspaceLocation({ search: '?view=settings&settings=models&model=templates' });
+  assert.equal(route.settingsSection, 'models');
+  assert.equal(route.modelSection, 'templates');
+});
+
+test('模型设置子页切换同步到顶层地址状态', async () => {
+  const source = await readFile(new URL('../src/main.tsx', import.meta.url), 'utf8');
+  assert.match(source, /<ModelSettingsScreen initialSection=\{requestedModelSection\} onSectionChange=\{setRequestedModelSection\}/);
+  assert.match(source, /setScreen\(next\);\s*onSectionChange\(next\);/);
+});
+
 test('切换工作页时将页面滚动位置复位到顶部', () => {
   const calls = [];
   navigation.resetViewport({ scrollTo: (options) => calls.push(options) });
