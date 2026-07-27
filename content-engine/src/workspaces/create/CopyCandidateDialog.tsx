@@ -1,0 +1,76 @@
+import { Check, LoaderCircle, Trash2, X } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { platformName } from '../../domain/content';
+import type { ProjectArtifact } from '../../domain/creative';
+
+type DiffLine = { kind: 'added' | 'removed' | 'unchanged'; text: string };
+
+function paragraphs(value: string) {
+  return value.split(/\n+/).map((item) => item.trim()).filter(Boolean);
+}
+
+export function paragraphDiff(before: string, after: string): DiffLine[] {
+  const left = paragraphs(before);
+  const right = paragraphs(after);
+  const table = Array.from({ length: left.length + 1 }, () => Array<number>(right.length + 1).fill(0));
+  for (let i = left.length - 1; i >= 0; i -= 1) {
+    for (let j = right.length - 1; j >= 0; j -= 1) table[i][j] = left[i] === right[j] ? table[i + 1][j + 1] + 1 : Math.max(table[i + 1][j], table[i][j + 1]);
+  }
+  const result: DiffLine[] = [];
+  let i = 0; let j = 0;
+  while (i < left.length || j < right.length) {
+    if (i < left.length && j < right.length && left[i] === right[j]) { result.push({ kind: 'unchanged', text: left[i] }); i += 1; j += 1; }
+    else if (j < right.length && (i === left.length || table[i][j + 1] >= table[i + 1][j])) { result.push({ kind: 'added', text: right[j] }); j += 1; }
+    else { result.push({ kind: 'removed', text: left[i] }); i += 1; }
+  }
+  return result;
+}
+
+function strings(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function records(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object') : [];
+}
+
+export function CopyCandidateDialog({ artifact, current, busy, onAccept, onReject, onClose }: {
+  artifact: ProjectArtifact;
+  current: { title: string; body: string };
+  busy: 'idle' | 'accepting' | 'rejecting';
+  onAccept: (selectedTitle?: string) => void;
+  onReject: () => void;
+  onClose: () => void;
+}) {
+  const titleOptions = strings(artifact.payload.titleOptions);
+  const candidateTitle = typeof artifact.payload.title === 'string' ? artifact.payload.title : titleOptions[0] ?? '未命名候选';
+  const candidateBody = typeof artifact.payload.body === 'string' ? artifact.payload.body : '';
+  const changeSummary = typeof artifact.payload.changeSummary === 'string' ? artifact.payload.changeSummary : typeof artifact.payload.summary === 'string' ? artifact.payload.summary : '';
+  const facts = strings(artifact.payload.factsToVerify);
+  const sections = records(artifact.payload.sections);
+  const [selectedTitle, setSelectedTitle] = useState(titleOptions[0] ?? '');
+  const diff = useMemo(() => paragraphDiff(current.body, candidateBody), [candidateBody, current.body]);
+  const canChange = artifact.status === 'CANDIDATE';
+
+  useEffect(() => {
+    const previous = document.body.style.overflow;
+    const close = (event: KeyboardEvent) => { if (event.key === 'Escape' && busy === 'idle') onClose(); };
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', close);
+    return () => { document.body.style.overflow = previous; window.removeEventListener('keydown', close); };
+  }, [busy, onClose]);
+
+  return <div className="copy-candidate-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target && busy === 'idle') onClose(); }}>
+    <section className="copy-candidate-dialog" role="dialog" aria-modal="true" aria-labelledby="copy-candidate-title">
+      <header><div><span>{artifact.platform ? platformName[artifact.platform] : '内容项目'}候选</span><h2 id="copy-candidate-title">{artifact.type === 'OUTLINE' ? '审核大纲' : '审核文案'}</h2></div><button className="icon-button" type="button" aria-label="关闭候选" disabled={busy !== 'idle'} onClick={onClose}><X size={18}/></button></header>
+      <div className="copy-candidate-body">
+        {titleOptions.length > 0 ? <fieldset disabled={!canChange}><legend>标题方案</legend>{titleOptions.map((title) => <label key={title}><input type="radio" name={`candidate-title-${artifact.id}`} checked={selectedTitle === title} onChange={() => setSelectedTitle(title)}/><span>{title}</span></label>)}</fieldset> : <section className="candidate-title"><span>标题</span><h3>{candidateTitle}</h3></section>}
+        {changeSummary && <p className="candidate-change-summary">{changeSummary}</p>}
+        {artifact.type === 'OUTLINE' && sections.length > 0 && <ol className="candidate-outline">{sections.map((section, index) => <li key={`${String(section.heading)}-${index}`}><b>{String(section.heading ?? '')}</b>{typeof section.purpose === 'string' && <p>{section.purpose}</p>}{strings(section.keyPoints).length > 0 && <ul>{strings(section.keyPoints).map((point) => <li key={point}>{point}</li>)}</ul>}</li>)}</ol>}
+        {artifact.type === 'PLATFORM_COPY' && <section className="candidate-diff" aria-label="候选与当前正文差异"><header><b>段落差异</b><div><span className="added">新增</span><span className="removed">删除</span><span className="unchanged">保留</span></div></header><div>{diff.length ? diff.map((line, index) => <p key={`${line.kind}-${index}`} className={line.kind}>{line.text}</p>) : <p className="unchanged">正文暂无内容</p>}</div></section>}
+        {facts.length > 0 && <section className="candidate-facts"><b>待核验</b><ul>{facts.map((fact) => <li key={fact}>{fact}</li>)}</ul></section>}
+      </div>
+      <footer>{canChange ? <><button className="button danger" type="button" disabled={busy !== 'idle'} onClick={onReject}>{busy === 'rejecting' ? <LoaderCircle size={16}/> : <Trash2 size={16}/>}废弃候选</button><button className="button primary" type="button" disabled={busy !== 'idle' || (artifact.type === 'OUTLINE' && !selectedTitle)} onClick={() => onAccept(artifact.type === 'OUTLINE' ? selectedTitle : undefined)}>{busy === 'accepting' ? <LoaderCircle size={16}/> : <Check size={16}/>}采用为当前版本</button></> : <button className="button primary" type="button" onClick={onClose}>关闭</button>}</footer>
+    </section>
+  </div>;
+}

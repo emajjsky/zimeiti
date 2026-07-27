@@ -15,6 +15,7 @@ const { listAvailableSkills } = require('./agent/skillRegistry.cjs');
 const { runBailianCli } = require('./runner/bailian.cjs');
 const { ANALYSIS_SCOPE, createTemplateStore, prepareAnalysisInput } = require('./services/intelligence-analysis.cjs');
 const { createCreativeSkillStore } = require('./services/creativeSkills.cjs');
+const { writingBriefInput } = require('./services/writing-brief.cjs');
 const { createProjectMaterialStore } = require('./services/projectMaterials.cjs');
 const { createProjectAgentStore, artifactView, runView } = require('./services/project-agent.cjs');
 const { saveProjectUpload, removeProjectUpload, openProjectUpload, readProjectUploadText } = require('./services/projectUploadStorage.cjs');
@@ -101,37 +102,6 @@ const agentPrepareInput = z.object({
   inputIds: z.array(z.string().uuid()).max(20).default([]),
   referenceIds: z.array(z.string().uuid()).max(20).default([]),
 });
-const platformSkillInput = z.object({
-  LAYOUT: z.string().min(1).max(160).optional(),
-  CHANNEL: z.string().min(1).max(160),
-});
-const writingBriefInput = z.object({
-  objective: z.string().max(2_000),
-  targetAudience: z.string().max(1_000),
-  coreMessage: z.string().max(4_000),
-  sourceRequirements: z.string().max(4_000),
-  lengthTarget: z.string().max(120),
-  selectedPlatforms: z.array(creativePlatform).min(1).max(4),
-  notes: z.string().max(4_000),
-  selectedSkills: z.object({
-    SUBJECT: z.string().min(1).max(160),
-    CONTENT_TYPE: z.string().min(1).max(160),
-    VOICE: z.string().min(1).max(160),
-    LAYOUT: z.string().min(1).max(160),
-    CHANNEL: z.string().min(1).max(160),
-  }),
-  platformSkills: z.object({
-    WECHAT: platformSkillInput.optional(),
-    XIAOHONGSHU: platformSkillInput.optional(),
-    ZHIHU: platformSkillInput.optional(),
-    WEIBO: platformSkillInput.optional(),
-  }),
-}).superRefine((value, context) => {
-  for (const platform of value.selectedPlatforms) {
-    if (!value.platformSkills[platform]?.CHANNEL) context.addIssue({ code: 'custom', path: ['platformSkills', platform], message: `请配置${creativePlatformNames[platform]}写作规则。` });
-  }
-});
-
 app.register(cors, { origin: config.corsOrigin, credentials: false });
 app.register(jwt, { secret: config.jwtSecret });
 app.register(multipart, { limits: { files: 1, fileSize: 50 * 1024 * 1024, fields: 8 } });
@@ -1281,6 +1251,29 @@ app.post('/api/v1/creative/project-artifacts/:id/accept', { preHandler: authenti
       throughMessageId: candidate.created_by_message_id,
     });
     return { artifact: artifactView({ ...acceptedResult.rows[0], payload_json: candidate.metadata_json?.payload ?? {}, version_number: 1 }), project };
+  });
+});
+
+app.post('/api/v1/creative/project-artifacts/:id/reject', { preHandler: authenticate }, async (request) => {
+  const artifactId = z.string().uuid().parse(request.params.id);
+  const workspace = await currentWorkspace(request.user.sub);
+  return transaction(async (client) => {
+    const result = await client.query(`UPDATE project_artifacts
+      SET status = 'REJECTED', updated_at = now()
+      WHERE id = $1 AND workspace_id = $2 AND status = 'CANDIDATE'
+        AND artifact_type IN ('OUTLINE', 'PLATFORM_COPY')
+      RETURNING id, project_id, platform`, [artifactId, workspace.id]);
+    if (!result.rowCount) { const error = new Error('该候选产物当前不能废弃。'); error.statusCode = 409; throw error; }
+    const artifact = result.rows[0];
+    await client.query(`INSERT INTO project_agent_messages
+      (workspace_id, project_id, role, content, stage, message_type, artifact_refs_json, metadata_json)
+      VALUES ($1, $2, 'ASSISTANT', '候选已废弃。', 'COPY', 'SYSTEM_EVENT', $3, $4)`, [
+      workspace.id,
+      artifact.project_id,
+      JSON.stringify([artifact.id]),
+      JSON.stringify({ platform: artifact.platform }),
+    ]);
+    return { id: artifact.id, status: 'REJECTED' };
   });
 });
 

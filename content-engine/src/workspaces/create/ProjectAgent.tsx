@@ -10,7 +10,11 @@ type ProjectAgentProps = {
   platform?: CreativePlatform;
   selectedMaterials?: { inputIds: string[]; referenceIds: string[] };
   selection?: { text: string; start: number; end: number };
+  blockedReason?: string;
+  refreshToken?: number;
+  onClearSelection?: () => void;
   onContextChange?: (context: ProjectAgentContext) => void;
+  onArtifactOpen?: (artifact: ProjectArtifact) => void;
   onArtifactAccepted: (artifact: ProjectArtifact, project?: ContentProject) => void;
   onOpenSettings: (target: 'agent' | 'policies') => void;
 };
@@ -47,7 +51,7 @@ function artifactHeading(artifact: ProjectArtifact) {
   return artifact.type === 'RESEARCH_PLAN' ? '研究计划' : artifact.type === 'OUTLINE' ? '文案大纲' : '文案候选';
 }
 
-export function ProjectAgent({ projectId, stage, platform, selectedMaterials, selection, onContextChange, onArtifactAccepted, onOpenSettings }: ProjectAgentProps) {
+export function ProjectAgent({ projectId, stage, platform, selectedMaterials, selection, blockedReason, refreshToken = 0, onClearSelection, onContextChange, onArtifactOpen, onArtifactAccepted, onOpenSettings }: ProjectAgentProps) {
   const [history, setHistory] = useState<ProjectAgentHistory>('CURRENT');
   const [context, setContext] = useState<ProjectAgentContext | null>(null);
   const [request, setRequest] = useState('');
@@ -73,7 +77,7 @@ export function ProjectAgent({ projectId, stage, platform, selectedMaterials, se
       .catch((reason) => { if (!cancelled) setError(reason instanceof Error ? reason.message : '读取 Agent 上下文失败。'); })
       .finally(() => { if (!cancelled) setBusy('idle'); });
     return () => { cancelled = true; };
-  }, [history, platform, projectId, stage]);
+  }, [history, platform, projectId, refreshToken, stage]);
 
   useEffect(() => {
     const status = context?.activeRun?.status;
@@ -94,7 +98,7 @@ export function ProjectAgent({ projectId, stage, platform, selectedMaterials, se
   const activeRun = context?.activeRun;
   const runIsActive = Boolean(activeRun && ['DRAFT', 'QUEUED', 'RUNNING'].includes(activeRun.status));
   const needsMaterials = stage === 'RESEARCH' && selectedCount === 0;
-  const canPrepare = Boolean(request.trim()) && !needsMaterials && busy === 'idle' && !runIsActive;
+  const canPrepare = Boolean(request.trim()) && !needsMaterials && !blockedReason && busy === 'idle' && !runIsActive;
 
   const prepare = async () => {
     if (!canPrepare) return;
@@ -131,6 +135,7 @@ export function ProjectAgent({ projectId, stage, platform, selectedMaterials, se
   };
 
   const openArtifact = (artifact: ProjectArtifact) => {
+    if (onArtifactOpen) { onArtifactOpen(artifact); return; }
     setPreview(artifact);
     setSelectedTitle(strings(artifact.payload.titleOptions)[0] ?? '');
   };
@@ -186,7 +191,7 @@ export function ProjectAgent({ projectId, stage, platform, selectedMaterials, se
     </div>
     {error && <div className="project-agent-error" role="alert"><CircleAlert size={16}/><span>{error}</span>{/(模型|提示词|核心 Agent|Key)/.test(error) && <button className="text-button" type="button" onClick={() => onOpenSettings(/核心 Agent/.test(error) ? 'agent' : 'policies')}><Settings2 size={14}/>去配置</button>}</div>}
     <div className="project-agent-composer">
-      <div><span>{stage === 'RESEARCH' ? `已选 ${selectedCount} 条资料` : selection ? `已选择 ${selection.text.length} 字` : '自由对话'}</span>{needsMaterials && <em>请先选择资料</em>}</div>
+      <div><span>{stage === 'RESEARCH' ? `已选 ${selectedCount} 条资料` : selection ? `已选择 ${selection.text.length} 字` : '自由对话'}</span>{selection && onClearSelection && <button className="selection-clear" type="button" aria-label="清除正文选区" onClick={onClearSelection}><X size={13}/></button>}{needsMaterials && <em>请先选择资料</em>}{blockedReason && <em>{blockedReason}</em>}</div>
       <textarea rows={3} value={request} maxLength={2_000} placeholder={stage === 'RESEARCH' ? '说明要核验的问题和保留的观点' : '例如：保留事实，把这篇文章润色得更自然'} onChange={(event) => setRequest(event.target.value)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') void prepare(); }}/>
       <button className="button primary" type="button" title="准备 Agent 任务" disabled={!canPrepare} onClick={() => void prepare()}>{busy === 'preparing' ? <LoaderCircle size={16}/> : <Send size={16}/>}发送</button>
     </div>
