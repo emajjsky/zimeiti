@@ -1,5 +1,6 @@
 const { z } = require('zod');
-const { outlineSchema } = require('./creative-outline.cjs');
+const { outlineSchema, outlineTemplateScope } = require('./creative-outline.cjs');
+const { draftTemplateScope } = require('./creative-draft.cjs');
 
 const COPY_ACTIONS = [
   'GENERATE_OUTLINE',
@@ -75,6 +76,37 @@ function copyTemplateScope(platform) {
   return scope;
 }
 
+function copyPromptTemplateScope(action, platform) {
+  if (action === 'GENERATE_OUTLINE') return outlineTemplateScope(platform);
+  if (action === 'GENERATE_DRAFT') return draftTemplateScope(platform);
+  return copyTemplateScope(platform);
+}
+
+function mergeFactsToVerify(...groups) {
+  return [...new Set(groups.flat().map((fact) => String(fact ?? '').trim()).filter(Boolean))];
+}
+
+function applyAcceptedCopyToState(state, input) {
+  const nextState = {
+    ...state,
+    projects: (state.projects ?? []).map((project) => ({
+      ...project,
+      versions: (project.versions ?? []).map((version) => ({ ...version })),
+    })),
+  };
+  const project = nextState.projects.find((item) => item.id === input.projectId);
+  const version = project?.versions.find((item) => item.platform === input.platform);
+  if (!project || !version) throw new Error('正式文案版本已不存在，无法采用候选。');
+  version.title = input.title;
+  version.body = input.body;
+  version.status = 'DRAFT';
+  version.updatedAt = input.updatedAt;
+  project.status = 'WRITING';
+  project.factChecks = mergeFactsToVerify(project.factChecks ?? [], input.factsToVerify ?? []);
+  project.updatedAt = input.updatedAt;
+  return { state: nextState, project, version };
+}
+
 function validateRevisionTemplate(body) {
   if (typeof body !== 'string' || !body.trim()) throw new Error('修改文案提示词不能为空。');
   if (body.length > MAX_REVISION_TEMPLATE_LENGTH) throw new Error(`修改文案提示词不能超过 ${MAX_REVISION_TEMPLATE_LENGTH.toLocaleString('en-US')} 个字符。`);
@@ -101,7 +133,10 @@ function parseCopyOutput(content, action) {
 }
 
 function buildCopyPrompt(snapshot) {
-  const businessTemplate = validateRevisionTemplate(snapshot.template ?? defaultRevisionTemplate(snapshot.platform));
+  const businessTemplate = snapshot.action === 'GENERATE_OUTLINE' || snapshot.action === 'GENERATE_DRAFT'
+    ? String(snapshot.template ?? '').trim()
+    : validateRevisionTemplate(snapshot.template ?? defaultRevisionTemplate(snapshot.platform));
+  if (!businessTemplate) throw new Error('文案动作提示词不能为空。');
   const outlineExample = {
     titleOptions: ['标题方案一'],
     summary: '大纲采用的叙事或论证思路',
@@ -161,6 +196,9 @@ module.exports = {
   copyActionScope,
   resolveCopyAction,
   copyTemplateScope,
+  copyPromptTemplateScope,
+  mergeFactsToVerify,
+  applyAcceptedCopyToState,
   validateRevisionTemplate,
   defaultRevisionTemplate,
   parseCopyOutput,

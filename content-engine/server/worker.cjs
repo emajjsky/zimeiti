@@ -12,6 +12,7 @@ const { buildOutlinePrompt, buildOutlineRepairPrompt, parseOutlineContent } = re
 const { DRAFT_ACTION_VERSION, buildDraftPrompt, buildDraftRepairPrompt, parseDraftContent } = require('./services/creative-draft.cjs');
 const { PROJECT_RESEARCH_ACTION_VERSION, buildResearchPlanPrompt, buildResearchPlanRepairPrompt, parseResearchPlan } = require('./services/project-research.cjs');
 const { createProjectAgentStore } = require('./services/project-agent.cjs');
+const { buildCopyPrompt, buildCopyRepairPrompt, mergeFactsToVerify, parseCopyOutput } = require('./services/project-copy-action.cjs');
 
 const connection = new IORedis(config.redisUrl, { maxRetriesPerRequest: null });
 const textRunner = createTextModelRunner();
@@ -27,6 +28,7 @@ async function processJob(queueJob) {
     if (queueJob.name === 'PROJECT_RESEARCH_PLAN') return await generateProjectResearchPlan({ jobId, workspaceId, runId: payload.runId });
     if (queueJob.name === 'CREATIVE_OUTLINE') return await generateCreativeOutline({ jobId, workspaceId, runId: payload.runId });
     if (queueJob.name === 'CREATIVE_DRAFT') return await generateCreativeDraft({ jobId, workspaceId, runId: payload.runId });
+    if (queueJob.name === 'PROJECT_COPY_ACTION') return await generateProjectCopyAction({ jobId, workspaceId, runId: payload.runId });
     if (queueJob.name !== 'BAILIAN_TEXT') throw new Error(`暂不支持的任务类型：${queueJob.name}`);
     const keyRow = await query('SELECT encrypted_secret FROM credential_vault WHERE workspace_id = $1 AND provider = $2', [workspaceId, 'BAILIAN']);
     if (!keyRow.rowCount) throw new Error('工作空间未配置百炼 Key。');
@@ -265,6 +267,124 @@ async function generateCreativeDraft({ jobId, workspaceId, runId }) {
       await client.query("UPDATE generation_runs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1 AND workspace_id = $3", [runId, message.slice(0, 2_000), workspaceId]);
       await client.query(`INSERT INTO api_usage_logs (workspace_id, job_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens, error)
         VALUES ($1, $2, $3, $4, 'CONTENT_WRITING', 'FAILED', $5, $6, $7, $8)`, [workspaceId, jobId, route?.provider ?? 'UNKNOWN', route?.model ?? null, Date.now() - startedAt, inputTokens ?? null, outputTokens ?? null, message.slice(0, 2_000)]);
+    });
+    throw error;
+  }
+}
+
+async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
+  const startedAt = Date.now();
+  let route;
+  let inputTokens;
+  let outputTokens;
+  try {
+    const runResult = await query(`SELECT id, action_version_id, source_snapshot_json, input_json
+      FROM generation_runs WHERE id = $1 AND workspace_id = $2
+        AND action_version_id LIKE 'project-copy-%' AND status = 'QUEUED'`, [runId, workspaceId]);
+    if (!runResult.rowCount) throw new Error('文案任务当前不能执行。');
+    await query("UPDATE generation_runs SET status = 'RUNNING', started_at = now() WHERE id = $1 AND workspace_id = $2", [runId, workspaceId]);
+    const run = runResult.rows[0];
+    const snapshot = run.source_snapshot_json;
+    const input = run.input_json;
+    route = input.route;
+    const connectionInput = await textConnectionInput(workspaceId, route);
+    const prompt = buildCopyPrompt({ ...snapshot, template: input.template.body });
+    const first = await textRunner.runText({ provider: route.provider, model: route.model, system: prompt.system, message: prompt.message, ...connectionInput });
+    inputTokens = first.inputTokens;
+    outputTokens = first.outputTokens;
+    let output;
+    try { output = parseCopyOutput(first.content, snapshot.action); }
+    catch (error) {
+      const validationError = error instanceof Error ? error.message : '输出不符合文案 JSON 契约。';
+      const repaired = await textRunner.runText({
+        provider: route.provider,
+        model: route.model,
+        system: buildCopyRepairPrompt(prompt.system, validationError),
+        message: first.content,
+        ...connectionInput,
+      });
+      inputTokens = (inputTokens ?? 0) + (repaired.inputTokens ?? 0);
+      outputTokens = (outputTokens ?? 0) + (repaired.outputTokens ?? 0);
+      output = parseCopyOutput(repaired.content, snapshot.action);
+    }
+    output.factsToVerify = mergeFactsToVerify(
+      snapshot.project?.factChecks ?? [],
+      snapshot.currentContent?.factsToVerify ?? [],
+      snapshot.contentMaster?.factsToVerify ?? [],
+      output.factsToVerify ?? [],
+    );
+    const saved = await transaction(async (client) => {
+      await client.query("UPDATE generation_runs SET status = 'SUCCEEDED', output_json = $2, usage_json = $3, completed_at = now() WHERE id = $1", [runId, JSON.stringify(output), JSON.stringify({ inputTokens, outputTokens })]);
+      const isOutline = snapshot.action === 'GENERATE_OUTLINE';
+      const artifact = await projectAgentStore.createArtifact(client, {
+        workspaceId,
+        projectId: snapshot.projectId,
+        type: isOutline ? 'OUTLINE' : 'PLATFORM_COPY',
+        stage: 'COPY',
+        platform: snapshot.platform,
+        status: 'CANDIDATE',
+        actionRunId: runId,
+        title: isOutline ? output.titleOptions[0] : output.title,
+        metadata: { action: snapshot.action, payload: output },
+      });
+      let versionId = null;
+      if (!isOutline) {
+        const versionResult = await client.query(`SELECT
+            COALESCE(MAX(v.version_number), 0) + 1 AS next_version,
+            (ARRAY_AGG(v.id ORDER BY v.version_number DESC) FILTER (WHERE a.status = 'ACCEPTED'))[1] AS parent_version_id,
+            (ARRAY_AGG(v.content_master_version_id ORDER BY v.version_number DESC) FILTER (WHERE a.status = 'ACCEPTED'))[1] AS master_version_id
+          FROM platform_content_versions v
+          JOIN project_artifacts a ON a.id = v.artifact_id
+          WHERE v.workspace_id = $1 AND v.project_id = $2 AND v.platform = $3`, [workspaceId, snapshot.projectId, snapshot.platform]);
+        const version = versionResult.rows[0];
+        const inserted = await client.query(`INSERT INTO platform_content_versions
+          (workspace_id, project_id, platform, artifact_id, content_master_version_id, parent_version_id,
+           version_number, title, body, facts_to_verify_json, change_summary)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`, [
+          workspaceId,
+          snapshot.projectId,
+          snapshot.platform,
+          artifact.id,
+          version.master_version_id ?? null,
+          version.parent_version_id ?? null,
+          Number(version.next_version),
+          output.title,
+          output.body,
+          JSON.stringify(output.factsToVerify),
+          output.changeSummary,
+        ]);
+        versionId = inserted.rows[0].id;
+      }
+      const message = await client.query(`INSERT INTO project_agent_messages
+        (workspace_id, project_id, action_run_id, role, content, stage, message_type, artifact_refs_json, metadata_json)
+        VALUES ($1, $2, $3, 'ASSISTANT', $4, 'COPY', 'ARTIFACT', $5, $6) RETURNING id`, [
+        workspaceId,
+        snapshot.projectId,
+        runId,
+        isOutline ? output.summary : output.changeSummary,
+        JSON.stringify([artifact.id]),
+        JSON.stringify({ platform: snapshot.platform, action: snapshot.action, model: route.model, status: 'CANDIDATE' }),
+      ]);
+      await client.query('UPDATE project_artifacts SET created_by_message_id = $1 WHERE id = $2 AND workspace_id = $3', [message.rows[0].id, artifact.id, workspaceId]);
+      await client.query("UPDATE jobs SET status = 'SUCCEEDED', result_json = $2, completed_at = now() WHERE id = $1", [jobId, JSON.stringify({ artifactId: artifact.id, versionId })]);
+      await client.query(`INSERT INTO api_usage_logs
+        (workspace_id, job_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens)
+        VALUES ($1, $2, $3, $4, 'PROJECT_COPY', 'SUCCESS', $5, $6, $7)`, [
+        workspaceId, jobId, route.provider, route.model, Date.now() - startedAt, inputTokens ?? null, outputTokens ?? null,
+      ]);
+      return { artifactId: artifact.id, versionId };
+    });
+    return saved;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '文案任务执行失败。';
+    await transaction(async (client) => {
+      await client.query("UPDATE generation_runs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1 AND workspace_id = $3", [runId, message.slice(0, 2_000), workspaceId]);
+      await client.query(`INSERT INTO api_usage_logs
+        (workspace_id, job_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens, error)
+        VALUES ($1, $2, $3, $4, 'PROJECT_COPY', 'FAILED', $5, $6, $7, $8)`, [
+        workspaceId, jobId, route?.provider ?? 'UNKNOWN', route?.model ?? null, Date.now() - startedAt,
+        inputTokens ?? null, outputTokens ?? null, message.slice(0, 2_000),
+      ]);
     });
     throw error;
   }

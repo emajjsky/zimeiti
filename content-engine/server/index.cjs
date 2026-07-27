@@ -2,6 +2,7 @@ const Fastify = require('fastify');
 const cors = require('@fastify/cors');
 const jwt = require('@fastify/jwt');
 const multipart = require('@fastify/multipart');
+const { randomUUID } = require('node:crypto');
 const { z } = require('zod');
 const config = require('./config.cjs');
 const { query, transaction } = require('./db.cjs');
@@ -15,12 +16,23 @@ const { runBailianCli } = require('./runner/bailian.cjs');
 const { ANALYSIS_SCOPE, createTemplateStore, prepareAnalysisInput } = require('./services/intelligence-analysis.cjs');
 const { createCreativeSkillStore } = require('./services/creativeSkills.cjs');
 const { createProjectMaterialStore } = require('./services/projectMaterials.cjs');
-const { createProjectAgentStore } = require('./services/project-agent.cjs');
+const { createProjectAgentStore, artifactView, runView } = require('./services/project-agent.cjs');
 const { saveProjectUpload, removeProjectUpload, openProjectUpload, readProjectUploadText } = require('./services/projectUploadStorage.cjs');
 const { PROJECT_RESEARCH_ACTION_VERSION, PROJECT_RESEARCH_SCOPE, researchRunView, researchPlanView } = require('./services/project-research.cjs');
 const { OUTLINE_ACTION_VERSION, OUTLINE_SCOPE, OUTLINE_TEMPLATE_SCOPES, outlineTemplateScope, validateOutlineTemplate, defaultOutlineTemplate, outlineCandidateView } = require('./services/creative-outline.cjs');
 const { DRAFT_ACTION_VERSION, DRAFT_SCOPE, DRAFT_TEMPLATE_SCOPES, draftTemplateScope, validateDraftTemplate, defaultDraftTemplate, draftCandidateView } = require('./services/creative-draft.cjs');
-const { REVISION_TEMPLATE_SCOPES, validateRevisionTemplate, defaultRevisionTemplate } = require('./services/project-copy-action.cjs');
+const {
+  COPY_ACTIONS,
+  REVISION_TEMPLATE_SCOPES,
+  applyAcceptedCopyToState,
+  copyActionScope,
+  copyActionVersion,
+  copyPromptTemplateScope,
+  mergeFactsToVerify,
+  resolveCopyAction,
+  validateRevisionTemplate,
+  defaultRevisionTemplate,
+} = require('./services/project-copy-action.cjs');
 
 const app = Fastify({ logger: true, bodyLimit: 5 * 1024 * 1024 });
 const credentials = new Set(['TAVILY', 'BAILIAN']);
@@ -76,6 +88,18 @@ const projectAgentQuery = z.object({
   stage: z.enum(['RESEARCH', 'COPY', 'VISUAL', 'LAYOUT', 'REVIEW']),
   platform: creativePlatform.optional(),
   history: z.enum(['CURRENT', 'ALL']).default('CURRENT'),
+});
+const agentPrepareInput = z.object({
+  stage: z.enum(['RESEARCH', 'COPY']),
+  platform: creativePlatform.optional(),
+  request: z.string().trim().min(1).max(2_000),
+  selection: z.object({
+    text: z.string().trim().min(1).max(12_000),
+    start: z.number().int().min(0),
+    end: z.number().int().min(0),
+  }).refine((value) => value.end > value.start, '选区结束位置必须大于开始位置。').optional(),
+  inputIds: z.array(z.string().uuid()).max(20).default([]),
+  referenceIds: z.array(z.string().uuid()).max(20).default([]),
 });
 const platformSkillInput = z.object({
   LAYOUT: z.string().min(1).max(160).optional(),
@@ -672,6 +696,175 @@ app.get('/api/v1/creative/projects/:projectId/agent', { preHandler: authenticate
   return projectAgentStore.context(workspace.id, projectId, input);
 });
 
+app.post('/api/v1/creative/projects/:projectId/agent/prepare', { preHandler: authenticate }, async (request, reply) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const input = agentPrepareInput.parse(request.body);
+  const workspace = await currentWorkspace(request.user.sub);
+  if (input.stage === 'RESEARCH') {
+    if (input.inputIds.length + input.referenceIds.length === 0) throw new Error('请至少选择一条项目资料。');
+    const [project, brief, policy, materialRows] = await Promise.all([
+      creativeProject(workspace.id, projectId),
+      creativeSkillStore.getBrief(workspace.id, projectId),
+      query(`SELECT p.model FROM agent_model_policies p
+        JOIN credential_vault c ON c.workspace_id = p.workspace_id AND c.provider = 'BAILIAN' AND c.status = 'READY'
+        WHERE p.workspace_id = $1 AND p.scope = $2 AND p.provider = 'BAILIAN_CLI'`, [workspace.id, PROJECT_RESEARCH_SCOPE]),
+      projectMaterialStore.researchSnapshot(workspace.id, projectId, input.inputIds, input.referenceIds),
+    ]);
+    if (!policy.rowCount) throw new Error('请先在“核心 Agent”配置可用的规划模型。');
+    const materials = await projectResearchMaterialSnapshot(materialRows);
+    const run = await transaction(async (client) => {
+      await client.query(`UPDATE generation_runs SET status = 'CANCELLED', completed_at = now()
+        WHERE workspace_id = $1 AND action_version_id = $2 AND status = 'DRAFT' AND source_snapshot_json->>'projectId' = $3`, [workspace.id, PROJECT_RESEARCH_ACTION_VERSION, projectId]);
+      const created = await client.query(`INSERT INTO generation_runs
+        (workspace_id, action_version_id, status, source_snapshot_json, input_json, model, prompt_version, estimated_cost)
+        VALUES ($1, $2, 'DRAFT', $3, $4, $5, '1.0.0', 'null'::jsonb) RETURNING *`, [
+        workspace.id,
+        PROJECT_RESEARCH_ACTION_VERSION,
+        JSON.stringify({ projectId, project, brief, request: input.request, materials, stage: 'RESEARCH' }),
+        JSON.stringify({ route: { provider: 'BAILIAN_CLI', model: policy.rows[0].model } }),
+        policy.rows[0].model,
+      ]);
+      await client.query(`INSERT INTO project_agent_messages
+        (workspace_id, project_id, action_run_id, role, content, stage, message_type, metadata_json)
+        VALUES ($1, $2, $3, 'USER', $4, 'RESEARCH', 'MESSAGE', '{}'::jsonb),
+               ($1, $2, $3, 'ASSISTANT', $5, 'RESEARCH', 'CONFIRMATION', $6)`, [
+        workspace.id, projectId, created.rows[0].id, input.request, '研究计划已准备，确认后开始执行。',
+        JSON.stringify({ action: 'PROJECT_RESEARCH_PLAN', model: policy.rows[0].model }),
+      ]);
+      for (const id of input.inputIds) await client.query('INSERT INTO project_research_materials (generation_run_id, input_id) VALUES ($1, $2)', [created.rows[0].id, id]);
+      for (const id of input.referenceIds) await client.query('INSERT INTO project_research_materials (generation_run_id, reference_id) VALUES ($1, $2)', [created.rows[0].id, id]);
+      return created.rows[0];
+    });
+    reply.code(201).send(runView(run));
+    return;
+  }
+
+  if (!input.platform) throw new Error('文案阶段必须指定目标平台。');
+  const [project, context, materialRows, summaries, masterResult, acceptedVersion] = await Promise.all([
+    creativeProject(workspace.id, projectId),
+    creativeSkillStore.getContext(workspace.id, projectId, input.platform),
+    projectMaterialStore.researchSnapshot(workspace.id, projectId, input.inputIds, input.referenceIds),
+    query(`SELECT stage, platform, summary, version FROM project_stage_summaries
+      WHERE workspace_id = $1 AND project_id = $2 AND (platform IS NULL OR platform = $3)
+      ORDER BY created_at DESC LIMIT 10`, [workspace.id, projectId, input.platform]),
+    query(`SELECT m.* FROM content_master_versions m
+      JOIN project_artifacts a ON a.id = m.artifact_id AND a.status = 'ACCEPTED'
+      WHERE m.workspace_id = $1 AND m.project_id = $2 ORDER BY m.version_number DESC LIMIT 1`, [workspace.id, projectId]),
+    query(`SELECT v.* FROM platform_content_versions v
+      JOIN project_artifacts a ON a.id = v.artifact_id AND a.status = 'ACCEPTED'
+      WHERE v.workspace_id = $1 AND v.project_id = $2 AND v.platform = $3
+      ORDER BY v.version_number DESC LIMIT 1`, [workspace.id, projectId, input.platform]),
+  ]);
+  if (!context) throw new Error('请先保存创作设定和写作策略。');
+  if (!context.brief.selectedPlatforms.includes(input.platform)) throw new Error('目标平台不在已保存的创作设定中。');
+  const projectVersion = project.versions?.find((version) => version.platform === input.platform);
+  if (!projectVersion) throw new Error('项目没有对应的图文平台版本。');
+  const currentRow = acceptedVersion.rows[0];
+  const currentContent = currentRow
+    ? { id: currentRow.id, title: currentRow.title, body: currentRow.body, factsToVerify: currentRow.facts_to_verify_json ?? [] }
+    : { id: projectVersion.id, title: projectVersion.title ?? '', body: projectVersion.body ?? '', factsToVerify: project.factChecks ?? [] };
+  const resolution = resolveCopyAction({ request: input.request, hasBody: Boolean(currentContent.body?.trim()), selection: input.selection, targetPlatform: input.platform });
+  if (resolution.needsClarification) {
+    await projectAgentStore.appendMessage(workspace.id, projectId, { role: 'USER', content: input.request, stage: 'COPY', metadata: { platform: input.platform } });
+    const message = await projectAgentStore.appendMessage(workspace.id, projectId, { role: 'ASSISTANT', content: resolution.question, stage: 'COPY', metadata: { platform: input.platform, needsClarification: true } });
+    reply.code(200).send({ needsClarification: true, message });
+    return;
+  }
+  const action = resolution.action;
+  const [route, template] = await Promise.all([
+    textTaskRoute(workspace.id, copyActionScope(action), action === 'GENERATE_OUTLINE' || action === 'GENERATE_DRAFT' ? '文案生成' : '文案改写'),
+    templateStore.get(workspace.id, copyPromptTemplateScope(action, input.platform)),
+  ]);
+  const materials = await projectResearchMaterialSnapshot(materialRows);
+  const master = masterResult.rows[0];
+  const sourceSnapshot = {
+    projectId,
+    project,
+    brief: context.brief,
+    skills: context.skills,
+    platform: input.platform,
+    stage: 'COPY',
+    action,
+    request: input.request,
+    currentContent,
+    selection: input.selection ?? null,
+    contentMaster: master ? {
+      id: master.id,
+      thesis: master.thesis,
+      facts: master.facts_json,
+      cases: master.cases_json,
+      preservedExpressions: master.preserved_expressions_json,
+      factsToVerify: master.facts_to_verify_json,
+      materialRefs: master.material_refs_json,
+    } : null,
+    summaries: summaries.rows,
+    materials,
+  };
+  const runInput = { template: { id: template.id, version: template.version, body: template.body }, route: { provider: route.provider, connectionId: route.connectionId ?? null, model: route.model } };
+  const run = await transaction(async (client) => {
+    await client.query(`UPDATE generation_runs SET status = 'CANCELLED', completed_at = now()
+      WHERE workspace_id = $1 AND action_version_id LIKE 'project-copy-%' AND status = 'DRAFT'
+        AND source_snapshot_json->>'projectId' = $2 AND source_snapshot_json->>'platform' = $3`, [workspace.id, projectId, input.platform]);
+    const created = await client.query(`INSERT INTO generation_runs
+      (workspace_id, action_version_id, status, source_snapshot_json, input_json, model, prompt_version, estimated_cost)
+      VALUES ($1, $2, 'DRAFT', $3, $4, $5, $6, 'null'::jsonb) RETURNING *`, [
+      workspace.id, copyActionVersion(action), JSON.stringify(sourceSnapshot), JSON.stringify(runInput), route.model, String(template.version),
+    ]);
+    await client.query(`INSERT INTO project_agent_messages
+      (workspace_id, project_id, action_run_id, role, content, stage, message_type, metadata_json)
+      VALUES ($1, $2, $3, 'USER', $4, 'COPY', 'MESSAGE', $5),
+             ($1, $2, $3, 'ASSISTANT', $6, 'COPY', 'CONFIRMATION', $7)`, [
+      workspace.id, projectId, created.rows[0].id, input.request, JSON.stringify({ platform: input.platform }),
+      '文案动作已准备，确认后生成候选版本。',
+      JSON.stringify({ platform: input.platform, action, model: route.model, promptVersion: template.version }),
+    ]);
+    return created.rows[0];
+  });
+  reply.code(201).send(runView(run));
+});
+
+app.post('/api/v1/creative/agent-runs/:id/confirm', { preHandler: authenticate }, async (request, reply) => {
+  const runId = z.string().uuid().parse(request.params.id);
+  const workspace = await currentWorkspace(request.user.sub);
+  const prepared = await transaction(async (client) => {
+    const run = await client.query(`UPDATE generation_runs SET status = 'QUEUED'
+      WHERE id = $1 AND workspace_id = $2 AND status = 'DRAFT'
+        AND (action_version_id = $3 OR action_version_id LIKE 'project-copy-%')
+      RETURNING *`, [runId, workspace.id, PROJECT_RESEARCH_ACTION_VERSION]);
+    if (!run.rowCount) { const error = new Error('该 Agent 任务当前不能确认。'); error.statusCode = 409; throw error; }
+    const jobType = run.rows[0].action_version_id === PROJECT_RESEARCH_ACTION_VERSION ? 'PROJECT_RESEARCH_PLAN' : 'PROJECT_COPY_ACTION';
+    const job = await client.query('INSERT INTO jobs (workspace_id, job_type, payload_json) VALUES ($1, $2, $3) RETURNING *', [workspace.id, jobType, JSON.stringify({ runId })]);
+    return { run: run.rows[0], job: job.rows[0], jobType };
+  });
+  try { await enqueue(prepared.job); }
+  catch (error) {
+    const message = error instanceof Error ? error.message : '任务入队失败。';
+    await query("UPDATE generation_runs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1", [runId, message.slice(0, 2_000)]);
+    await query("UPDATE jobs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1", [prepared.job.id, message.slice(0, 2_000)]);
+    throw error;
+  }
+  await projectAgentStore.appendMessage(workspace.id, prepared.run.source_snapshot_json.projectId, {
+    actionRunId: runId,
+    role: 'ASSISTANT',
+    content: '任务已进入执行队列。',
+    stage: prepared.run.source_snapshot_json.stage ?? 'COPY',
+    messageType: 'RUN_STATUS',
+    metadata: { platform: prepared.run.source_snapshot_json.platform ?? null, status: 'QUEUED', jobType: prepared.jobType },
+  });
+  reply.code(202).send({ id: runId, status: 'QUEUED', jobId: prepared.job.id });
+});
+
+app.post('/api/v1/creative/agent-runs/:id/cancel', { preHandler: authenticate }, async (request) => {
+  const runId = z.string().uuid().parse(request.params.id);
+  const workspace = await currentWorkspace(request.user.sub);
+  const result = await query(`UPDATE generation_runs SET status = 'CANCELLED', completed_at = now()
+    WHERE id = $1 AND workspace_id = $2 AND status IN ('DRAFT', 'QUEUED')
+      AND (action_version_id = $3 OR action_version_id LIKE 'project-copy-%') RETURNING *`, [runId, workspace.id, PROJECT_RESEARCH_ACTION_VERSION]);
+  if (!result.rowCount) { const error = new Error('该 Agent 任务当前不能取消。'); error.statusCode = 409; throw error; }
+  await query("UPDATE jobs SET status = 'CANCELLED', completed_at = now() WHERE workspace_id = $1 AND payload_json->>'runId' = $2 AND status = 'PENDING'", [workspace.id, runId]);
+  return runView(result.rows[0]);
+});
+
 app.get('/api/v1/creative/projects/:projectId/research', { preHandler: authenticate }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const workspace = await currentWorkspace(request.user.sub);
@@ -854,7 +1047,7 @@ app.post('/api/v1/creative/outline-candidates/:id/accept', { preHandler: authent
     const candidate = candidateResult.rows[0];
     if (!candidate.output_json.titleOptions.includes(input.selectedTitle)) throw new Error('请选择候选中提供的标题。');
     const snapshotResult = await client.query('SELECT state_json FROM workspace_snapshots WHERE workspace_id = $1 FOR UPDATE', [workspace.id]);
-    const state = snapshotResult.rows[0]?.state_json;
+    let state = snapshotResult.rows[0]?.state_json;
     const project = state?.projects?.find((item) => item.id === candidate.project_id);
     const version = project?.versions?.find((item) => item.platform === candidate.platform);
     if (!project || !version) throw new Error('正式文案版本已不存在，无法接受大纲。');
@@ -986,6 +1179,131 @@ app.post('/api/v1/creative/draft-candidates/:id/accept', { preHandler: authentic
     await client.query("UPDATE creative_draft_candidates SET status = 'REJECTED', updated_at = now() WHERE workspace_id = $1 AND outline_candidate_id = $2 AND id <> $3 AND status IN ('CANDIDATE', 'ACCEPTED')", [workspace.id, candidate.outline_candidate_id, candidate.id]);
     const accepted = await client.query("UPDATE creative_draft_candidates SET status = 'ACCEPTED', accepted_at = now(), updated_at = now() WHERE id = $1 AND workspace_id = $2 RETURNING *", [candidate.id, workspace.id]);
     return { candidate: draftCandidateView({ ...accepted.rows[0], model: candidate.model, prompt_version: candidate.prompt_version }), project };
+  });
+});
+
+app.post('/api/v1/creative/project-artifacts/:id/accept', { preHandler: authenticate }, async (request) => {
+  const artifactId = z.string().uuid().parse(request.params.id);
+  const input = z.object({ selectedTitle: z.string().trim().min(1).max(120).optional() }).parse(request.body ?? {});
+  const workspace = await currentWorkspace(request.user.sub);
+  return transaction(async (client) => {
+    const candidateResult = await client.query(`SELECT a.*, r.source_snapshot_json,
+        v.id AS content_version_id, v.title AS content_title, v.body AS content_body,
+        v.facts_to_verify_json, v.change_summary
+      FROM project_artifacts a
+      LEFT JOIN generation_runs r ON r.id = a.action_run_id
+      LEFT JOIN platform_content_versions v ON v.artifact_id = a.id
+      WHERE a.id = $1 AND a.workspace_id = $2 AND a.status = 'CANDIDATE'
+        AND a.artifact_type IN ('OUTLINE', 'PLATFORM_COPY')
+      FOR UPDATE OF a`, [artifactId, workspace.id]);
+    if (!candidateResult.rowCount) { const error = new Error('该候选产物当前不能采用。'); error.statusCode = 409; throw error; }
+    const candidate = candidateResult.rows[0];
+    const snapshotResult = await client.query('SELECT state_json FROM workspace_snapshots WHERE workspace_id = $1 FOR UPDATE', [workspace.id]);
+    let state = snapshotResult.rows[0]?.state_json;
+    const updatedAt = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
+    let project;
+    let summary;
+    if (candidate.artifact_type === 'OUTLINE') {
+      const payload = candidate.metadata_json?.payload ?? {};
+      const selectedTitle = input.selectedTitle ?? payload.titleOptions?.[0];
+      if (!selectedTitle || (payload.titleOptions?.length && !payload.titleOptions.includes(selectedTitle))) throw new Error('请选择候选大纲中提供的标题。');
+      const currentProject = state?.projects?.find((item) => item.id === candidate.project_id);
+      const currentVersion = currentProject?.versions?.find((item) => item.platform === candidate.platform);
+      if (!currentProject || !currentVersion) throw new Error('正式文案版本已不存在，无法采用候选。');
+      currentVersion.title = selectedTitle;
+      currentVersion.status = 'DRAFT';
+      currentVersion.updatedAt = updatedAt;
+      currentProject.status = 'WRITING';
+      currentProject.factChecks = mergeFactsToVerify(currentProject.factChecks ?? [], payload.factsToVerify ?? []);
+      currentProject.updatedAt = updatedAt;
+      project = currentProject;
+      summary = payload.summary || `已采用${creativePlatformNames[candidate.platform]}大纲。`;
+    } else {
+      if (!candidate.content_version_id) throw new Error('候选文案内容已不存在。');
+      const latestMaster = await client.query(`SELECT m.* FROM content_master_versions m
+        JOIN project_artifacts a ON a.id = m.artifact_id AND a.status = 'ACCEPTED'
+        WHERE m.workspace_id = $1 AND m.project_id = $2 ORDER BY m.version_number DESC LIMIT 1`, [workspace.id, candidate.project_id]);
+      let master = latestMaster.rows[0];
+      const candidateFacts = mergeFactsToVerify(
+        candidate.source_snapshot_json?.project?.factChecks ?? [],
+        candidate.source_snapshot_json?.currentContent?.factsToVerify ?? [],
+        candidate.source_snapshot_json?.contentMaster?.factsToVerify ?? [],
+        candidate.facts_to_verify_json ?? [],
+      );
+      if (!master) {
+        const masterArtifact = await projectAgentStore.createArtifact(client, {
+          workspaceId: workspace.id,
+          projectId: candidate.project_id,
+          type: 'CONTENT_MASTER',
+          stage: 'COPY',
+          status: 'ACCEPTED',
+          actionRunId: candidate.action_run_id,
+          title: candidate.content_title,
+        });
+        const materialRefs = (candidate.source_snapshot_json?.materials ?? []).map((material) => material.id).filter(Boolean);
+        const createdMaster = await client.query(`INSERT INTO content_master_versions
+          (workspace_id, project_id, artifact_id, version_number, thesis, facts_to_verify_json, material_refs_json)
+          VALUES ($1, $2, $3, 1, $4, $5, $6) RETURNING *`, [
+          workspace.id,
+          candidate.project_id,
+          masterArtifact.id,
+          candidate.source_snapshot_json?.project?.coreViewpoint || candidate.content_title,
+          JSON.stringify(candidateFacts),
+          JSON.stringify(materialRefs),
+        ]);
+        master = createdMaster.rows[0];
+      }
+      await client.query('UPDATE platform_content_versions SET content_master_version_id = $1 WHERE id = $2', [master.id, candidate.content_version_id]);
+      const applied = applyAcceptedCopyToState(state, {
+        projectId: candidate.project_id,
+        platform: candidate.platform,
+        title: candidate.content_title,
+        body: candidate.content_body,
+        factsToVerify: candidateFacts,
+        updatedAt,
+      });
+      state = applied.state;
+      project = applied.project;
+      summary = candidate.change_summary || `已采用${creativePlatformNames[candidate.platform]}文案候选。`;
+    }
+    await client.query('UPDATE workspace_snapshots SET state_json = $2, revision = revision + 1, updated_at = now() WHERE workspace_id = $1', [workspace.id, JSON.stringify(state)]);
+    await client.query(`UPDATE project_artifacts SET status = 'REJECTED', updated_at = now()
+      WHERE workspace_id = $1 AND project_id = $2 AND platform = $3 AND artifact_type = $4
+        AND status = 'ACCEPTED' AND id <> $5`, [workspace.id, candidate.project_id, candidate.platform, candidate.artifact_type, candidate.id]);
+    const acceptedResult = await client.query(`UPDATE project_artifacts SET status = 'ACCEPTED', accepted_at = now(), updated_at = now()
+      WHERE id = $1 AND workspace_id = $2 RETURNING *`, [candidate.id, workspace.id]);
+    await projectAgentStore.upsertStageSummary(client, {
+      workspaceId: workspace.id,
+      projectId: candidate.project_id,
+      stage: 'COPY',
+      platform: candidate.platform,
+      summary,
+      throughMessageId: candidate.created_by_message_id,
+    });
+    return { artifact: artifactView({ ...acceptedResult.rows[0], payload_json: candidate.metadata_json?.payload ?? {}, version_number: 1 }), project };
+  });
+});
+
+app.post('/api/v1/creative/projects/:projectId/platforms/:platform', { preHandler: authenticate }, async (request) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const platformValue = String(request.params.platform);
+  if (platformValue === 'VIDEO_CHANNEL') throw new Error('视频号使用独立的视频创作流程。');
+  const platform = creativePlatform.parse(platformValue);
+  const workspace = await currentWorkspace(request.user.sub);
+  return transaction(async (client) => {
+    const snapshotResult = await client.query('SELECT state_json FROM workspace_snapshots WHERE workspace_id = $1 FOR UPDATE', [workspace.id]);
+    const state = snapshotResult.rows[0]?.state_json;
+    const project = state?.projects?.find((item) => item.id === projectId);
+    if (!project) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
+    const existingVersion = project.versions?.find((version) => version.platform === platform);
+    await client.query(`INSERT INTO platform_strategies (workspace_id, project_id, platform)
+      VALUES ($1, $2, $3) ON CONFLICT (workspace_id, project_id, platform) DO NOTHING`, [workspace.id, projectId, platform]);
+    if (existingVersion) return { project, platform, created: false };
+    const updatedAt = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
+    project.versions = [...(project.versions ?? []), { id: randomUUID(), platform, status: 'DRAFT', title: '', body: '', updatedAt }];
+    project.updatedAt = updatedAt;
+    await client.query('UPDATE workspace_snapshots SET state_json = $2, revision = revision + 1, updated_at = now() WHERE workspace_id = $1', [workspace.id, JSON.stringify(state)]);
+    return { project, platform, created: true };
   });
 });
 

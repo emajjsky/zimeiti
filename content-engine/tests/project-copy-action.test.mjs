@@ -1,15 +1,28 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
-import {
+import copyActionModule from '../server/services/project-copy-action.cjs';
+
+const {
   COPY_ACTIONS,
   buildCopyPrompt,
   copyActionVersion,
   copyTemplateScope,
   defaultRevisionTemplate,
+  applyAcceptedCopyToState,
+  copyPromptTemplateScope,
+  mergeFactsToVerify,
   parseCopyOutput,
   resolveCopyAction,
-} from '../server/services/project-copy-action.cjs';
+} = copyActionModule;
+
+function routeSlice(source, start, end) {
+  const from = source.indexOf(start);
+  assert.notEqual(from, -1, `缺少路由 ${start}`);
+  const to = source.indexOf(end, from + start.length);
+  assert.notEqual(to, -1, `缺少后续路由 ${end}`);
+  return source.slice(from, to);
+}
 
 test('文案请求按固定优先级确定性映射到注册动作', () => {
   assert.equal(resolveCopyAction({ request: '把这篇文章润色一下', hasBody: true }).action, 'POLISH_EXISTING_DRAFT');
@@ -94,4 +107,69 @@ test('四平台修订提示词在设置页可见并接入服务端模板仓储',
   assert.match(api, /CREATIVE_REVISION_WECHAT/);
   assert.match(api, /CREATIVE_REVISION_WEIBO/);
   assert.match(settings, /id: 'REVISION', label: '修改文案'/);
+});
+
+test('不同文案动作冻结对应的大纲、初稿或修订模板', () => {
+  assert.equal(copyPromptTemplateScope('GENERATE_OUTLINE', 'WECHAT'), 'CREATIVE_OUTLINE_WECHAT');
+  assert.equal(copyPromptTemplateScope('GENERATE_DRAFT', 'ZHIHU'), 'CREATIVE_DRAFT_ZHIHU');
+  assert.equal(copyPromptTemplateScope('POLISH_EXISTING_DRAFT', 'WEIBO'), 'CREATIVE_REVISION_WEIBO');
+});
+
+test('Project Agent prepare 不入队，confirm 才创建 Worker Job', () => {
+  const server = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
+  const prepare = routeSlice(server, "/agent/prepare", "/agent-runs/:id/confirm");
+  const confirm = routeSlice(server, "/agent-runs/:id/confirm", "/agent-runs/:id/cancel");
+  assert.match(prepare, /status.*DRAFT/s);
+  assert.doesNotMatch(prepare, /await enqueue/);
+  assert.match(confirm, /PROJECT_COPY_ACTION/);
+  assert.match(confirm, /await enqueue/);
+});
+
+test('Project Agent Worker 只创建候选产物，不直接覆盖正式正文', () => {
+  const worker = fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8');
+  const execute = routeSlice(worker, 'async function generateProjectCopyAction', 'async function generateAgentPlan');
+  assert.match(worker, /PROJECT_COPY_ACTION/);
+  assert.match(execute, /project_artifacts/);
+  assert.match(execute, /platform_content_versions/);
+  assert.doesNotMatch(execute, /workspace_snapshots/);
+});
+
+test('采用候选时更新正式版本并合并待核验事实', () => {
+  const state = {
+    projects: [{
+      id: 'project-1',
+      title: '项目',
+      status: 'BRIEF',
+      factChecks: ['核验原始价格', ''],
+      versions: [{ id: 'wechat-1', platform: 'WECHAT', status: 'DRAFT', title: '旧标题', body: '旧正文', updatedAt: '旧时间' }],
+    }],
+  };
+  const result = applyAcceptedCopyToState(state, {
+    projectId: 'project-1',
+    platform: 'WECHAT',
+    title: '新标题',
+    body: '新正文',
+    factsToVerify: ['核验原始价格', ' 核验发布日期 '],
+    updatedAt: '12:30',
+  });
+  assert.equal(result.project.status, 'WRITING');
+  assert.equal(result.project.versions[0].title, '新标题');
+  assert.equal(result.project.versions[0].body, '新正文');
+  assert.deepEqual(result.project.factChecks, ['核验原始价格', '核验发布日期']);
+  assert.deepEqual(mergeFactsToVerify([' A ', '', 'B'], ['B', 'C']), ['A', 'B', 'C']);
+});
+
+test('采用候选和启用平台都锁定 workspace snapshot 且保持幂等', () => {
+  const server = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
+  const accept = routeSlice(server, "/project-artifacts/:id/accept", "/projects/:projectId/platforms/:platform");
+  const enable = routeSlice(server, "/projects/:projectId/platforms/:platform", "/agent/skills");
+  assert.match(accept, /FOR UPDATE/);
+  assert.match(accept, /FOR UPDATE OF a(?!, v)/);
+  assert.doesNotMatch(accept, /FOR UPDATE OF a, v/);
+  assert.match(accept, /workspace_snapshots/);
+  assert.match(accept, /platform_content_versions/);
+  assert.match(accept, /upsertStageSummary/);
+  assert.match(enable, /FOR UPDATE/);
+  assert.match(enable, /existingVersion|find\(/);
+  assert.match(enable, /VIDEO_CHANNEL/);
 });
