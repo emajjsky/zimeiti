@@ -397,3 +397,12 @@ API：`http://127.0.0.1:8787/health`
 - `package.json` 的 `dev` 同时启动 API、Web 和 Worker。自动化新增 7 项大纲契约测试，完整 Node 测试为 92 项。
 - Playwright 使用独立测试用户验证未配置模型的真实阻断与任务策略跳转，并使用测试级 API mock 验证候选桌面和 390px 布局。产品运行时没有示例候选，未触发真实模型调用。
 - 本轮视觉参数为 `DESIGN_VARIANCE 4 / MOTION_INTENSITY 2 / VISUAL_DENSITY 6`。沿用暖白、钴蓝、淡蓝和薄荷绿，只使用状态反馈动画，并支持 `prefers-reduced-motion`。
+
+## 2026-07-27 实现记录：平台 Skill 组合
+
+- `010_platform_creative_skills.sql` 为 `creative_skill_compositions` 增加 `platform_versions_json`，并按项目已选平台回填公众号/小红书内置排版和渠道版本。
+- `011_platform_outline_action_v1_1.sql` 注册 `creative-outline:1.1.0`，并取消尚未执行的 `1.0.0` DRAFT 运行；已成功或已采用结果保持不变。
+- `creativeSkills.getContext(workspaceId, projectId, platform)` 按当前平台组合三个共用 Skill 与两个平台 Skill；保存时逐项校验版本 ID、维度和工作空间权限。
+- `CreateWorkspace.tsx` 将 Skill 面板改为共用、公众号、小红书页签。切换或新增目标平台时自动创建对应默认组合，保存后由服务端恢复。
+- `buildOutlinePrompt()` 不再把含 Skill ID 的完整 Brief 直接传给模型，只传业务字段和已冻结的五维 `skillRules`，避免旧全局字段形成冲突指令。
+- 新增服务端单元测试和 Playwright 断言，验证两平台默认排版/渠道及小红书上下文隔离。

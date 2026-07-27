@@ -38,6 +38,7 @@ test('大纲提示词包含 Brief、平台和冻结的五维 Skill 规则', () =
   assert.match(prompt.message, /形成公众号文章/);
   assert.match(prompt.message, /解释术语，不夸大能力/);
   assert.match(prompt.message, /公众号长文/);
+  assert.doesNotMatch(prompt.message, /selectedSkills|platformSkills/);
 });
 
 test('模型大纲通过严格 JSON 结构校验', () => {
@@ -63,6 +64,9 @@ test('Agent 动作迁移保留旧 Skill 系统并建立动作执行引用', () =
   assert.match(migration, /ADD COLUMN action_version_id/);
   assert.match(migration, /creative-outline:1\.0\.0/);
   assert.doesNotMatch(migration, /DROP TABLE skill_definitions|ALTER TABLE skill_definitions/);
+  const platformActionMigration = fs.readFileSync(new URL('../server/migrations/011_platform_outline_action_v1_1.sql', import.meta.url), 'utf8');
+  assert.match(platformActionMigration, /creative-outline:1\.1\.0/);
+  assert.match(platformActionMigration, /status = 'CANCELLED'/);
 });
 
 test('大纲 API 仅在确认后入队，采用候选时才更新正式快照', () => {

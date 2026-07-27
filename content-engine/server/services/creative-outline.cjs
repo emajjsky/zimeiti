@@ -1,6 +1,6 @@
 const { z } = require('zod');
 
-const OUTLINE_ACTION_VERSION = 'creative-outline:1.0.0';
+const OUTLINE_ACTION_VERSION = 'creative-outline:1.1.0';
 const OUTLINE_SCOPE = 'CONTENT_WRITING';
 
 const outlineSchema = z.object({
@@ -44,7 +44,14 @@ function buildOutlinePrompt({ project, brief, skills, platform }) {
   ].join('\n');
   const message = JSON.stringify({
     project: { title: project.title, coreViewpoint: project.coreViewpoint, factChecks: project.factChecks ?? [] },
-    writingBrief: brief,
+    writingBrief: {
+      objective: brief.objective,
+      targetAudience: brief.targetAudience,
+      coreMessage: brief.coreMessage,
+      sourceRequirements: brief.sourceRequirements,
+      lengthTarget: brief.lengthTarget,
+      notes: brief.notes,
+    },
     skillRules: skills.map((skill) => ({ dimension: skill.dimension, name: skill.name, version: skill.version.version, instructions: skill.version.instructions })),
     platform,
   });

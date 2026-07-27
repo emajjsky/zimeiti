@@ -30,6 +30,7 @@ function briefView(row) {
     selectedPlatforms: row.selected_platforms_json ?? [],
     notes: row.notes,
     selectedSkills: row.selected_versions_json ?? {},
+    platformSkills: row.platform_versions_json ?? {},
     updatedAt: row.updated_at,
   };
 }
@@ -52,17 +53,19 @@ function createCreativeSkillStore({ query, transaction }) {
   }
 
   async function getBrief(workspaceId, projectId) {
-    const result = await query(`SELECT b.*, c.selected_versions_json
+    const result = await query(`SELECT b.*, c.selected_versions_json, c.platform_versions_json
       FROM writing_briefs b
       JOIN creative_skill_compositions c ON c.id = b.composition_id
       WHERE b.workspace_id = $1 AND b.project_id = $2`, [workspaceId, projectId]);
     return briefView(result.rows[0]);
   }
 
-  async function getContext(workspaceId, projectId) {
+  async function getContext(workspaceId, projectId, platform) {
     const brief = await getBrief(workspaceId, projectId);
     if (!brief) return null;
-    const requested = DIMENSIONS.map((dimension) => brief.selectedSkills[dimension]);
+    const platformSelection = brief.platformSkills[platform];
+    if (!platformSelection) throw new Error(`请先配置${platform === 'WECHAT' ? '公众号' : '小红书'}的排版与渠道 Skill。`);
+    const requested = [brief.selectedSkills.SUBJECT, brief.selectedSkills.CONTENT_TYPE, brief.selectedSkills.VOICE, platformSelection.LAYOUT, platformSelection.CHANNEL];
     const result = await query(`SELECT d.id, d.dimension, d.slug, d.name, d.description, d.sort_order,
       v.id AS version_id, v.version, v.instructions_md, v.rules_json
       FROM creative_skill_versions v
@@ -76,15 +79,25 @@ function createCreativeSkillStore({ query, transaction }) {
   }
 
   async function saveBrief(workspaceId, projectId, input) {
-    const requested = DIMENSIONS.map((dimension) => input.selectedSkills[dimension]);
+    const shared = ['SUBJECT', 'CONTENT_TYPE', 'VOICE'];
+    const requestedPairs = [
+      ...shared.map((dimension) => [dimension, input.selectedSkills[dimension]]),
+      ...input.selectedPlatforms.flatMap((platform) => [['LAYOUT', input.platformSkills[platform]?.LAYOUT], ['CHANNEL', input.platformSkills[platform]?.CHANNEL]]),
+    ];
+    if (requestedPairs.some(([, id]) => !id)) {
+      const error = new Error('Skill 组合无效，请为每个平台选择排版和渠道规则。');
+      error.statusCode = 400;
+      throw error;
+    }
+    const requested = [...new Set(requestedPairs.map(([, id]) => id))];
     const catalog = await query(`SELECT v.id, d.dimension
       FROM creative_skill_versions v
       JOIN creative_skill_definitions d ON d.id = v.definition_id
       WHERE v.id = ANY($1::text[]) AND d.enabled = true
         AND (d.workspace_id IS NULL OR d.workspace_id = $2)`, [requested, workspaceId]);
-    const actual = new Map(catalog.rows.map((row) => [row.dimension, row.id]));
-    const invalid = DIMENSIONS.find((dimension) => actual.get(dimension) !== input.selectedSkills[dimension]);
-    if (invalid || catalog.rowCount !== DIMENSIONS.length) {
+    const actual = new Map(catalog.rows.map((row) => [row.id, row.dimension]));
+    const invalid = requestedPairs.find(([dimension, id]) => actual.get(id) !== dimension);
+    if (invalid || catalog.rowCount !== requested.length) {
       const error = new Error('Skill 组合无效，请重新选择五个创作维度。');
       error.statusCode = 400;
       throw error;
@@ -92,10 +105,11 @@ function createCreativeSkillStore({ query, transaction }) {
 
     return transaction(async (client) => {
       const composition = await client.query(`INSERT INTO creative_skill_compositions
-        (workspace_id, project_id, selected_versions_json) VALUES ($1, $2, $3)
+        (workspace_id, project_id, selected_versions_json, platform_versions_json) VALUES ($1, $2, $3, $4)
         ON CONFLICT (workspace_id, project_id) DO UPDATE SET
-          selected_versions_json = excluded.selected_versions_json, updated_at = now()
-        RETURNING id`, [workspaceId, projectId, JSON.stringify(input.selectedSkills)]);
+          selected_versions_json = excluded.selected_versions_json,
+          platform_versions_json = excluded.platform_versions_json, updated_at = now()
+        RETURNING id`, [workspaceId, projectId, JSON.stringify(input.selectedSkills), JSON.stringify(input.platformSkills)]);
       const result = await client.query(`INSERT INTO writing_briefs
         (workspace_id, project_id, composition_id, objective, target_audience, core_message,
          source_requirements, length_target, selected_platforms_json, notes)
@@ -109,7 +123,7 @@ function createCreativeSkillStore({ query, transaction }) {
         RETURNING *`, [workspaceId, projectId, composition.rows[0].id, input.objective,
         input.targetAudience, input.coreMessage, input.sourceRequirements, input.lengthTarget,
         JSON.stringify(input.selectedPlatforms), input.notes]);
-      return briefView({ ...result.rows[0], selected_versions_json: input.selectedSkills });
+      return briefView({ ...result.rows[0], selected_versions_json: input.selectedSkills, platform_versions_json: input.platformSkills });
     });
   }
 

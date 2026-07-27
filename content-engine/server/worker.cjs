@@ -103,7 +103,7 @@ async function generateCreativeOutline({ jobId, workspaceId, runId }) {
   let inputTokens;
   let outputTokens;
   try {
-    const runResult = await query("SELECT id, source_snapshot_json, input_json FROM generation_runs WHERE id = $1 AND workspace_id = $2 AND action_version_id = 'creative-outline:1.0.0' AND status = 'QUEUED'", [runId, workspaceId]);
+    const runResult = await query("SELECT id, source_snapshot_json, input_json FROM generation_runs WHERE id = $1 AND workspace_id = $2 AND action_version_id = 'creative-outline:1.1.0' AND status = 'QUEUED'", [runId, workspaceId]);
     if (!runResult.rowCount) throw new Error('大纲任务当前不能执行。');
     await query("UPDATE generation_runs SET status = 'RUNNING', started_at = now() WHERE id = $1 AND workspace_id = $2", [runId, workspaceId]);
     const snapshot = runResult.rows[0].source_snapshot_json;

@@ -2,6 +2,9 @@ import type { Platform } from './content';
 
 export type CreativeSkillDimension = 'SUBJECT' | 'CONTENT_TYPE' | 'VOICE' | 'LAYOUT' | 'CHANNEL';
 export type CreativeSkillSelection = Record<CreativeSkillDimension, string>;
+export type CreativePlatform = Exclude<Platform, 'VIDEO_CHANNEL'>;
+export type CreativePlatformSkillSelection = Record<'LAYOUT' | 'CHANNEL', string>;
+export type CreativePlatformSkillMap = Partial<Record<CreativePlatform, CreativePlatformSkillSelection>>;
 
 export interface CreativeSkillDefinition {
   id: string;
@@ -29,6 +32,7 @@ export interface WritingBrief {
   selectedPlatforms: Platform[];
   notes: string;
   selectedSkills: CreativeSkillSelection;
+  platformSkills: CreativePlatformSkillMap;
   updatedAt: string;
 }
 

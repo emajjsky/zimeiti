@@ -22,6 +22,10 @@ const externalProviders = new Set(['DASHSCOPE', 'SILICONFLOW', 'VOLCENGINE_ARK',
 const sourceInput = z.object({ name: z.string().max(160), type: z.literal('RSS'), url: z.string().url().max(2_000), category: z.string().max(120), includeKeywords: z.array(z.string().max(120)).optional(), excludeKeywords: z.array(z.string().max(120)).optional(), language: z.enum(['ALL', 'ZH', 'EN']).optional(), enabled: z.boolean(), refreshMinutes: z.number().min(5).max(10_080), trust: z.string().max(80) });
 const templateStore = createTemplateStore({ query });
 const creativeSkillStore = createCreativeSkillStore({ query, transaction });
+const platformSkillInput = z.object({
+  LAYOUT: z.string().min(1).max(160),
+  CHANNEL: z.string().min(1).max(160),
+});
 const writingBriefInput = z.object({
   objective: z.string().max(2_000),
   targetAudience: z.string().max(1_000),
@@ -37,6 +41,14 @@ const writingBriefInput = z.object({
     LAYOUT: z.string().min(1).max(160),
     CHANNEL: z.string().min(1).max(160),
   }),
+  platformSkills: z.object({
+    WECHAT: platformSkillInput.optional(),
+    XIAOHONGSHU: platformSkillInput.optional(),
+  }),
+}).superRefine((value, context) => {
+  for (const platform of value.selectedPlatforms) {
+    if (!value.platformSkills[platform]) context.addIssue({ code: 'custom', path: ['platformSkills', platform], message: `请配置${platform === 'WECHAT' ? '公众号' : '小红书'}的排版与渠道 Skill。` });
+  }
 });
 
 app.register(cors, { origin: config.corsOrigin, credentials: false });
@@ -473,7 +485,7 @@ app.post('/api/v1/creative/projects/:projectId/outline/prepare', { preHandler: a
   const workspace = await currentWorkspace(request.user.sub);
   const [project, context, route] = await Promise.all([
     creativeProject(workspace.id, projectId),
-    creativeSkillStore.getContext(workspace.id, projectId),
+    creativeSkillStore.getContext(workspace.id, projectId, input.platform),
     textTaskRoute(workspace.id, OUTLINE_SCOPE, '文案生成'),
   ]);
   if (!context) throw new Error('请先保存创作设定和 Skill 组合。');

@@ -3,7 +3,7 @@ import { Check, CheckCircle2, CircleAlert, LoaderCircle, RotateCcw, Sparkles, X 
 import { webCreative } from '../../data/webApi';
 import type { ContentProject, ContentVersion, Platform } from '../../domain/content';
 import { platformName, projectStatusName } from '../../domain/content';
-import type { CreativeOutlineCandidate, CreativeOutlineRun, CreativeSkillDefinition, CreativeSkillDimension, CreativeSkillSelection, WritingBriefInput } from '../../domain/creative';
+import type { CreativeOutlineCandidate, CreativeOutlineRun, CreativePlatform, CreativePlatformSkillMap, CreativeSkillDefinition, CreativeSkillDimension, CreativeSkillSelection, WritingBriefInput } from '../../domain/creative';
 
 type CreateStage = 'brief' | 'copy' | 'visual' | 'layout' | 'review';
 type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
@@ -20,6 +20,15 @@ const dimensions: { id: CreativeSkillDimension; label: string }[] = [
   { id: 'SUBJECT', label: '题材' },
   { id: 'CONTENT_TYPE', label: '内容类型' },
   { id: 'VOICE', label: '语言风格' },
+  { id: 'LAYOUT', label: '排版' },
+  { id: 'CHANNEL', label: '渠道' },
+];
+const sharedDimensions: { id: 'SUBJECT' | 'CONTENT_TYPE' | 'VOICE'; label: string }[] = [
+  { id: 'SUBJECT', label: '题材' },
+  { id: 'CONTENT_TYPE', label: '内容类型' },
+  { id: 'VOICE', label: '语言风格' },
+];
+const platformDimensions: { id: 'LAYOUT' | 'CHANNEL'; label: string }[] = [
   { id: 'LAYOUT', label: '排版' },
   { id: 'CHANNEL', label: '渠道' },
 ];
@@ -59,7 +68,20 @@ function defaultBrief(project: ContentProject, skills: CreativeSkillDefinition[]
       LAYOUT: firstVersion(skills, 'LAYOUT', xhsFirst ? 'xiaohongshu-carousel' : 'wechat-longform'),
       CHANNEL: firstVersion(skills, 'CHANNEL', xhsFirst ? 'xiaohongshu' : 'wechat'),
     },
+    platformSkills: platformSkillDefaults(contentVersions.map((version) => version.platform), skills),
   };
+}
+
+function platformSkillDefaults(platforms: Platform[], skills: CreativeSkillDefinition[], current: CreativePlatformSkillMap = {}) {
+  return platforms.reduce<CreativePlatformSkillMap>((result, platform) => {
+    if (platform !== 'WECHAT' && platform !== 'XIAOHONGSHU') return result;
+    const xhs = platform === 'XIAOHONGSHU';
+    result[platform] = current[platform] ?? {
+      LAYOUT: firstVersion(skills, 'LAYOUT', xhs ? 'xiaohongshu-carousel' : 'wechat-longform'),
+      CHANNEL: firstVersion(skills, 'CHANNEL', xhs ? 'xiaohongshu' : 'wechat'),
+    };
+    return result;
+  }, { ...current });
 }
 
 export function CreateWorkspace({ project, activePlatform, onPlatform, activeVersion, onSaveVersion, onProjectAccepted, onOpenModelSettings }: {
@@ -77,6 +99,7 @@ export function CreateWorkspace({ project, activePlatform, onPlatform, activeVer
   const [briefState, setBriefState] = useState<SaveState>('idle');
   const [briefError, setBriefError] = useState('');
   const [savedAt, setSavedAt] = useState('');
+  const [skillPanelTab, setSkillPanelTab] = useState<'SHARED' | CreativePlatform>('SHARED');
   const [draft, setDraft] = useState<Pick<ContentVersion, 'title' | 'body'>>({ title: activeVersion?.title ?? '', body: activeVersion?.body ?? '' });
   const [copyState, setCopyState] = useState<'saved' | 'saving'>('saved');
   const [outlineRun, setOutlineRun] = useState<CreativeOutlineRun | null>(null);
@@ -104,6 +127,7 @@ export function CreateWorkspace({ project, activePlatform, onPlatform, activeVer
         selectedPlatforms: result.brief.selectedPlatforms,
         notes: result.brief.notes,
         selectedSkills: result.brief.selectedSkills,
+        platformSkills: platformSkillDefaults(result.brief.selectedPlatforms, catalog, result.brief.platformSkills),
       } : defaultBrief(project, catalog));
       setSavedAt(result.brief?.updatedAt ?? '');
       setBriefState(result.brief ? 'saved' : 'dirty');
@@ -123,6 +147,10 @@ export function CreateWorkspace({ project, activePlatform, onPlatform, activeVer
   useEffect(() => {
     if (contentVersions.length && !contentVersions.some((version) => version.platform === activePlatform)) onPlatform(contentVersions[0].platform);
   }, [activePlatform, contentVersions, onPlatform]);
+
+  useEffect(() => {
+    if (skillPanelTab !== 'SHARED' && !brief?.selectedPlatforms.includes(skillPanelTab)) setSkillPanelTab('SHARED');
+  }, [brief?.selectedPlatforms, skillPanelTab]);
 
   const outlinePlatform = activeVersion?.platform === 'WECHAT' || activeVersion?.platform === 'XIAOHONGSHU' ? activeVersion.platform : null;
 
@@ -172,12 +200,26 @@ export function CreateWorkspace({ project, activePlatform, onPlatform, activeVer
   }, [outlinePlatform, outlineRun?.id, outlineRun?.status, project?.id]);
 
   const skillGroups = useMemo(() => new Map(dimensions.map(({ id }) => [id, skills.filter((skill) => skill.dimension === id)])), [skills]);
-  const selectedSkillDetails = useMemo(() => new Map(dimensions.map(({ id }) => [id, skills.find((skill) => skill.version.id === brief?.selectedSkills[id])])), [brief?.selectedSkills, skills]);
+  const skillDescription = (versionId: string | undefined) => skills.find((skill) => skill.version.id === versionId)?.description;
 
   const changeBrief = (patch: Partial<WritingBriefInput>) => {
     setBrief((current) => current ? { ...current, ...patch } : current);
     setBriefState('dirty');
     setBriefError('');
+  };
+
+  const toggleBriefPlatform = (platform: CreativePlatform) => {
+    if (!brief) return;
+    const selectedPlatforms = brief.selectedPlatforms.includes(platform)
+      ? brief.selectedPlatforms.filter((item) => item !== platform)
+      : [...brief.selectedPlatforms, platform];
+    changeBrief({ selectedPlatforms, platformSkills: platformSkillDefaults(selectedPlatforms, skills, brief.platformSkills) });
+  };
+
+  const changePlatformSkill = (platform: CreativePlatform, dimension: 'LAYOUT' | 'CHANNEL', value: string) => {
+    if (!brief) return;
+    const current = brief.platformSkills[platform] ?? { LAYOUT: '', CHANNEL: '' };
+    changeBrief({ platformSkills: { ...brief.platformSkills, [platform]: { ...current, [dimension]: value } } });
   };
 
   const saveBrief = async () => {
@@ -195,6 +237,7 @@ export function CreateWorkspace({ project, activePlatform, onPlatform, activeVer
         selectedPlatforms: result.brief.selectedPlatforms,
         notes: result.brief.notes,
         selectedSkills: result.brief.selectedSkills,
+        platformSkills: result.brief.platformSkills,
       });
       setSavedAt(result.brief.updatedAt);
       setBriefState('saved');
@@ -307,12 +350,15 @@ export function CreateWorkspace({ project, activePlatform, onPlatform, activeVer
             <label className="wide"><span>核心表达</span><textarea rows={4} value={brief.coreMessage} onChange={(event) => changeBrief({ coreMessage: event.target.value })}/></label>
             <label className="wide"><span>来源与核验要求</span><textarea rows={3} value={brief.sourceRequirements} onChange={(event) => changeBrief({ sourceRequirements: event.target.value })} placeholder="必须引用的来源、数据和待核验事实"/></label>
             <label><span>篇幅目标</span><input value={brief.lengthTarget} onChange={(event) => changeBrief({ lengthTarget: event.target.value })}/></label>
-            <fieldset><legend>目标平台</legend><div>{contentVersions.map((version) => <label key={version.platform}><input type="checkbox" checked={brief.selectedPlatforms.includes(version.platform)} onChange={() => changeBrief({ selectedPlatforms: brief.selectedPlatforms.includes(version.platform) ? brief.selectedPlatforms.filter((item) => item !== version.platform) : [...brief.selectedPlatforms, version.platform] })}/><span>{platformName[version.platform]}</span></label>)}</div></fieldset>
+            <fieldset><legend>目标平台</legend><div>{contentVersions.map((version) => <label key={version.platform}><input type="checkbox" checked={brief.selectedPlatforms.includes(version.platform)} onChange={() => toggleBriefPlatform(version.platform as CreativePlatform)}/><span>{platformName[version.platform]}</span></label>)}</div></fieldset>
             <label className="wide"><span>补充要求</span><textarea rows={3} value={brief.notes} onChange={(event) => changeBrief({ notes: event.target.value })} placeholder="不希望出现的表达、必须保留的例子或其它要求"/></label>
           </div>
           <footer><div className={`creative-save-status ${briefState}`} aria-live="polite">{briefState === 'saved' && <><CheckCircle2 size={16}/><span>已保存{savedAt ? ` ${new Date(savedAt).toLocaleString('zh-CN', { hour12: false })}` : ''}</span></>}{briefState === 'dirty' && <span>有未保存修改</span>}{briefState === 'error' && <><CircleAlert size={16}/><span>{briefError}</span></>}</div></footer>
         </form>
-        <aside className="creative-skill-panel"><header><h2>Skill 组合</h2><span>5 个维度</span></header><div className="creative-skill-fields">{dimensions.map(({ id, label }) => <label key={id}><span>{label}</span><select value={brief.selectedSkills[id]} onChange={(event) => changeBrief({ selectedSkills: { ...brief.selectedSkills, [id]: event.target.value } })}>{(skillGroups.get(id) ?? []).map((skill) => <option key={skill.version.id} value={skill.version.id}>{skill.name}</option>)}</select><small>{selectedSkillDetails.get(id)?.description}</small></label>)}</div></aside>
+        <aside className="creative-skill-panel"><header><h2>Skill 组合</h2><span>按平台</span></header>
+          <nav className="creative-skill-tabs" aria-label="Skill 规则范围"><button type="button" className={skillPanelTab === 'SHARED' ? 'active' : ''} onClick={() => setSkillPanelTab('SHARED')}>共用</button>{brief.selectedPlatforms.map((platform) => platform !== 'VIDEO_CHANNEL' && <button type="button" key={platform} className={skillPanelTab === platform ? 'active' : ''} onClick={() => setSkillPanelTab(platform)}>{platformName[platform]}</button>)}</nav>
+          <div className="creative-skill-fields">{skillPanelTab === 'SHARED' ? sharedDimensions.map(({ id, label }) => <label key={id}><span>{label}</span><select value={brief.selectedSkills[id]} onChange={(event) => changeBrief({ selectedSkills: { ...brief.selectedSkills, [id]: event.target.value } })}>{(skillGroups.get(id) ?? []).map((skill) => <option key={skill.version.id} value={skill.version.id}>{skill.name}</option>)}</select><small>{skillDescription(brief.selectedSkills[id])}</small></label>) : platformDimensions.map(({ id, label }) => <label key={`${skillPanelTab}-${id}`}><span>{label}</span><select value={brief.platformSkills[skillPanelTab]?.[id] ?? ''} onChange={(event) => changePlatformSkill(skillPanelTab, id, event.target.value)}>{(skillGroups.get(id) ?? []).map((skill) => <option key={skill.version.id} value={skill.version.id}>{skill.name}</option>)}</select><small>{skillDescription(brief.platformSkills[skillPanelTab]?.[id])}</small></label>)}</div>
+        </aside>
       </>}
     </section>}
 

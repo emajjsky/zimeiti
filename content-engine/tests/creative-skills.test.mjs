@@ -10,6 +10,10 @@ const selection = {
   LAYOUT: 'creative-layout-wechat:1.0.0',
   CHANNEL: 'creative-channel-wechat:1.0.0',
 };
+const platformSkills = {
+  WECHAT: { LAYOUT: 'creative-layout-wechat:1.0.0', CHANNEL: 'creative-channel-wechat:1.0.0' },
+  XIAOHONGSHU: { LAYOUT: 'creative-layout-xhs:1.0.0', CHANNEL: 'creative-channel-xhs:1.0.0' },
+};
 
 test('创作 Skill 固定为五个规则维度', () => {
   assert.deepEqual(DIMENSIONS, ['SUBJECT', 'CONTENT_TYPE', 'VOICE', 'LAYOUT', 'CHANNEL']);
@@ -17,6 +21,9 @@ test('创作 Skill 固定为五个规则维度', () => {
   assert.match(migration, /CREATE TABLE writing_briefs/);
   assert.match(migration, /CREATE TABLE creative_skill_compositions/);
   assert.doesNotMatch(migration, /DROP TABLE skill_definitions|ALTER TABLE skill_definitions/);
+  const platformMigration = fs.readFileSync(new URL('../server/migrations/010_platform_creative_skills.sql', import.meta.url), 'utf8');
+  assert.match(platformMigration, /ADD COLUMN platform_versions_json/);
+  assert.match(platformMigration, /creative-layout-xhs:1\.0\.0/);
 });
 
 test('保存 WritingBrief 前校验每个维度对应的 Skill 版本', async () => {
@@ -33,9 +40,10 @@ test('保存 WritingBrief 前校验每个维度对应的 Skill 版本', async ()
       } });
     },
   });
-  const result = await store.saveBrief('workspace-id', 'project-1', { objective: '解释一个问题', targetAudience: '普通读者', coreMessage: '核心观点', sourceRequirements: '', lengthTarget: '1500 字', selectedPlatforms: ['WECHAT'], notes: '', selectedSkills: selection });
+  const result = await store.saveBrief('workspace-id', 'project-1', { objective: '解释一个问题', targetAudience: '普通读者', coreMessage: '核心观点', sourceRequirements: '', lengthTarget: '1500 字', selectedPlatforms: ['WECHAT'], notes: '', selectedSkills: selection, platformSkills });
   assert.equal(transactionCalled, true);
   assert.deepEqual(result.selectedSkills, selection);
+  assert.deepEqual(result.platformSkills, platformSkills);
 });
 
 test('错误维度的 Skill 组合不会写入数据库', async () => {
@@ -44,8 +52,30 @@ test('错误维度的 Skill 组合不会写入数据库', async () => {
     query: async () => ({ rowCount: 5, rows: Object.entries(selection).map(([dimension, id], index) => ({ dimension: index === 0 ? 'VOICE' : dimension, id })) }),
     transaction: async () => { transactionCalled = true; },
   });
-  await assert.rejects(() => store.saveBrief('workspace-id', 'project-1', { selectedSkills: selection }), /Skill 组合无效/);
+  await assert.rejects(() => store.saveBrief('workspace-id', 'project-1', { selectedPlatforms: ['WECHAT'], selectedSkills: selection, platformSkills }), /Skill 组合无效/);
   assert.equal(transactionCalled, false);
+});
+
+test('生成小红书内容只冻结小红书排版与渠道 Skill', async () => {
+  let call = 0;
+  const rows = [
+    { id: 'creative-subject-ai', dimension: 'SUBJECT', slug: 'ai-technology', name: 'AI 科技', description: '', sort_order: 1, version_id: selection.SUBJECT, version: '1.0.0', instructions_md: 'AI 规则', rules_json: {} },
+    { id: 'creative-type-education', dimension: 'CONTENT_TYPE', slug: 'education', name: '科普', description: '', sort_order: 1, version_id: selection.CONTENT_TYPE, version: '1.0.0', instructions_md: '科普规则', rules_json: {} },
+    { id: 'creative-voice-fresh', dimension: 'VOICE', slug: 'plain-fresh', name: '通俗清新', description: '', sort_order: 1, version_id: selection.VOICE, version: '1.0.0', instructions_md: '语言规则', rules_json: {} },
+    { id: 'creative-layout-xhs', dimension: 'LAYOUT', slug: 'xiaohongshu-carousel', name: '小红书分页图文', description: '', sort_order: 1, version_id: platformSkills.XIAOHONGSHU.LAYOUT, version: '1.0.0', instructions_md: '小红书排版', rules_json: {} },
+    { id: 'creative-channel-xhs', dimension: 'CHANNEL', slug: 'xiaohongshu', name: '小红书', description: '', sort_order: 1, version_id: platformSkills.XIAOHONGSHU.CHANNEL, version: '1.0.0', instructions_md: '小红书渠道', rules_json: {} },
+  ];
+  const store = createCreativeSkillStore({
+    query: async () => {
+      call += 1;
+      if (call === 1) return { rowCount: 1, rows: [{ id: 'brief-id', project_id: 'project-1', selected_platforms_json: ['WECHAT', 'XIAOHONGSHU'], selected_versions_json: selection, platform_versions_json: platformSkills }] };
+      return { rowCount: rows.length, rows };
+    },
+    transaction: async () => { throw new Error('不应进入事务'); },
+  });
+  const context = await store.getContext('workspace-id', 'project-1', 'XIAOHONGSHU');
+  assert.deepEqual(context.skills.map((skill) => skill.name), ['AI 科技', '科普', '通俗清新', '小红书分页图文', '小红书']);
+  assert.equal(context.skills.some((skill) => skill.name === '公众号长文' || skill.name === '公众号'), false);
 });
 
 test('创作主流程不再把视频列为必经步骤', () => {
