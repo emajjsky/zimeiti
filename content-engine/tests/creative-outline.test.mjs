@@ -4,7 +4,6 @@ import test from 'node:test';
 import {
   buildOutlinePrompt,
   parseOutlineContent,
-  renderOutlineMarkdown,
 } from '../server/services/creative-outline.cjs';
 
 const snapshot = {
@@ -52,12 +51,6 @@ test('字符串章节和字符串平台式结果会被拒绝', () => {
   assert.throws(() => parseOutlineContent(JSON.stringify({ ...output, sections: [{ heading: '只有标题' }] })), /expected/i);
 });
 
-test('采用后的正式资产使用可继续编辑的 Markdown 大纲', () => {
-  const markdown = renderOutlineMarkdown(output);
-  assert.match(markdown, /^## 开篇/m);
-  assert.match(markdown, /- 明确输入/);
-});
-
 test('Agent 动作迁移保留旧 Skill 系统并建立动作执行引用', () => {
   const migration = fs.readFileSync(new URL('../server/migrations/009_creative_outline_action.sql', import.meta.url), 'utf8');
   assert.match(migration, /CREATE TABLE agent_action_definitions/);
@@ -80,6 +73,7 @@ test('大纲 API 仅在确认后入队，采用候选时才更新正式快照', 
   assert.match(server.slice(confirmStart, acceptStart), /await enqueue/);
   assert.match(server.slice(acceptStart), /UPDATE workspace_snapshots SET state_json/);
   assert.match(server.slice(acceptStart), /status = 'ACCEPTED'/);
+  assert.doesNotMatch(server.slice(acceptStart), /version\.body\s*=/);
 });
 
 test('开发环境同时启动 API、Web 与 Worker', () => {

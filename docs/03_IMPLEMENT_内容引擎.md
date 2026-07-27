@@ -388,11 +388,11 @@ API：`http://127.0.0.1:8787/health`
 ## 2026-07-27 实现记录：受控创作大纲
 
 - `009_creative_outline_action.sql` 新增 `agent_action_definitions`、`agent_action_versions` 和 `creative_outline_candidates`；`generation_runs` 增加可空的 `action_version_id`，并要求 Skill 或动作执行引用至少存在一个。迁移已应用到本地开发库。
-- `server/services/creative-outline.cjs` 定义 `creative-outline:1.0.0`、`CONTENT_WRITING` Scope、严格 Zod 输出 Schema、生成提示、单次修复提示、Markdown 渲染和候选 DTO。
+- `server/services/creative-outline.cjs` 定义 `creative-outline:1.0.0`、`CONTENT_WRITING` Scope、严格 Zod 输出 Schema、生成提示、单次修复提示和候选 DTO。
 - `creativeSkills.getContext()` 读取项目 WritingBrief 和冻结的五维 Skill 版本、规则；任一版本失效时拒绝准备动作。
 - API 新增大纲 `prepare/confirm/cancel/latest-run/latest/accept`。最近运行按项目与平台隔离；prepare 不入队，confirm 才创建 `CREATIVE_OUTLINE` Job；accept 使用行锁和事务更新工作空间快照。
 - Worker 复用统一文本模型执行器，支持百炼 CLI 和 OpenAI 兼容外部连接。首次 JSON 结构失败只修复一次，并将调用写入 `api_usage_logs.operation = CONTENT_WRITING`。
-- `CreateWorkspace.tsx` 实现准备、待确认、排队、执行、失败、候选和已采用状态。候选审核区位于正式编辑器上方，标题单选、章节和待核验项集中展示，不创建多个输出框或伪聊天窗口。
+- `CreateWorkspace.tsx` 实现准备、待确认、排队、执行、失败、候选和已采用状态。候选通过独立审核弹层展示，正式编辑器只承载标题与正文。
 - 服务端接受候选后，`App` 仅用返回项目更新 React 状态，不再次调用全量 `persistState`，避免旧快照覆盖事务结果。
 - `package.json` 的 `dev` 同时启动 API、Web 和 Worker。自动化新增 7 项大纲契约测试，完整 Node 测试为 92 项。
 - Playwright 使用独立测试用户验证未配置模型的真实阻断与任务策略跳转，并使用测试级 API mock 验证候选桌面和 390px 布局。产品运行时没有示例候选，未触发真实模型调用。
@@ -406,3 +406,14 @@ API：`http://127.0.0.1:8787/health`
 - `CreateWorkspace.tsx` 将 Skill 面板改为共用、公众号、小红书页签。切换或新增目标平台时自动创建对应默认组合，保存后由服务端恢复。
 - `buildOutlinePrompt()` 不再把含 Skill ID 的完整 Brief 直接传给模型，只传业务字段和已冻结的五维 `skillRules`，避免旧全局字段形成冲突指令。
 - 新增服务端单元测试和 Playwright 断言，验证两平台默认排版/渠道及小红书上下文隔离。
+
+## 2026-07-27 实现记录：大纲资产与正文编辑器解耦
+
+- `POST /creative/outline-candidates/:id/accept` 不再调用 Markdown 渲染器，也不再修改 `version.body`；事务仍更新选中标题、文案版本状态、项目状态和候选接受状态。
+- 删除未再使用的 `renderOutlineMarkdown()`，并增加源码契约测试，禁止 accept 路由重新出现 `version.body =` 写入。
+- `CreateWorkspace.tsx` 新增大纲审核弹层状态。候选成功后自动打开；关闭后由右侧 Agent 的“审核大纲”恢复；已采用后由“查看大纲”恢复。
+- 审核弹层使用单一内容滚动区，桌面最大高度为 `82dvh`，移动端占满视口；遮罩点击和 Escape 均可关闭。
+- 右侧 Agent 将“大纲已写入文案”修正为“大纲已采用”，并显示真实下一步“生成初稿”，但未渲染未实现的动作按钮。
+- 标题输入改为可换行 textarea，标题和正文均根据 `scrollHeight` 自动增长并设为 `overflow: hidden`，消除编辑器内部滚动条。
+- Playwright 验证候选自动弹出、关闭后编辑器恢复、右侧可重开、390px 无横向溢出、采用后状态正确且正文不含 Markdown。
+- 本轮视觉参数为 `DESIGN_VARIANCE 5 / MOTION_INTENSITY 2 / VISUAL_DENSITY 4`。继续使用现有品牌色和直角面板体系，仅增加状态反馈，不引入新动画依赖。

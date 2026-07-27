@@ -13,7 +13,7 @@ const { listAvailableSkills } = require('./agent/skillRegistry.cjs');
 const { runBailianCli } = require('./runner/bailian.cjs');
 const { ANALYSIS_SCOPE, createTemplateStore, prepareAnalysisInput } = require('./services/intelligence-analysis.cjs');
 const { createCreativeSkillStore } = require('./services/creativeSkills.cjs');
-const { OUTLINE_ACTION_VERSION, OUTLINE_SCOPE, renderOutlineMarkdown, outlineCandidateView } = require('./services/creative-outline.cjs');
+const { OUTLINE_ACTION_VERSION, OUTLINE_SCOPE, outlineCandidateView } = require('./services/creative-outline.cjs');
 
 const app = Fastify({ logger: true, bodyLimit: 5 * 1024 * 1024 });
 const credentials = new Set(['TAVILY', 'BAILIAN']);
@@ -573,7 +573,6 @@ app.post('/api/v1/creative/outline-candidates/:id/accept', { preHandler: authent
     if (!project || !version) throw new Error('正式文案版本已不存在，无法接受大纲。');
     const updatedAt = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
     version.title = input.selectedTitle;
-    version.body = renderOutlineMarkdown(candidate.output_json);
     version.status = 'DRAFT';
     version.updatedAt = updatedAt;
     project.status = 'WRITING';

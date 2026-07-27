@@ -93,11 +93,25 @@ with sync_playwright() as playwright:
             return
         route.fulfill(status=200, content_type="application/json", body='{"id":"22222222-2222-4222-8222-222222222222","projectId":"mock-project","platform":"WECHAT","status":"CANDIDATE","selectedTitle":null,"titleOptions":["普通人判断 AI 工具，先看这三件事","别被功能数量骗了"],"summary":"从真实问题、使用成本和可验证结果三个角度建立判断框架。","sections":[{"heading":"先定义真实问题","purpose":"明确工具要解决什么","keyPoints":["写下具体任务","确认输入和输出"]},{"heading":"计算完整成本","purpose":"比较学习与使用代价","keyPoints":["订阅费用","时间成本"]},{"heading":"验证实际结果","purpose":"用结果而不是演示判断","keyPoints":["设置验收标准"]}],"factsToVerify":["核验产品当前价格"],"model":"qwen-plus","createdAt":"2026-07-27T08:00:00.000Z","acceptedAt":null}')
 
+    def mock_accept_outline(route):
+        route.fulfill(status=200, content_type="application/json", body='{"candidate":{"id":"22222222-2222-4222-8222-222222222222","projectId":"mock-project","platform":"WECHAT","status":"ACCEPTED","selectedTitle":"普通人判断 AI 工具，先看这三件事","titleOptions":["普通人判断 AI 工具，先看这三件事","别被功能数量骗了"],"summary":"从真实问题、使用成本和可验证结果三个角度建立判断框架。","sections":[{"heading":"先定义真实问题","purpose":"明确工具要解决什么","keyPoints":["写下具体任务","确认输入和输出"]},{"heading":"计算完整成本","purpose":"比较学习与使用代价","keyPoints":["订阅费用","时间成本"]},{"heading":"验证实际结果","purpose":"用结果而不是演示判断","keyPoints":["设置验收标准"]}],"factsToVerify":["核验产品当前价格"],"model":"qwen-plus","createdAt":"2026-07-27T08:00:00.000Z","acceptedAt":"2026-07-27T08:30:00.000Z"},"project":{"id":"mock-project","title":"普通人如何判断一个 AI 工具是否值得使用","status":"WRITING","coreViewpoint":"先看真实问题、使用成本和可验证结果，不追逐功能数量。","factChecks":[],"versions":[{"id":"mock-version","platform":"WECHAT","status":"DRAFT","title":"普通人判断 AI 工具，先看这三件事","body":"先看真实问题、使用成本和可验证结果，不追逐功能数量。","updatedAt":"08:30"}],"updatedAt":"08:30"}}')
+
     page.route("**/api/v1/creative/projects/*/outline/**", mock_outline)
+    page.route("**/api/v1/creative/outline-candidates/*/accept", mock_accept_outline)
     page.get_by_role("button", name="创作", exact=True).click()
     page.wait_for_selector(".creative-stepper")
     page.locator(".creative-stepper button").filter(has_text="文案").click()
-    page.wait_for_selector(".outline-review")
+    page.wait_for_selector(".outline-dialog")
+    assert page.locator(".editor .outline-review").count() == 0
+    page.get_by_role("button", name="关闭大纲", exact=True).click()
+    page.wait_for_selector(".outline-dialog", state="detached")
+    assert page.get_by_text("大纲待审核", exact=True).count() == 1
+    assert page.get_by_role("button", name="审核大纲", exact=True).count() == 1
+    body_editor = page.get_by_label("正文")
+    assert body_editor.evaluate("element => getComputedStyle(element).overflowY === 'hidden'")
+    assert body_editor.evaluate("element => element.clientHeight >= element.scrollHeight")
+    page.get_by_role("button", name="审核大纲", exact=True).click()
+    page.wait_for_selector(".outline-dialog")
     page.screenshot(path=ARTIFACTS / "creative-outline-candidate-desktop.png", full_page=True)
 
     page.set_viewport_size({"width": 390, "height": 844})
@@ -105,9 +119,18 @@ with sync_playwright() as playwright:
     page.screenshot(path=ARTIFACTS / "creative-copy-mobile.png", full_page=True)
     assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
     assert page.locator(".sidebar").bounding_box()["x"] < 0
+    page.get_by_role("button", name="关闭大纲", exact=True).click()
+    page.wait_for_selector(".outline-dialog", state="detached")
 
     page.set_viewport_size({"width": 1440, "height": 1000})
     page.wait_for_timeout(350)
+    page.get_by_role("button", name="审核大纲", exact=True).click()
+    page.get_by_role("button", name="采用大纲", exact=True).click()
+    page.wait_for_selector(".outline-dialog", state="detached")
+    assert page.get_by_text("大纲已采用", exact=True).count() == 1
+    assert page.get_by_text("下一步：生成初稿", exact=True).count() == 1
+    assert page.get_by_role("button", name="查看大纲", exact=True).count() == 1
+    assert "##" not in page.get_by_label("正文").input_value()
     page.get_by_role("button", name="今天", exact=True).click()
     page.wait_for_selector(".today-layout")
     current = datetime.now()

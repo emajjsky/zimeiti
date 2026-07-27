@@ -62,10 +62,6 @@ function buildOutlineRepairPrompt(system, validationError) {
   return `${system}\n上一次输出未通过结构校验。请只返回修正后的 JSON。校验错误：${validationError}`;
 }
 
-function renderOutlineMarkdown(output) {
-  return output.sections.map((section) => `## ${section.heading}\n\n${section.keyPoints.map((point) => `- ${point}`).join('\n')}`).join('\n\n');
-}
-
 function outlineCandidateView(row) {
   if (!row) return null;
   return {
@@ -81,4 +77,4 @@ function outlineCandidateView(row) {
   };
 }
 
-module.exports = { OUTLINE_ACTION_VERSION, OUTLINE_SCOPE, outlineSchema, parseOutlineContent, buildOutlinePrompt, buildOutlineRepairPrompt, renderOutlineMarkdown, outlineCandidateView };
+module.exports = { OUTLINE_ACTION_VERSION, OUTLINE_SCOPE, outlineSchema, parseOutlineContent, buildOutlinePrompt, buildOutlineRepairPrompt, outlineCandidateView };

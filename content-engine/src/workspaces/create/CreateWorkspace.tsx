@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, CheckCircle2, CircleAlert, LoaderCircle, RotateCcw, Sparkles, X } from 'lucide-react';
 import { webCreative } from '../../data/webApi';
 import type { ContentProject, ContentVersion, Platform } from '../../domain/content';
@@ -105,8 +105,12 @@ export function CreateWorkspace({ project, activePlatform, onPlatform, activeVer
   const [outlineRun, setOutlineRun] = useState<CreativeOutlineRun | null>(null);
   const [outlineCandidate, setOutlineCandidate] = useState<CreativeOutlineCandidate | null>(null);
   const [selectedTitle, setSelectedTitle] = useState('');
+  const [outlineReviewOpen, setOutlineReviewOpen] = useState(false);
   const [outlineBusy, setOutlineBusy] = useState<'idle' | 'loading' | 'preparing' | 'confirming' | 'cancelling' | 'accepting'>('idle');
   const [outlineError, setOutlineError] = useState('');
+  const titleEditorRef = useRef<HTMLTextAreaElement>(null);
+  const bodyEditorRef = useRef<HTMLTextAreaElement>(null);
+  const outlineDialogRef = useRef<HTMLDivElement>(null);
   const contentVersions = useMemo(() => project?.versions.filter((version) => version.platform !== 'VIDEO_CHANNEL') ?? [], [project?.versions]);
 
   useEffect(() => {
@@ -145,6 +149,31 @@ export function CreateWorkspace({ project, activePlatform, onPlatform, activeVer
   }, [activeVersion?.body, activeVersion?.id, activeVersion?.title]);
 
   useEffect(() => {
+    const resize = (element: HTMLTextAreaElement | null, minimum: number) => {
+      if (!element) return;
+      element.style.height = 'auto';
+      element.style.height = `${Math.max(element.scrollHeight, minimum)}px`;
+    };
+    resize(titleEditorRef.current, 56);
+    resize(bodyEditorRef.current, 360);
+  }, [draft.body, draft.title, stage]);
+
+  useEffect(() => {
+    if (!outlineReviewOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOutlineReviewOpen(false);
+    };
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', closeOnEscape);
+    window.requestAnimationFrame(() => outlineDialogRef.current?.focus());
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [outlineReviewOpen]);
+
+  useEffect(() => {
     if (contentVersions.length && !contentVersions.some((version) => version.platform === activePlatform)) onPlatform(contentVersions[0].platform);
   }, [activePlatform, contentVersions, onPlatform]);
 
@@ -165,9 +194,8 @@ export function CreateWorkspace({ project, activePlatform, onPlatform, activeVer
     ]).then(([run, candidate]) => {
       if (cancelled) return;
       setOutlineRun(run);
-      const visibleCandidate = run?.status === 'SUCCEEDED' || (!run && candidate?.status === 'ACCEPTED') ? candidate : null;
-      setOutlineCandidate(visibleCandidate);
-      setSelectedTitle(visibleCandidate?.selectedTitle ?? visibleCandidate?.titleOptions[0] ?? '');
+      setOutlineCandidate(candidate);
+      setSelectedTitle(candidate?.selectedTitle ?? candidate?.titleOptions[0] ?? '');
     }).catch((error) => {
       if (!cancelled) setOutlineError(error instanceof Error ? error.message : '大纲状态读取失败。');
     }).finally(() => {
@@ -175,6 +203,10 @@ export function CreateWorkspace({ project, activePlatform, onPlatform, activeVer
     });
     return () => { cancelled = true; };
   }, [outlinePlatform, project?.id, stage]);
+
+  useEffect(() => {
+    if (outlineCandidate?.status === 'CANDIDATE') setOutlineReviewOpen(true);
+  }, [outlineCandidate?.id, outlineCandidate?.status]);
 
   useEffect(() => {
     if (!project || !outlinePlatform || !outlineRun || !['QUEUED', 'RUNNING'].includes(outlineRun.status)) return;
@@ -277,8 +309,9 @@ export function CreateWorkspace({ project, activePlatform, onPlatform, activeVer
     try {
       const run = await webCreative.prepareOutline(project.id, outlinePlatform);
       setOutlineRun(run);
-      setOutlineCandidate(null);
-      setSelectedTitle('');
+      setOutlineCandidate((current) => current?.status === 'ACCEPTED' ? current : null);
+      setSelectedTitle((current) => outlineCandidate?.status === 'ACCEPTED' ? current : '');
+      setOutlineReviewOpen(false);
     } catch (error) {
       setOutlineError(error instanceof Error ? error.message : '大纲准备失败。');
     } finally {
@@ -322,6 +355,7 @@ export function CreateWorkspace({ project, activePlatform, onPlatform, activeVer
     try {
       const result = await webCreative.acceptOutline(outlineCandidate.id, selectedTitle);
       setOutlineCandidate(result.candidate);
+      setOutlineReviewOpen(false);
       onProjectAccepted(result.project);
       const version = result.project.versions.find((item) => item.platform === outlineCandidate.platform);
       if (version) setDraft({ title: version.title, body: version.body });
@@ -363,17 +397,7 @@ export function CreateWorkspace({ project, activePlatform, onPlatform, activeVer
     </section>}
 
     {stage === 'copy' && (activeVersion && activeVersion.platform !== 'VIDEO_CHANNEL' ? <div className="create-layout editable creative-copy-layout"><section className="editor"><div className="editor-head"><div className="tabs">{contentVersions.map((version) => <button type="button" key={version.platform} className={version.platform === activePlatform ? 'active' : ''} onClick={() => onPlatform(version.platform)}>{platformName[version.platform]}</button>)}</div><button className="text-button" type="button" onClick={saveCopy}>保存草稿</button></div><div className="editor-tools">{platformName[activeVersion.platform]}文案</div>
-      {outlineCandidate && <section className={`outline-review ${outlineCandidate.status === 'ACCEPTED' ? 'accepted' : ''}`} aria-label="大纲候选">
-        <header><div><span>{outlineCandidate.status === 'ACCEPTED' ? '已采用' : '候选大纲'}</span><b>{outlineCandidate.model}</b></div>{outlineCandidate.status === 'ACCEPTED' && <CheckCircle2 size={20}/>}</header>
-        <div className="outline-review-body">
-          <fieldset disabled={outlineCandidate.status === 'ACCEPTED'}><legend>标题方案</legend>{outlineCandidate.titleOptions.map((title) => <label key={title}><input type="radio" name={`outline-title-${outlineCandidate.id}`} checked={selectedTitle === title} onChange={() => setSelectedTitle(title)}/><span>{title}</span></label>)}</fieldset>
-          <p className="outline-summary">{outlineCandidate.summary}</p>
-          <ol className="outline-sections">{outlineCandidate.sections.map((section) => <li key={section.heading}><div><b>{section.heading}</b><span>{section.purpose}</span></div><ul>{section.keyPoints.map((point) => <li key={point}>{point}</li>)}</ul></li>)}</ol>
-          {outlineCandidate.factsToVerify.length > 0 && <div className="outline-facts"><b>待核验</b><ul>{outlineCandidate.factsToVerify.map((fact) => <li key={fact}>{fact}</li>)}</ul></div>}
-        </div>
-        {outlineCandidate.status === 'CANDIDATE' && <footer><button className="text-button" type="button" disabled={outlineBusy !== 'idle'} onClick={() => void prepareOutline()}><RotateCcw size={15}/>重新生成</button><button className="button primary" type="button" disabled={!selectedTitle || outlineBusy !== 'idle'} onClick={() => void acceptOutline()}>{outlineBusy === 'accepting' ? <LoaderCircle size={16}/> : <Check size={16}/>}采用大纲</button></footer>}
-      </section>}
-      <div className="document editor-document"><label>标题<input value={draft.title} onChange={(event) => changeDraft({ title: event.target.value })} onBlur={saveCopy}/></label><label>正文<textarea value={draft.body} onChange={(event) => changeDraft({ body: event.target.value })} onBlur={saveCopy} placeholder="从核心观点开始，写出这期内容的完整表达。"/></label></div></section>
+      <div className="document editor-document"><label>标题<textarea ref={titleEditorRef} rows={1} value={draft.title} onChange={(event) => changeDraft({ title: event.target.value })} onBlur={saveCopy}/></label><label>正文<textarea ref={bodyEditorRef} value={draft.body} onChange={(event) => changeDraft({ body: event.target.value })} onBlur={saveCopy} placeholder="从核心观点开始，写出这期内容的完整表达。"/></label></div></section>
       <aside className="assistant-panel creative-agent-panel"><header><div><Sparkles size={18}/><h2>大纲 Agent</h2></div><span>{platformName[activeVersion.platform]}</span></header>
         {outlineBusy === 'loading' && <div className="outline-state loading"><LoaderCircle size={18}/><span>读取任务状态</span></div>}
         {outlineBusy !== 'loading' && !outlineRun && <div className="outline-state idle"><p>从当前创作设定生成大纲候选。</p><button className="button primary" type="button" disabled={outlineBusy !== 'idle'} onClick={() => void prepareOutline()}>{outlineBusy === 'preparing' ? <LoaderCircle size={16}/> : <Sparkles size={16}/>}生成大纲</button></div>}
@@ -381,9 +405,22 @@ export function CreateWorkspace({ project, activePlatform, onPlatform, activeVer
         {outlineRun && ['QUEUED', 'RUNNING'].includes(outlineRun.status) && <div className="outline-state running"><LoaderCircle size={20}/><b>{outlineRun.status === 'QUEUED' ? '等待执行' : '正在生成大纲'}</b>{outlineRun.status === 'QUEUED' && <button className="text-button" type="button" disabled={outlineBusy !== 'idle'} onClick={() => void cancelOutline()}>取消任务</button>}</div>}
         {outlineRun?.status === 'FAILED' && <div className="outline-state failed"><CircleAlert size={19}/><b>生成失败</b><p>{outlineRun.error || '模型任务执行失败。'}</p><button className="text-button" type="button" onClick={() => void prepareOutline()}>重新准备</button></div>}
         {outlineRun?.status === 'CANCELLED' && <div className="outline-state cancelled"><b>已取消</b><button className="button primary" type="button" onClick={() => void prepareOutline()}>重新生成</button></div>}
-        {outlineRun?.status === 'SUCCEEDED' && outlineCandidate && <div className={`outline-state ${outlineCandidate.status === 'ACCEPTED' ? 'accepted' : 'ready'}`}><CheckCircle2 size={19}/><b>{outlineCandidate.status === 'ACCEPTED' ? '大纲已写入文案' : '大纲等待审核'}</b></div>}
+        {outlineCandidate && (outlineRun?.status === 'SUCCEEDED' || outlineCandidate.status === 'ACCEPTED') && <div className={`outline-state ${outlineCandidate.status === 'ACCEPTED' ? 'accepted' : 'ready'}`}><CheckCircle2 size={19}/><div><b>{outlineCandidate.status === 'ACCEPTED' ? '大纲已采用' : '大纲待审核'}</b><span>{outlineCandidate.status === 'ACCEPTED' ? '下一步：生成初稿' : '确认结构后再进入正文写作'}</span></div><button className="text-button outline-state-action" type="button" onClick={() => setOutlineReviewOpen(true)}>{outlineCandidate.status === 'ACCEPTED' ? '查看大纲' : '审核大纲'}</button></div>}
         {outlineError && <div className="outline-inline-error" role="alert"><CircleAlert size={17}/><p>{outlineError}</p>{/配置可用文本模型|配置可用/.test(outlineError) && <button className="text-button" type="button" onClick={onOpenModelSettings}>去配置任务策略</button>}</div>}
         <div className="creative-checks"><div><b>平台版本</b><span>{contentVersions.length} 个</span></div><div><b>待核验事实</b><span>{project.factChecks.length} 项</span></div></div>
       </aside></div> : <section className="empty-workbench"><h1>还没有图文平台版本</h1><p>当前主流程支持公众号和小红书。</p></section>)}
+
+    {outlineReviewOpen && outlineCandidate && <div className="outline-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setOutlineReviewOpen(false); }}>
+      <div ref={outlineDialogRef} className={`outline-dialog ${outlineCandidate.status === 'ACCEPTED' ? 'accepted' : ''}`} role="dialog" aria-modal="true" aria-labelledby="outline-dialog-title" tabIndex={-1}>
+        <header><div><span>{outlineCandidate.status === 'ACCEPTED' ? '已采用大纲' : '审核大纲'}</span><b>{outlineCandidate.model}</b></div><button className="icon-button" type="button" aria-label="关闭大纲" onClick={() => setOutlineReviewOpen(false)}><X size={18}/></button></header>
+        <div className="outline-dialog-body">
+          <fieldset disabled={outlineCandidate.status === 'ACCEPTED'}><legend id="outline-dialog-title">标题方案</legend>{outlineCandidate.titleOptions.map((title) => <label key={title}><input type="radio" name={`outline-title-${outlineCandidate.id}`} checked={selectedTitle === title} onChange={() => setSelectedTitle(title)}/><span>{title}</span></label>)}</fieldset>
+          <section className="outline-summary" aria-label="大纲摘要"><b>内容摘要</b><p>{outlineCandidate.summary}</p></section>
+          <section className="outline-structure" aria-label="章节结构"><h3>章节结构</h3><ol className="outline-sections">{outlineCandidate.sections.map((section) => <li key={section.heading}><div><b>{section.heading}</b><span>{section.purpose}</span></div><ul>{section.keyPoints.map((point) => <li key={point}>{point}</li>)}</ul></li>)}</ol></section>
+          {outlineCandidate.factsToVerify.length > 0 && <div className="outline-facts"><b>待核验</b><ul>{outlineCandidate.factsToVerify.map((fact) => <li key={fact}>{fact}</li>)}</ul></div>}
+        </div>
+        <footer>{outlineCandidate.status === 'CANDIDATE' ? <><button className="text-button" type="button" disabled={outlineBusy !== 'idle'} onClick={() => void prepareOutline()}><RotateCcw size={15}/>重新生成</button><button className="button primary" type="button" disabled={!selectedTitle || outlineBusy !== 'idle'} onClick={() => void acceptOutline()}>{outlineBusy === 'accepting' ? <LoaderCircle size={16}/> : <Check size={16}/>}采用大纲</button></> : <button className="button primary" type="button" onClick={() => setOutlineReviewOpen(false)}>返回文案</button>}</footer>
+      </div>
+    </div>}
   </>;
 }
