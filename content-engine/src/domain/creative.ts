@@ -43,6 +43,47 @@ export interface ProjectReference {
 
 export type ProjectReferenceMetadata = Pick<ProjectReference, 'role' | 'title' | 'notes' | 'scope' | 'platforms'>;
 
+export type ProjectResearchRunStatus = 'DRAFT' | 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
+
+export interface ProjectAgentMessage {
+  id: string;
+  role: 'USER' | 'ASSISTANT';
+  content: string;
+  runId: string | null;
+  createdAt: string;
+}
+
+export interface ProjectResearchRun {
+  id: string;
+  status: ProjectResearchRunStatus;
+  request: string;
+  model: string;
+  actionVersion: string;
+  materialIds: { inputIds: string[]; referenceIds: string[] };
+  materialCount: number;
+  error?: string;
+  jobId?: string;
+  createdAt: string;
+}
+
+export interface ProjectResearchPlan {
+  id: string;
+  runId: string;
+  title: string;
+  summary: string;
+  questions: { question: string; why: string; preferredSources: string[] }[];
+  claims: { claim: string; priority: 'HIGH' | 'MEDIUM' | 'LOW'; reason: string }[];
+  nextActions: { action: 'SEARCH_WEB' | 'READ_LINK' | 'ASK_USER'; purpose: string; target: string }[];
+  createdAt: string;
+}
+
+export interface ProjectResearchContext {
+  messages: ProjectAgentMessage[];
+  run: ProjectResearchRun | null;
+  plan: ProjectResearchPlan | null;
+  usedMaterialIds: { inputIds: string[]; referenceIds: string[] };
+}
+
 export interface CreativeSkillDefinition {
   id: string;
   dimension: CreativeSkillDimension;

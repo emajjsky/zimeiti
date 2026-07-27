@@ -28,7 +28,7 @@ Fastify API
 | PostgreSQL | 用户、工作空间、凭据、情报、任务和审计主数据 | 已建立初始迁移 |
 | Redis/BullMQ | 延迟任务、异步任务、重试与 Worker 通信 | 已建立骨架 |
 | 百炼 CLI Runner | 每个任务临时注入 Key 并执行 CLI | 已建立骨架 |
-| Agent 动作与 Skill 组合 | 受限动作计划、五维创作规则、确认前运行记录 | 热点分析、大纲和初稿动作已建立；研究动作待实施 |
+| Agent 动作与 Skill 组合 | 受限动作计划、五维创作规则、确认前运行记录 | 热点分析、大纲、初稿和项目研究计划已建立；来源执行待实施 |
 | RSS/剪藏/Tavily 服务 | 合规信息采集、统一分类和候选搜索 | RSS 目录与分类已验收，Tavily/剪藏待真实用户验收 |
 | 飞书适配器 | OAuth、模板、字段映射、同步 | 未实现 |
 | 发布扩展 | 浏览器预填与人工确认 | 未实现 |
@@ -513,4 +513,15 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - `ProjectMaterials.tsx` 将我的内容、参考链接、素材文件拆为互斥页签，提供加载、空、错误、保存中、编辑和删除状态；移动端编辑弹层使用完整视口且无横向溢出。
 - 创作步骤更新为项目概览、资料与研究、文案、配图、排版、审核。目标篇幅从项目概览移动到文案写作策略，但在 `platform_strategies` 建立前仍写入兼容字段 `lengthTarget`。
 - 开发默认目录为 `data/uploads`，由 `.gitignore` 排除；生产部署必须把 `UPLOAD_ROOT` 指向持久卷或改用 OSS 适配器。
-- 本切片没有读取链接正文、转写音视频、运行浏览器或调用模型。下一实现单元是 `research_runs`、`research_sources`、`evidence_claims` 及受控研究确认卡。
+- 项目资料切片本身不读取链接正文或转写音视频。其后的研究计划切片已允许在用户确认后调用百炼文本模型，但仍不执行网页读取或事实核验。
+
+## 2026-07-27 实现记录：项目研究 Agent
+
+- 迁移 `014_project_research_agent.sql` 注册 `project-research-plan:1.0.0`，新增 `project_agent_messages`、`project_research_plans` 和 `project_research_materials`。运行状态继续复用 `generation_runs`，异步任务复用 `jobs` 与 BullMQ。
+- `projectMaterials.researchSnapshot()` 使用 `workspace_id + project_id + id` 校验所有选中资料；缺失或跨项目 ID 整体拒绝。`readProjectUploadText()` 只读取 TXT/Markdown 的固定字节上限。
+- 准备接口冻结项目、WritingBrief、用户请求、模型路由和资料快照，创建 DRAFT 并保存用户消息，不入队。确认接口原子切换为 QUEUED，创建 `PROJECT_RESEARCH_PLAN` Job 后入队；取消只允许 DRAFT 或尚未执行的 QUEUED。
+- Worker 使用 `AGENT_PLANNER` 路由调用百炼 CLI。输出由 Zod 严格校验，第一次结构不合法时只允许一次修复调用；成功后事务保存计划、助手消息、运行结果和 `PROJECT_RESEARCH` 用量日志。
+- GET 上下文返回最近运行、最近完成计划、计划引用资料和最近 100 条消息。消息查询先取最新 100 条，再按时间正序返回，避免长期项目只看到最早消息。
+- `ProjectMaterials.tsx` 管理资料选择、真实项目进度和引用标记；`ProjectResearchAgent.tsx` 管理持久化对话、准备、确认、排队、运行、失败和完成计划。活动确认卡存在时阻止重复准备。
+- 页面使用 4 步资产进度：项目概览、项目资料、研究计划、正式文案。正式文案排除立项时自动预填的核心观点，仅在采用初稿或用户实际修改标题/正文后完成。
+- 当前 Prompt 只生成研究问题、待核验主张和下一步动作，不执行动作。`READ_LINK`、`SEARCH_WEB` 和 `ASK_USER` 将由下一迁移的来源/证据对象承接。

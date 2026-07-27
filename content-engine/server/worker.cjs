@@ -10,6 +10,7 @@ const { createTextModelRunner } = require('./services/text-model.cjs');
 const { buildAnalysisPrompt, buildAnalysisRepairPrompt, calculateOverallScore, decisionForScore, parseAnalysisContent } = require('./services/intelligence-analysis.cjs');
 const { buildOutlinePrompt, buildOutlineRepairPrompt, parseOutlineContent } = require('./services/creative-outline.cjs');
 const { DRAFT_ACTION_VERSION, buildDraftPrompt, buildDraftRepairPrompt, parseDraftContent } = require('./services/creative-draft.cjs');
+const { PROJECT_RESEARCH_ACTION_VERSION, buildResearchPlanPrompt, buildResearchPlanRepairPrompt, parseResearchPlan } = require('./services/project-research.cjs');
 
 const connection = new IORedis(config.redisUrl, { maxRetriesPerRequest: null });
 const textRunner = createTextModelRunner();
@@ -21,6 +22,7 @@ async function processJob(queueJob) {
   try {
     if (queueJob.name === 'AGENT_PLAN') return await generateAgentPlan({ jobId, workspaceId, planId: payload.planId });
     if (queueJob.name === 'INTELLIGENCE_ANALYSIS') return await generateIntelligenceAnalysis({ jobId, workspaceId, runId: payload.runId });
+    if (queueJob.name === 'PROJECT_RESEARCH_PLAN') return await generateProjectResearchPlan({ jobId, workspaceId, runId: payload.runId });
     if (queueJob.name === 'CREATIVE_OUTLINE') return await generateCreativeOutline({ jobId, workspaceId, runId: payload.runId });
     if (queueJob.name === 'CREATIVE_DRAFT') return await generateCreativeDraft({ jobId, workspaceId, runId: payload.runId });
     if (queueJob.name !== 'BAILIAN_TEXT') throw new Error(`暂不支持的任务类型：${queueJob.name}`);
@@ -33,6 +35,52 @@ async function processJob(queueJob) {
     const message = error instanceof Error ? error.message : '任务失败。';
     if (queueJob.name === 'AGENT_PLAN' && payload.planId) await query('UPDATE agent_plans SET status = $1, error = $2, updated_at = now() WHERE id = $3 AND workspace_id = $4', ['FAILED', message.slice(0, 2_000), payload.planId, workspaceId]);
     await query('UPDATE jobs SET status = $1, error = $2, completed_at = now() WHERE id = $3', ['FAILED', message.slice(0, 2_000), jobId]);
+    throw error;
+  }
+}
+
+async function generateProjectResearchPlan({ jobId, workspaceId, runId }) {
+  const startedAt = Date.now();
+  let route;
+  let inputTokens;
+  let outputTokens;
+  try {
+    const runResult = await query('SELECT id, source_snapshot_json, input_json FROM generation_runs WHERE id = $1 AND workspace_id = $2 AND action_version_id = $3 AND status = \'QUEUED\'', [runId, workspaceId, PROJECT_RESEARCH_ACTION_VERSION]);
+    if (!runResult.rowCount) throw new Error('研究计划当前不能执行。');
+    await query("UPDATE generation_runs SET status = 'RUNNING', started_at = now() WHERE id = $1 AND workspace_id = $2", [runId, workspaceId]);
+    const snapshot = runResult.rows[0].source_snapshot_json;
+    route = runResult.rows[0].input_json.route;
+    const connectionInput = await textConnectionInput(workspaceId, route);
+    const prompt = buildResearchPlanPrompt(snapshot);
+    const first = await textRunner.runText({ provider: route.provider, model: route.model, system: prompt.system, message: prompt.message, ...connectionInput });
+    inputTokens = first.inputTokens;
+    outputTokens = first.outputTokens;
+    let output;
+    try { output = parseResearchPlan(first.content); }
+    catch (error) {
+      const validationError = error instanceof Error ? error.message : '输出不符合研究计划 JSON 契约。';
+      const repaired = await textRunner.runText({ provider: route.provider, model: route.model, system: buildResearchPlanRepairPrompt(prompt.system, validationError), message: first.content, ...connectionInput });
+      inputTokens = (inputTokens ?? 0) + (repaired.inputTokens ?? 0);
+      outputTokens = (outputTokens ?? 0) + (repaired.outputTokens ?? 0);
+      output = parseResearchPlan(repaired.content);
+    }
+    const saved = await transaction(async (client) => {
+      await client.query("UPDATE generation_runs SET status = 'SUCCEEDED', output_json = $2, usage_json = $3, completed_at = now() WHERE id = $1", [runId, JSON.stringify(output), JSON.stringify({ inputTokens, outputTokens })]);
+      const plan = await client.query('INSERT INTO project_research_plans (workspace_id, project_id, generation_run_id, output_json) VALUES ($1, $2, $3, $4) RETURNING id', [workspaceId, snapshot.projectId, runId, JSON.stringify(output)]);
+      await client.query('INSERT INTO project_agent_messages (workspace_id, project_id, generation_run_id, role, content) VALUES ($1, $2, $3, $4, $5)', [workspaceId, snapshot.projectId, runId, 'ASSISTANT', output.summary]);
+      await client.query("UPDATE jobs SET status = 'SUCCEEDED', result_json = $2, completed_at = now() WHERE id = $1", [jobId, JSON.stringify({ planId: plan.rows[0].id })]);
+      await client.query(`INSERT INTO api_usage_logs (workspace_id, job_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens)
+        VALUES ($1, $2, $3, $4, 'PROJECT_RESEARCH', 'SUCCESS', $5, $6, $7)`, [workspaceId, jobId, route.provider, route.model, Date.now() - startedAt, inputTokens ?? null, outputTokens ?? null]);
+      return plan.rows[0];
+    });
+    return { planId: saved.id };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '研究计划生成失败。';
+    await transaction(async (client) => {
+      await client.query("UPDATE generation_runs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1 AND workspace_id = $3", [runId, message.slice(0, 2_000), workspaceId]);
+      await client.query(`INSERT INTO api_usage_logs (workspace_id, job_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens, error)
+        VALUES ($1, $2, $3, $4, 'PROJECT_RESEARCH', 'FAILED', $5, $6, $7, $8)`, [workspaceId, jobId, route?.provider ?? 'UNKNOWN', route?.model ?? null, Date.now() - startedAt, inputTokens ?? null, outputTokens ?? null, message.slice(0, 2_000)]);
+    });
     throw error;
   }
 }

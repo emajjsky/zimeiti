@@ -2,7 +2,8 @@ import { ExternalLink, FileAudio, FileText, FileVideo, Image, Link2, LoaderCircl
 import { useEffect, useMemo, useState } from 'react';
 import { webCreative } from '../../data/webApi';
 import { platformName } from '../../domain/content';
-import type { CreativePlatform, ProjectInput, ProjectInputKind, ProjectInputPayload, ProjectMaterialScope, ProjectReference, ProjectReferenceMetadata, ProjectReferenceRole } from '../../domain/creative';
+import type { CreativePlatform, ProjectInput, ProjectInputKind, ProjectInputPayload, ProjectMaterialScope, ProjectReference, ProjectReferenceMetadata, ProjectReferenceRole, ProjectResearchContext } from '../../domain/creative';
+import { ProjectResearchAgent } from './ProjectResearchAgent';
 
 type MaterialTab = 'INPUTS' | 'LINKS' | 'FILES';
 type Editor = { type: 'INPUT'; item?: ProjectInput } | { type: 'REFERENCE'; sourceType: 'LINK' | 'FILE'; item?: ProjectReference };
@@ -40,7 +41,7 @@ function scopeText(scope: ProjectMaterialScope, platforms: CreativePlatform[]) {
   return `${scopeName[scope]} · ${platforms.length ? platforms.map((platform) => platformName[platform]).join('、') : '全部平台'}`;
 }
 
-export function ProjectMaterials({ projectId, platforms }: { projectId: string; platforms: CreativePlatform[] }) {
+export function ProjectMaterials({ projectId, platforms, overviewReady, hasDraft, onOpenAgentSettings }: { projectId: string; platforms: CreativePlatform[]; overviewReady: boolean; hasDraft: boolean; onOpenAgentSettings: () => void }) {
   const [inputs, setInputs] = useState<ProjectInput[]>([]);
   const [references, setReferences] = useState<ProjectReference[]>([]);
   const [tab, setTab] = useState<MaterialTab>('INPUTS');
@@ -48,6 +49,9 @@ export function ProjectMaterials({ projectId, platforms }: { projectId: string; 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [research, setResearch] = useState<ProjectResearchContext | null>(null);
+  const [selectedInputIds, setSelectedInputIds] = useState<string[]>([]);
+  const [selectedReferenceIds, setSelectedReferenceIds] = useState<string[]>([]);
 
   const links = useMemo(() => references.filter((item) => item.sourceType === 'LINK'), [references]);
   const files = useMemo(() => references.filter((item) => item.sourceType === 'FILE'), [references]);
@@ -55,28 +59,31 @@ export function ProjectMaterials({ projectId, platforms }: { projectId: string; 
   useEffect(() => {
     let cancelled = false;
     setLoading(true); setError('');
-    webCreative.materials(projectId).then((result) => {
+    Promise.all([webCreative.materials(projectId), webCreative.research(projectId)]).then(([result, researchResult]) => {
       if (cancelled) return;
       setInputs(result.inputs); setReferences(result.references);
+      setResearch(researchResult);
+      setSelectedInputIds(researchResult.run?.materialIds.inputIds.length ? researchResult.run.materialIds.inputIds : result.inputs.filter((item) => item.scope === 'PROJECT' || item.scope === 'RESEARCH').map((item) => item.id));
+      setSelectedReferenceIds(researchResult.run?.materialIds.referenceIds.length ? researchResult.run.materialIds.referenceIds : result.references.filter((item) => item.scope === 'PROJECT' || item.scope === 'RESEARCH').map((item) => item.id));
     }).catch((reason) => { if (!cancelled) setError(reason instanceof Error ? reason.message : '读取项目资料失败。'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [projectId]);
 
-  const upsertInput = (item: ProjectInput) => setInputs((current) => [item, ...current.filter((value) => value.id !== item.id)]);
-  const upsertReference = (item: ProjectReference) => setReferences((current) => [item, ...current.filter((value) => value.id !== item.id)]);
+  const upsertInput = (item: ProjectInput) => { setInputs((current) => [item, ...current.filter((value) => value.id !== item.id)]); setSelectedInputIds((current) => current.includes(item.id) ? current : [...current, item.id]); };
+  const upsertReference = (item: ProjectReference) => { setReferences((current) => [item, ...current.filter((value) => value.id !== item.id)]); setSelectedReferenceIds((current) => current.includes(item.id) ? current : [...current, item.id]); };
 
   const removeInput = async (item: ProjectInput) => {
     if (!window.confirm(`删除“${item.title}”？`)) return;
     setError('');
-    try { await webCreative.removeInput(item.id); setInputs((current) => current.filter((value) => value.id !== item.id)); }
+    try { await webCreative.removeInput(item.id); setInputs((current) => current.filter((value) => value.id !== item.id)); setSelectedInputIds((current) => current.filter((id) => id !== item.id)); }
     catch (reason) { setError(reason instanceof Error ? reason.message : '删除失败。'); }
   };
 
   const removeReference = async (item: ProjectReference) => {
     if (!window.confirm(`删除“${item.title}”？`)) return;
     setError('');
-    try { await webCreative.removeReference(item.id); setReferences((current) => current.filter((value) => value.id !== item.id)); }
+    try { await webCreative.removeReference(item.id); setReferences((current) => current.filter((value) => value.id !== item.id)); setSelectedReferenceIds((current) => current.filter((id) => id !== item.id)); }
     catch (reason) { setError(reason instanceof Error ? reason.message : '删除失败。'); }
   };
 
@@ -89,7 +96,24 @@ export function ProjectMaterials({ projectId, platforms }: { projectId: string; 
     } catch (reason) { setError(reason instanceof Error ? reason.message : '打开素材失败。'); }
   };
 
-  return <section className="project-materials">
+  const usedInputs = new Set(research?.usedMaterialIds.inputIds ?? []);
+  const usedReferences = new Set(research?.usedMaterialIds.referenceIds ?? []);
+  const materialCount = inputs.length + references.length;
+  const progress = [
+    { label: '项目概览', done: overviewReady },
+    { label: '项目资料', done: materialCount > 0 },
+    { label: '研究计划', done: Boolean(research?.plan) },
+    { label: '正式文案', done: hasDraft },
+  ];
+  const completed = progress.filter((item) => item.done).length;
+  const currentProgressIndex = progress.findIndex((item) => !item.done);
+  const toggleInput = (id: string) => setSelectedInputIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
+  const toggleReference = (id: string) => setSelectedReferenceIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
+  const allSelected = selectedInputIds.length === inputs.length && selectedReferenceIds.length === references.length && materialCount > 0;
+
+  return <section className="project-material-workspace">
+    <div className="project-progress-band"><div><span>项目进度</span><b>{completed}/{progress.length}</b></div><ol>{progress.map((item, index) => <li key={item.label} className={item.done ? 'done' : index === currentProgressIndex ? 'current' : ''}><i>{item.done ? '✓' : index + 1}</i><span>{item.label}</span></li>)}</ol></div>
+    <div className="project-research-layout"><section className="project-materials">
     <header className="materials-head">
       <div><h2>资料与研究</h2><div className="materials-counts"><span>{inputs.length} 条内容</span><span>{links.length} 条参考</span><span>{files.length} 个文件</span></div></div>
       <button className="button primary" type="button" onClick={() => setEditor(tab === 'INPUTS' ? { type: 'INPUT' } : { type: 'REFERENCE', sourceType: tab === 'LINKS' ? 'LINK' : 'FILE' })}>{tab === 'FILES' ? <Upload size={16}/> : <Plus size={16}/>} {tab === 'INPUTS' ? '新增内容' : tab === 'LINKS' ? '新增参考' : '上传素材'}</button>
@@ -99,24 +123,38 @@ export function ProjectMaterials({ projectId, platforms }: { projectId: string; 
       <button type="button" className={tab === 'LINKS' ? 'active' : ''} onClick={() => setTab('LINKS')}>参考链接 <span>{links.length}</span></button>
       <button type="button" className={tab === 'FILES' ? 'active' : ''} onClick={() => setTab('FILES')}>素材文件 <span>{files.length}</span></button>
     </nav>
+    <div className="material-selection-bar"><span>已选 {selectedInputIds.length + selectedReferenceIds.length} 条给 Agent</span><button className="text-button" type="button" disabled={materialCount === 0} onClick={() => { setSelectedInputIds(allSelected ? [] : inputs.map((item) => item.id)); setSelectedReferenceIds(allSelected ? [] : references.map((item) => item.id)); }}>{allSelected ? '清空' : '全选'}</button></div>
     {error && <div className="materials-error" role="alert">{error}</div>}
     {loading ? <div className="materials-loading"><LoaderCircle size={19}/><span>读取项目资料</span></div> : <div className="materials-list">
-      {tab === 'INPUTS' && (inputs.length ? inputs.map((item) => <article className="material-row input-row" key={item.id}>
+      {tab === 'INPUTS' && (inputs.length ? inputs.map((item) => <article className={`material-row input-row ${selectedInputIds.includes(item.id) ? 'selected' : ''}`} key={item.id}>
+        <label className="material-selector"><input type="checkbox" aria-label={`选择 ${item.title}`} checked={selectedInputIds.includes(item.id)} onChange={() => toggleInput(item.id)}/><span/></label>
         <div className="material-row-main"><div className="material-row-title"><span className={`material-role role-${item.kind.toLowerCase()}`}>{inputKindName[item.kind]}</span><h3>{item.title}</h3></div><p>{item.body}</p><small>{scopeText(item.scope, item.platforms)}</small></div>
-        <div className="material-row-actions"><button className="icon-button" type="button" title="编辑" aria-label={`编辑 ${item.title}`} onClick={() => setEditor({ type: 'INPUT', item })}><Pencil size={16}/></button><button className="icon-button danger-icon" type="button" title="删除" aria-label={`删除 ${item.title}`} onClick={() => void removeInput(item)}><Trash2 size={16}/></button></div>
+        <div className="material-row-actions">{usedInputs.has(item.id) && <span className="material-used">研究已引用</span>}<button className="icon-button" type="button" title="编辑" aria-label={`编辑 ${item.title}`} onClick={() => setEditor({ type: 'INPUT', item })}><Pencil size={16}/></button><button className="icon-button danger-icon" type="button" title="删除" aria-label={`删除 ${item.title}`} onClick={() => void removeInput(item)}><Trash2 size={16}/></button></div>
       </article>) : <div className="materials-empty">还没有项目内容</div>)}
-      {tab === 'LINKS' && (links.length ? links.map((item) => <ReferenceRow key={item.id} item={item} onOpen={() => void openReference(item)} onEdit={() => setEditor({ type: 'REFERENCE', sourceType: 'LINK', item })} onRemove={() => void removeReference(item)}/>) : <div className="materials-empty">还没有参考链接</div>)}
-      {tab === 'FILES' && (files.length ? files.map((item) => <ReferenceRow key={item.id} item={item} onOpen={() => void openReference(item)} onEdit={() => setEditor({ type: 'REFERENCE', sourceType: 'FILE', item })} onRemove={() => void removeReference(item)}/>) : <div className="materials-empty">还没有素材文件</div>)}
+      {tab === 'LINKS' && (links.length ? links.map((item) => <ReferenceRow key={item.id} item={item} selected={selectedReferenceIds.includes(item.id)} used={usedReferences.has(item.id)} onSelect={() => toggleReference(item.id)} onOpen={() => void openReference(item)} onEdit={() => setEditor({ type: 'REFERENCE', sourceType: 'LINK', item })} onRemove={() => void removeReference(item)}/>) : <div className="materials-empty">还没有参考链接</div>)}
+      {tab === 'FILES' && (files.length ? files.map((item) => <ReferenceRow key={item.id} item={item} selected={selectedReferenceIds.includes(item.id)} used={usedReferences.has(item.id)} onSelect={() => toggleReference(item.id)} onOpen={() => void openReference(item)} onEdit={() => setEditor({ type: 'REFERENCE', sourceType: 'FILE', item })} onRemove={() => void removeReference(item)}/>) : <div className="materials-empty">还没有素材文件</div>)}
     </div>}
-    {editor && <MaterialDialog editor={editor} projectId={projectId} availablePlatforms={platforms} busy={busy} onBusy={setBusy} onClose={() => !busy && setEditor(null)} onError={setError} onInput={upsertInput} onReference={upsertReference}/>}
+    {editor && <MaterialDialog
+      editor={editor}
+      projectId={projectId}
+      availablePlatforms={platforms}
+      busy={busy}
+      onBusy={setBusy}
+      onClose={() => !busy && setEditor(null)}
+      onError={setError}
+      onInput={upsertInput}
+      onReference={upsertReference}
+    />}
+    </section><ProjectResearchAgent projectId={projectId} context={research} selectedInputIds={selectedInputIds} selectedReferenceIds={selectedReferenceIds} onContext={setResearch} onOpenSettings={onOpenAgentSettings}/></div>
   </section>;
 }
 
-function ReferenceRow({ item, onOpen, onEdit, onRemove }: { item: ProjectReference; onOpen: () => void; onEdit: () => void; onRemove: () => void }) {
-  return <article className="material-row">
+function ReferenceRow({ item, selected, used, onSelect, onOpen, onEdit, onRemove }: { item: ProjectReference; selected: boolean; used: boolean; onSelect: () => void; onOpen: () => void; onEdit: () => void; onRemove: () => void }) {
+  return <article className={`material-row ${selected ? 'selected' : ''}`}>
+    <label className="material-selector"><input type="checkbox" aria-label={`选择 ${item.title}`} checked={selected} onChange={onSelect}/><span/></label>
     <div className="material-source-icon">{item.sourceType === 'LINK' ? <Link2 size={18}/> : fileIcon(item.mimeType)}</div>
-    <div className="material-row-main"><div className="material-row-title"><span className={`material-role role-${item.role.toLowerCase()}`}>{referenceRoleName[item.role]}</span><h3>{item.title}</h3></div><p>{item.notes || (item.sourceType === 'LINK' ? item.url : `${item.originalFilename} · ${formatBytes(item.sizeBytes)}`)}</p><small>{scopeText(item.scope, item.platforms)}</small></div>
-    <div className="material-row-actions"><button className="icon-button" type="button" title="打开" aria-label={`打开 ${item.title}`} onClick={onOpen}><ExternalLink size={16}/></button><button className="icon-button" type="button" title="编辑" aria-label={`编辑 ${item.title}`} onClick={onEdit}><Pencil size={16}/></button><button className="icon-button danger-icon" type="button" title="删除" aria-label={`删除 ${item.title}`} onClick={onRemove}><Trash2 size={16}/></button></div>
+    <div className="material-row-main"><div className="material-row-title"><span className={`material-role role-${item.role.toLowerCase()}`}>{referenceRoleName[item.role]}</span><h3>{item.title}</h3></div><p>{item.notes || (item.sourceType === 'LINK' ? item.url : `${item.originalFilename} · ${formatBytes(item.sizeBytes)}`)}</p><small>{scopeText(item.scope, item.platforms)} · {item.sourceType === 'LINK' ? '未读取' : ['text/plain', 'text/markdown'].includes(item.mimeType ?? '') ? '文本可读取' : '仅文件信息'}</small></div>
+    <div className="material-row-actions">{used && <span className="material-used">研究已引用</span>}<button className="icon-button" type="button" title="打开" aria-label={`打开 ${item.title}`} onClick={onOpen}><ExternalLink size={16}/></button><button className="icon-button" type="button" title="编辑" aria-label={`编辑 ${item.title}`} onClick={onEdit}><Pencil size={16}/></button><button className="icon-button danger-icon" type="button" title="删除" aria-label={`删除 ${item.title}`} onClick={onRemove}><Trash2 size={16}/></button></div>
   </article>;
 }
 

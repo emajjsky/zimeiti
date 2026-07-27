@@ -90,7 +90,18 @@ function createProjectMaterialStore({ query }) {
     return result.rows[0];
   }
 
-  return { list, createInput, updateInput, removeInput, createReference, updateReference, getReference, removeReference };
+  async function researchSnapshot(workspaceId, projectId, inputIds, referenceIds) {
+    const [inputs, references] = await Promise.all([
+      inputIds.length ? query('SELECT * FROM project_inputs WHERE workspace_id = $1 AND project_id = $2 AND id = ANY($3::uuid[]) ORDER BY updated_at DESC', [workspaceId, projectId, inputIds]) : { rows: [] },
+      referenceIds.length ? query('SELECT * FROM project_references WHERE workspace_id = $1 AND project_id = $2 AND id = ANY($3::uuid[]) ORDER BY updated_at DESC', [workspaceId, projectId, referenceIds]) : { rows: [] },
+    ]);
+    if (inputs.rows.length !== inputIds.length || references.rows.length !== referenceIds.length) {
+      const error = new Error('部分项目资料不存在或不属于当前项目。'); error.statusCode = 400; throw error;
+    }
+    return { inputs: inputs.rows, references: references.rows };
+  }
+
+  return { list, createInput, updateInput, removeInput, createReference, updateReference, getReference, removeReference, researchSnapshot };
 }
 
 module.exports = { createProjectMaterialStore, inputView, referenceView };

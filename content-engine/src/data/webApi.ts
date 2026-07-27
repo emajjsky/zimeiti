@@ -1,7 +1,7 @@
 import type { LocalState } from './localRepository';
 import type { ApiUsageLog, ApiUsageSummary, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelTaskPolicy } from '../domain/integrations';
 import type { ContentProject, IntelligenceAnalysis, Platform } from '../domain/content';
-import type { CreativeDraftCandidate, CreativeDraftPreparation, CreativeDraftRun, CreativeOutlineCandidate, CreativeOutlinePreparation, CreativeOutlineRun, CreativeSkillDefinition, ProjectInput, ProjectInputPayload, ProjectReference, ProjectReferenceMetadata, WritingBrief, WritingBriefInput } from '../domain/creative';
+import type { CreativeDraftCandidate, CreativeDraftPreparation, CreativeDraftRun, CreativeOutlineCandidate, CreativeOutlinePreparation, CreativeOutlineRun, CreativeSkillDefinition, ProjectInput, ProjectInputPayload, ProjectReference, ProjectReferenceMetadata, ProjectResearchContext, ProjectResearchRun, WritingBrief, WritingBriefInput } from '../domain/creative';
 
 const tokenKey = 'content-engine-web-session-v1';
 const apiBase = import.meta.env.VITE_API_BASE ?? '/api/v1';
@@ -62,6 +62,10 @@ export const webCreative = {
     if (!response.ok) { const payload = await response.json().catch(() => ({})); throw new Error(payload?.error?.message || `读取文件失败（HTTP ${response.status}）。`); }
     return response.blob();
   },
+  research: (projectId: string) => request<ProjectResearchContext>(`/creative/projects/${encodeURIComponent(projectId)}/research`),
+  prepareResearch: (projectId: string, input: { request: string; inputIds: string[]; referenceIds: string[] }) => request<ProjectResearchRun>(`/creative/projects/${encodeURIComponent(projectId)}/research/prepare`, { method: 'POST', body: JSON.stringify(input) }),
+  confirmResearch: (runId: string) => request<{ id: string; status: 'QUEUED'; jobId: string }>(`/creative/research-runs/${encodeURIComponent(runId)}/confirm`, { method: 'POST', body: '{}' }),
+  cancelResearch: (runId: string) => request<{ id: string; status: 'CANCELLED' }>(`/creative/research-runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST', body: '{}' }),
   prepareOutline: (projectId: string, platform: Exclude<Platform, 'VIDEO_CHANNEL'>) => request<CreativeOutlinePreparation>(`/creative/projects/${encodeURIComponent(projectId)}/outline/prepare`, { method: 'POST', body: JSON.stringify({ platform }) }),
   confirmOutline: (runId: string) => request<{ id: string; status: 'QUEUED'; jobId: string }>(`/creative/outline-runs/${encodeURIComponent(runId)}/confirm`, { method: 'POST', body: '{}' }),
   cancelOutline: (runId: string) => request<{ id: string; status: 'CANCELLED' }>(`/creative/outline-runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST', body: '{}' }),

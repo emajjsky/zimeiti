@@ -81,7 +81,7 @@ function platformSkillDefaults(platforms: Platform[], skills: CreativeSkillDefin
   }, { ...current });
 }
 
-export function CreateWorkspace({ project, activePlatform, onPlatform, activeVersion, onSaveVersion, onProjectAccepted, onOpenModelSettings }: {
+export function CreateWorkspace({ project, activePlatform, onPlatform, activeVersion, onSaveVersion, onProjectAccepted, onOpenModelSettings, onOpenAgentSettings }: {
   project: ContentProject | undefined;
   activePlatform: Platform;
   onPlatform: (platform: Platform) => void;
@@ -89,6 +89,7 @@ export function CreateWorkspace({ project, activePlatform, onPlatform, activeVer
   onSaveVersion: (projectId: string, versionId: string, patch: Pick<ContentVersion, 'title' | 'body'>) => void;
   onProjectAccepted: (project: ContentProject) => void;
   onOpenModelSettings: () => void;
+  onOpenAgentSettings: () => void;
 }) {
   const [stage, setStage] = useState<CreateStage>('brief');
   const [skills, setSkills] = useState<CreativeSkillDefinition[]>([]);
@@ -497,7 +498,16 @@ export function CreateWorkspace({ project, activePlatform, onPlatform, activeVer
       </>}
     </section>}
 
-    {stage === 'materials' && <ProjectMaterials projectId={project.id} platforms={contentVersions.map((version) => version.platform as CreativePlatform)}/>}
+    {stage === 'materials' && <ProjectMaterials
+      projectId={project.id}
+      platforms={contentVersions.map((version) => version.platform as CreativePlatform)}
+      overviewReady={briefState === 'saved'}
+      hasDraft={draftCandidate?.status === 'ACCEPTED' || contentVersions.some((version) => {
+        const body = version.body.trim();
+        return Boolean(body) && (body !== project.coreViewpoint.trim() || version.title.trim() !== project.title.trim());
+      })}
+      onOpenAgentSettings={onOpenAgentSettings}
+    />}
 
     {stage === 'copy' && (activeVersion && activeVersion.platform !== 'VIDEO_CHANNEL' ? <div className="create-layout editable creative-copy-layout"><section className="editor"><div className="editor-head"><div className="tabs">{contentVersions.map((version) => <button type="button" key={version.platform} className={version.platform === activePlatform ? 'active' : ''} onClick={() => onPlatform(version.platform)}>{platformName[version.platform]}</button>)}</div><button className="text-button" type="button" onClick={saveCopy}>保存草稿</button></div>
       {brief && <section className="writing-strategy" aria-labelledby="writing-strategy-title"><header><div><h2 id="writing-strategy-title">写作策略</h2><span>{platformName[activeVersion.platform]}文案 · {skillName(brief.platformSkills[activeVersion.platform as CreativePlatform]?.CHANNEL)}规则</span></div><button className="text-button" type="button" disabled={briefState === 'saving'} onClick={() => void saveBrief()}>{briefState === 'saving' ? '保存中' : briefState === 'saved' ? '已保存' : '保存策略'}</button></header><div className="writing-strategy-fields">{sharedDimensions.map(({ id, label }) => <label key={id}><span>{label}</span><select value={brief.selectedSkills[id]} onChange={(event) => changeBrief({ selectedSkills: { ...brief.selectedSkills, [id]: event.target.value } })}>{(skillGroups.get(id) ?? []).map((skill) => <option key={skill.version.id} value={skill.version.id}>{skill.name}</option>)}</select><small>{skillDescription(brief.selectedSkills[id])}</small></label>)}<label><span>目标篇幅</span><input value={brief.lengthTarget} onChange={(event) => changeBrief({ lengthTarget: event.target.value })}/><small>当前平台的正文范围</small></label></div>{briefError && <div className="writing-strategy-error" role="alert"><CircleAlert size={16}/><span>{briefError}</span></div>}</section>}

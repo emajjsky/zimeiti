@@ -15,7 +15,8 @@ const { runBailianCli } = require('./runner/bailian.cjs');
 const { ANALYSIS_SCOPE, createTemplateStore, prepareAnalysisInput } = require('./services/intelligence-analysis.cjs');
 const { createCreativeSkillStore } = require('./services/creativeSkills.cjs');
 const { createProjectMaterialStore } = require('./services/projectMaterials.cjs');
-const { saveProjectUpload, removeProjectUpload, openProjectUpload } = require('./services/projectUploadStorage.cjs');
+const { saveProjectUpload, removeProjectUpload, openProjectUpload, readProjectUploadText } = require('./services/projectUploadStorage.cjs');
+const { PROJECT_RESEARCH_ACTION_VERSION, PROJECT_RESEARCH_SCOPE, researchRunView, researchPlanView } = require('./services/project-research.cjs');
 const { OUTLINE_ACTION_VERSION, OUTLINE_SCOPE, OUTLINE_TEMPLATE_SCOPES, outlineTemplateScope, validateOutlineTemplate, defaultOutlineTemplate, outlineCandidateView } = require('./services/creative-outline.cjs');
 const { DRAFT_ACTION_VERSION, DRAFT_SCOPE, DRAFT_TEMPLATE_SCOPES, draftTemplateScope, validateDraftTemplate, defaultDraftTemplate, draftCandidateView } = require('./services/creative-draft.cjs');
 
@@ -48,6 +49,14 @@ const projectReferenceMetadata = z.object({
   notes: z.string().max(4_000).default(''),
   scope: projectScope,
   platforms: projectPlatforms.default([]),
+});
+const projectResearchInput = z.object({
+  request: z.string().trim().min(1).max(2_000),
+  inputIds: z.array(z.string().uuid()).max(20).default([]),
+  referenceIds: z.array(z.string().uuid()).max(20).default([]),
+}).superRefine((value, context) => {
+  if (value.inputIds.length + value.referenceIds.length === 0) context.addIssue({ code: 'custom', path: ['inputIds'], message: '请至少选择一条项目资料。' });
+  if (value.inputIds.length + value.referenceIds.length > 20) context.addIssue({ code: 'custom', path: ['inputIds'], message: '单次最多选择 20 条项目资料。' });
 });
 const platformSkillInput = z.object({
   LAYOUT: z.string().min(1).max(160).optional(),
@@ -594,6 +603,127 @@ app.get('/api/v1/creative/project-files/:id/content', { preHandler: authenticate
   const filename = encodeURIComponent(reference.original_filename || 'project-material');
   reply.type(reference.mime_type).header('Content-Length', reference.size_bytes).header('Cache-Control', 'private, max-age=3600').header('X-Content-Type-Options', 'nosniff').header('Content-Security-Policy', 'sandbox').header('Content-Disposition', `inline; filename*=UTF-8''${filename}`);
   return reply.send(openProjectUpload(config.uploadRoot, reference.storage_key));
+});
+
+async function projectResearchMaterialSnapshot(rows) {
+  let remaining = 12_000;
+  const take = (value, maximum = 3_000) => {
+    const text = String(value || '').trim();
+    const result = text.slice(0, Math.max(0, Math.min(maximum, remaining)));
+    remaining -= result.length;
+    return result;
+  };
+  const inputs = rows.inputs.map((row) => ({
+    id: row.id, type: 'INPUT', kind: row.kind, title: row.title, scope: row.scope,
+    platforms: row.platforms_json ?? [], content: take(row.body),
+  }));
+  const references = [];
+  for (const row of rows.references) {
+    let extractedText = '';
+    if (remaining > 0 && row.source_type === 'FILE' && ['text/plain', 'text/markdown'].includes(row.mime_type)) {
+      extractedText = take(await readProjectUploadText(config.uploadRoot, row.storage_key, Math.min(3_000, remaining)));
+    }
+    references.push({
+      id: row.id, type: row.source_type, role: row.role, title: row.title, notes: row.notes,
+      scope: row.scope, platforms: row.platforms_json ?? [], url: row.url ?? null,
+      filename: row.original_filename ?? null, mimeType: row.mime_type ?? null,
+      extractedText: extractedText || null,
+      contentStatus: row.source_type === 'LINK' ? 'NOT_READ' : extractedText ? 'TEXT_EXTRACTED' : 'METADATA_ONLY',
+    });
+  }
+  return [...inputs, ...references];
+}
+
+async function researchMaterialIds(runId) {
+  if (!runId) return { inputIds: [], referenceIds: [] };
+  const result = await query('SELECT input_id, reference_id FROM project_research_materials WHERE generation_run_id = $1', [runId]);
+  return {
+    inputIds: result.rows.flatMap((row) => row.input_id ? [row.input_id] : []),
+    referenceIds: result.rows.flatMap((row) => row.reference_id ? [row.reference_id] : []),
+  };
+}
+
+app.get('/api/v1/creative/projects/:projectId/research', { preHandler: authenticate }, async (request) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const workspace = await currentWorkspace(request.user.sub);
+  await creativeProject(workspace.id, projectId);
+  const [messages, run, plan] = await Promise.all([
+    query(`SELECT * FROM (
+      SELECT id, role, content, generation_run_id, created_at
+      FROM project_agent_messages WHERE workspace_id = $1 AND project_id = $2
+      ORDER BY created_at DESC LIMIT 100
+    ) recent ORDER BY created_at ASC`, [workspace.id, projectId]),
+    query(`SELECT r.*, j.id AS job_id FROM generation_runs r
+      LEFT JOIN jobs j ON j.workspace_id = r.workspace_id AND j.payload_json->>'runId' = r.id::text
+      WHERE r.workspace_id = $1 AND r.action_version_id = $2 AND r.source_snapshot_json->>'projectId' = $3
+      ORDER BY r.created_at DESC LIMIT 1`, [workspace.id, PROJECT_RESEARCH_ACTION_VERSION, projectId]),
+    query('SELECT * FROM project_research_plans WHERE workspace_id = $1 AND project_id = $2 ORDER BY created_at DESC LIMIT 1', [workspace.id, projectId]),
+  ]);
+  const materialIds = await researchMaterialIds(run.rows[0]?.id);
+  const usedMaterialIds = await researchMaterialIds(plan.rows[0]?.generation_run_id);
+  return {
+    messages: messages.rows.map((row) => ({ id: row.id, role: row.role, content: row.content, runId: row.generation_run_id ?? null, createdAt: row.created_at })),
+    run: researchRunView(run.rows[0], materialIds),
+    plan: researchPlanView(plan.rows[0]),
+    usedMaterialIds,
+  };
+});
+
+app.post('/api/v1/creative/projects/:projectId/research/prepare', { preHandler: authenticate }, async (request, reply) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const input = projectResearchInput.parse(request.body);
+  const workspace = await currentWorkspace(request.user.sub);
+  const [project, brief, policy, materialRows] = await Promise.all([
+    creativeProject(workspace.id, projectId),
+    creativeSkillStore.getBrief(workspace.id, projectId),
+    query(`SELECT p.model FROM agent_model_policies p
+      JOIN credential_vault c ON c.workspace_id = p.workspace_id AND c.provider = 'BAILIAN' AND c.status = 'READY'
+      WHERE p.workspace_id = $1 AND p.scope = $2 AND p.provider = 'BAILIAN_CLI'`, [workspace.id, PROJECT_RESEARCH_SCOPE]),
+    projectMaterialStore.researchSnapshot(workspace.id, projectId, input.inputIds, input.referenceIds),
+  ]);
+  if (!policy.rowCount) { const error = new Error('请先在“核心 Agent”配置可用的规划模型。'); error.statusCode = 400; throw error; }
+  const materials = await projectResearchMaterialSnapshot(materialRows);
+  const run = await transaction(async (client) => {
+    await client.query(`UPDATE generation_runs SET status = 'CANCELLED', completed_at = now()
+      WHERE workspace_id = $1 AND action_version_id = $2 AND status = 'DRAFT' AND source_snapshot_json->>'projectId' = $3`, [workspace.id, PROJECT_RESEARCH_ACTION_VERSION, projectId]);
+    const created = await client.query(`INSERT INTO generation_runs
+      (workspace_id, action_version_id, status, source_snapshot_json, input_json, model, prompt_version, estimated_cost)
+      VALUES ($1, $2, 'DRAFT', $3, $4, $5, '1.0.0', 'null'::jsonb) RETURNING *`, [
+      workspace.id, PROJECT_RESEARCH_ACTION_VERSION,
+      JSON.stringify({ projectId, project, brief, request: input.request, materials }),
+      JSON.stringify({ route: { provider: 'BAILIAN_CLI', model: policy.rows[0].model } }), policy.rows[0].model,
+    ]);
+    await client.query('INSERT INTO project_agent_messages (workspace_id, project_id, generation_run_id, role, content) VALUES ($1, $2, $3, $4, $5)', [workspace.id, projectId, created.rows[0].id, 'USER', input.request]);
+    for (const id of input.inputIds) await client.query('INSERT INTO project_research_materials (generation_run_id, input_id) VALUES ($1, $2)', [created.rows[0].id, id]);
+    for (const id of input.referenceIds) await client.query('INSERT INTO project_research_materials (generation_run_id, reference_id) VALUES ($1, $2)', [created.rows[0].id, id]);
+    return created.rows[0];
+  });
+  reply.code(201).send(researchRunView(run, { inputIds: input.inputIds, referenceIds: input.referenceIds }));
+});
+
+app.post('/api/v1/creative/research-runs/:id/confirm', { preHandler: authenticate }, async (request, reply) => {
+  const runId = z.string().uuid().parse(request.params.id);
+  const workspace = await currentWorkspace(request.user.sub);
+  const run = await query('UPDATE generation_runs SET status = \'QUEUED\' WHERE id = $1 AND workspace_id = $2 AND action_version_id = $3 AND status = \'DRAFT\' RETURNING id', [runId, workspace.id, PROJECT_RESEARCH_ACTION_VERSION]);
+  if (!run.rowCount) { const error = new Error('该研究计划当前不能确认。'); error.statusCode = 409; throw error; }
+  const job = await query("INSERT INTO jobs (workspace_id, job_type, payload_json) VALUES ($1, 'PROJECT_RESEARCH_PLAN', $2) RETURNING *", [workspace.id, JSON.stringify({ runId })]);
+  try { await enqueue(job.rows[0]); }
+  catch (error) {
+    const message = error instanceof Error ? error.message : '任务入队失败。';
+    await query("UPDATE generation_runs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1", [runId, message.slice(0, 2_000)]);
+    await query("UPDATE jobs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1", [job.rows[0].id, message.slice(0, 2_000)]);
+    throw error;
+  }
+  reply.code(202).send({ id: runId, status: 'QUEUED', jobId: job.rows[0].id });
+});
+
+app.post('/api/v1/creative/research-runs/:id/cancel', { preHandler: authenticate }, async (request) => {
+  const runId = z.string().uuid().parse(request.params.id);
+  const workspace = await currentWorkspace(request.user.sub);
+  const result = await query("UPDATE generation_runs SET status = 'CANCELLED', completed_at = now() WHERE id = $1 AND workspace_id = $2 AND action_version_id = $3 AND status IN ('DRAFT', 'QUEUED') RETURNING id, status", [runId, workspace.id, PROJECT_RESEARCH_ACTION_VERSION]);
+  if (!result.rowCount) { const error = new Error('该研究计划当前不能取消。'); error.statusCode = 409; throw error; }
+  await query("UPDATE jobs SET status = 'CANCELLED', completed_at = now() WHERE workspace_id = $1 AND payload_json->>'runId' = $2 AND status = 'PENDING'", [workspace.id, runId]);
+  return result.rows[0];
 });
 
 app.post('/api/v1/creative/projects/:projectId/outline/prepare', { preHandler: authenticate }, async (request, reply) => {

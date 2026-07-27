@@ -49,4 +49,13 @@ function openProjectUpload(root, storageKey) {
   return fs.createReadStream(safePath(root, storageKey));
 }
 
-module.exports = { MIME_EXTENSIONS, saveProjectUpload, removeProjectUpload, openProjectUpload, safePath };
+async function readProjectUploadText(root, storageKey, maxBytes = 20_000) {
+  const handle = await fsp.open(safePath(root, storageKey), 'r');
+  try {
+    const buffer = Buffer.alloc(maxBytes);
+    const { bytesRead } = await handle.read(buffer, 0, maxBytes, 0);
+    return buffer.subarray(0, bytesRead).toString('utf8').replace(/\0/g, '').trim();
+  } finally { await handle.close(); }
+}
+
+module.exports = { MIME_EXTENSIONS, saveProjectUpload, removeProjectUpload, openProjectUpload, readProjectUploadText, safePath };
