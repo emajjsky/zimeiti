@@ -107,18 +107,30 @@ test('研究计划先准备确认卡，用户确认后才入队', () => {
 
 test('项目资料页具备真实进度、资料选择和 Agent 完整状态', () => {
   const materials = fs.readFileSync(new URL('../src/workspaces/create/ProjectMaterials.tsx', import.meta.url), 'utf8');
-  const agent = fs.readFileSync(new URL('../src/workspaces/create/ProjectResearchAgent.tsx', import.meta.url), 'utf8');
+  const agent = fs.readFileSync(new URL('../src/workspaces/create/ProjectAgent.tsx', import.meta.url), 'utf8');
   const workspace = fs.readFileSync(new URL('../src/workspaces/create/CreateWorkspace.tsx', import.meta.url), 'utf8');
   const styles = fs.readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
   assert.match(materials, /项目概览[\s\S]*项目资料[\s\S]*研究计划[\s\S]*正式文案/);
   assert.match(materials, /selectedInputIds[\s\S]*selectedReferenceIds/);
   assert.match(materials, /研究已引用/);
-  assert.match(agent, /准备计划/);
+  assert.match(materials, /webCreative\.agentContext/);
+  assert.match(agent, /发送/);
   assert.match(agent, /确认调用/);
   assert.match(agent, /QUEUED[\s\S]*RUNNING[\s\S]*FAILED/);
-  assert.match(agent, /最近完成计划/);
+  assert.match(agent, /待回答问题[\s\S]*待核验主张[\s\S]*下一步/);
   assert.match(workspace, /draftCandidate\?\.status === 'ACCEPTED'/);
   assert.match(workspace, /body !== project\.coreViewpoint\.trim\(\)/);
   assert.match(styles, /\.project-research-layout/);
+  assert.match(styles, /\.project-agent\{/);
   assert.match(styles, /@media \(max-width:1100px\).*\.project-research-layout\{grid-template-columns:1fr\}/s);
+});
+
+test('研究与文案共用一个 ProjectAgent 组件', () => {
+  const agent = fs.readFileSync(new URL('../src/workspaces/create/ProjectAgent.tsx', import.meta.url), 'utf8');
+  const materials = fs.readFileSync(new URL('../src/workspaces/create/ProjectMaterials.tsx', import.meta.url), 'utf8');
+  assert.match(agent, /CURRENT[\s\S]*ALL/);
+  assert.match(agent, /MESSAGE[\s\S]*CONFIRMATION[\s\S]*RUN_STATUS[\s\S]*ARTIFACT[\s\S]*SYSTEM_EVENT/);
+  assert.match(agent, /acceptArtifact/);
+  assert.match(materials, /<ProjectAgent/);
+  assert.doesNotMatch(materials, /ProjectResearchAgent/);
 });

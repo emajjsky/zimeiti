@@ -44,14 +44,82 @@ export interface ProjectReference {
 export type ProjectReferenceMetadata = Pick<ProjectReference, 'role' | 'title' | 'notes' | 'scope' | 'platforms'>;
 
 export type ProjectResearchRunStatus = 'DRAFT' | 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
+export type ProjectAgentStage = 'RESEARCH' | 'COPY' | 'VISUAL' | 'LAYOUT' | 'REVIEW';
+export type ProjectAgentMessageType = 'MESSAGE' | 'CONFIRMATION' | 'RUN_STATUS' | 'ARTIFACT' | 'SYSTEM_EVENT';
+export type ProjectAgentHistory = 'CURRENT' | 'ALL';
+export type CopyAction = 'GENERATE_OUTLINE' | 'GENERATE_DRAFT' | 'POLISH_EXISTING_DRAFT' | 'RESTRUCTURE_DRAFT' | 'EXPAND_DRAFT' | 'SHORTEN_DRAFT' | 'REVISE_SELECTION' | 'ADAPT_PLATFORM';
+export type ProjectArtifactType = 'RESEARCH_PLAN' | 'OUTLINE' | 'CONTENT_MASTER' | 'PLATFORM_COPY';
+export type ProjectArtifactStatus = 'CANDIDATE' | 'ACCEPTED' | 'REJECTED';
 
 export interface ProjectAgentMessage {
   id: string;
   role: 'USER' | 'ASSISTANT';
   content: string;
   runId: string | null;
+  stage?: ProjectAgentStage;
+  messageType?: ProjectAgentMessageType;
+  artifactRefs?: string[];
+  metadata?: Record<string, unknown>;
   createdAt: string;
 }
+
+export interface ProjectStageSummary {
+  id: string;
+  stage: ProjectAgentStage;
+  platform: CreativePlatform | null;
+  summary: string;
+  version: number;
+  createdAt: string;
+}
+
+export interface ProjectAgentRun {
+  id: string;
+  action: CopyAction | 'PROJECT_RESEARCH_PLAN';
+  status: ProjectResearchRunStatus;
+  request: string;
+  confirmation: {
+    model: string;
+    promptVersion: number | string | null;
+    skillNames: string[];
+    materialCount: number;
+    writeScope: string;
+  };
+  error?: string;
+  createdAt: string;
+}
+
+export interface ProjectArtifact {
+  id: string;
+  type: ProjectArtifactType;
+  status: ProjectArtifactStatus;
+  platform: CreativePlatform | null;
+  version: number;
+  parentArtifactId: string | null;
+  payload: Record<string, unknown>;
+  createdAt: string;
+  acceptedAt: string | null;
+}
+
+export interface ProjectAgentContext {
+  stage: ProjectAgentStage;
+  platform: CreativePlatform | null;
+  messages: ProjectAgentMessage[];
+  summaries: ProjectStageSummary[];
+  activeRun: ProjectAgentRun | null;
+  artifacts: ProjectArtifact[];
+  usedMaterialIds: { inputIds: string[]; referenceIds: string[] };
+}
+
+export interface ProjectAgentPrepareInput {
+  stage: 'RESEARCH' | 'COPY';
+  platform?: CreativePlatform;
+  request: string;
+  selection?: { text: string; start: number; end: number };
+  inputIds: string[];
+  referenceIds: string[];
+}
+
+export type ProjectAgentPrepareResult = ProjectAgentRun | { needsClarification: true; message: ProjectAgentMessage };
 
 export interface ProjectResearchRun {
   id: string;

@@ -1,7 +1,7 @@
 import type { LocalState } from './localRepository';
 import type { ApiUsageLog, ApiUsageSummary, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelTaskPolicy } from '../domain/integrations';
 import type { ContentProject, IntelligenceAnalysis, Platform } from '../domain/content';
-import type { CreativeDraftCandidate, CreativeDraftPreparation, CreativeDraftRun, CreativeOutlineCandidate, CreativeOutlinePreparation, CreativeOutlineRun, CreativePlatform, CreativeSkillDefinition, ProjectInput, ProjectInputPayload, ProjectReference, ProjectReferenceMetadata, ProjectResearchContext, ProjectResearchRun, WritingBrief, WritingBriefInput } from '../domain/creative';
+import type { CreativeDraftCandidate, CreativeDraftPreparation, CreativeDraftRun, CreativeOutlineCandidate, CreativeOutlinePreparation, CreativeOutlineRun, CreativePlatform, CreativeSkillDefinition, ProjectAgentContext, ProjectAgentHistory, ProjectAgentPrepareInput, ProjectAgentPrepareResult, ProjectAgentRun, ProjectArtifact, ProjectInput, ProjectInputPayload, ProjectReference, ProjectReferenceMetadata, ProjectResearchContext, ProjectResearchRun, WritingBrief, WritingBriefInput } from '../domain/creative';
 
 const tokenKey = 'content-engine-web-session-v1';
 const apiBase = import.meta.env.VITE_API_BASE ?? '/api/v1';
@@ -66,6 +66,15 @@ export const webCreative = {
   prepareResearch: (projectId: string, input: { request: string; inputIds: string[]; referenceIds: string[] }) => request<ProjectResearchRun>(`/creative/projects/${encodeURIComponent(projectId)}/research/prepare`, { method: 'POST', body: JSON.stringify(input) }),
   confirmResearch: (runId: string) => request<{ id: string; status: 'QUEUED'; jobId: string }>(`/creative/research-runs/${encodeURIComponent(runId)}/confirm`, { method: 'POST', body: '{}' }),
   cancelResearch: (runId: string) => request<{ id: string; status: 'CANCELLED' }>(`/creative/research-runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST', body: '{}' }),
+  agentContext: (projectId: string, input: { stage: ProjectAgentContext['stage']; platform?: CreativePlatform; history: ProjectAgentHistory }) => {
+    const params = new URLSearchParams({ stage: input.stage, history: input.history });
+    if (input.platform) params.set('platform', input.platform);
+    return request<ProjectAgentContext>(`/creative/projects/${encodeURIComponent(projectId)}/agent?${params}`);
+  },
+  prepareAgent: (projectId: string, input: ProjectAgentPrepareInput) => request<ProjectAgentPrepareResult>(`/creative/projects/${encodeURIComponent(projectId)}/agent/prepare`, { method: 'POST', body: JSON.stringify(input) }),
+  confirmAgentRun: (runId: string) => request<{ id: string; status: 'QUEUED'; jobId: string }>(`/creative/agent-runs/${encodeURIComponent(runId)}/confirm`, { method: 'POST', body: '{}' }),
+  cancelAgentRun: (runId: string) => request<ProjectAgentRun>(`/creative/agent-runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST', body: '{}' }),
+  acceptArtifact: (artifactId: string, selectedTitle?: string) => request<{ artifact: ProjectArtifact; project: ContentProject }>(`/creative/project-artifacts/${encodeURIComponent(artifactId)}/accept`, { method: 'POST', body: JSON.stringify(selectedTitle ? { selectedTitle } : {}) }),
   prepareOutline: (projectId: string, platform: CreativePlatform) => request<CreativeOutlinePreparation>(`/creative/projects/${encodeURIComponent(projectId)}/outline/prepare`, { method: 'POST', body: JSON.stringify({ platform }) }),
   confirmOutline: (runId: string) => request<{ id: string; status: 'QUEUED'; jobId: string }>(`/creative/outline-runs/${encodeURIComponent(runId)}/confirm`, { method: 'POST', body: '{}' }),
   cancelOutline: (runId: string) => request<{ id: string; status: 'CANCELLED' }>(`/creative/outline-runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST', body: '{}' }),

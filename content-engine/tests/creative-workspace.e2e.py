@@ -101,10 +101,10 @@ with sync_playwright() as playwright:
     page.get_by_text("project-reference.txt", exact=True).wait_for()
 
     assert page.locator(".project-progress-band").count() == 1
-    assert page.locator(".project-research-agent").count() == 1
+    assert page.locator(".project-agent").count() == 1
     assert page.get_by_text("已选 3 条资料", exact=True).count() == 1
     page.locator(".project-agent-composer textarea").fill("保留我的观点，核验产品能力和价格，生成研究计划。")
-    page.get_by_role("button", name="准备计划", exact=True).click()
+    page.get_by_role("button", name="发送", exact=True).click()
     page.get_by_text("请先在“核心 Agent”配置可用的规划模型。", exact=True).wait_for()
     assert page.get_by_role("button", name="去配置", exact=True).count() == 1
     assert page.locator(".project-progress-band li.done").count() == 2
@@ -114,69 +114,67 @@ with sync_playwright() as playwright:
     research_state = {"status": "DRAFT", "input_ids": [], "reference_ids": []}
 
     def research_context():
-        run = {
-            "id": "66666666-6666-4666-8666-666666666666",
-            "status": research_state["status"],
-            "request": "保留我的观点，核验产品能力和价格，生成研究计划。",
-            "model": "qwen-plus",
-            "actionVersion": "project-research-plan:1.0.0",
-            "materialIds": {"inputIds": research_state["input_ids"], "referenceIds": research_state["reference_ids"]},
-            "materialCount": len(research_state["input_ids"]) + len(research_state["reference_ids"]),
-            "createdAt": "2026-07-27T10:00:00.000Z",
-        }
-        plan = None
-        messages = [{"id": "message-user", "role": "USER", "content": run["request"], "runId": run["id"], "createdAt": run["createdAt"]}]
-        if research_state["status"] == "SUCCEEDED":
-            messages.append({"id": "message-agent", "role": "ASSISTANT", "content": "先核验官方能力和价格，再判断普通用户是否适用。", "runId": run["id"], "createdAt": "2026-07-27T10:01:00.000Z"})
-            plan = {
-                "id": "77777777-7777-4777-8777-777777777777",
-                "runId": run["id"],
-                "title": "AI 工具价值判断研究计划",
-                "summary": "先核验官方能力和价格，再判断普通用户是否适用。",
-                "questions": [{"question": "产品当前开放哪些能力？", "why": "避免引用过期信息。", "preferredSources": ["官方文档", "官方价格页"]}],
-                "claims": [{"claim": "该能力对免费用户开放。", "priority": "HIGH", "reason": "影响使用建议。"}],
-                "nextActions": [{"action": "SEARCH_WEB", "purpose": "查找最新官方说明。", "target": "产品名 官方文档 2026"}],
-                "createdAt": "2026-07-27T10:01:00.000Z",
+        run = None
+        messages = [{"id": "message-user", "role": "USER", "content": "保留我的观点，核验产品能力和价格，生成研究计划。", "runId": "66666666-6666-4666-8666-666666666666", "stage": "RESEARCH", "messageType": "MESSAGE", "artifactRefs": [], "createdAt": "2026-07-27T10:00:00.000Z"}]
+        artifacts = []
+        if research_state["status"] == "DRAFT":
+            run = {
+                "id": "66666666-6666-4666-8666-666666666666",
+                "action": "PROJECT_RESEARCH_PLAN",
+                "status": "DRAFT",
+                "request": messages[0]["content"],
+                "confirmation": {"model": "qwen-plus", "promptVersion": 1, "skillNames": [], "materialCount": len(research_state["input_ids"]) + len(research_state["reference_ids"]), "writeScope": "研究计划候选"},
+                "createdAt": "2026-07-27T10:00:00.000Z",
             }
-        return {"messages": messages, "run": run, "plan": plan, "usedMaterialIds": {"inputIds": research_state["input_ids"], "referenceIds": research_state["reference_ids"]} if plan else {"inputIds": [], "referenceIds": []}}
+            messages.append({"id": "message-confirmation", "role": "ASSISTANT", "content": "研究计划已准备，确认后开始执行。", "runId": run["id"], "stage": "RESEARCH", "messageType": "CONFIRMATION", "artifactRefs": [], "createdAt": run["createdAt"]})
+        if research_state["status"] == "SUCCEEDED":
+            artifact = {"id": "77777777-7777-4777-8777-777777777777", "type": "RESEARCH_PLAN", "status": "CANDIDATE", "platform": None, "version": 1, "parentArtifactId": None, "payload": {"title": "AI 工具价值判断研究计划", "summary": "先核验官方能力和价格，再判断普通用户是否适用。", "questions": [{"question": "产品当前开放哪些能力？", "why": "避免引用过期信息。", "preferredSources": ["官方文档", "官方价格页"]}], "claims": [{"claim": "该能力对免费用户开放。", "priority": "HIGH", "reason": "影响使用建议。"}], "nextActions": [{"action": "SEARCH_WEB", "purpose": "查找最新官方说明。", "target": "产品名 官方文档 2026"}]}, "createdAt": "2026-07-27T10:01:00.000Z", "acceptedAt": None}
+            artifacts.append(artifact)
+            messages.append({"id": "message-agent", "role": "ASSISTANT", "content": artifact["payload"]["summary"], "runId": "66666666-6666-4666-8666-666666666666", "stage": "RESEARCH", "messageType": "ARTIFACT", "artifactRefs": [artifact["id"]], "createdAt": artifact["createdAt"]})
+        return {"stage": "RESEARCH", "platform": None, "messages": messages, "summaries": [], "activeRun": run, "artifacts": artifacts, "usedMaterialIds": {"inputIds": research_state["input_ids"], "referenceIds": research_state["reference_ids"]} if artifacts else {"inputIds": [], "referenceIds": []}}
 
-    def mock_research(route):
-        if route.request.method == "POST":
-            payload = json.loads(route.request.post_data or "{}")
-            research_state["status"] = "DRAFT"
-            research_state["input_ids"] = payload["inputIds"]
-            research_state["reference_ids"] = payload["referenceIds"]
-            route.fulfill(status=201, content_type="application/json", body=json.dumps(research_context()["run"], ensure_ascii=False))
-            return
+    def mock_research_context(route):
         route.fulfill(status=200, content_type="application/json", body=json.dumps(research_context(), ensure_ascii=False))
+
+    def mock_prepare_research(route):
+        payload = json.loads(route.request.post_data or "{}")
+        research_state["status"] = "DRAFT"
+        research_state["input_ids"] = payload["inputIds"]
+        research_state["reference_ids"] = payload["referenceIds"]
+        route.fulfill(status=201, content_type="application/json", body=json.dumps(research_context()["activeRun"], ensure_ascii=False))
 
     def mock_confirm_research(route):
         research_state["status"] = "SUCCEEDED"
         route.fulfill(status=202, content_type="application/json", body='{"id":"66666666-6666-4666-8666-666666666666","status":"QUEUED","jobId":"88888888-8888-4888-8888-888888888888"}')
 
-    research_route_pattern = re.compile(r".*/api/v1/creative/projects/[^/]+/research(?:/prepare)?$")
-    research_confirm_pattern = re.compile(r".*/api/v1/creative/research-runs/[^/]+/confirm$")
-    page.route(research_route_pattern, mock_research)
+    research_route_pattern = re.compile(r".*/api/v1/creative/projects/[^/]+/agent\?.*stage=RESEARCH.*$")
+    research_prepare_pattern = re.compile(r".*/api/v1/creative/projects/[^/]+/agent/prepare$")
+    research_confirm_pattern = re.compile(r".*/api/v1/creative/agent-runs/[^/]+/confirm$")
+    page.route(research_route_pattern, mock_research_context)
+    page.route(research_prepare_pattern, mock_prepare_research)
     page.route(research_confirm_pattern, mock_confirm_research)
-    page.get_by_role("button", name="准备计划", exact=True).click()
+    page.get_by_role("button", name="发送", exact=True).click()
     page.get_by_text("生成研究计划", exact=True).wait_for()
     assert page.get_by_text("qwen-plus", exact=True).count() == 1
     page.screenshot(path=ARTIFACTS / "creative-research-confirmation.png", full_page=True)
     page.get_by_role("button", name="确认调用", exact=True).click()
+    page.get_by_role("button", name="查看计划", exact=True).click()
     page.get_by_text("AI 工具价值判断研究计划", exact=True).wait_for()
-    assert page.get_by_text("研究已引用", exact=True).count() == 1
+    assert page.get_by_text("研究已引用", exact=True).count() == 3
     assert page.locator(".project-progress-band li.done").count() == 3
     page.screenshot(path=ARTIFACTS / "creative-research-plan.png", full_page=True)
+    page.get_by_role("button", name="关闭候选", exact=True).click()
 
     page.set_viewport_size({"width": 1024, "height": 900})
     page.wait_for_timeout(200)
     assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
     materials_box = page.locator(".project-materials").bounding_box()
-    agent_box = page.locator(".project-research-agent").bounding_box()
+    agent_box = page.locator(".project-agent").bounding_box()
     assert materials_box and agent_box and agent_box["y"] > materials_box["y"]
     page.screenshot(path=ARTIFACTS / "creative-research-agent-tablet.png", full_page=True)
     page.set_viewport_size({"width": 1440, "height": 1000})
     page.unroute(research_route_pattern)
+    page.unroute(research_prepare_pattern)
     page.unroute(research_confirm_pattern)
 
     page.locator(".materials-tabs button").filter(has_text="参考链接").click()

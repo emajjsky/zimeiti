@@ -2,8 +2,8 @@ import { ExternalLink, FileAudio, FileText, FileVideo, Image, Link2, LoaderCircl
 import { useEffect, useMemo, useState } from 'react';
 import { webCreative } from '../../data/webApi';
 import { platformName } from '../../domain/content';
-import type { CreativePlatform, ProjectInput, ProjectInputKind, ProjectInputPayload, ProjectMaterialScope, ProjectReference, ProjectReferenceMetadata, ProjectReferenceRole, ProjectResearchContext } from '../../domain/creative';
-import { ProjectResearchAgent } from './ProjectResearchAgent';
+import type { CreativePlatform, ProjectAgentContext, ProjectInput, ProjectInputKind, ProjectInputPayload, ProjectMaterialScope, ProjectReference, ProjectReferenceMetadata, ProjectReferenceRole } from '../../domain/creative';
+import { ProjectAgent } from './ProjectAgent';
 
 type MaterialTab = 'INPUTS' | 'LINKS' | 'FILES';
 type Editor = { type: 'INPUT'; item?: ProjectInput } | { type: 'REFERENCE'; sourceType: 'LINK' | 'FILE'; item?: ProjectReference };
@@ -49,7 +49,7 @@ export function ProjectMaterials({ projectId, platforms, overviewReady, hasDraft
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [research, setResearch] = useState<ProjectResearchContext | null>(null);
+  const [research, setResearch] = useState<ProjectAgentContext | null>(null);
   const [selectedInputIds, setSelectedInputIds] = useState<string[]>([]);
   const [selectedReferenceIds, setSelectedReferenceIds] = useState<string[]>([]);
 
@@ -59,12 +59,12 @@ export function ProjectMaterials({ projectId, platforms, overviewReady, hasDraft
   useEffect(() => {
     let cancelled = false;
     setLoading(true); setError('');
-    Promise.all([webCreative.materials(projectId), webCreative.research(projectId)]).then(([result, researchResult]) => {
+    Promise.all([webCreative.materials(projectId), webCreative.agentContext(projectId, { stage: 'RESEARCH', history: 'CURRENT' })]).then(([result, researchResult]) => {
       if (cancelled) return;
       setInputs(result.inputs); setReferences(result.references);
       setResearch(researchResult);
-      setSelectedInputIds(researchResult.run?.materialIds.inputIds.length ? researchResult.run.materialIds.inputIds : result.inputs.filter((item) => item.scope === 'PROJECT' || item.scope === 'RESEARCH').map((item) => item.id));
-      setSelectedReferenceIds(researchResult.run?.materialIds.referenceIds.length ? researchResult.run.materialIds.referenceIds : result.references.filter((item) => item.scope === 'PROJECT' || item.scope === 'RESEARCH').map((item) => item.id));
+      setSelectedInputIds(researchResult.usedMaterialIds.inputIds.length ? researchResult.usedMaterialIds.inputIds : result.inputs.filter((item) => item.scope === 'PROJECT' || item.scope === 'RESEARCH').map((item) => item.id));
+      setSelectedReferenceIds(researchResult.usedMaterialIds.referenceIds.length ? researchResult.usedMaterialIds.referenceIds : result.references.filter((item) => item.scope === 'PROJECT' || item.scope === 'RESEARCH').map((item) => item.id));
     }).catch((reason) => { if (!cancelled) setError(reason instanceof Error ? reason.message : '读取项目资料失败。'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -102,7 +102,7 @@ export function ProjectMaterials({ projectId, platforms, overviewReady, hasDraft
   const progress = [
     { label: '项目概览', done: overviewReady },
     { label: '项目资料', done: materialCount > 0 },
-    { label: '研究计划', done: Boolean(research?.plan) },
+    { label: '研究计划', done: Boolean(research?.artifacts.some((artifact) => artifact.type === 'RESEARCH_PLAN')) },
     { label: '正式文案', done: hasDraft },
   ];
   const completed = progress.filter((item) => item.done).length;
@@ -145,7 +145,14 @@ export function ProjectMaterials({ projectId, platforms, overviewReady, hasDraft
       onInput={upsertInput}
       onReference={upsertReference}
     />}
-    </section><ProjectResearchAgent projectId={projectId} context={research} selectedInputIds={selectedInputIds} selectedReferenceIds={selectedReferenceIds} onContext={setResearch} onOpenSettings={onOpenAgentSettings}/></div>
+    </section><ProjectAgent
+      projectId={projectId}
+      stage="RESEARCH"
+      selectedMaterials={{ inputIds: selectedInputIds, referenceIds: selectedReferenceIds }}
+      onContextChange={setResearch}
+      onArtifactAccepted={() => undefined}
+      onOpenSettings={() => onOpenAgentSettings()}
+    /></div>
   </section>;
 }
 
