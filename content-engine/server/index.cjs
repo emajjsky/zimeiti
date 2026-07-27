@@ -649,7 +649,7 @@ app.get('/api/v1/creative/projects/:projectId/research', { preHandler: authentic
   await creativeProject(workspace.id, projectId);
   const [messages, run, plan] = await Promise.all([
     query(`SELECT * FROM (
-      SELECT id, role, content, generation_run_id, created_at
+      SELECT id, role, content, action_run_id, stage, message_type, artifact_refs_json, created_at
       FROM project_agent_messages WHERE workspace_id = $1 AND project_id = $2
       ORDER BY created_at DESC LIMIT 100
     ) recent ORDER BY created_at ASC`, [workspace.id, projectId]),
@@ -662,7 +662,16 @@ app.get('/api/v1/creative/projects/:projectId/research', { preHandler: authentic
   const materialIds = await researchMaterialIds(run.rows[0]?.id);
   const usedMaterialIds = await researchMaterialIds(plan.rows[0]?.generation_run_id);
   return {
-    messages: messages.rows.map((row) => ({ id: row.id, role: row.role, content: row.content, runId: row.generation_run_id ?? null, createdAt: row.created_at })),
+    messages: messages.rows.map((row) => ({
+      id: row.id,
+      role: row.role,
+      content: row.content,
+      runId: row.action_run_id ?? null,
+      stage: row.stage,
+      messageType: row.message_type,
+      artifactRefs: row.artifact_refs_json ?? [],
+      createdAt: row.created_at,
+    })),
     run: researchRunView(run.rows[0], materialIds),
     plan: researchPlanView(plan.rows[0]),
     usedMaterialIds,
@@ -693,7 +702,7 @@ app.post('/api/v1/creative/projects/:projectId/research/prepare', { preHandler: 
       JSON.stringify({ projectId, project, brief, request: input.request, materials }),
       JSON.stringify({ route: { provider: 'BAILIAN_CLI', model: policy.rows[0].model } }), policy.rows[0].model,
     ]);
-    await client.query('INSERT INTO project_agent_messages (workspace_id, project_id, generation_run_id, role, content) VALUES ($1, $2, $3, $4, $5)', [workspace.id, projectId, created.rows[0].id, 'USER', input.request]);
+    await client.query('INSERT INTO project_agent_messages (workspace_id, project_id, action_run_id, role, content) VALUES ($1, $2, $3, $4, $5)', [workspace.id, projectId, created.rows[0].id, 'USER', input.request]);
     for (const id of input.inputIds) await client.query('INSERT INTO project_research_materials (generation_run_id, input_id) VALUES ($1, $2)', [created.rows[0].id, id]);
     for (const id of input.referenceIds) await client.query('INSERT INTO project_research_materials (generation_run_id, reference_id) VALUES ($1, $2)', [created.rows[0].id, id]);
     return created.rows[0];

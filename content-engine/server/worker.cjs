@@ -67,7 +67,7 @@ async function generateProjectResearchPlan({ jobId, workspaceId, runId }) {
     const saved = await transaction(async (client) => {
       await client.query("UPDATE generation_runs SET status = 'SUCCEEDED', output_json = $2, usage_json = $3, completed_at = now() WHERE id = $1", [runId, JSON.stringify(output), JSON.stringify({ inputTokens, outputTokens })]);
       const plan = await client.query('INSERT INTO project_research_plans (workspace_id, project_id, generation_run_id, output_json) VALUES ($1, $2, $3, $4) RETURNING id', [workspaceId, snapshot.projectId, runId, JSON.stringify(output)]);
-      await client.query('INSERT INTO project_agent_messages (workspace_id, project_id, generation_run_id, role, content) VALUES ($1, $2, $3, $4, $5)', [workspaceId, snapshot.projectId, runId, 'ASSISTANT', output.summary]);
+      await client.query('INSERT INTO project_agent_messages (workspace_id, project_id, action_run_id, role, content) VALUES ($1, $2, $3, $4, $5)', [workspaceId, snapshot.projectId, runId, 'ASSISTANT', output.summary]);
       await client.query("UPDATE jobs SET status = 'SUCCEEDED', result_json = $2, completed_at = now() WHERE id = $1", [jobId, JSON.stringify({ planId: plan.rows[0].id })]);
       await client.query(`INSERT INTO api_usage_logs (workspace_id, job_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens)
         VALUES ($1, $2, $3, $4, 'PROJECT_RESEARCH', 'SUCCESS', $5, $6, $7)`, [workspaceId, jobId, route.provider, route.model, Date.now() - startedAt, inputTokens ?? null, outputTokens ?? null]);
