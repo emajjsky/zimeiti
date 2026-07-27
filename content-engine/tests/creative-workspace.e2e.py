@@ -49,19 +49,12 @@ with sync_playwright() as playwright:
     page.wait_for_selector(".creative-brief-form")
 
     assert page.locator(".creative-stepper button").count() == 5
-    assert page.locator(".creative-skill-fields select").count() == 3
+    assert page.locator(".creative-skill-panel").count() == 0
+    assert page.get_by_text("Skill 组合", exact=True).count() == 0
     assert page.get_by_role("button", name="配图").is_disabled()
     assert page.get_by_role("button", name="排版").is_disabled()
     assert page.get_by_role("button", name="审核").is_disabled()
     assert page.get_by_text("视频号", exact=True).count() == 0
-
-    skill_panel = page.locator(".creative-skill-panel")
-    skill_panel.get_by_role("button", name="小红书", exact=True).click()
-    assert skill_panel.locator("select").nth(0).locator("option:checked").text_content() == "小红书分页图文"
-    assert skill_panel.locator("select").nth(1).locator("option:checked").text_content() == "小红书"
-    skill_panel.get_by_role("button", name="公众号", exact=True).click()
-    assert skill_panel.locator("select").nth(0).locator("option:checked").text_content() == "公众号长文"
-    assert skill_panel.locator("select").nth(1).locator("option:checked").text_content() == "公众号"
 
     target = page.get_by_label("目标受众")
     target.fill("想提高内容效率但不熟悉技术的普通创作者")
@@ -79,6 +72,15 @@ with sync_playwright() as playwright:
 
     page.locator(".creative-stepper button").filter(has_text="文案").click()
     page.wait_for_selector(".creative-agent-panel")
+    strategy = page.locator(".writing-strategy")
+    assert strategy.locator("select").count() == 3
+    assert strategy.get_by_text("排版", exact=True).count() == 0
+    assert strategy.get_by_text("公众号文案", exact=True).count() == 1
+    assert strategy.locator(".writing-channel-rule b").text_content() == "公众号"
+    page.locator(".editor-head .tabs").get_by_role("button", name="小红书", exact=True).click()
+    assert strategy.get_by_text("小红书文案", exact=True).count() == 1
+    assert strategy.locator(".writing-channel-rule b").text_content() == "小红书"
+    page.locator(".editor-head .tabs").get_by_role("button", name="公众号", exact=True).click()
     page.get_by_role("button", name="生成大纲", exact=True).click()
     page.get_by_text("请先为文案生成配置可用文本模型。", exact=True).wait_for()
     console_errors.clear()
@@ -175,7 +177,7 @@ with sync_playwright() as playwright:
     original_body = body_editor.input_value()
     page.get_by_role("button", name="生成初稿", exact=True).click()
     page.get_by_text("确认生成初稿", exact=True).wait_for()
-    assert page.get_by_text("V1", exact=True).count() >= 1
+    assert page.get_by_text("公众号图文 · 提示词 V1", exact=True).count() == 1
     page.get_by_role("button", name="确认生成", exact=True).click()
     page.wait_for_selector(".draft-review-dialog", timeout=10000)
     assert body_editor.input_value() == original_body
@@ -206,8 +208,16 @@ with sync_playwright() as playwright:
     template_tabs = page.locator(".prompt-template-tabs")
     assert template_tabs.get_by_role("button").count() == 3
     template_tabs.get_by_role("button", name="生成初稿", exact=True).click()
-    page.get_by_label("生成初稿提示词", exact=True).wait_for()
-    assert page.get_by_label("生成初稿提示词", exact=True).input_value()
+    platform_tabs = page.locator(".prompt-platform-tabs")
+    assert platform_tabs.get_by_role("button").count() == 2
+    page.get_by_label("生成初稿 · 公众号图文提示词", exact=True).wait_for()
+    wechat_template = page.get_by_label("生成初稿 · 公众号图文提示词", exact=True).input_value()
+    assert "公众号图文" in wechat_template
+    platform_tabs.get_by_role("button", name="小红书图文", exact=True).click()
+    page.get_by_label("生成初稿 · 小红书图文提示词", exact=True).wait_for()
+    xhs_template = page.get_by_label("生成初稿 · 小红书图文提示词", exact=True).input_value()
+    assert "小红书图文" in xhs_template
+    assert wechat_template != xhs_template
     page.screenshot(path=ARTIFACTS / "prompt-template-tabs-desktop.png", full_page=True)
     page.reload()
     page.wait_for_selector(".prompt-template-settings")

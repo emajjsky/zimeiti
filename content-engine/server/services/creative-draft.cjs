@@ -2,7 +2,10 @@ const { z } = require('zod');
 
 const DRAFT_ACTION_VERSION = 'creative-draft:1.0.0';
 const DRAFT_SCOPE = 'CONTENT_WRITING';
-const DRAFT_TEMPLATE_SCOPE = 'CREATIVE_DRAFT';
+const DRAFT_TEMPLATE_SCOPES = {
+  WECHAT: 'CREATIVE_DRAFT_WECHAT',
+  XIAOHONGSHU: 'CREATIVE_DRAFT_XIAOHONGSHU',
+};
 const MAX_DRAFT_TEMPLATE_LENGTH = 12_000;
 
 const draftSchema = z.object({
@@ -17,8 +20,17 @@ function validateDraftTemplate(body) {
   return body.trim();
 }
 
-function defaultDraftTemplate() {
-  return '根据已采用大纲写成完整、可直接编辑的初稿。开篇明确问题，正文完成必要的解释与论证，结尾给出具体行动建议。保持自然表达，避免空泛套话；不得编造事实、数据、案例或来源。';
+function draftTemplateScope(platform) {
+  const scope = DRAFT_TEMPLATE_SCOPES[platform];
+  if (!scope) throw new Error('当前平台没有接入初稿提示词。');
+  return scope;
+}
+
+function defaultDraftTemplate(platform) {
+  if (platform === 'XIAOHONGSHU') {
+    return '根据已采用大纲写成小红书图文初稿。标题具体、有吸引力但不使用夸张承诺；开篇快速说明读者能获得什么，正文使用短段落、清晰小标题和可拆页的信息单元，结尾给出行动建议或自然互动。保持口语化但不轻浮，不得编造事实、数据、案例或来源。';
+  }
+  return '根据已采用大纲写成公众号图文初稿。开篇明确问题与阅读价值，正文完成必要的解释、论证和案例衔接，使用适合长文阅读的小标题与自然段落，结尾形成总结或具体行动建议。保持自然表达，避免空泛套话；不得编造事实、数据、案例或来源。';
 }
 
 function parseDraftContent(content) {
@@ -31,7 +43,7 @@ function parseDraftContent(content) {
 }
 
 function buildDraftPrompt({ project, brief, skills, platform, outline, template }) {
-  const businessTemplate = validateDraftTemplate(template ?? defaultDraftTemplate());
+  const businessTemplate = validateDraftTemplate(template ?? defaultDraftTemplate(platform));
   const example = { title: '采用后的文章标题', body: '完整正文纯文本，使用自然段落和必要的小标题。', factsToVerify: ['发布前仍需核验的事实'] };
   const system = [
     '你是内容项目的初稿编辑，依据已采用大纲写成完整正文。',
@@ -84,4 +96,4 @@ function draftCandidateView(row) {
   };
 }
 
-module.exports = { DRAFT_ACTION_VERSION, DRAFT_SCOPE, DRAFT_TEMPLATE_SCOPE, draftSchema, validateDraftTemplate, defaultDraftTemplate, parseDraftContent, buildDraftPrompt, buildDraftRepairPrompt, draftCandidateView };
+module.exports = { DRAFT_ACTION_VERSION, DRAFT_SCOPE, DRAFT_TEMPLATE_SCOPES, draftTemplateScope, draftSchema, validateDraftTemplate, defaultDraftTemplate, parseDraftContent, buildDraftPrompt, buildDraftRepairPrompt, draftCandidateView };

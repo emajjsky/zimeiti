@@ -28,11 +28,6 @@ const sharedDimensions: { id: 'SUBJECT' | 'CONTENT_TYPE' | 'VOICE'; label: strin
   { id: 'CONTENT_TYPE', label: '内容类型' },
   { id: 'VOICE', label: '语言风格' },
 ];
-const platformDimensions: { id: 'LAYOUT' | 'CHANNEL'; label: string }[] = [
-  { id: 'LAYOUT', label: '排版' },
-  { id: 'CHANNEL', label: '渠道' },
-];
-
 const emptySelection: CreativeSkillSelection = { SUBJECT: '', CONTENT_TYPE: '', VOICE: '', LAYOUT: '', CHANNEL: '' };
 
 function firstVersion(skills: CreativeSkillDefinition[], dimension: CreativeSkillDimension, preferredSlug?: string) {
@@ -99,7 +94,6 @@ export function CreateWorkspace({ project, activePlatform, onPlatform, activeVer
   const [briefState, setBriefState] = useState<SaveState>('idle');
   const [briefError, setBriefError] = useState('');
   const [savedAt, setSavedAt] = useState('');
-  const [skillPanelTab, setSkillPanelTab] = useState<'SHARED' | CreativePlatform>('SHARED');
   const [draft, setDraft] = useState<Pick<ContentVersion, 'title' | 'body'>>({ title: activeVersion?.title ?? '', body: activeVersion?.body ?? '' });
   const [copyState, setCopyState] = useState<'saved' | 'saving'>('saved');
   const [outlineRun, setOutlineRun] = useState<CreativeOutlineRun | null>(null);
@@ -184,10 +178,6 @@ export function CreateWorkspace({ project, activePlatform, onPlatform, activeVer
   useEffect(() => {
     if (contentVersions.length && !contentVersions.some((version) => version.platform === activePlatform)) onPlatform(contentVersions[0].platform);
   }, [activePlatform, contentVersions, onPlatform]);
-
-  useEffect(() => {
-    if (skillPanelTab !== 'SHARED' && !brief?.selectedPlatforms.includes(skillPanelTab)) setSkillPanelTab('SHARED');
-  }, [brief?.selectedPlatforms, skillPanelTab]);
 
   const outlinePlatform = activeVersion?.platform === 'WECHAT' || activeVersion?.platform === 'XIAOHONGSHU' ? activeVersion.platform : null;
 
@@ -286,6 +276,7 @@ export function CreateWorkspace({ project, activePlatform, onPlatform, activeVer
 
   const skillGroups = useMemo(() => new Map(dimensions.map(({ id }) => [id, skills.filter((skill) => skill.dimension === id)])), [skills]);
   const skillDescription = (versionId: string | undefined) => skills.find((skill) => skill.version.id === versionId)?.description;
+  const skillName = (versionId: string | undefined) => skills.find((skill) => skill.version.id === versionId)?.name ?? '未配置';
 
   const changeBrief = (patch: Partial<WritingBriefInput>) => {
     setBrief((current) => current ? { ...current, ...patch } : current);
@@ -299,12 +290,6 @@ export function CreateWorkspace({ project, activePlatform, onPlatform, activeVer
       ? brief.selectedPlatforms.filter((item) => item !== platform)
       : [...brief.selectedPlatforms, platform];
     changeBrief({ selectedPlatforms, platformSkills: platformSkillDefaults(selectedPlatforms, skills, brief.platformSkills) });
-  };
-
-  const changePlatformSkill = (platform: CreativePlatform, dimension: 'LAYOUT' | 'CHANNEL', value: string) => {
-    if (!brief) return;
-    const current = brief.platformSkills[platform] ?? { LAYOUT: '', CHANNEL: '' };
-    changeBrief({ platformSkills: { ...brief.platformSkills, [platform]: { ...current, [dimension]: value } } });
   };
 
   const saveBrief = async () => {
@@ -354,7 +339,7 @@ export function CreateWorkspace({ project, activePlatform, onPlatform, activeVer
   const prepareOutline = async () => {
     if (!project || !outlinePlatform) return;
     if (briefState !== 'saved') {
-      setOutlineError('请先保存创作设定，再生成大纲。');
+      setOutlineError('请先保存创作设定和写作策略，再生成大纲。');
       return;
     }
     setOutlineBusy('preparing');
@@ -508,25 +493,23 @@ export function CreateWorkspace({ project, activePlatform, onPlatform, activeVer
           </div>
           <footer><div className={`creative-save-status ${briefState}`} aria-live="polite">{briefState === 'saved' && <><CheckCircle2 size={16}/><span>已保存{savedAt ? ` ${new Date(savedAt).toLocaleString('zh-CN', { hour12: false })}` : ''}</span></>}{briefState === 'dirty' && <span>有未保存修改</span>}{briefState === 'error' && <><CircleAlert size={16}/><span>{briefError}</span></>}</div></footer>
         </form>
-        <aside className="creative-skill-panel"><header><h2>Skill 组合</h2><span>按平台</span></header>
-          <nav className="creative-skill-tabs" aria-label="Skill 规则范围"><button type="button" className={skillPanelTab === 'SHARED' ? 'active' : ''} onClick={() => setSkillPanelTab('SHARED')}>共用</button>{brief.selectedPlatforms.map((platform) => platform !== 'VIDEO_CHANNEL' && <button type="button" key={platform} className={skillPanelTab === platform ? 'active' : ''} onClick={() => setSkillPanelTab(platform)}>{platformName[platform]}</button>)}</nav>
-          <div className="creative-skill-fields">{skillPanelTab === 'SHARED' ? sharedDimensions.map(({ id, label }) => <label key={id}><span>{label}</span><select value={brief.selectedSkills[id]} onChange={(event) => changeBrief({ selectedSkills: { ...brief.selectedSkills, [id]: event.target.value } })}>{(skillGroups.get(id) ?? []).map((skill) => <option key={skill.version.id} value={skill.version.id}>{skill.name}</option>)}</select><small>{skillDescription(brief.selectedSkills[id])}</small></label>) : platformDimensions.map(({ id, label }) => <label key={`${skillPanelTab}-${id}`}><span>{label}</span><select value={brief.platformSkills[skillPanelTab]?.[id] ?? ''} onChange={(event) => changePlatformSkill(skillPanelTab, id, event.target.value)}>{(skillGroups.get(id) ?? []).map((skill) => <option key={skill.version.id} value={skill.version.id}>{skill.name}</option>)}</select><small>{skillDescription(brief.platformSkills[skillPanelTab]?.[id])}</small></label>)}</div>
-        </aside>
       </>}
     </section>}
 
-    {stage === 'copy' && (activeVersion && activeVersion.platform !== 'VIDEO_CHANNEL' ? <div className="create-layout editable creative-copy-layout"><section className="editor"><div className="editor-head"><div className="tabs">{contentVersions.map((version) => <button type="button" key={version.platform} className={version.platform === activePlatform ? 'active' : ''} onClick={() => onPlatform(version.platform)}>{platformName[version.platform]}</button>)}</div><button className="text-button" type="button" onClick={saveCopy}>保存草稿</button></div><div className="editor-tools">{platformName[activeVersion.platform]}文案</div>
+    {stage === 'copy' && (activeVersion && activeVersion.platform !== 'VIDEO_CHANNEL' ? <div className="create-layout editable creative-copy-layout"><section className="editor"><div className="editor-head"><div className="tabs">{contentVersions.map((version) => <button type="button" key={version.platform} className={version.platform === activePlatform ? 'active' : ''} onClick={() => onPlatform(version.platform)}>{platformName[version.platform]}</button>)}</div><button className="text-button" type="button" onClick={saveCopy}>保存草稿</button></div>
+      {brief && <section className="writing-strategy" aria-labelledby="writing-strategy-title"><header><div><h2 id="writing-strategy-title">写作策略</h2><span>{platformName[activeVersion.platform]}文案</span></div><button className="text-button" type="button" disabled={briefState === 'saving'} onClick={() => void saveBrief()}>{briefState === 'saving' ? '保存中' : briefState === 'saved' ? '已保存' : '保存策略'}</button></header><div className="writing-strategy-fields">{sharedDimensions.map(({ id, label }) => <label key={id}><span>{label}</span><select value={brief.selectedSkills[id]} onChange={(event) => changeBrief({ selectedSkills: { ...brief.selectedSkills, [id]: event.target.value } })}>{(skillGroups.get(id) ?? []).map((skill) => <option key={skill.version.id} value={skill.version.id}>{skill.name}</option>)}</select><small>{skillDescription(brief.selectedSkills[id])}</small></label>)}<div className="writing-channel-rule"><span>平台规则</span><b>{skillName(brief.platformSkills[activeVersion.platform as CreativePlatform]?.CHANNEL)}</b><small>随当前平台自动绑定</small></div></div>{briefError && <div className="writing-strategy-error" role="alert"><CircleAlert size={16}/><span>{briefError}</span></div>}</section>}
+      <div className="editor-tools">{platformName[activeVersion.platform]}文案</div>
       <div className="document editor-document"><label>标题<textarea ref={titleEditorRef} rows={1} value={draft.title} onChange={(event) => changeDraft({ title: event.target.value })} onBlur={saveCopy}/></label><label>正文<textarea ref={bodyEditorRef} value={draft.body} onChange={(event) => changeDraft({ body: event.target.value })} onBlur={saveCopy} placeholder="从核心观点开始，写出这期内容的完整表达。"/></label></div></section>
       <aside className="assistant-panel creative-agent-panel"><header><div><Sparkles size={18}/><h2>创作 Agent</h2></div><span>{platformName[activeVersion.platform]}</span></header>
         {(outlineBusy === 'loading' || draftBusy === 'loading') && <div className="outline-state loading"><LoaderCircle size={18}/><span>读取任务状态</span></div>}
-        {outlineBusy !== 'loading' && !outlineRun && outlineCandidate?.status !== 'ACCEPTED' && <div className="outline-state idle"><p>从当前创作设定生成大纲候选。</p><button className="button primary" type="button" disabled={outlineBusy !== 'idle'} onClick={() => void prepareOutline()}>{outlineBusy === 'preparing' ? <LoaderCircle size={16}/> : <Sparkles size={16}/>}生成大纲</button></div>}
-        {outlineRun?.status === 'DRAFT' && <div className="outline-confirmation"><div className="outline-confirmation-head"><b>确认本次生成</b><span>{outlineRun.confirmation.actionVersion}</span></div><dl><div><dt>模型</dt><dd>{outlineRun.confirmation.model}</dd></div><div><dt>平台</dt><dd>{platformName[outlineRun.confirmation.platform]}</dd></div></dl><div className="outline-skill-list">{outlineRun.confirmation.skills.map((skill) => <div key={skill.dimension}><span>{dimensions.find((item) => item.id === skill.dimension)?.label}</span><b>{skill.name}</b><small>v{skill.version}</small></div>)}</div><footer><button className="icon-button" type="button" title="取消" aria-label="取消本次生成" disabled={outlineBusy !== 'idle'} onClick={() => void cancelOutline()}><X size={17}/></button><button className="button primary" type="button" disabled={outlineBusy !== 'idle'} onClick={() => void confirmOutline()}>{outlineBusy === 'confirming' ? <LoaderCircle size={16}/> : <Check size={16}/>}确认生成</button></footer></div>}
+        {outlineBusy !== 'loading' && !outlineRun && outlineCandidate?.status !== 'ACCEPTED' && <div className="outline-state idle"><p>按当前平台和写作策略生成大纲。</p><button className="button primary" type="button" disabled={outlineBusy !== 'idle'} onClick={() => void prepareOutline()}>{outlineBusy === 'preparing' ? <LoaderCircle size={16}/> : <Sparkles size={16}/>}生成大纲</button></div>}
+        {outlineRun?.status === 'DRAFT' && <div className="outline-confirmation"><div className="outline-confirmation-head"><b>确认生成大纲</b><span>{outlineRun.confirmation.actionVersion}</span></div><dl><div><dt>模型</dt><dd>{outlineRun.confirmation.model}</dd></div><div><dt>目标</dt><dd>{platformName[outlineRun.confirmation.platform]}图文 · 提示词 V{outlineRun.confirmation.promptVersion}</dd></div></dl><div className="outline-skill-list">{outlineRun.confirmation.skills.map((skill) => <div key={skill.dimension}><span>{dimensions.find((item) => item.id === skill.dimension)?.label}</span><b>{skill.name}</b><small>v{skill.version}</small></div>)}</div><footer><button className="icon-button" type="button" title="取消" aria-label="取消本次生成" disabled={outlineBusy !== 'idle'} onClick={() => void cancelOutline()}><X size={17}/></button><button className="button primary" type="button" disabled={outlineBusy !== 'idle'} onClick={() => void confirmOutline()}>{outlineBusy === 'confirming' ? <LoaderCircle size={16}/> : <Check size={16}/>}确认生成</button></footer></div>}
         {outlineRun && ['QUEUED', 'RUNNING'].includes(outlineRun.status) && <div className="outline-state running"><LoaderCircle size={20}/><b>{outlineRun.status === 'QUEUED' ? '等待执行' : '正在生成大纲'}</b>{outlineRun.status === 'QUEUED' && <button className="text-button" type="button" disabled={outlineBusy !== 'idle'} onClick={() => void cancelOutline()}>取消任务</button>}</div>}
         {outlineRun?.status === 'FAILED' && <div className="outline-state failed"><CircleAlert size={19}/><b>生成失败</b><p>{outlineRun.error || '模型任务执行失败。'}</p><button className="text-button" type="button" onClick={() => void prepareOutline()}>重新准备</button></div>}
         {outlineRun?.status === 'CANCELLED' && <div className="outline-state cancelled"><b>已取消</b><button className="button primary" type="button" onClick={() => void prepareOutline()}>重新生成</button></div>}
         {outlineCandidate && (outlineRun?.status === 'SUCCEEDED' || outlineCandidate.status === 'ACCEPTED') && <div className={`outline-state ${outlineCandidate.status === 'ACCEPTED' ? 'accepted' : 'ready'}`}><CheckCircle2 size={19}/><div><b>{outlineCandidate.status === 'ACCEPTED' ? '大纲已采用' : '大纲待审核'}</b><span>{outlineCandidate.status === 'ACCEPTED' ? '下一步：生成初稿' : '确认结构后再进入正文写作'}</span></div><button className="text-button outline-state-action" type="button" onClick={() => setOutlineReviewOpen(true)}>{outlineCandidate.status === 'ACCEPTED' ? '查看大纲' : '审核大纲'}</button></div>}
         {outlineCandidate?.status === 'ACCEPTED' && draftBusy !== 'loading' && !draftRun && !draftCandidate && <div className="outline-state idle draft-start"><p>按已采用大纲生成完整初稿。</p><button className="button primary" type="button" disabled={draftBusy !== 'idle'} onClick={() => void prepareDraft()}>{draftBusy === 'preparing' ? <LoaderCircle size={16}/> : <Sparkles size={16}/>}生成初稿</button></div>}
-        {outlineCandidate?.status === 'ACCEPTED' && draftRun?.status === 'DRAFT' && <div className="outline-confirmation draft-confirmation"><div className="outline-confirmation-head"><b>确认生成初稿</b><span>{draftRun.confirmation.actionVersion}</span></div><dl><div><dt>模型</dt><dd>{draftRun.confirmation.model}</dd></div><div><dt>提示词</dt><dd>V{draftRun.confirmation.promptVersion}</dd></div></dl><div className="outline-skill-list">{draftRun.confirmation.skills.map((skill) => <div key={skill.dimension}><span>{dimensions.find((item) => item.id === skill.dimension)?.label}</span><b>{skill.name}</b><small>v{skill.version}</small></div>)}</div><footer><button className="icon-button" type="button" title="取消" aria-label="取消生成初稿" disabled={draftBusy !== 'idle'} onClick={() => void cancelDraft()}><X size={17}/></button><button className="button primary" type="button" disabled={draftBusy !== 'idle'} onClick={() => void confirmDraft()}>{draftBusy === 'confirming' ? <LoaderCircle size={16}/> : <Check size={16}/>}确认生成</button></footer></div>}
+        {outlineCandidate?.status === 'ACCEPTED' && draftRun?.status === 'DRAFT' && <div className="outline-confirmation draft-confirmation"><div className="outline-confirmation-head"><b>确认生成初稿</b><span>{draftRun.confirmation.actionVersion}</span></div><dl><div><dt>模型</dt><dd>{draftRun.confirmation.model}</dd></div><div><dt>目标</dt><dd>{platformName[draftRun.confirmation.platform]}图文 · 提示词 V{draftRun.confirmation.promptVersion}</dd></div></dl><div className="outline-skill-list">{draftRun.confirmation.skills.map((skill) => <div key={skill.dimension}><span>{dimensions.find((item) => item.id === skill.dimension)?.label}</span><b>{skill.name}</b><small>v{skill.version}</small></div>)}</div><footer><button className="icon-button" type="button" title="取消" aria-label="取消生成初稿" disabled={draftBusy !== 'idle'} onClick={() => void cancelDraft()}><X size={17}/></button><button className="button primary" type="button" disabled={draftBusy !== 'idle'} onClick={() => void confirmDraft()}>{draftBusy === 'confirming' ? <LoaderCircle size={16}/> : <Check size={16}/>}确认生成</button></footer></div>}
         {outlineCandidate?.status === 'ACCEPTED' && draftRun && ['QUEUED', 'RUNNING'].includes(draftRun.status) && <div className="outline-state running"><LoaderCircle size={20}/><b>{draftRun.status === 'QUEUED' ? '初稿等待执行' : '正在生成初稿'}</b>{draftRun.status === 'QUEUED' && <button className="text-button" type="button" disabled={draftBusy !== 'idle'} onClick={() => void cancelDraft()}>取消任务</button>}</div>}
         {outlineCandidate?.status === 'ACCEPTED' && draftRun?.status === 'FAILED' && <div className="outline-state failed"><CircleAlert size={19}/><b>初稿生成失败</b><p>{draftRun.error || '模型任务执行失败。'}</p><button className="text-button" type="button" onClick={() => void prepareDraft()}>重新准备</button></div>}
         {outlineCandidate?.status === 'ACCEPTED' && draftRun?.status === 'CANCELLED' && <div className="outline-state cancelled"><b>初稿任务已取消</b><button className="button primary" type="button" onClick={() => void prepareDraft()}>重新生成</button></div>}

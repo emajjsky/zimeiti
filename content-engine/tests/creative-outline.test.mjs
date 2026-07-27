@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import test from 'node:test';
 import {
   buildOutlinePrompt,
+  defaultOutlineTemplate,
+  outlineTemplateScope,
   parseOutlineContent,
 } from '../server/services/creative-outline.cjs';
 
@@ -13,7 +15,6 @@ const snapshot = {
     { dimension: 'SUBJECT', name: 'AI 科普', version: { version: '1.0.0', instructions: '解释术语，不夸大能力。' } },
     { dimension: 'CONTENT_TYPE', name: '实用教程', version: { version: '1.0.0', instructions: '按任务步骤组织。' } },
     { dimension: 'VOICE', name: '清晰自然', version: { version: '1.0.0', instructions: '使用短句。' } },
-    { dimension: 'LAYOUT', name: '公众号长文', version: { version: '1.0.0', instructions: '使用分级标题。' } },
     { dimension: 'CHANNEL', name: '公众号', version: { version: '1.0.0', instructions: '适合微信阅读。' } },
   ],
   platform: 'WECHAT',
@@ -30,15 +31,23 @@ const output = {
   factsToVerify: ['产品价格与版本限制'],
 };
 
-test('大纲提示词包含 Brief、平台和冻结的五维 Skill 规则', () => {
+test('大纲提示词包含 Brief、平台和四项写作规则，不包含排版', () => {
   const prompt = buildOutlinePrompt({ ...snapshot, template: '先解释误区，再给出行动路径。' });
   assert.match(prompt.system, /只生成大纲候选/);
   assert.match(prompt.system, /WECHAT/);
   assert.match(prompt.message, /形成公众号文章/);
   assert.match(prompt.message, /解释术语，不夸大能力/);
-  assert.match(prompt.message, /公众号长文/);
   assert.match(prompt.message, /先解释误区，再给出行动路径/);
+  assert.doesNotMatch(prompt.message, /LAYOUT|公众号长文|使用分级标题/);
   assert.doesNotMatch(prompt.message, /selectedSkills|platformSkills/);
+});
+
+test('公众号和小红书使用独立大纲 Scope 与默认模板', () => {
+  assert.equal(outlineTemplateScope('WECHAT'), 'CREATIVE_OUTLINE_WECHAT');
+  assert.equal(outlineTemplateScope('XIAOHONGSHU'), 'CREATIVE_OUTLINE_XIAOHONGSHU');
+  assert.match(defaultOutlineTemplate('WECHAT'), /公众号图文/);
+  assert.match(defaultOutlineTemplate('XIAOHONGSHU'), /小红书图文/);
+  assert.notEqual(defaultOutlineTemplate('WECHAT'), defaultOutlineTemplate('XIAOHONGSHU'));
 });
 
 test('模型大纲通过严格 JSON 结构校验', () => {

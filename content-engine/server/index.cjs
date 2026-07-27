@@ -13,8 +13,8 @@ const { listAvailableSkills } = require('./agent/skillRegistry.cjs');
 const { runBailianCli } = require('./runner/bailian.cjs');
 const { ANALYSIS_SCOPE, createTemplateStore, prepareAnalysisInput } = require('./services/intelligence-analysis.cjs');
 const { createCreativeSkillStore } = require('./services/creativeSkills.cjs');
-const { OUTLINE_ACTION_VERSION, OUTLINE_SCOPE, OUTLINE_TEMPLATE_SCOPE, validateOutlineTemplate, defaultOutlineTemplate, outlineCandidateView } = require('./services/creative-outline.cjs');
-const { DRAFT_ACTION_VERSION, DRAFT_SCOPE, DRAFT_TEMPLATE_SCOPE, validateDraftTemplate, defaultDraftTemplate, draftCandidateView } = require('./services/creative-draft.cjs');
+const { OUTLINE_ACTION_VERSION, OUTLINE_SCOPE, OUTLINE_TEMPLATE_SCOPES, outlineTemplateScope, validateOutlineTemplate, defaultOutlineTemplate, outlineCandidateView } = require('./services/creative-outline.cjs');
+const { DRAFT_ACTION_VERSION, DRAFT_SCOPE, DRAFT_TEMPLATE_SCOPES, draftTemplateScope, validateDraftTemplate, defaultDraftTemplate, draftCandidateView } = require('./services/creative-draft.cjs');
 
 const app = Fastify({ logger: true, bodyLimit: 5 * 1024 * 1024 });
 const credentials = new Set(['TAVILY', 'BAILIAN']);
@@ -22,12 +22,14 @@ const modelTasks = ['INTELLIGENCE_ANALYSIS', 'TOPIC_RECOMMENDATION', 'CONTENT_WR
 const externalProviders = new Set(['DASHSCOPE', 'SILICONFLOW', 'VOLCENGINE_ARK', 'KIMI', 'ZHIPU', 'OPENAI', 'OPENAI_COMPATIBLE']);
 const sourceInput = z.object({ name: z.string().max(160), type: z.literal('RSS'), url: z.string().url().max(2_000), category: z.string().max(120), includeKeywords: z.array(z.string().max(120)).optional(), excludeKeywords: z.array(z.string().max(120)).optional(), language: z.enum(['ALL', 'ZH', 'EN']).optional(), enabled: z.boolean(), refreshMinutes: z.number().min(5).max(10_080), trust: z.string().max(80) });
 const templateStore = createTemplateStore({ query }, {
-  [OUTLINE_TEMPLATE_SCOPE]: { defaultTemplate: defaultOutlineTemplate, validateTemplate: validateOutlineTemplate },
-  [DRAFT_TEMPLATE_SCOPE]: { defaultTemplate: defaultDraftTemplate, validateTemplate: validateDraftTemplate },
+  [OUTLINE_TEMPLATE_SCOPES.WECHAT]: { defaultTemplate: () => defaultOutlineTemplate('WECHAT'), validateTemplate: validateOutlineTemplate },
+  [OUTLINE_TEMPLATE_SCOPES.XIAOHONGSHU]: { defaultTemplate: () => defaultOutlineTemplate('XIAOHONGSHU'), validateTemplate: validateOutlineTemplate },
+  [DRAFT_TEMPLATE_SCOPES.WECHAT]: { defaultTemplate: () => defaultDraftTemplate('WECHAT'), validateTemplate: validateDraftTemplate },
+  [DRAFT_TEMPLATE_SCOPES.XIAOHONGSHU]: { defaultTemplate: () => defaultDraftTemplate('XIAOHONGSHU'), validateTemplate: validateDraftTemplate },
 });
 const creativeSkillStore = createCreativeSkillStore({ query, transaction });
 const platformSkillInput = z.object({
-  LAYOUT: z.string().min(1).max(160),
+  LAYOUT: z.string().min(1).max(160).optional(),
   CHANNEL: z.string().min(1).max(160),
 });
 const writingBriefInput = z.object({
@@ -51,7 +53,7 @@ const writingBriefInput = z.object({
   }),
 }).superRefine((value, context) => {
   for (const platform of value.selectedPlatforms) {
-    if (!value.platformSkills[platform]) context.addIssue({ code: 'custom', path: ['platformSkills', platform], message: `请配置${platform === 'WECHAT' ? '公众号' : '小红书'}的排版与渠道 Skill。` });
+    if (!value.platformSkills[platform]?.CHANNEL) context.addIssue({ code: 'custom', path: ['platformSkills', platform], message: `请配置${platform === 'WECHAT' ? '公众号' : '小红书'}写作规则。` });
   }
 });
 
@@ -316,7 +318,8 @@ app.get('/api/v1/models/usage', { preHandler: authenticate }, async (request) =>
 
 function promptTemplateScope(value) {
   const scope = String(value || '');
-  if (![ANALYSIS_SCOPE, OUTLINE_TEMPLATE_SCOPE, DRAFT_TEMPLATE_SCOPE].includes(scope)) { const error = new Error('当前提示词模板尚未接入执行器。'); error.statusCode = 400; throw error; }
+  const supported = [ANALYSIS_SCOPE, ...Object.values(OUTLINE_TEMPLATE_SCOPES), ...Object.values(DRAFT_TEMPLATE_SCOPES)];
+  if (!supported.includes(scope)) { const error = new Error('当前提示词模板尚未接入执行器。'); error.statusCode = 400; throw error; }
   return scope;
 }
 
@@ -487,13 +490,14 @@ app.post('/api/v1/creative/projects/:projectId/outline/prepare', { preHandler: a
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = z.object({ platform: z.enum(['WECHAT', 'XIAOHONGSHU']) }).parse(request.body);
   const workspace = await currentWorkspace(request.user.sub);
+  const templateScope = outlineTemplateScope(input.platform);
   const [project, context, route, template] = await Promise.all([
     creativeProject(workspace.id, projectId),
     creativeSkillStore.getContext(workspace.id, projectId, input.platform),
     textTaskRoute(workspace.id, OUTLINE_SCOPE, '文案生成'),
-    templateStore.get(workspace.id, OUTLINE_TEMPLATE_SCOPE),
+    templateStore.get(workspace.id, templateScope),
   ]);
-  if (!context) throw new Error('请先保存创作设定和 Skill 组合。');
+  if (!context) throw new Error('请先保存创作设定和写作策略。');
   if (!context.brief.selectedPlatforms.includes(input.platform)) throw new Error('目标平台不在已保存的创作设定中。');
   const platformVersion = project.versions?.find((version) => version.platform === input.platform);
   if (!platformVersion) throw new Error('项目没有对应的图文平台版本。');
@@ -595,16 +599,17 @@ app.post('/api/v1/creative/projects/:projectId/draft/prepare', { preHandler: aut
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = z.object({ platform: z.enum(['WECHAT', 'XIAOHONGSHU']) }).parse(request.body);
   const workspace = await currentWorkspace(request.user.sub);
+  const templateScope = draftTemplateScope(input.platform);
   const [project, context, route, template, outlineResult] = await Promise.all([
     creativeProject(workspace.id, projectId),
     creativeSkillStore.getContext(workspace.id, projectId, input.platform),
     textTaskRoute(workspace.id, DRAFT_SCOPE, '文案生成'),
-    templateStore.get(workspace.id, DRAFT_TEMPLATE_SCOPE),
+    templateStore.get(workspace.id, templateScope),
     query(`SELECT * FROM creative_outline_candidates
       WHERE workspace_id = $1 AND project_id = $2 AND platform = $3 AND status = 'ACCEPTED'
       ORDER BY accepted_at DESC LIMIT 1`, [workspace.id, projectId, input.platform]),
   ]);
-  if (!context) throw new Error('请先保存创作设定和 Skill 组合。');
+  if (!context) throw new Error('请先保存创作设定和写作策略。');
   if (!context.brief.selectedPlatforms.includes(input.platform)) throw new Error('目标平台不在已保存的创作设定中。');
   if (!outlineResult.rowCount) { const error = new Error('请先采用当前平台的大纲。'); error.statusCode = 409; throw error; }
   const platformVersion = project.versions?.find((version) => version.platform === input.platform);

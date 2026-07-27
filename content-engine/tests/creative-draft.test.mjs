@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import test from 'node:test';
 import {
   buildDraftPrompt,
+  defaultDraftTemplate,
+  draftTemplateScope,
   parseDraftContent,
 } from '../server/services/creative-draft.cjs';
 
@@ -13,7 +15,6 @@ const snapshot = {
     { dimension: 'SUBJECT', name: 'AI 科普', version: { version: '1.0.0', instructions: '解释术语，不夸大能力。' } },
     { dimension: 'CONTENT_TYPE', name: '实用教程', version: { version: '1.0.0', instructions: '按任务步骤组织。' } },
     { dimension: 'VOICE', name: '清晰自然', version: { version: '1.0.0', instructions: '使用短句。' } },
-    { dimension: 'LAYOUT', name: '公众号长文', version: { version: '1.0.0', instructions: '使用清晰小标题。' } },
     { dimension: 'CHANNEL', name: '公众号', version: { version: '1.0.0', instructions: '适合微信阅读。' } },
   ],
   platform: 'WECHAT',
@@ -36,13 +37,22 @@ const output = {
   factsToVerify: ['核验产品当前价格'],
 };
 
-test('初稿提示词冻结业务模板、已采用大纲和五维 Skill', () => {
+test('初稿提示词冻结业务模板、已采用大纲和四项写作规则', () => {
   const prompt = buildDraftPrompt({ ...snapshot, template: '开头直接提出问题，结尾给出一项行动。' });
   assert.match(prompt.system, /完整正文/);
   assert.match(prompt.system, /不要使用 #、##、###/);
   assert.match(prompt.message, /开头直接提出问题/);
   assert.match(prompt.message, /普通人用 AI，先做对这一件事/);
   assert.match(prompt.message, /解释术语，不夸大能力/);
+  assert.doesNotMatch(prompt.message, /LAYOUT|公众号长文|使用清晰小标题/);
+});
+
+test('公众号和小红书使用独立初稿 Scope 与默认模板', () => {
+  assert.equal(draftTemplateScope('WECHAT'), 'CREATIVE_DRAFT_WECHAT');
+  assert.equal(draftTemplateScope('XIAOHONGSHU'), 'CREATIVE_DRAFT_XIAOHONGSHU');
+  assert.match(defaultDraftTemplate('WECHAT'), /公众号图文/);
+  assert.match(defaultDraftTemplate('XIAOHONGSHU'), /小红书图文/);
+  assert.notEqual(defaultDraftTemplate('WECHAT'), defaultDraftTemplate('XIAOHONGSHU'));
 });
 
 test('模型初稿必须是完整 JSON，正文不能过短', () => {

@@ -432,3 +432,16 @@ API：`http://127.0.0.1:8787/health`
 - 导航模型补充 `templates` 子页白名单和类型，`?view=settings&settings=models&model=templates` 刷新后可恢复提示词模板页。
 - 新增 5 项初稿契约测试、2 项模板页导航测试并扩展创作 E2E。Node 测试共 99 项；Playwright 使用 Mock 验证采用前不覆盖正文、采用后写入完整初稿、模板页刷新恢复和 390px 无横向溢出，没有触发付费模型。
 - 本轮视觉参数保持 `DESIGN_VARIANCE 5 / MOTION_INTENSITY 2 / VISUAL_DENSITY 4`，沿用现有直角面板、钴蓝和马卡龙状态色，不新增动画依赖。
+
+## 2026-07-27 实现记录：写作策略与平台提示词重构
+
+- `creativeSkills.cjs` 新增 `WRITING_DIMENSIONS`。`getContext()` 只读取题材、内容类型、语言风格和当前平台渠道规则，不再读取或冻结 `LAYOUT`。
+- Brief 保存继续兼容已有 `platform_versions_json`；排版版本允许保留供后续阶段使用，但缺失排版不再阻断写作策略保存和大纲、初稿准备。
+- `creative-outline.cjs` 将通用 `CREATIVE_OUTLINE` 拆为 `CREATIVE_OUTLINE_WECHAT`、`CREATIVE_OUTLINE_XIAOHONGSHU`，并提供不同默认模板。
+- `creative-draft.cjs` 将通用 `CREATIVE_DRAFT` 拆为 `CREATIVE_DRAFT_WECHAT`、`CREATIVE_DRAFT_XIAOHONGSHU`，公众号长文与小红书图文分别约束结构和表达。
+- outline/draft prepare 根据当前平台选择模板 Scope，运行仍冻结模板 ID、版本和正文；旧通用 Scope 保留历史记录但不再用于新执行。
+- `CreateWorkspace.tsx` 删除创作设定右侧 Skill 面板，在文案编辑器顶部增加四列“写作策略”。三个规则可选，平台规则只读并随公众号、小红书页签切换。
+- 大纲与初稿确认卡显示明确的“公众号图文”或“小红书图文”目标及提示词版本，Skill 快照中不再出现排版。
+- `PromptTemplateSettings.tsx` 改为任务一级页签和平台二级选择，五个 Scope 独立缓存、编辑、保存新版本和恢复默认。
+- 前端采用 `DESIGN_VARIANCE 5 / MOTION_INTENSITY 2 / VISUAL_DENSITY 4`。保持现有波普怀旧清新品牌语言，使用单层分区和稳定四列，不新增动效。
+- 自动化新增写作阶段归属、排版排除、双平台 Scope 与默认模板测试；Playwright 验证 Brief 无 Skill、文案页三项选择与平台规则、两平台模板内容不同和 390px 无横向溢出。

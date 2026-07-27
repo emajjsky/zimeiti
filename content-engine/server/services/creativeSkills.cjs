@@ -1,4 +1,5 @@
 const DIMENSIONS = ['SUBJECT', 'CONTENT_TYPE', 'VOICE', 'LAYOUT', 'CHANNEL'];
+const WRITING_DIMENSIONS = ['SUBJECT', 'CONTENT_TYPE', 'VOICE', 'CHANNEL'];
 
 function skillView(row) {
   return {
@@ -64,8 +65,8 @@ function createCreativeSkillStore({ query, transaction }) {
     const brief = await getBrief(workspaceId, projectId);
     if (!brief) return null;
     const platformSelection = brief.platformSkills[platform];
-    if (!platformSelection) throw new Error(`请先配置${platform === 'WECHAT' ? '公众号' : '小红书'}的排版与渠道 Skill。`);
-    const requested = [brief.selectedSkills.SUBJECT, brief.selectedSkills.CONTENT_TYPE, brief.selectedSkills.VOICE, platformSelection.LAYOUT, platformSelection.CHANNEL];
+    if (!platformSelection?.CHANNEL) throw new Error(`请先配置${platform === 'WECHAT' ? '公众号' : '小红书'}写作规则。`);
+    const requested = [brief.selectedSkills.SUBJECT, brief.selectedSkills.CONTENT_TYPE, brief.selectedSkills.VOICE, platformSelection.CHANNEL];
     const result = await query(`SELECT d.id, d.dimension, d.slug, d.name, d.description, d.sort_order,
       v.id AS version_id, v.version, v.instructions_md, v.rules_json
       FROM creative_skill_versions v
@@ -74,7 +75,7 @@ function createCreativeSkillStore({ query, transaction }) {
         AND (d.workspace_id IS NULL OR d.workspace_id = $2)`, [requested, workspaceId]);
     const byVersion = new Map(result.rows.map((row) => [row.version_id, skillView(row)]));
     const skills = requested.map((id) => byVersion.get(id)).filter(Boolean);
-    if (skills.length !== DIMENSIONS.length) throw new Error('项目绑定的 Skill 版本已不可用，请重新保存创作设定。');
+    if (skills.length !== WRITING_DIMENSIONS.length) throw new Error('项目绑定的写作策略已不可用，请重新保存写作策略。');
     return { brief, skills };
   }
 
@@ -82,10 +83,11 @@ function createCreativeSkillStore({ query, transaction }) {
     const shared = ['SUBJECT', 'CONTENT_TYPE', 'VOICE'];
     const requestedPairs = [
       ...shared.map((dimension) => [dimension, input.selectedSkills[dimension]]),
-      ...input.selectedPlatforms.flatMap((platform) => [['LAYOUT', input.platformSkills[platform]?.LAYOUT], ['CHANNEL', input.platformSkills[platform]?.CHANNEL]]),
+      ...input.selectedPlatforms.map((platform) => ['CHANNEL', input.platformSkills[platform]?.CHANNEL]),
+      ...input.selectedPlatforms.flatMap((platform) => input.platformSkills[platform]?.LAYOUT ? [['LAYOUT', input.platformSkills[platform].LAYOUT]] : []),
     ];
     if (requestedPairs.some(([, id]) => !id)) {
-      const error = new Error('Skill 组合无效，请为每个平台选择排版和渠道规则。');
+      const error = new Error('写作策略无效，请选择题材、内容类型、语言风格，并确保平台写作规则可用。');
       error.statusCode = 400;
       throw error;
     }
@@ -98,7 +100,7 @@ function createCreativeSkillStore({ query, transaction }) {
     const actual = new Map(catalog.rows.map((row) => [row.id, row.dimension]));
     const invalid = requestedPairs.find(([dimension, id]) => actual.get(id) !== dimension);
     if (invalid || catalog.rowCount !== requested.length) {
-      const error = new Error('Skill 组合无效，请重新选择五个创作维度。');
+      const error = new Error('写作策略无效，请重新选择可用规则。');
       error.statusCode = 400;
       throw error;
     }
@@ -130,4 +132,4 @@ function createCreativeSkillStore({ query, transaction }) {
   return { list, getBrief, getContext, saveBrief };
 }
 
-module.exports = { DIMENSIONS, createCreativeSkillStore };
+module.exports = { DIMENSIONS, WRITING_DIMENSIONS, createCreativeSkillStore };

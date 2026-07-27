@@ -81,7 +81,12 @@ export type AnalysisPreparation = { id: string; status: 'DRAFT'; createdAt: stri
 export type AnalysisRun = Omit<AnalysisPreparation, 'status'> & { status: 'DRAFT' | 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED'; error?: string; jobId?: string };
 
 export type CredentialStatus = { provider: 'BAILIAN' | 'TAVILY'; configured: boolean; status: 'UNCONFIGURED' | 'UNVERIFIED' | 'READY' | 'ERROR'; updatedAt?: string | null; lastTestedAt?: string | null; lastError?: string | null };
-export type PromptTemplateScope = 'INTELLIGENCE_ANALYSIS' | 'CREATIVE_OUTLINE' | 'CREATIVE_DRAFT';
+export type PromptTemplateScope =
+  | 'INTELLIGENCE_ANALYSIS'
+  | 'CREATIVE_OUTLINE_WECHAT'
+  | 'CREATIVE_OUTLINE_XIAOHONGSHU'
+  | 'CREATIVE_DRAFT_WECHAT'
+  | 'CREATIVE_DRAFT_XIAOHONGSHU';
 export type PromptTemplate = { id: string; scope: PromptTemplateScope; version: number; body: string; source: 'DEFAULT' | 'CUSTOM'; updatedAt: string };
 
 export const webAgent = {

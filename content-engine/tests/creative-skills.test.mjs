@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { createCreativeSkillStore, DIMENSIONS } from '../server/services/creativeSkills.cjs';
+import { createCreativeSkillStore, DIMENSIONS, WRITING_DIMENSIONS } from '../server/services/creativeSkills.cjs';
 
 const selection = {
   SUBJECT: 'creative-subject-ai:1.0.0',
@@ -17,6 +17,7 @@ const platformSkills = {
 
 test('创作 Skill 固定为五个规则维度', () => {
   assert.deepEqual(DIMENSIONS, ['SUBJECT', 'CONTENT_TYPE', 'VOICE', 'LAYOUT', 'CHANNEL']);
+  assert.deepEqual(WRITING_DIMENSIONS, ['SUBJECT', 'CONTENT_TYPE', 'VOICE', 'CHANNEL']);
   const migration = fs.readFileSync(new URL('../server/migrations/008_creative_skill_system.sql', import.meta.url), 'utf8');
   assert.match(migration, /CREATE TABLE writing_briefs/);
   assert.match(migration, /CREATE TABLE creative_skill_compositions/);
@@ -52,17 +53,16 @@ test('错误维度的 Skill 组合不会写入数据库', async () => {
     query: async () => ({ rowCount: 5, rows: Object.entries(selection).map(([dimension, id], index) => ({ dimension: index === 0 ? 'VOICE' : dimension, id })) }),
     transaction: async () => { transactionCalled = true; },
   });
-  await assert.rejects(() => store.saveBrief('workspace-id', 'project-1', { selectedPlatforms: ['WECHAT'], selectedSkills: selection, platformSkills }), /Skill 组合无效/);
+  await assert.rejects(() => store.saveBrief('workspace-id', 'project-1', { selectedPlatforms: ['WECHAT'], selectedSkills: selection, platformSkills }), /写作策略无效/);
   assert.equal(transactionCalled, false);
 });
 
-test('生成小红书内容只冻结小红书排版与渠道 Skill', async () => {
+test('生成小红书内容只冻结写作维度和小红书平台规则', async () => {
   let call = 0;
   const rows = [
     { id: 'creative-subject-ai', dimension: 'SUBJECT', slug: 'ai-technology', name: 'AI 科技', description: '', sort_order: 1, version_id: selection.SUBJECT, version: '1.0.0', instructions_md: 'AI 规则', rules_json: {} },
     { id: 'creative-type-education', dimension: 'CONTENT_TYPE', slug: 'education', name: '科普', description: '', sort_order: 1, version_id: selection.CONTENT_TYPE, version: '1.0.0', instructions_md: '科普规则', rules_json: {} },
     { id: 'creative-voice-fresh', dimension: 'VOICE', slug: 'plain-fresh', name: '通俗清新', description: '', sort_order: 1, version_id: selection.VOICE, version: '1.0.0', instructions_md: '语言规则', rules_json: {} },
-    { id: 'creative-layout-xhs', dimension: 'LAYOUT', slug: 'xiaohongshu-carousel', name: '小红书分页图文', description: '', sort_order: 1, version_id: platformSkills.XIAOHONGSHU.LAYOUT, version: '1.0.0', instructions_md: '小红书排版', rules_json: {} },
     { id: 'creative-channel-xhs', dimension: 'CHANNEL', slug: 'xiaohongshu', name: '小红书', description: '', sort_order: 1, version_id: platformSkills.XIAOHONGSHU.CHANNEL, version: '1.0.0', instructions_md: '小红书渠道', rules_json: {} },
   ];
   const store = createCreativeSkillStore({
@@ -74,7 +74,8 @@ test('生成小红书内容只冻结小红书排版与渠道 Skill', async () =>
     transaction: async () => { throw new Error('不应进入事务'); },
   });
   const context = await store.getContext('workspace-id', 'project-1', 'XIAOHONGSHU');
-  assert.deepEqual(context.skills.map((skill) => skill.name), ['AI 科技', '科普', '通俗清新', '小红书分页图文', '小红书']);
+  assert.deepEqual(context.skills.map((skill) => skill.name), ['AI 科技', '科普', '通俗清新', '小红书']);
+  assert.equal(context.skills.some((skill) => skill.dimension === 'LAYOUT'), false);
   assert.equal(context.skills.some((skill) => skill.name === '公众号长文' || skill.name === '公众号'), false);
 });
 
@@ -86,4 +87,26 @@ test('创作主流程不再把视频列为必经步骤', () => {
   assert.match(source, /version\.platform !== 'VIDEO_CHANNEL'/);
   assert.match(source, /webCreative\.saveBrief/);
   assert.match(server, /selectedPlatforms: z\.array\(z\.enum\(\['WECHAT', 'XIAOHONGSHU'\]\)\)/);
+});
+
+test('Skill 只在文案阶段作为写作策略出现，排版不参与写作确认', () => {
+  const source = fs.readFileSync(new URL('../src/workspaces/create/CreateWorkspace.tsx', import.meta.url), 'utf8');
+  const briefStart = source.indexOf("{stage === 'brief'");
+  const copyStart = source.indexOf("{stage === 'copy' && (activeVersion");
+  assert.ok(briefStart > -1 && copyStart > briefStart);
+  assert.doesNotMatch(source.slice(briefStart, copyStart), /Skill 组合|creative-skill-panel|写作策略/);
+  assert.match(source.slice(copyStart), /writing-strategy/);
+  assert.match(source, /题材[\s\S]*内容类型[\s\S]*语言风格/);
+  assert.match(source.slice(copyStart), /sharedDimensions\.map/);
+  assert.match(source.slice(copyStart), /平台规则[\s\S]*随当前平台自动绑定/);
+  assert.doesNotMatch(source.slice(copyStart, source.indexOf('outlineReviewOpen', copyStart)), /platformDimensions|changePlatformSkill/);
+});
+
+test('提示词模板按任务和公众号小红书分别配置', () => {
+  const source = fs.readFileSync(new URL('../src/workspaces/settings/PromptTemplateSettings.tsx', import.meta.url), 'utf8');
+  assert.match(source, /CREATIVE_\$\{task\}_\$\{platform\}/);
+  assert.match(source, /公众号图文/);
+  assert.match(source, /小红书图文/);
+  assert.match(source, /prompt-platform-tabs/);
+  assert.doesNotMatch(source, /CREATIVE_OUTLINE'|CREATIVE_DRAFT'/);
 });

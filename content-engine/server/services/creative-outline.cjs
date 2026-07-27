@@ -2,7 +2,10 @@ const { z } = require('zod');
 
 const OUTLINE_ACTION_VERSION = 'creative-outline:1.1.0';
 const OUTLINE_SCOPE = 'CONTENT_WRITING';
-const OUTLINE_TEMPLATE_SCOPE = 'CREATIVE_OUTLINE';
+const OUTLINE_TEMPLATE_SCOPES = {
+  WECHAT: 'CREATIVE_OUTLINE_WECHAT',
+  XIAOHONGSHU: 'CREATIVE_OUTLINE_XIAOHONGSHU',
+};
 const MAX_OUTLINE_TEMPLATE_LENGTH = 12_000;
 
 const outlineSchema = z.object({
@@ -31,12 +34,21 @@ function validateOutlineTemplate(body) {
   return body.trim();
 }
 
-function defaultOutlineTemplate() {
-  return '围绕核心表达设计清晰、完整、可执行的大纲。标题应准确具体，章节之间必须有推进关系，每节说明写作目的和关键要点；不确定内容列入待核验事实。';
+function outlineTemplateScope(platform) {
+  const scope = OUTLINE_TEMPLATE_SCOPES[platform];
+  if (!scope) throw new Error('当前平台没有接入大纲提示词。');
+  return scope;
+}
+
+function defaultOutlineTemplate(platform) {
+  if (platform === 'XIAOHONGSHU') {
+    return '为小红书图文设计大纲。标题需要具体、有阅读动机但不得夸张；结构适合移动端快速阅读，开篇尽快给出利益点或问题冲突，正文按可拆分为图文页的段落推进，结尾给出互动或行动建议。不确定内容列入待核验事实。';
+  }
+  return '为公众号图文设计大纲。标题需要准确具体；结构要有完整的叙事或论证推进，开篇交代问题与阅读价值，正文使用清晰层级展开解释、证据和案例，结尾形成总结或行动建议。不确定内容列入待核验事实。';
 }
 
 function buildOutlinePrompt({ project, brief, skills, platform, template }) {
-  const businessTemplate = validateOutlineTemplate(template ?? defaultOutlineTemplate());
+  const businessTemplate = validateOutlineTemplate(template ?? defaultOutlineTemplate(platform));
   const example = {
     titleOptions: ['标题方案一', '标题方案二'],
     summary: '大纲采用的叙事和论证思路',
@@ -91,4 +103,4 @@ function outlineCandidateView(row) {
   };
 }
 
-module.exports = { OUTLINE_ACTION_VERSION, OUTLINE_SCOPE, OUTLINE_TEMPLATE_SCOPE, outlineSchema, validateOutlineTemplate, defaultOutlineTemplate, parseOutlineContent, buildOutlinePrompt, buildOutlineRepairPrompt, outlineCandidateView };
+module.exports = { OUTLINE_ACTION_VERSION, OUTLINE_SCOPE, OUTLINE_TEMPLATE_SCOPES, outlineTemplateScope, outlineSchema, validateOutlineTemplate, defaultOutlineTemplate, parseOutlineContent, buildOutlinePrompt, buildOutlineRepairPrompt, outlineCandidateView };
