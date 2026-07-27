@@ -24,17 +24,24 @@ const app = Fastify({ logger: true, bodyLimit: 5 * 1024 * 1024 });
 const credentials = new Set(['TAVILY', 'BAILIAN']);
 const modelTasks = ['INTELLIGENCE_ANALYSIS', 'TOPIC_RECOMMENDATION', 'CONTENT_WRITING', 'CONTENT_REWRITE', 'CONTENT_LAYOUT', 'TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE', 'SPEECH_SYNTHESIS', 'SPEECH_RECOGNITION', 'TEXT_TO_VIDEO', 'IMAGE_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO', 'REFERENCE_TO_VIDEO', 'VIDEO_EDIT'];
 const externalProviders = new Set(['DASHSCOPE', 'SILICONFLOW', 'VOLCENGINE_ARK', 'KIMI', 'ZHIPU', 'OPENAI', 'OPENAI_COMPATIBLE']);
+const creativePlatform = z.enum(['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO']);
+const analysisPlatform = z.enum(['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO', 'VIDEO_CHANNEL']);
+const creativePlatformNames = { WECHAT: '公众号', XIAOHONGSHU: '小红书', ZHIHU: '知乎', WEIBO: '微博' };
 const sourceInput = z.object({ name: z.string().max(160), type: z.literal('RSS'), url: z.string().url().max(2_000), category: z.string().max(120), includeKeywords: z.array(z.string().max(120)).optional(), excludeKeywords: z.array(z.string().max(120)).optional(), language: z.enum(['ALL', 'ZH', 'EN']).optional(), enabled: z.boolean(), refreshMinutes: z.number().min(5).max(10_080), trust: z.string().max(80) });
 const templateStore = createTemplateStore({ query }, {
   [OUTLINE_TEMPLATE_SCOPES.WECHAT]: { defaultTemplate: () => defaultOutlineTemplate('WECHAT'), validateTemplate: validateOutlineTemplate },
   [OUTLINE_TEMPLATE_SCOPES.XIAOHONGSHU]: { defaultTemplate: () => defaultOutlineTemplate('XIAOHONGSHU'), validateTemplate: validateOutlineTemplate },
+  [OUTLINE_TEMPLATE_SCOPES.ZHIHU]: { defaultTemplate: () => defaultOutlineTemplate('ZHIHU'), validateTemplate: validateOutlineTemplate },
+  [OUTLINE_TEMPLATE_SCOPES.WEIBO]: { defaultTemplate: () => defaultOutlineTemplate('WEIBO'), validateTemplate: validateOutlineTemplate },
   [DRAFT_TEMPLATE_SCOPES.WECHAT]: { defaultTemplate: () => defaultDraftTemplate('WECHAT'), validateTemplate: validateDraftTemplate },
   [DRAFT_TEMPLATE_SCOPES.XIAOHONGSHU]: { defaultTemplate: () => defaultDraftTemplate('XIAOHONGSHU'), validateTemplate: validateDraftTemplate },
+  [DRAFT_TEMPLATE_SCOPES.ZHIHU]: { defaultTemplate: () => defaultDraftTemplate('ZHIHU'), validateTemplate: validateDraftTemplate },
+  [DRAFT_TEMPLATE_SCOPES.WEIBO]: { defaultTemplate: () => defaultDraftTemplate('WEIBO'), validateTemplate: validateDraftTemplate },
 });
 const creativeSkillStore = createCreativeSkillStore({ query, transaction });
 const projectMaterialStore = createProjectMaterialStore({ query });
 const projectScope = z.enum(['PROJECT', 'RESEARCH', 'WRITING', 'IMAGING']);
-const projectPlatforms = z.array(z.enum(['WECHAT', 'XIAOHONGSHU'])).max(2);
+const projectPlatforms = z.array(creativePlatform).max(4);
 const projectInputPayload = z.object({
   kind: z.enum(['IDEA', 'DRAFT', 'NOTE', 'TRANSCRIPT']),
   title: z.string().trim().min(1).max(160),
@@ -68,7 +75,7 @@ const writingBriefInput = z.object({
   coreMessage: z.string().max(4_000),
   sourceRequirements: z.string().max(4_000),
   lengthTarget: z.string().max(120),
-  selectedPlatforms: z.array(z.enum(['WECHAT', 'XIAOHONGSHU'])).min(1).max(2),
+  selectedPlatforms: z.array(creativePlatform).min(1).max(4),
   notes: z.string().max(4_000),
   selectedSkills: z.object({
     SUBJECT: z.string().min(1).max(160),
@@ -80,10 +87,12 @@ const writingBriefInput = z.object({
   platformSkills: z.object({
     WECHAT: platformSkillInput.optional(),
     XIAOHONGSHU: platformSkillInput.optional(),
+    ZHIHU: platformSkillInput.optional(),
+    WEIBO: platformSkillInput.optional(),
   }),
 }).superRefine((value, context) => {
   for (const platform of value.selectedPlatforms) {
-    if (!value.platformSkills[platform]?.CHANNEL) context.addIssue({ code: 'custom', path: ['platformSkills', platform], message: `请配置${platform === 'WECHAT' ? '公众号' : '小红书'}写作规则。` });
+    if (!value.platformSkills[platform]?.CHANNEL) context.addIssue({ code: 'custom', path: ['platformSkills', platform], message: `请配置${creativePlatformNames[platform]}写作规则。` });
   }
 });
 
@@ -105,7 +114,7 @@ async function currentWorkspace(userId) {
 }
 
 function defaultState(name) {
-  return { workspace: { name, materialRoot: '', primaryTopics: [], enabledPlatforms: ['WECHAT', 'XIAOHONGSHU', 'VIDEO_CHANNEL'], setupCompleted: false }, feishuTemplate: { name: `${name}内容库`, topicStorage: 'ONE_TABLE', includeSchedule: true, includeReview: false, status: 'DRAFT' }, sources: [], intelligence: [], topics: [], projects: [] };
+  return { workspace: { name, materialRoot: '', primaryTopics: [], enabledPlatforms: ['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO', 'VIDEO_CHANNEL'], setupCompleted: false }, feishuTemplate: { name: `${name}内容库`, topicStorage: 'ONE_TABLE', includeSchedule: true, includeReview: false, status: 'DRAFT' }, sources: [], intelligence: [], topics: [], projects: [] };
 }
 
 const authInput = z.object({ email: z.string().email().max(320), password: z.string().min(8).max(200), displayName: z.string().min(1).max(80).optional(), workspaceName: z.string().min(1).max(80).optional() });
@@ -402,7 +411,7 @@ function analysisItem(row) {
 }
 
 app.post('/api/v1/intelligence/items/:id/analyses/prepare', { preHandler: authenticate }, async (request, reply) => {
-  const input = z.object({ platforms: z.array(z.enum(['WECHAT', 'XIAOHONGSHU', 'VIDEO_CHANNEL'])).min(1).max(3) }).parse(request.body);
+  const input = z.object({ platforms: z.array(analysisPlatform).min(1).max(5) }).parse(request.body);
   const workspace = await currentWorkspace(request.user.sub);
   const itemResult = await query('SELECT * FROM intelligence_items WHERE id = $1 AND workspace_id = $2', [request.params.id, workspace.id]);
   if (!itemResult.rowCount) { const error = new Error('未找到这条资讯。'); error.statusCode = 404; throw error; }
@@ -737,7 +746,7 @@ app.post('/api/v1/creative/research-runs/:id/cancel', { preHandler: authenticate
 
 app.post('/api/v1/creative/projects/:projectId/outline/prepare', { preHandler: authenticate }, async (request, reply) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
-  const input = z.object({ platform: z.enum(['WECHAT', 'XIAOHONGSHU']) }).parse(request.body);
+  const input = z.object({ platform: creativePlatform }).parse(request.body);
   const workspace = await currentWorkspace(request.user.sub);
   const templateScope = outlineTemplateScope(input.platform);
   const [project, context, route, template] = await Promise.all([
@@ -790,7 +799,7 @@ app.post('/api/v1/creative/outline-runs/:id/cancel', { preHandler: authenticate 
 });
 
 app.get('/api/v1/creative/projects/:projectId/outline/latest-run', { preHandler: authenticate }, async (request) => {
-  const input = z.object({ platform: z.enum(['WECHAT', 'XIAOHONGSHU']) }).parse(request.query);
+  const input = z.object({ platform: creativePlatform }).parse(request.query);
   const workspace = await currentWorkspace(request.user.sub);
   const result = await query(`SELECT r.id, r.status, r.error, r.model, r.prompt_version, r.source_snapshot_json, r.created_at,
       (SELECT j.id FROM jobs j WHERE j.workspace_id = r.workspace_id AND j.payload_json->>'runId' = r.id::text ORDER BY j.created_at DESC LIMIT 1) AS job_id
@@ -804,7 +813,7 @@ app.get('/api/v1/creative/projects/:projectId/outline/latest-run', { preHandler:
 });
 
 app.get('/api/v1/creative/projects/:projectId/outline/latest', { preHandler: authenticate }, async (request) => {
-  const input = z.object({ platform: z.enum(['WECHAT', 'XIAOHONGSHU']) }).parse(request.query);
+  const input = z.object({ platform: creativePlatform }).parse(request.query);
   const workspace = await currentWorkspace(request.user.sub);
   const result = await query(`SELECT c.*, r.model FROM creative_outline_candidates c
     JOIN generation_runs r ON r.id = c.generation_run_id
@@ -846,7 +855,7 @@ app.post('/api/v1/creative/outline-candidates/:id/accept', { preHandler: authent
 
 app.post('/api/v1/creative/projects/:projectId/draft/prepare', { preHandler: authenticate }, async (request, reply) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
-  const input = z.object({ platform: z.enum(['WECHAT', 'XIAOHONGSHU']) }).parse(request.body);
+  const input = z.object({ platform: creativePlatform }).parse(request.body);
   const workspace = await currentWorkspace(request.user.sub);
   const templateScope = draftTemplateScope(input.platform);
   const [project, context, route, template, outlineResult] = await Promise.all([
@@ -905,7 +914,7 @@ app.post('/api/v1/creative/draft-runs/:id/cancel', { preHandler: authenticate },
 });
 
 app.get('/api/v1/creative/projects/:projectId/draft/latest-run', { preHandler: authenticate }, async (request) => {
-  const input = z.object({ platform: z.enum(['WECHAT', 'XIAOHONGSHU']) }).parse(request.query);
+  const input = z.object({ platform: creativePlatform }).parse(request.query);
   const workspace = await currentWorkspace(request.user.sub);
   const result = await query(`SELECT r.id, r.status, r.error, r.model, r.prompt_version, r.source_snapshot_json, r.created_at,
       (SELECT j.id FROM jobs j WHERE j.workspace_id = r.workspace_id AND j.payload_json->>'runId' = r.id::text ORDER BY j.created_at DESC LIMIT 1) AS job_id
@@ -920,7 +929,7 @@ app.get('/api/v1/creative/projects/:projectId/draft/latest-run', { preHandler: a
 });
 
 app.get('/api/v1/creative/projects/:projectId/draft/latest', { preHandler: authenticate }, async (request) => {
-  const input = z.object({ platform: z.enum(['WECHAT', 'XIAOHONGSHU']) }).parse(request.query);
+  const input = z.object({ platform: creativePlatform }).parse(request.query);
   const workspace = await currentWorkspace(request.user.sub);
   const result = await query(`SELECT c.*, r.model, r.prompt_version FROM creative_draft_candidates c
     JOIN generation_runs r ON r.id = c.generation_run_id

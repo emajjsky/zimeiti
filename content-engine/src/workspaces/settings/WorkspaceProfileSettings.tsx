@@ -4,7 +4,7 @@ import { PageHeader } from '../../components/workspace/PageHeader';
 import type { WorkspaceProfile } from '../../data/localRepository';
 import { platformName, type Platform } from '../../domain/content';
 
-const supportedPlatforms: Platform[] = ['WECHAT', 'VIDEO_CHANNEL', 'XIAOHONGSHU'];
+const supportedPlatforms: Platform[] = ['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO', 'VIDEO_CHANNEL'];
 
 export function WorkspaceProfileSettings({
   workspace,

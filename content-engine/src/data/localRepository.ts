@@ -37,7 +37,7 @@ export const seedState: LocalState = {
     primaryTopics: ['AI 工具实战'],
     accountPositioning: '',
     targetAudience: '',
-    enabledPlatforms: ['WECHAT', 'XIAOHONGSHU', 'VIDEO_CHANNEL'],
+    enabledPlatforms: ['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO', 'VIDEO_CHANNEL'],
     setupCompleted: false,
   },
   feishuTemplate: {

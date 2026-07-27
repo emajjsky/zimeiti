@@ -1,7 +1,7 @@
 import type { LocalState } from './localRepository';
 import type { ApiUsageLog, ApiUsageSummary, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelTaskPolicy } from '../domain/integrations';
 import type { ContentProject, IntelligenceAnalysis, Platform } from '../domain/content';
-import type { CreativeDraftCandidate, CreativeDraftPreparation, CreativeDraftRun, CreativeOutlineCandidate, CreativeOutlinePreparation, CreativeOutlineRun, CreativeSkillDefinition, ProjectInput, ProjectInputPayload, ProjectReference, ProjectReferenceMetadata, ProjectResearchContext, ProjectResearchRun, WritingBrief, WritingBriefInput } from '../domain/creative';
+import type { CreativeDraftCandidate, CreativeDraftPreparation, CreativeDraftRun, CreativeOutlineCandidate, CreativeOutlinePreparation, CreativeOutlineRun, CreativePlatform, CreativeSkillDefinition, ProjectInput, ProjectInputPayload, ProjectReference, ProjectReferenceMetadata, ProjectResearchContext, ProjectResearchRun, WritingBrief, WritingBriefInput } from '../domain/creative';
 
 const tokenKey = 'content-engine-web-session-v1';
 const apiBase = import.meta.env.VITE_API_BASE ?? '/api/v1';
@@ -66,17 +66,17 @@ export const webCreative = {
   prepareResearch: (projectId: string, input: { request: string; inputIds: string[]; referenceIds: string[] }) => request<ProjectResearchRun>(`/creative/projects/${encodeURIComponent(projectId)}/research/prepare`, { method: 'POST', body: JSON.stringify(input) }),
   confirmResearch: (runId: string) => request<{ id: string; status: 'QUEUED'; jobId: string }>(`/creative/research-runs/${encodeURIComponent(runId)}/confirm`, { method: 'POST', body: '{}' }),
   cancelResearch: (runId: string) => request<{ id: string; status: 'CANCELLED' }>(`/creative/research-runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST', body: '{}' }),
-  prepareOutline: (projectId: string, platform: Exclude<Platform, 'VIDEO_CHANNEL'>) => request<CreativeOutlinePreparation>(`/creative/projects/${encodeURIComponent(projectId)}/outline/prepare`, { method: 'POST', body: JSON.stringify({ platform }) }),
+  prepareOutline: (projectId: string, platform: CreativePlatform) => request<CreativeOutlinePreparation>(`/creative/projects/${encodeURIComponent(projectId)}/outline/prepare`, { method: 'POST', body: JSON.stringify({ platform }) }),
   confirmOutline: (runId: string) => request<{ id: string; status: 'QUEUED'; jobId: string }>(`/creative/outline-runs/${encodeURIComponent(runId)}/confirm`, { method: 'POST', body: '{}' }),
   cancelOutline: (runId: string) => request<{ id: string; status: 'CANCELLED' }>(`/creative/outline-runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST', body: '{}' }),
-  latestOutlineRun: (projectId: string, platform: Exclude<Platform, 'VIDEO_CHANNEL'>) => request<CreativeOutlineRun | null>(`/creative/projects/${encodeURIComponent(projectId)}/outline/latest-run?platform=${encodeURIComponent(platform)}`),
-  latestOutline: (projectId: string, platform: Exclude<Platform, 'VIDEO_CHANNEL'>) => request<CreativeOutlineCandidate | null>(`/creative/projects/${encodeURIComponent(projectId)}/outline/latest?platform=${encodeURIComponent(platform)}`),
+  latestOutlineRun: (projectId: string, platform: CreativePlatform) => request<CreativeOutlineRun | null>(`/creative/projects/${encodeURIComponent(projectId)}/outline/latest-run?platform=${encodeURIComponent(platform)}`),
+  latestOutline: (projectId: string, platform: CreativePlatform) => request<CreativeOutlineCandidate | null>(`/creative/projects/${encodeURIComponent(projectId)}/outline/latest?platform=${encodeURIComponent(platform)}`),
   acceptOutline: (candidateId: string, selectedTitle: string) => request<{ candidate: CreativeOutlineCandidate; project: ContentProject }>(`/creative/outline-candidates/${encodeURIComponent(candidateId)}/accept`, { method: 'POST', body: JSON.stringify({ selectedTitle }) }),
-  prepareDraft: (projectId: string, platform: Exclude<Platform, 'VIDEO_CHANNEL'>) => request<CreativeDraftPreparation>(`/creative/projects/${encodeURIComponent(projectId)}/draft/prepare`, { method: 'POST', body: JSON.stringify({ platform }) }),
+  prepareDraft: (projectId: string, platform: CreativePlatform) => request<CreativeDraftPreparation>(`/creative/projects/${encodeURIComponent(projectId)}/draft/prepare`, { method: 'POST', body: JSON.stringify({ platform }) }),
   confirmDraft: (runId: string) => request<{ id: string; status: 'QUEUED'; jobId: string }>(`/creative/draft-runs/${encodeURIComponent(runId)}/confirm`, { method: 'POST', body: '{}' }),
   cancelDraft: (runId: string) => request<{ id: string; status: 'CANCELLED' }>(`/creative/draft-runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST', body: '{}' }),
-  latestDraftRun: (projectId: string, platform: Exclude<Platform, 'VIDEO_CHANNEL'>) => request<CreativeDraftRun | null>(`/creative/projects/${encodeURIComponent(projectId)}/draft/latest-run?platform=${encodeURIComponent(platform)}`),
-  latestDraft: (projectId: string, platform: Exclude<Platform, 'VIDEO_CHANNEL'>) => request<CreativeDraftCandidate | null>(`/creative/projects/${encodeURIComponent(projectId)}/draft/latest?platform=${encodeURIComponent(platform)}`),
+  latestDraftRun: (projectId: string, platform: CreativePlatform) => request<CreativeDraftRun | null>(`/creative/projects/${encodeURIComponent(projectId)}/draft/latest-run?platform=${encodeURIComponent(platform)}`),
+  latestDraft: (projectId: string, platform: CreativePlatform) => request<CreativeDraftCandidate | null>(`/creative/projects/${encodeURIComponent(projectId)}/draft/latest?platform=${encodeURIComponent(platform)}`),
   acceptDraft: (candidateId: string) => request<{ candidate: CreativeDraftCandidate; project: ContentProject }>(`/creative/draft-candidates/${encodeURIComponent(candidateId)}/accept`, { method: 'POST', body: '{}' }),
   job: (jobId: string) => request<{ id: string; status: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED'; error?: string }>(`/jobs/${encodeURIComponent(jobId)}`),
 };
@@ -108,8 +108,12 @@ export type PromptTemplateScope =
   | 'INTELLIGENCE_ANALYSIS'
   | 'CREATIVE_OUTLINE_WECHAT'
   | 'CREATIVE_OUTLINE_XIAOHONGSHU'
+  | 'CREATIVE_OUTLINE_ZHIHU'
+  | 'CREATIVE_OUTLINE_WEIBO'
   | 'CREATIVE_DRAFT_WECHAT'
-  | 'CREATIVE_DRAFT_XIAOHONGSHU';
+  | 'CREATIVE_DRAFT_XIAOHONGSHU'
+  | 'CREATIVE_DRAFT_ZHIHU'
+  | 'CREATIVE_DRAFT_WEIBO';
 export type PromptTemplate = { id: string; scope: PromptTemplateScope; version: number; body: string; source: 'DEFAULT' | 'CUSTOM'; updatedAt: string };
 
 export const webAgent = {

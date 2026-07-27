@@ -2,6 +2,7 @@ const { z } = require('zod');
 
 const ANALYSIS_SCOPE = 'INTELLIGENCE_ANALYSIS';
 const MAX_TEMPLATE_LENGTH = 12_000;
+const ANALYSIS_PLATFORMS = ['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO', 'VIDEO_CHANNEL'];
 const templateVariables = ['title', 'summary', 'source', 'publishedAt', 'category', 'keywords', 'primaryTopics', 'accountPositioning', 'targetAudience', 'platforms'];
 const weights = { timeliness: 20, accountFit: 25, contentValue: 25, spreadPotential: 15, feasibilityAndSafety: 15 };
 
@@ -17,7 +18,7 @@ const analysisSchema = z.object({
     feasibilityAndSafety: scoreReason,
   }),
   angles: z.array(z.object({ title: z.string().trim().min(1).max(120), coreViewpoint: z.string().trim().min(1).max(400), targetAudience: z.string().trim().min(1).max(160) })).max(3),
-  platforms: z.array(z.object({ platform: z.enum(['WECHAT', 'XIAOHONGSHU', 'VIDEO_CHANNEL']), fitScore: z.number().int().min(0).max(100), recommendedFormat: z.string().trim().min(1).max(120), reason: z.string().trim().min(1).max(240) })),
+  platforms: z.array(z.object({ platform: z.enum(ANALYSIS_PLATFORMS), fitScore: z.number().int().min(0).max(100), recommendedFormat: z.string().trim().min(1).max(120), reason: z.string().trim().min(1).max(240) })),
   factsToVerify: z.array(z.string().trim().min(1).max(300)).max(5),
   risks: z.array(z.string().trim().min(1).max(300)).max(5),
 });
@@ -109,7 +110,7 @@ function buildAnalysisRepairPrompt(system, validationError) {
 function prepareAnalysisInput({ item, profile, platforms, template, route }) {
   if (!item?.title?.trim() || !item?.summary?.trim() || !item?.source?.trim() || !item?.url?.trim()) throw new Error('资讯缺少标题、摘要、来源或原文链接，暂不能分析。');
   const selectedPlatforms = [...new Set(platforms ?? [])];
-  if (!selectedPlatforms.length || selectedPlatforms.some((value) => !['WECHAT', 'XIAOHONGSHU', 'VIDEO_CHANNEL'].includes(value))) throw new Error('请至少选择一个有效的平台。');
+  if (!selectedPlatforms.length || selectedPlatforms.some((value) => !ANALYSIS_PLATFORMS.includes(value))) throw new Error('请至少选择一个有效的平台。');
   if (!(profile?.primaryTopics ?? []).map((value) => String(value).trim()).filter(Boolean).length) throw new Error('请先在工作空间设置至少一个默认题材。');
   if (!route?.provider || !route?.model?.trim()) throw new Error('请先为热点分析配置可用文本模型。');
   if (!template?.id || !template?.version || !template?.body) throw new Error('热点分析提示词模板不可用。');

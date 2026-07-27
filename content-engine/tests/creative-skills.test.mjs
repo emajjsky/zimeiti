@@ -86,7 +86,9 @@ test('创作主流程不再把视频列为必经步骤', () => {
   assert.doesNotMatch(source, /label: '视频'/);
   assert.match(source, /version\.platform !== 'VIDEO_CHANNEL'/);
   assert.match(source, /webCreative\.saveBrief/);
-  assert.match(server, /selectedPlatforms: z\.array\(z\.enum\(\['WECHAT', 'XIAOHONGSHU'\]\)\)/);
+  assert.match(server, /const creativePlatform = z\.enum\(\['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO'\]\)/);
+  assert.match(server, /selectedPlatforms: z\.array\(creativePlatform\)/);
+  assert.doesNotMatch(server, /const creativePlatform = z\.enum\([^\n]*VIDEO_CHANNEL/);
 });
 
 test('Skill 只在文案阶段作为写作策略出现，排版不参与写作确认', () => {
@@ -102,11 +104,13 @@ test('Skill 只在文案阶段作为写作策略出现，排版不参与写作�
   assert.doesNotMatch(source.slice(copyStart, source.indexOf('outlineReviewOpen', copyStart)), /platformDimensions|changePlatformSkill/);
 });
 
-test('提示词模板按任务和公众号小红书分别配置', () => {
+test('提示词模板按任务和四个图文平台分别配置', () => {
   const source = fs.readFileSync(new URL('../src/workspaces/settings/PromptTemplateSettings.tsx', import.meta.url), 'utf8');
   assert.match(source, /CREATIVE_\$\{task\}_\$\{platform\}/);
   assert.match(source, /公众号图文/);
   assert.match(source, /小红书图文/);
+  assert.match(source, /知乎回答/);
+  assert.match(source, /微博内容/);
   assert.match(source, /prompt-platform-tabs/);
   assert.doesNotMatch(source, /CREATIVE_OUTLINE'|CREATIVE_DRAFT'/);
 });

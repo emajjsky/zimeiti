@@ -127,7 +127,7 @@ export interface CreativeOutlineSkillSnapshot {
 
 export interface CreativeOutlineConfirmation {
   model: string;
-  platform: Exclude<Platform, 'VIDEO_CHANNEL'>;
+  platform: CreativePlatform;
   actionVersion: string;
   promptVersion: number;
   skills: CreativeOutlineSkillSnapshot[];
@@ -156,7 +156,7 @@ export interface CreativeOutlineSection {
 export interface CreativeOutlineCandidate {
   id: string;
   projectId: string;
-  platform: Exclude<Platform, 'VIDEO_CHANNEL'>;
+  platform: CreativePlatform;
   status: CreativeOutlineCandidateStatus;
   selectedTitle: string | null;
   titleOptions: string[];
@@ -189,7 +189,7 @@ export interface CreativeDraftRun extends Omit<CreativeDraftPreparation, 'status
 export interface CreativeDraftCandidate {
   id: string;
   projectId: string;
-  platform: Exclude<Platform, 'VIDEO_CHANNEL'>;
+  platform: CreativePlatform;
   outlineCandidateId: string;
   status: CreativeDraftCandidateStatus;
   title: string;

@@ -122,7 +122,7 @@ function App() {
       id,
       title: angle?.title || selectedIntel.title,
       category: selectedIntel.category,
-      platforms: analysis?.selectedPlatforms ?? ['WECHAT', 'XIAOHONGSHU', 'VIDEO_CHANNEL'] as Platform[],
+      platforms: analysis?.selectedPlatforms ?? ['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO', 'VIDEO_CHANNEL'] as Platform[],
       urgency: analysis?.decision === 'FOLLOW' ? '高' as const : '中' as const,
       status: 'PENDING' as const,
       coreViewpoint: angle?.coreViewpoint || selectedIntel.summary,
@@ -338,7 +338,7 @@ function Onboarding({ initial, onComplete }: { initial: WorkspaceProfile; onComp
       <div className="eyebrow">FIRST RUN / 首次设置</div><h2>建立你的编辑部</h2><p>只需一分钟；飞书、模型和账号授权都可以稍后连接。</p>
       <label>工作空间名称<input value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：知行内容实验室" autoFocus /></label>
       <label>你最常做的题材<input value={topics} onChange={(event) => setTopics(event.target.value)} placeholder="例如：AI 工具、国学、财经" /><small>用顿号或逗号分隔，之后可随时调整。</small></label>
-      <fieldset><legend>首发平台</legend><div className="platform-options">{(['WECHAT', 'XIAOHONGSHU', 'VIDEO_CHANNEL'] as Platform[]).map((platform) => <button type="button" key={platform} className={platforms.includes(platform) ? 'chosen' : ''} onClick={() => togglePlatform(platform)}>{platforms.includes(platform) ? '✓ ' : '+ '}{platformName[platform]}</button>)}</div></fieldset>
+      <fieldset><legend>首发平台</legend><div className="platform-options">{(['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO', 'VIDEO_CHANNEL'] as Platform[]).map((platform) => <button type="button" key={platform} className={platforms.includes(platform) ? 'chosen' : ''} onClick={() => togglePlatform(platform)}>{platforms.includes(platform) ? '✓ ' : '+ '}{platformName[platform]}</button>)}</div></fieldset>
       <button className="button primary setup-submit" type="submit" disabled={!name.trim() || platforms.length === 0}>进入内容引擎 <ChevronRight size={17}/></button>
     </form>
   </main>;
@@ -382,7 +382,7 @@ function TopicEditor({ topic, defaultCategory, onSave, onCancel }: { topic?: Top
       <label className="form-title">选题标题<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="一句话描述这期要解决的问题" autoFocus /></label>
       <div className="form-grid"><label>题材<input value={category} onChange={(event) => setCategory(event.target.value)} placeholder="例如：国学生活化" /></label><label>时效<select value={urgency} onChange={(event) => setUrgency(event.target.value as TopicCandidate['urgency'])}><option value="高">高：需要尽快跟进</option><option value="中">中：常规排期</option><option value="低">低：常青内容</option></select></label></div>
       <label>核心观点<textarea value={coreViewpoint} onChange={(event) => setCoreViewpoint(event.target.value)} placeholder="你希望读者看完后认同或能做到什么？" rows={5} /></label>
-      <fieldset><legend>目标平台</legend><div className="platform-options">{(['WECHAT', 'XIAOHONGSHU', 'VIDEO_CHANNEL'] as Platform[]).map((platform) => <button type="button" key={platform} className={platforms.includes(platform) ? 'chosen' : ''} onClick={() => togglePlatform(platform)}>{platforms.includes(platform) ? '✓ ' : '+ '}{platformName[platform]}</button>)}</div></fieldset>
+      <fieldset><legend>目标平台</legend><div className="platform-options">{(['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO', 'VIDEO_CHANNEL'] as Platform[]).map((platform) => <button type="button" key={platform} className={platforms.includes(platform) ? 'chosen' : ''} onClick={() => togglePlatform(platform)}>{platforms.includes(platform) ? '✓ ' : '+ '}{platformName[platform]}</button>)}</div></fieldset>
       <label>计划日期 <span>（可选）</span><input value={plannedDate} onChange={(event) => setPlannedDate(event.target.value)} placeholder="例如：2026-07-25" /></label>
       <footer><button className="text-button" type="button" onClick={onCancel}>取消</button><button className="button primary" type="submit" disabled={!title.trim() || !coreViewpoint.trim() || platforms.length === 0}>保存选题 <ChevronRight size={17}/></button></footer>
     </form>

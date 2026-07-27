@@ -54,7 +54,7 @@ const views = new Set([...navigationGroups.flatMap((group) => group.items.map((i
 const discoverSections = new Set(discoverTabs.map((item) => item.id));
 const settingsSections = new Set(settingsTabs.map((item) => item.id));
 const modelSections = new Set(['bailian', 'agent', 'search', 'connections', 'policies', 'templates', 'usage']);
-const platforms = new Set(['WECHAT', 'XIAOHONGSHU', 'VIDEO_CHANNEL']);
+const platforms = new Set(['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO', 'VIDEO_CHANNEL']);
 
 function allowed(value, values, fallback = null) {
   return typeof value === 'string' && values.has(value) ? value : fallback;

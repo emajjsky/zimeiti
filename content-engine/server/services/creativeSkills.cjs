@@ -1,5 +1,6 @@
 const DIMENSIONS = ['SUBJECT', 'CONTENT_TYPE', 'VOICE', 'LAYOUT', 'CHANNEL'];
 const WRITING_DIMENSIONS = ['SUBJECT', 'CONTENT_TYPE', 'VOICE', 'CHANNEL'];
+const PLATFORM_NAMES = { WECHAT: '公众号', XIAOHONGSHU: '小红书', ZHIHU: '知乎', WEIBO: '微博' };
 
 function skillView(row) {
   return {
@@ -65,7 +66,7 @@ function createCreativeSkillStore({ query, transaction }) {
     const brief = await getBrief(workspaceId, projectId);
     if (!brief) return null;
     const platformSelection = brief.platformSkills[platform];
-    if (!platformSelection?.CHANNEL) throw new Error(`请先配置${platform === 'WECHAT' ? '公众号' : '小红书'}写作规则。`);
+    if (!platformSelection?.CHANNEL) throw new Error(`请先配置${PLATFORM_NAMES[platform] ?? '当前平台'}写作规则。`);
     const requested = [brief.selectedSkills.SUBJECT, brief.selectedSkills.CONTENT_TYPE, brief.selectedSkills.VOICE, platformSelection.CHANNEL];
     const result = await query(`SELECT d.id, d.dimension, d.slug, d.name, d.description, d.sort_order,
       v.id AS version_id, v.version, v.instructions_md, v.rules_json

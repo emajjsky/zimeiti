@@ -73,7 +73,7 @@ export interface WorkspaceLocationState {
   intelligenceId: string | null;
   topicId: string | null;
   projectId: string | null;
-  platform: 'WECHAT' | 'XIAOHONGSHU' | 'VIDEO_CHANNEL';
+  platform: 'WECHAT' | 'XIAOHONGSHU' | 'ZHIHU' | 'WEIBO' | 'VIDEO_CHANNEL';
 }
 
 export interface WorkspaceLocationTarget {

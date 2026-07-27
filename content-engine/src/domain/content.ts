@@ -11,7 +11,7 @@ export type ProjectStatus =
   | 'RETROSPECTIVE'
   | 'ARCHIVED';
 
-export type Platform = 'WECHAT' | 'XIAOHONGSHU' | 'VIDEO_CHANNEL';
+export type Platform = 'WECHAT' | 'XIAOHONGSHU' | 'ZHIHU' | 'WEIBO' | 'VIDEO_CHANNEL';
 export type ContentVersionStatus = 'DRAFT' | 'PREFLIGHT_PASSED' | 'WAITING_CONFIRMATION' | 'PUBLISHED' | 'FAILED' | 'CANCELLED';
 
 export type AnalysisDecision = 'FOLLOW' | 'WATCH' | 'SKIP';
@@ -112,6 +112,8 @@ export interface ContentProject {
 export const platformName: Record<Platform, string> = {
   WECHAT: '公众号',
   XIAOHONGSHU: '小红书',
+  ZHIHU: '知乎',
+  WEIBO: '微博',
   VIDEO_CHANNEL: '视频号',
 };
 

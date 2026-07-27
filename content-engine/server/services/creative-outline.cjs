@@ -5,6 +5,8 @@ const OUTLINE_SCOPE = 'CONTENT_WRITING';
 const OUTLINE_TEMPLATE_SCOPES = {
   WECHAT: 'CREATIVE_OUTLINE_WECHAT',
   XIAOHONGSHU: 'CREATIVE_OUTLINE_XIAOHONGSHU',
+  ZHIHU: 'CREATIVE_OUTLINE_ZHIHU',
+  WEIBO: 'CREATIVE_OUTLINE_WEIBO',
 };
 const MAX_OUTLINE_TEMPLATE_LENGTH = 12_000;
 
@@ -43,6 +45,12 @@ function outlineTemplateScope(platform) {
 function defaultOutlineTemplate(platform) {
   if (platform === 'XIAOHONGSHU') {
     return '为小红书图文设计大纲。标题需要具体、有阅读动机但不得夸张；结构适合移动端快速阅读，开篇尽快给出利益点或问题冲突，正文按可拆分为图文页的段落推进，结尾给出互动或行动建议。不确定内容列入待核验事实。';
+  }
+  if (platform === 'ZHIHU') {
+    return '为知乎回答设计大纲。先还原问题语境并给出明确结论，再建立事实、原因、案例和边界组成的论证链；标题和章节要服务读者理解，不写空泛态度。不确定内容列入待核验事实。';
+  }
+  if (platform === 'WEIBO') {
+    return '为微博内容设计大纲。优先判断适合单条还是串文，首句承载核心信息或时效钩子，后续按事实、观点和行动建议推进；每一条都要可独立理解，不制造夸张冲突。不确定内容列入待核验事实。';
   }
   return '为公众号图文设计大纲。标题需要准确具体；结构要有完整的叙事或论证推进，开篇交代问题与阅读价值，正文使用清晰层级展开解释、证据和案例，结尾形成总结或行动建议。不确定内容列入待核验事实。';
 }

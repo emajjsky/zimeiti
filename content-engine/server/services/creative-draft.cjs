@@ -5,6 +5,8 @@ const DRAFT_SCOPE = 'CONTENT_WRITING';
 const DRAFT_TEMPLATE_SCOPES = {
   WECHAT: 'CREATIVE_DRAFT_WECHAT',
   XIAOHONGSHU: 'CREATIVE_DRAFT_XIAOHONGSHU',
+  ZHIHU: 'CREATIVE_DRAFT_ZHIHU',
+  WEIBO: 'CREATIVE_DRAFT_WEIBO',
 };
 const MAX_DRAFT_TEMPLATE_LENGTH = 12_000;
 
@@ -29,6 +31,12 @@ function draftTemplateScope(platform) {
 function defaultDraftTemplate(platform) {
   if (platform === 'XIAOHONGSHU') {
     return '根据已采用大纲写成小红书图文初稿。标题具体、有吸引力但不使用夸张承诺；开篇快速说明读者能获得什么，正文使用短段落、清晰小标题和可拆页的信息单元，结尾给出行动建议或自然互动。保持口语化但不轻浮，不得编造事实、数据、案例或来源。';
+  }
+  if (platform === 'ZHIHU') {
+    return '根据已采用大纲写成知乎回答初稿。保留问题语境并结论前置，用事实、原因、案例和限制条件形成完整论证链；主动回应可能的反例，不用情绪替代证据。不得编造事实、数据、案例或来源。';
+  }
+  if (platform === 'WEIBO') {
+    return '根据已采用大纲写成微博初稿。结合内容时效选择单条或串文；首句直接交代核心事实或观点，单条保持信息密度，串文逐条推进且每条可独立理解，结尾给出自然互动或行动建议。不得编造事实、数据、案例或来源。';
   }
   return '根据已采用大纲写成公众号图文初稿。开篇明确问题与阅读价值，正文完成必要的解释、论证和案例衔接，使用适合长文阅读的小标题与自然段落，结尾形成总结或具体行动建议。保持自然表达，避免空泛套话；不得编造事实、数据、案例或来源。';
 }

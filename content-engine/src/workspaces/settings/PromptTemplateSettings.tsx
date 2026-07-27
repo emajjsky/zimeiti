@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { webModels, type PromptTemplate, type PromptTemplateScope } from '../../data/webApi';
 
 type PromptTask = 'ANALYSIS' | 'OUTLINE' | 'DRAFT';
-type PromptPlatform = 'WECHAT' | 'XIAOHONGSHU';
+type PromptPlatform = 'WECHAT' | 'XIAOHONGSHU' | 'ZHIHU' | 'WEIBO';
 
 const taskTabs: { id: PromptTask; label: string }[] = [
   { id: 'ANALYSIS', label: '热点分析' },
@@ -14,6 +14,8 @@ const taskTabs: { id: PromptTask; label: string }[] = [
 const platforms: { id: PromptPlatform; label: string }[] = [
   { id: 'WECHAT', label: '公众号图文' },
   { id: 'XIAOHONGSHU', label: '小红书图文' },
+  { id: 'ZHIHU', label: '知乎回答' },
+  { id: 'WEIBO', label: '微博内容' },
 ];
 
 const analysisVariables = ['{{title}}', '{{summary}}', '{{source}}', '{{publishedAt}}', '{{category}}', '{{keywords}}', '{{primaryTopics}}', '{{accountPositioning}}', '{{targetAudience}}', '{{platforms}}'];

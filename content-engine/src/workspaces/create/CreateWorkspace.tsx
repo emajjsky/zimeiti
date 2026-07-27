@@ -47,23 +47,29 @@ function subjectSlug(project: ContentProject) {
 }
 
 function defaultBrief(project: ContentProject, skills: CreativeSkillDefinition[]): WritingBriefInput {
-  const contentVersions = project.versions.filter((version) => version.platform !== 'VIDEO_CHANNEL');
+  const contentVersions = project.versions.filter((version): version is ContentVersion & { platform: CreativePlatform } => version.platform !== 'VIDEO_CHANNEL');
   const primaryPlatform = contentVersions[0]?.platform ?? 'WECHAT';
-  const xhsFirst = primaryPlatform === 'XIAOHONGSHU';
+  const primarySlugs = {
+    WECHAT: { layout: 'wechat-longform', channel: 'wechat' },
+    XIAOHONGSHU: { layout: 'xiaohongshu-carousel', channel: 'xiaohongshu' },
+    ZHIHU: { layout: 'zhihu-answer', channel: 'zhihu' },
+    WEIBO: { layout: 'weibo-thread', channel: 'weibo' },
+  }[primaryPlatform];
+  const lengthTarget = primaryPlatform === 'XIAOHONGSHU' ? '6-8 页图文' : primaryPlatform === 'WEIBO' ? '300-1000 字或 3-8 条串文' : primaryPlatform === 'ZHIHU' ? '1500-3000 字' : '1500-2500 字';
   return {
     objective: `围绕“${project.title}”形成一篇可发布的内容`,
     targetAudience: '',
     coreMessage: project.coreViewpoint,
     sourceRequirements: project.factChecks.join('；'),
-    lengthTarget: xhsFirst ? '6-8 页图文' : '1500-2500 字',
+    lengthTarget,
     selectedPlatforms: contentVersions.map((version) => version.platform),
     notes: '',
     selectedSkills: {
       SUBJECT: firstVersion(skills, 'SUBJECT', subjectSlug(project)),
       CONTENT_TYPE: firstVersion(skills, 'CONTENT_TYPE', 'education'),
       VOICE: firstVersion(skills, 'VOICE', 'plain-fresh'),
-      LAYOUT: firstVersion(skills, 'LAYOUT', xhsFirst ? 'xiaohongshu-carousel' : 'wechat-longform'),
-      CHANNEL: firstVersion(skills, 'CHANNEL', xhsFirst ? 'xiaohongshu' : 'wechat'),
+      LAYOUT: firstVersion(skills, 'LAYOUT', primarySlugs.layout),
+      CHANNEL: firstVersion(skills, 'CHANNEL', primarySlugs.channel),
     },
     platformSkills: platformSkillDefaults(contentVersions.map((version) => version.platform), skills),
   };
@@ -71,11 +77,16 @@ function defaultBrief(project: ContentProject, skills: CreativeSkillDefinition[]
 
 function platformSkillDefaults(platforms: Platform[], skills: CreativeSkillDefinition[], current: CreativePlatformSkillMap = {}) {
   return platforms.reduce<CreativePlatformSkillMap>((result, platform) => {
-    if (platform !== 'WECHAT' && platform !== 'XIAOHONGSHU') return result;
-    const xhs = platform === 'XIAOHONGSHU';
+    if (platform === 'VIDEO_CHANNEL') return result;
+    const slugs = {
+      WECHAT: { layout: 'wechat-longform', channel: 'wechat' },
+      XIAOHONGSHU: { layout: 'xiaohongshu-carousel', channel: 'xiaohongshu' },
+      ZHIHU: { layout: 'zhihu-answer', channel: 'zhihu' },
+      WEIBO: { layout: 'weibo-thread', channel: 'weibo' },
+    }[platform];
     result[platform] = current[platform] ?? {
-      LAYOUT: firstVersion(skills, 'LAYOUT', xhs ? 'xiaohongshu-carousel' : 'wechat-longform'),
-      CHANNEL: firstVersion(skills, 'CHANNEL', xhs ? 'xiaohongshu' : 'wechat'),
+      LAYOUT: firstVersion(skills, 'LAYOUT', slugs.layout),
+      CHANNEL: firstVersion(skills, 'CHANNEL', slugs.channel),
     };
     return result;
   }, { ...current });
@@ -182,7 +193,7 @@ export function CreateWorkspace({ project, activePlatform, onPlatform, activeVer
     if (contentVersions.length && !contentVersions.some((version) => version.platform === activePlatform)) onPlatform(contentVersions[0].platform);
   }, [activePlatform, contentVersions, onPlatform]);
 
-  const outlinePlatform = activeVersion?.platform === 'WECHAT' || activeVersion?.platform === 'XIAOHONGSHU' ? activeVersion.platform : null;
+  const outlinePlatform = activeVersion?.platform && activeVersion.platform !== 'VIDEO_CHANNEL' ? activeVersion.platform : null;
 
   useEffect(() => {
     if (!project || !outlinePlatform || stage !== 'copy') return;
