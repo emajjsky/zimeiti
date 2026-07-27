@@ -1,6 +1,7 @@
 const Fastify = require('fastify');
 const cors = require('@fastify/cors');
 const jwt = require('@fastify/jwt');
+const multipart = require('@fastify/multipart');
 const { z } = require('zod');
 const config = require('./config.cjs');
 const { query, transaction } = require('./db.cjs');
@@ -13,6 +14,8 @@ const { listAvailableSkills } = require('./agent/skillRegistry.cjs');
 const { runBailianCli } = require('./runner/bailian.cjs');
 const { ANALYSIS_SCOPE, createTemplateStore, prepareAnalysisInput } = require('./services/intelligence-analysis.cjs');
 const { createCreativeSkillStore } = require('./services/creativeSkills.cjs');
+const { createProjectMaterialStore } = require('./services/projectMaterials.cjs');
+const { saveProjectUpload, removeProjectUpload, openProjectUpload } = require('./services/projectUploadStorage.cjs');
 const { OUTLINE_ACTION_VERSION, OUTLINE_SCOPE, OUTLINE_TEMPLATE_SCOPES, outlineTemplateScope, validateOutlineTemplate, defaultOutlineTemplate, outlineCandidateView } = require('./services/creative-outline.cjs');
 const { DRAFT_ACTION_VERSION, DRAFT_SCOPE, DRAFT_TEMPLATE_SCOPES, draftTemplateScope, validateDraftTemplate, defaultDraftTemplate, draftCandidateView } = require('./services/creative-draft.cjs');
 
@@ -28,6 +31,24 @@ const templateStore = createTemplateStore({ query }, {
   [DRAFT_TEMPLATE_SCOPES.XIAOHONGSHU]: { defaultTemplate: () => defaultDraftTemplate('XIAOHONGSHU'), validateTemplate: validateDraftTemplate },
 });
 const creativeSkillStore = createCreativeSkillStore({ query, transaction });
+const projectMaterialStore = createProjectMaterialStore({ query });
+const projectScope = z.enum(['PROJECT', 'RESEARCH', 'WRITING', 'IMAGING']);
+const projectPlatforms = z.array(z.enum(['WECHAT', 'XIAOHONGSHU'])).max(2);
+const projectInputPayload = z.object({
+  kind: z.enum(['IDEA', 'DRAFT', 'NOTE', 'TRANSCRIPT']),
+  title: z.string().trim().min(1).max(160),
+  body: z.string().trim().min(1).max(50_000),
+  scope: projectScope,
+  platforms: projectPlatforms.default([]),
+});
+const projectReferenceRole = z.enum(['FACT', 'OPINION', 'STRUCTURE', 'VOICE', 'HOOK', 'VISUAL', 'NEGATIVE']);
+const projectReferenceMetadata = z.object({
+  role: projectReferenceRole,
+  title: z.string().trim().min(1).max(200),
+  notes: z.string().max(4_000).default(''),
+  scope: projectScope,
+  platforms: projectPlatforms.default([]),
+});
 const platformSkillInput = z.object({
   LAYOUT: z.string().min(1).max(160).optional(),
   CHANNEL: z.string().min(1).max(160),
@@ -59,6 +80,7 @@ const writingBriefInput = z.object({
 
 app.register(cors, { origin: config.corsOrigin, credentials: false });
 app.register(jwt, { secret: config.jwtSecret });
+app.register(multipart, { limits: { files: 1, fileSize: 50 * 1024 * 1024, fields: 8 } });
 
 app.setErrorHandler((error, _request, reply) => {
   const status = error.statusCode && error.statusCode < 500 ? error.statusCode : 400;
@@ -485,6 +507,94 @@ async function creativeProject(workspaceId, projectId) {
   if (!project) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
   return project;
 }
+
+app.get('/api/v1/creative/projects/:projectId/materials', { preHandler: authenticate }, async (request) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const workspace = await currentWorkspace(request.user.sub);
+  await creativeProject(workspace.id, projectId);
+  return projectMaterialStore.list(workspace.id, projectId);
+});
+
+app.post('/api/v1/creative/projects/:projectId/inputs', { preHandler: authenticate }, async (request, reply) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const input = projectInputPayload.parse(request.body);
+  const workspace = await currentWorkspace(request.user.sub);
+  await creativeProject(workspace.id, projectId);
+  reply.code(201).send(await projectMaterialStore.createInput(workspace.id, projectId, input));
+});
+
+app.put('/api/v1/creative/project-inputs/:id', { preHandler: authenticate }, async (request) => {
+  const id = z.string().uuid().parse(request.params.id);
+  const workspace = await currentWorkspace(request.user.sub);
+  return projectMaterialStore.updateInput(workspace.id, id, projectInputPayload.parse(request.body));
+});
+
+app.delete('/api/v1/creative/project-inputs/:id', { preHandler: authenticate }, async (request, reply) => {
+  const id = z.string().uuid().parse(request.params.id);
+  const workspace = await currentWorkspace(request.user.sub);
+  await projectMaterialStore.removeInput(workspace.id, id);
+  reply.code(204).send();
+});
+
+app.post('/api/v1/creative/projects/:projectId/references', { preHandler: authenticate }, async (request, reply) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const input = projectReferenceMetadata.extend({ url: z.string().url().max(2_000).refine((value) => /^https?:\/\//i.test(value), '只支持 HTTP(S) 公开链接。') }).parse(request.body);
+  const workspace = await currentWorkspace(request.user.sub);
+  await creativeProject(workspace.id, projectId);
+  reply.code(201).send(await projectMaterialStore.createReference(workspace.id, projectId, { ...input, sourceType: 'LINK' }));
+});
+
+app.post('/api/v1/creative/projects/:projectId/files', { preHandler: authenticate }, async (request, reply) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const queryInput = z.object({
+    title: z.string().trim().max(200).optional(),
+    role: projectReferenceRole,
+    scope: projectScope,
+    platforms: z.string().max(80).optional(),
+    notes: z.string().max(4_000).optional(),
+  }).parse(request.query);
+  const platforms = queryInput.platforms ? queryInput.platforms.split(',').filter(Boolean) : [];
+  projectPlatforms.parse(platforms);
+  const workspace = await currentWorkspace(request.user.sub);
+  await creativeProject(workspace.id, projectId);
+  const part = await request.file();
+  if (!part) throw new Error('请选择要上传的文件。');
+  const stored = await saveProjectUpload(config.uploadRoot, workspace.id, projectId, part);
+  try {
+    const created = await projectMaterialStore.createReference(workspace.id, projectId, {
+      sourceType: 'FILE', role: queryInput.role, title: queryInput.title || stored.originalFilename,
+      notes: queryInput.notes ?? '', scope: queryInput.scope, platforms, ...stored,
+    });
+    reply.code(201).send(created);
+  } catch (error) {
+    await removeProjectUpload(config.uploadRoot, stored.storageKey).catch(() => {});
+    throw error;
+  }
+});
+
+app.put('/api/v1/creative/project-references/:id', { preHandler: authenticate }, async (request) => {
+  const id = z.string().uuid().parse(request.params.id);
+  const workspace = await currentWorkspace(request.user.sub);
+  return projectMaterialStore.updateReference(workspace.id, id, projectReferenceMetadata.parse(request.body));
+});
+
+app.delete('/api/v1/creative/project-references/:id', { preHandler: authenticate }, async (request, reply) => {
+  const id = z.string().uuid().parse(request.params.id);
+  const workspace = await currentWorkspace(request.user.sub);
+  const removed = await projectMaterialStore.removeReference(workspace.id, id);
+  if (removed.storage_key) await removeProjectUpload(config.uploadRoot, removed.storage_key).catch((error) => request.log.warn({ error }, '清理项目素材文件失败'));
+  reply.code(204).send();
+});
+
+app.get('/api/v1/creative/project-files/:id/content', { preHandler: authenticate }, async (request, reply) => {
+  const id = z.string().uuid().parse(request.params.id);
+  const workspace = await currentWorkspace(request.user.sub);
+  const reference = await projectMaterialStore.getReference(workspace.id, id);
+  if (reference.source_type !== 'FILE' || !reference.storage_key) { const error = new Error('这条参考资料没有文件内容。'); error.statusCode = 404; throw error; }
+  const filename = encodeURIComponent(reference.original_filename || 'project-material');
+  reply.type(reference.mime_type).header('Content-Length', reference.size_bytes).header('Cache-Control', 'private, max-age=3600').header('X-Content-Type-Options', 'nosniff').header('Content-Security-Policy', 'sandbox').header('Content-Disposition', `inline; filename*=UTF-8''${filename}`);
+  return reply.send(openProjectUpload(config.uploadRoot, reference.storage_key));
+});
 
 app.post('/api/v1/creative/projects/:projectId/outline/prepare', { preHandler: authenticate }, async (request, reply) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);

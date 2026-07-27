@@ -8,6 +8,8 @@ from playwright.sync_api import sync_playwright
 
 ARTIFACTS = Path(__file__).resolve().parents[1] / "artifacts"
 ARTIFACTS.mkdir(exist_ok=True)
+UPLOAD_SAMPLE = ARTIFACTS / "project-reference.txt"
+UPLOAD_SAMPLE.write_text("项目素材上传验收", encoding="utf-8")
 
 
 def chrome_path():
@@ -48,7 +50,7 @@ with sync_playwright() as playwright:
     page.get_by_role("button", name="确认立项").click()
     page.wait_for_selector(".creative-brief-form")
 
-    assert page.locator(".creative-stepper button").count() == 5
+    assert page.locator(".creative-stepper button").count() == 6
     assert page.locator(".creative-skill-panel").count() == 0
     assert page.get_by_text("Skill 组合", exact=True).count() == 0
     assert page.get_by_role("button", name="配图").is_disabled()
@@ -59,27 +61,78 @@ with sync_playwright() as playwright:
     target = page.get_by_label("目标受众")
     target.fill("想提高内容效率但不熟悉技术的普通创作者")
     with page.expect_response(lambda response: "/creative/projects/" in response.url and response.request.method == "PUT" and response.status == 200):
-        page.get_by_role("button", name="保存设定").click()
+        page.get_by_role("button", name="保存概览").click()
     page.get_by_text("已保存", exact=False).wait_for()
     assert "view=create" in page.url
     assert "project=" in page.url
     page.screenshot(path=ARTIFACTS / "creative-brief-desktop.png", full_page=True)
+
+    page.locator(".creative-stepper button").filter(has_text="资料与研究").click()
+    page.wait_for_selector(".project-materials")
+    page.get_by_role("button", name="新增内容").click()
+    dialog = page.get_by_role("dialog")
+    dialog.get_by_label("项目内容标题").fill("必须保留的个人观点")
+    dialog.get_by_label("项目内容正文").fill("判断 AI 工具时，先验证真实任务，再比较功能数量。")
+    dialog.get_by_role("button", name="保存", exact=True).click()
+    page.get_by_text("必须保留的个人观点", exact=True).wait_for()
+
+    page.get_by_role("button", name="编辑 必须保留的个人观点").click()
+    dialog = page.get_by_role("dialog")
+    dialog.get_by_label("项目内容标题").fill("必须保留的核心观点")
+    dialog.get_by_role("button", name="保存", exact=True).click()
+    page.get_by_text("必须保留的核心观点", exact=True).wait_for()
+
+    page.locator(".materials-tabs button").filter(has_text="参考链接").click()
+    page.get_by_role("button", name="新增参考").click()
+    dialog = page.get_by_role("dialog")
+    dialog.get_by_label("参考资料标题").fill("官方产品说明")
+    dialog.get_by_label("参考资料链接").fill("https://example.com/product")
+    dialog.get_by_label("参考资料备注").fill("用于核验产品能力")
+    dialog.get_by_role("button", name="保存", exact=True).click()
+    page.get_by_text("官方产品说明", exact=True).wait_for()
+
+    page.locator(".materials-tabs button").filter(has_text="素材文件").click()
+    page.get_by_role("button", name="上传素材").click()
+    dialog = page.get_by_role("dialog")
+    dialog.get_by_label("素材文件").set_input_files(str(UPLOAD_SAMPLE))
+    dialog.get_by_label("参考资料备注").fill("用户提供的文本素材")
+    dialog.get_by_role("button", name="保存", exact=True).click()
+    page.get_by_text("project-reference.txt", exact=True).wait_for()
+
+    page.locator(".materials-tabs button").filter(has_text="参考链接").click()
+    page.once("dialog", lambda confirm: confirm.accept())
+    page.get_by_role("button", name="删除 官方产品说明").click()
+    page.get_by_text("还没有参考链接", exact=True).wait_for()
+    page.screenshot(path=ARTIFACTS / "creative-materials-desktop.png", full_page=True)
 
     page.reload()
     page.wait_for_load_state("networkidle")
     page.wait_for_selector(".creative-brief-form")
     assert page.get_by_label("目标受众").input_value() == "想提高内容效率但不熟悉技术的普通创作者"
 
+    page.locator(".creative-stepper button").filter(has_text="资料与研究").click()
+    page.get_by_text("必须保留的核心观点", exact=True).wait_for()
+    page.screenshot(path=ARTIFACTS / "creative-materials-desktop.png", full_page=True)
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_timeout(200)
+    assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
+    page.get_by_role("button", name="编辑 必须保留的核心观点").click()
+    page.screenshot(path=ARTIFACTS / "creative-materials-mobile.png", full_page=True)
+    assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
+    page.get_by_role("button", name="关闭", exact=True).click()
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    page.locator(".materials-tabs button").filter(has_text="素材文件").click()
+    page.get_by_text("project-reference.txt", exact=True).wait_for()
+
     page.locator(".creative-stepper button").filter(has_text="文案").click()
     page.wait_for_selector(".creative-agent-panel")
     strategy = page.locator(".writing-strategy")
     assert strategy.locator("select").count() == 3
+    assert strategy.locator("input").count() == 1
     assert strategy.get_by_text("排版", exact=True).count() == 0
-    assert strategy.get_by_text("公众号文案", exact=True).count() == 1
-    assert strategy.locator(".writing-channel-rule b").text_content() == "公众号"
+    assert strategy.get_by_text("公众号文案 · 公众号规则", exact=True).count() == 1
     page.locator(".editor-head .tabs").get_by_role("button", name="小红书", exact=True).click()
-    assert strategy.get_by_text("小红书文案", exact=True).count() == 1
-    assert strategy.locator(".writing-channel-rule b").text_content() == "小红书"
+    assert strategy.get_by_text("小红书文案 · 小红书规则", exact=True).count() == 1
     page.locator(".editor-head .tabs").get_by_role("button", name="公众号", exact=True).click()
     page.get_by_role("button", name="生成大纲", exact=True).click()
     page.get_by_text("请先为文案生成配置可用文本模型。", exact=True).wait_for()

@@ -14,6 +14,7 @@ module.exports = {
   redisUrl: process.env.REDIS_URL || 'redis://127.0.0.1:6379',
   jwtSecret,
   corsOrigin: process.env.CORS_ORIGIN || 'http://127.0.0.1:5173',
+  uploadRoot: path.resolve(process.env.UPLOAD_ROOT || path.join(process.cwd(), 'data', 'uploads')),
   encryptionSecret: process.env.CREDENTIAL_ENCRYPTION_KEY || (isProduction ? '' : crypto.createHash('sha256').update(jwtSecret).digest('base64')),
   isProduction,
 };

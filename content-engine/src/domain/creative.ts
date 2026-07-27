@@ -5,6 +5,43 @@ export type CreativeSkillSelection = Record<CreativeSkillDimension, string>;
 export type CreativePlatform = Exclude<Platform, 'VIDEO_CHANNEL'>;
 export type CreativePlatformSkillSelection = Record<'LAYOUT' | 'CHANNEL', string>;
 export type CreativePlatformSkillMap = Partial<Record<CreativePlatform, CreativePlatformSkillSelection>>;
+export type ProjectMaterialScope = 'PROJECT' | 'RESEARCH' | 'WRITING' | 'IMAGING';
+export type ProjectInputKind = 'IDEA' | 'DRAFT' | 'NOTE' | 'TRANSCRIPT';
+export type ProjectReferenceRole = 'FACT' | 'OPINION' | 'STRUCTURE' | 'VOICE' | 'HOOK' | 'VISUAL' | 'NEGATIVE';
+
+export interface ProjectInput {
+  id: string;
+  projectId: string;
+  kind: ProjectInputKind;
+  title: string;
+  body: string;
+  scope: ProjectMaterialScope;
+  platforms: CreativePlatform[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ProjectInputPayload = Pick<ProjectInput, 'kind' | 'title' | 'body' | 'scope' | 'platforms'>;
+
+export interface ProjectReference {
+  id: string;
+  projectId: string;
+  sourceType: 'LINK' | 'FILE';
+  role: ProjectReferenceRole;
+  title: string;
+  notes: string;
+  url: string | null;
+  originalFilename: string | null;
+  mimeType: string | null;
+  sizeBytes: number | null;
+  sha256: string | null;
+  scope: ProjectMaterialScope;
+  platforms: CreativePlatform[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ProjectReferenceMetadata = Pick<ProjectReference, 'role' | 'title' | 'notes' | 'scope' | 'platforms'>;
 
 export interface CreativeSkillDefinition {
   id: string;

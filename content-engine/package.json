@@ -18,6 +18,7 @@
   "dependencies": {
     "@fastify/cors": "^11.3.0",
     "@fastify/jwt": "^10.2.0",
+    "@fastify/multipart": "^9.4.0",
     "@vitejs/plugin-react": "latest",
     "animejs": "^4.5.0",
     "bailian-cli": "1.10.1",

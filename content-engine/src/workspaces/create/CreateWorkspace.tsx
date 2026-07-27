@@ -4,12 +4,14 @@ import { webCreative } from '../../data/webApi';
 import type { ContentProject, ContentVersion, Platform } from '../../domain/content';
 import { platformName, projectStatusName } from '../../domain/content';
 import type { CreativeDraftCandidate, CreativeDraftRun, CreativeOutlineCandidate, CreativeOutlineRun, CreativePlatform, CreativePlatformSkillMap, CreativeSkillDefinition, CreativeSkillDimension, CreativeSkillSelection, WritingBriefInput } from '../../domain/creative';
+import { ProjectMaterials } from './ProjectMaterials';
 
-type CreateStage = 'brief' | 'copy' | 'visual' | 'layout' | 'review';
+type CreateStage = 'brief' | 'materials' | 'copy' | 'visual' | 'layout' | 'review';
 type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
 
 const stages: { id: CreateStage; label: string; enabled: boolean }[] = [
-  { id: 'brief', label: '创作设定', enabled: true },
+  { id: 'brief', label: '项目概览', enabled: true },
+  { id: 'materials', label: '资料与研究', enabled: true },
   { id: 'copy', label: '文案', enabled: true },
   { id: 'visual', label: '配图', enabled: false },
   { id: 'layout', label: '排版', enabled: false },
@@ -477,17 +479,16 @@ export function CreateWorkspace({ project, activePlatform, onPlatform, activeVer
     <nav className="creative-stepper" aria-label="创作流程">{stages.map((item, index) => <button type="button" key={item.id} className={stage === item.id ? 'active' : ''} disabled={!item.enabled} onClick={() => item.enabled && setStage(item.id)}><b>{index + 1}</b><span>{item.label}</span></button>)}</nav>
 
     {stage === 'brief' && <section className="creative-brief-shell">
-      {!brief && briefState !== 'error' && <div className="creative-brief-loading"><LoaderCircle size={20}/><span>正在读取创作设定</span></div>}
-      {briefState === 'error' && !brief && <div className="creative-brief-error"><CircleAlert size={20}/><div><b>创作设定加载失败</b><p>{briefError}</p></div></div>}
+      {!brief && briefState !== 'error' && <div className="creative-brief-loading"><LoaderCircle size={20}/><span>正在读取项目概览</span></div>}
+      {briefState === 'error' && !brief && <div className="creative-brief-error"><CircleAlert size={20}/><div><b>项目概览加载失败</b><p>{briefError}</p></div></div>}
       {brief && <>
         <form className="creative-brief-form" onSubmit={(event) => { event.preventDefault(); void saveBrief(); }}>
-          <header><div><h2>创作设定</h2><p>先固定这篇内容要解决的问题，再进入文案。</p></div><button className="button primary" type="submit" disabled={briefState === 'saving' || brief.selectedPlatforms.length === 0}>{briefState === 'saving' ? '保存中' : '保存设定'}</button></header>
+          <header><div><h2>项目概览</h2></div><button className="button primary" type="submit" disabled={briefState === 'saving' || brief.selectedPlatforms.length === 0}>{briefState === 'saving' ? '保存中' : '保存概览'}</button></header>
           <div className="creative-brief-fields">
             <label><span>创作目标</span><input value={brief.objective} onChange={(event) => changeBrief({ objective: event.target.value })}/></label>
             <label><span>目标受众</span><input value={brief.targetAudience} onChange={(event) => changeBrief({ targetAudience: event.target.value })} placeholder="这篇内容主要写给谁"/></label>
             <label className="wide"><span>核心表达</span><textarea rows={4} value={brief.coreMessage} onChange={(event) => changeBrief({ coreMessage: event.target.value })}/></label>
             <label className="wide"><span>来源与核验要求</span><textarea rows={3} value={brief.sourceRequirements} onChange={(event) => changeBrief({ sourceRequirements: event.target.value })} placeholder="必须引用的来源、数据和待核验事实"/></label>
-            <label><span>篇幅目标</span><input value={brief.lengthTarget} onChange={(event) => changeBrief({ lengthTarget: event.target.value })}/></label>
             <fieldset><legend>目标平台</legend><div>{contentVersions.map((version) => <label key={version.platform}><input type="checkbox" checked={brief.selectedPlatforms.includes(version.platform)} onChange={() => toggleBriefPlatform(version.platform as CreativePlatform)}/><span>{platformName[version.platform]}</span></label>)}</div></fieldset>
             <label className="wide"><span>补充要求</span><textarea rows={3} value={brief.notes} onChange={(event) => changeBrief({ notes: event.target.value })} placeholder="不希望出现的表达、必须保留的例子或其它要求"/></label>
           </div>
@@ -496,8 +497,10 @@ export function CreateWorkspace({ project, activePlatform, onPlatform, activeVer
       </>}
     </section>}
 
+    {stage === 'materials' && <ProjectMaterials projectId={project.id} platforms={contentVersions.map((version) => version.platform as CreativePlatform)}/>}
+
     {stage === 'copy' && (activeVersion && activeVersion.platform !== 'VIDEO_CHANNEL' ? <div className="create-layout editable creative-copy-layout"><section className="editor"><div className="editor-head"><div className="tabs">{contentVersions.map((version) => <button type="button" key={version.platform} className={version.platform === activePlatform ? 'active' : ''} onClick={() => onPlatform(version.platform)}>{platformName[version.platform]}</button>)}</div><button className="text-button" type="button" onClick={saveCopy}>保存草稿</button></div>
-      {brief && <section className="writing-strategy" aria-labelledby="writing-strategy-title"><header><div><h2 id="writing-strategy-title">写作策略</h2><span>{platformName[activeVersion.platform]}文案</span></div><button className="text-button" type="button" disabled={briefState === 'saving'} onClick={() => void saveBrief()}>{briefState === 'saving' ? '保存中' : briefState === 'saved' ? '已保存' : '保存策略'}</button></header><div className="writing-strategy-fields">{sharedDimensions.map(({ id, label }) => <label key={id}><span>{label}</span><select value={brief.selectedSkills[id]} onChange={(event) => changeBrief({ selectedSkills: { ...brief.selectedSkills, [id]: event.target.value } })}>{(skillGroups.get(id) ?? []).map((skill) => <option key={skill.version.id} value={skill.version.id}>{skill.name}</option>)}</select><small>{skillDescription(brief.selectedSkills[id])}</small></label>)}<div className="writing-channel-rule"><span>平台规则</span><b>{skillName(brief.platformSkills[activeVersion.platform as CreativePlatform]?.CHANNEL)}</b><small>随当前平台自动绑定</small></div></div>{briefError && <div className="writing-strategy-error" role="alert"><CircleAlert size={16}/><span>{briefError}</span></div>}</section>}
+      {brief && <section className="writing-strategy" aria-labelledby="writing-strategy-title"><header><div><h2 id="writing-strategy-title">写作策略</h2><span>{platformName[activeVersion.platform]}文案 · {skillName(brief.platformSkills[activeVersion.platform as CreativePlatform]?.CHANNEL)}规则</span></div><button className="text-button" type="button" disabled={briefState === 'saving'} onClick={() => void saveBrief()}>{briefState === 'saving' ? '保存中' : briefState === 'saved' ? '已保存' : '保存策略'}</button></header><div className="writing-strategy-fields">{sharedDimensions.map(({ id, label }) => <label key={id}><span>{label}</span><select value={brief.selectedSkills[id]} onChange={(event) => changeBrief({ selectedSkills: { ...brief.selectedSkills, [id]: event.target.value } })}>{(skillGroups.get(id) ?? []).map((skill) => <option key={skill.version.id} value={skill.version.id}>{skill.name}</option>)}</select><small>{skillDescription(brief.selectedSkills[id])}</small></label>)}<label><span>目标篇幅</span><input value={brief.lengthTarget} onChange={(event) => changeBrief({ lengthTarget: event.target.value })}/><small>当前平台的正文范围</small></label></div>{briefError && <div className="writing-strategy-error" role="alert"><CircleAlert size={16}/><span>{briefError}</span></div>}</section>}
       <div className="editor-tools">{platformName[activeVersion.platform]}文案</div>
       <div className="document editor-document"><label>标题<textarea ref={titleEditorRef} rows={1} value={draft.title} onChange={(event) => changeDraft({ title: event.target.value })} onBlur={saveCopy}/></label><label>正文<textarea ref={bodyEditorRef} value={draft.body} onChange={(event) => changeDraft({ body: event.target.value })} onBlur={saveCopy} placeholder="从核心观点开始，写出这期内容的完整表达。"/></label></div></section>
       <aside className="assistant-panel creative-agent-panel"><header><div><Sparkles size={18}/><h2>创作 Agent</h2></div><span>{platformName[activeVersion.platform]}</span></header>

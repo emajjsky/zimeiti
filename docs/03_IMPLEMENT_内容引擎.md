@@ -1,7 +1,7 @@
 # 内容引擎技术实施方案
 
 > 版本：Web-only v1.0
-> 更新：2026-07-24
+> 更新：2026-07-27
 > 适用阶段：P0-P2
 
 ## 1. 架构决策
@@ -28,7 +28,7 @@ Fastify API
 | PostgreSQL | 用户、工作空间、凭据、情报、任务和审计主数据 | 已建立初始迁移 |
 | Redis/BullMQ | 延迟任务、异步任务、重试与 Worker 通信 | 已建立骨架 |
 | 百炼 CLI Runner | 每个任务临时注入 Key 并执行 CLI | 已建立骨架 |
-| Agent 动作与 Skill 组合 | 受限动作计划、五维创作规则、确认前运行记录 | 热点分析动作已建立，创作组合待实施 |
+| Agent 动作与 Skill 组合 | 受限动作计划、五维创作规则、确认前运行记录 | 热点分析、大纲和初稿动作已建立；研究动作待实施 |
 | RSS/剪藏/Tavily 服务 | 合规信息采集、统一分类和候选搜索 | RSS 目录与分类已验收，Tavily/剪藏待真实用户验收 |
 | 飞书适配器 | OAuth、模板、字段映射、同步 | 未实现 |
 | 发布扩展 | 浏览器预填与人工确认 | 未实现 |
@@ -52,6 +52,8 @@ Fastify API
 | `intelligence_sources` / `intelligence_items` | 资讯来源和情报记录；`matched_keywords` 保存真实命中词；服务端在读取与 RSS 刷新时删除超过 30 天的数据 |
 | `jobs` / `api_usage_logs` | 异步任务、模型调用与错误记录 |
 | `workspace_snapshots` | 从早期原型迁移的临时状态桥 |
+| `project_inputs` | 项目想法、草稿、笔记和转写；保存使用阶段与适用平台 |
+| `project_references` | 公开链接和上传文件的用途、Scope、元数据与私有存储键 |
 
 阶段 1 首个迁移必须新增 `generation_runs`：记录确认卡、来源快照、Scope、模型、提示词版本、预估/实际用量、状态、错误和产物引用。阶段 3 必须新增 `publication_tasks`：一个平台版本可关联多次排期、提交、失败重试或取消。
 
@@ -93,6 +95,13 @@ POST /api/v1/intelligence/clip
 POST /api/v1/intelligence/search
 POST /api/v1/jobs/bailian-text
 GET  /api/v1/jobs/:id
+GET  /api/v1/creative/projects/:projectId/materials
+POST /api/v1/creative/projects/:projectId/inputs
+PUT/DELETE /api/v1/creative/project-inputs/:id
+POST /api/v1/creative/projects/:projectId/references
+POST /api/v1/creative/projects/:projectId/files
+PUT/DELETE /api/v1/creative/project-references/:id
+GET /api/v1/creative/project-files/:id/content
 ```
 
 ### 5.2 异步任务
@@ -493,3 +502,15 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 ### 实施顺序
 
 第一切片先跑通公众号真实案例：一份用户草稿、两条参考链接、一张已有图片、一张视觉参考图。顺序为项目资料与 Scope → 研究计划/证据 → 内容母版 → 公众号平台策略 → 对话式候选修改 → 配图计划与两类素材 → HTML/素材包 → 五类审核。小红书在公众号闭环通过后复用同一母版实现，不并行堆页面；视频保持独立。
+
+## 2026-07-27 实现记录：项目资料与参考 Scope
+
+- 迁移 `013_project_materials.sql` 新增 `project_inputs` 和 `project_references`。当前项目主体仍位于 `workspace_snapshots`，所以两表先使用 `project_id text` 并在 API 写入前调用 `creativeProject()` 校验项目归属；正式 `content_projects` 表建立后再补外键迁移。
+- `projectMaterials.cjs` 提供输入与参考资料的工作空间隔离 CRUD，返回 DTO 主动移除 `storage_key`。
+- `projectUploadStorage.cjs` 使用相对存储键、随机文件名、项目 ID 哈希目录和 `safePath()` 防止路径穿越；写入时计算 SHA-256，失败时清理半成品。
+- Fastify 注册 `@fastify/multipart`，单文件上限 50MB。MIME 白名单只允许 JPEG、PNG、WebP、GIF、PDF、纯文本、Markdown、MP3、WAV、M4A、MP4 和 WebM。
+- 文件内容只通过鉴权 API 读取；响应增加 `X-Content-Type-Options: nosniff`、CSP sandbox、私有缓存和安全文件名。删除数据库记录后清理对应文件。
+- `ProjectMaterials.tsx` 将我的内容、参考链接、素材文件拆为互斥页签，提供加载、空、错误、保存中、编辑和删除状态；移动端编辑弹层使用完整视口且无横向溢出。
+- 创作步骤更新为项目概览、资料与研究、文案、配图、排版、审核。目标篇幅从项目概览移动到文案写作策略，但在 `platform_strategies` 建立前仍写入兼容字段 `lengthTarget`。
+- 开发默认目录为 `data/uploads`，由 `.gitignore` 排除；生产部署必须把 `UPLOAD_ROOT` 指向持久卷或改用 OSS 适配器。
+- 本切片没有读取链接正文、转写音视频、运行浏览器或调用模型。下一实现单元是 `research_runs`、`research_sources`、`evidence_claims` 及受控研究确认卡。

@@ -82,7 +82,7 @@ test('生成小红书内容只冻结写作维度和小红书平台规则', async
 test('创作主流程不再把视频列为必经步骤', () => {
   const source = fs.readFileSync(new URL('../src/workspaces/create/CreateWorkspace.tsx', import.meta.url), 'utf8');
   const server = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
-  assert.match(source, /创作设定[\s\S]*文案[\s\S]*配图[\s\S]*排版[\s\S]*审核/);
+  assert.match(source, /项目概览[\s\S]*资料与研究[\s\S]*文案[\s\S]*配图[\s\S]*排版[\s\S]*审核/);
   assert.doesNotMatch(source, /label: '视频'/);
   assert.match(source, /version\.platform !== 'VIDEO_CHANNEL'/);
   assert.match(source, /webCreative\.saveBrief/);
@@ -98,7 +98,7 @@ test('Skill 只在文案阶段作为写作策略出现，排版不参与写作�
   assert.match(source.slice(copyStart), /writing-strategy/);
   assert.match(source, /题材[\s\S]*内容类型[\s\S]*语言风格/);
   assert.match(source.slice(copyStart), /sharedDimensions\.map/);
-  assert.match(source.slice(copyStart), /平台规则[\s\S]*随当前平台自动绑定/);
+  assert.match(source.slice(copyStart), /文案 · [\s\S]*规则/);
   assert.doesNotMatch(source.slice(copyStart, source.indexOf('outlineReviewOpen', copyStart)), /platformDimensions|changePlatformSkill/);
 });
 

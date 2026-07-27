@@ -1,7 +1,7 @@
 import type { LocalState } from './localRepository';
 import type { ApiUsageLog, ApiUsageSummary, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelTaskPolicy } from '../domain/integrations';
 import type { ContentProject, IntelligenceAnalysis, Platform } from '../domain/content';
-import type { CreativeDraftCandidate, CreativeDraftPreparation, CreativeDraftRun, CreativeOutlineCandidate, CreativeOutlinePreparation, CreativeOutlineRun, CreativeSkillDefinition, WritingBrief, WritingBriefInput } from '../domain/creative';
+import type { CreativeDraftCandidate, CreativeDraftPreparation, CreativeDraftRun, CreativeOutlineCandidate, CreativeOutlinePreparation, CreativeOutlineRun, CreativeSkillDefinition, ProjectInput, ProjectInputPayload, ProjectReference, ProjectReferenceMetadata, WritingBrief, WritingBriefInput } from '../domain/creative';
 
 const tokenKey = 'content-engine-web-session-v1';
 const apiBase = import.meta.env.VITE_API_BASE ?? '/api/v1';
@@ -14,7 +14,8 @@ function readSession(): WebSession | null {
 
 async function request<T>(path: string, options: RequestInit = {}, authenticated = true): Promise<T> {
   const session = readSession();
-  const response = await fetch(`${apiBase}${path}`, { ...options, headers: { ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(authenticated && session ? { Authorization: `Bearer ${session.accessToken}` } : {}), ...(options.headers ?? {}) } });
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+  const response = await fetch(`${apiBase}${path}`, { ...options, headers: { ...(options.body !== undefined && !isFormData ? { 'Content-Type': 'application/json' } : {}), ...(authenticated && session ? { Authorization: `Bearer ${session.accessToken}` } : {}), ...(options.headers ?? {}) } });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload?.error?.message || `请求失败（HTTP ${response.status}）。`);
   return payload as T;
@@ -43,6 +44,24 @@ export const webCreative = {
   skills: () => request<CreativeSkillDefinition[]>('/creative/skills'),
   brief: (projectId: string) => request<{ brief: WritingBrief | null }>(`/creative/projects/${encodeURIComponent(projectId)}/brief`),
   saveBrief: (projectId: string, input: WritingBriefInput) => request<{ brief: WritingBrief }>(`/creative/projects/${encodeURIComponent(projectId)}/brief`, { method: 'PUT', body: JSON.stringify(input) }),
+  materials: (projectId: string) => request<{ inputs: ProjectInput[]; references: ProjectReference[] }>(`/creative/projects/${encodeURIComponent(projectId)}/materials`),
+  createInput: (projectId: string, input: ProjectInputPayload) => request<ProjectInput>(`/creative/projects/${encodeURIComponent(projectId)}/inputs`, { method: 'POST', body: JSON.stringify(input) }),
+  updateInput: (id: string, input: ProjectInputPayload) => request<ProjectInput>(`/creative/project-inputs/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(input) }),
+  removeInput: (id: string) => request<void>(`/creative/project-inputs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  createReference: (projectId: string, input: ProjectReferenceMetadata & { url: string }) => request<ProjectReference>(`/creative/projects/${encodeURIComponent(projectId)}/references`, { method: 'POST', body: JSON.stringify(input) }),
+  updateReference: (id: string, input: ProjectReferenceMetadata) => request<ProjectReference>(`/creative/project-references/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(input) }),
+  removeReference: (id: string) => request<void>(`/creative/project-references/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  uploadFile: (projectId: string, file: File, input: ProjectReferenceMetadata) => {
+    const params = new URLSearchParams({ title: input.title, role: input.role, scope: input.scope, notes: input.notes, platforms: input.platforms.join(',') });
+    const body = new FormData(); body.append('file', file);
+    return request<ProjectReference>(`/creative/projects/${encodeURIComponent(projectId)}/files?${params}`, { method: 'POST', body });
+  },
+  async projectFile(id: string) {
+    const session = readSession();
+    const response = await fetch(`${apiBase}/creative/project-files/${encodeURIComponent(id)}/content`, { headers: session ? { Authorization: `Bearer ${session.accessToken}` } : {} });
+    if (!response.ok) { const payload = await response.json().catch(() => ({})); throw new Error(payload?.error?.message || `读取文件失败（HTTP ${response.status}）。`); }
+    return response.blob();
+  },
   prepareOutline: (projectId: string, platform: Exclude<Platform, 'VIDEO_CHANNEL'>) => request<CreativeOutlinePreparation>(`/creative/projects/${encodeURIComponent(projectId)}/outline/prepare`, { method: 'POST', body: JSON.stringify({ platform }) }),
   confirmOutline: (runId: string) => request<{ id: string; status: 'QUEUED'; jobId: string }>(`/creative/outline-runs/${encodeURIComponent(runId)}/confirm`, { method: 'POST', body: '{}' }),
   cancelOutline: (runId: string) => request<{ id: string; status: 'CANCELLED' }>(`/creative/outline-runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST', body: '{}' }),
