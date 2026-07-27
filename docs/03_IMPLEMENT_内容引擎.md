@@ -28,7 +28,7 @@ Fastify API
 | PostgreSQL | 用户、工作空间、凭据、情报、任务和审计主数据 | 已建立初始迁移 |
 | Redis/BullMQ | 延迟任务、异步任务、重试与 Worker 通信 | 已建立骨架 |
 | 百炼 CLI Runner | 每个任务临时注入 Key 并执行 CLI | 已建立骨架 |
-| Agent 动作与 Skill 组合 | 受限动作计划、五维创作规则、确认前运行记录 | 热点分析、大纲、初稿和项目研究计划已建立；来源执行待实施 |
+| Agent 动作与 Skill 组合 | 受限动作计划、版本化创作规则、确认前运行记录 | 通用项目 Agent、研究计划和八个四平台文案动作已建立；来源执行待实施 |
 | RSS/剪藏/Tavily 服务 | 合规信息采集、统一分类和候选搜索 | RSS 目录与分类已验收，Tavily/剪藏待真实用户验收 |
 | 飞书适配器 | OAuth、模板、字段映射、同步 | 未实现 |
 | 发布扩展 | 浏览器预填与人工确认 | 未实现 |
@@ -535,3 +535,18 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - `ProjectMaterials.tsx` 管理资料选择、真实项目进度和引用标记；`ProjectResearchAgent.tsx` 管理持久化对话、准备、确认、排队、运行、失败和完成计划。活动确认卡存在时阻止重复准备。
 - 页面使用 4 步资产进度：项目概览、项目资料、研究计划、正式文案。正式文案排除立项时自动预填的核心观点，仅在采用初稿或用户实际修改标题/正文后完成。
 - 当前 Prompt 只生成研究问题、待核验主张和下一步动作，不执行动作。`READ_LINK`、`SEARCH_WEB` 和 `ASK_USER` 将在通用 Agent 与文案候选闭环之后，由来源/证据对象承接。
+
+## 2026-07-27 实现记录：通用项目 Agent 与四平台文案
+
+- `015_universal_project_agent.sql` 为消息增加阶段、消息类型、动作运行和产物引用，新增阶段摘要、通用产物、内容母版、平台策略和平台文案版本；所有项目对象继续按 `workspace_id + project_id` 隔离。
+- `016_four_platform_creative_contracts.sql` 增加知乎、微博的渠道/结构 Skill 和四平台大纲、初稿 Scope；`017_project_copy_actions.sql` 注册生成大纲、生成正文、润色、重构、扩写、压缩、修改选区和平台适配八个动作版本。
+- `project-agent.cjs` 统一研究与文案上下文、消息、摘要和产物 DTO。`project-copy-action.cjs` 负责确定性动作解析、平台规则、Prompt、严格输出 Schema、候选结构和事实保留。
+- `/creative/projects/:projectId/agent` 提供阶段/平台/历史上下文；`agent/prepare` 只冻结快照并创建 DRAFT，`agent-runs/:id/confirm` 才入队。Worker 成功只写候选、消息、运行和 `PROJECT_COPY` 用量，采用事务才更新正式版本。
+- `/creative/project-artifacts/:id/accept` 采用候选并更新内容母版、平台版本、正式工作区快照和阶段摘要；`/reject` 只允许废弃当前工作空间中的大纲或平台文案候选并记录 `SYSTEM_EVENT`。
+- `/creative/projects/:projectId/platforms/:platform` 幂等启用四个图文平台，禁止创建视频号。写作 Brief 校验已拆到 `writing-brief.cjs`，共享 `LAYOUT/CHANNEL` 可为空，当前平台 `CHANNEL` 仍强制存在。
+- `ProjectAgent.tsx` 替代研究专用组件，渲染五类消息、当前阶段/完整历史、确认卡、运行状态和候选入口；研究无资料、文案策略未保存或存在活动运行时禁用发送。
+- `CopyWorkspace.tsx` 管理四平台标签、平台启用、写作策略、正式文案自动保存、正文选区、版本入口和项目 Agent。`CopyCandidateDialog.tsx` 提供大纲/全文审核、段落 LCS 差异、待核验事实、采用和废弃。
+- 服务端项目回写通过 `updateState()` 持久化，新增平台和采用正文均能在刷新后恢复。候选采用成功后关闭旧审核对象，再从 Agent 上下文读取已采用产物。
+- 响应式断点为 1024px、790px 和 460px。桌面为正文/Agent 双栏，窄屏为单栏；候选在移动端占满视口。视觉参数保持 `DESIGN_VARIANCE 4 / MOTION_INTENSITY 2 / VISUAL_DENSITY 6`，只保留加载反馈动画。
+- 自动化覆盖四平台隔离、策略阻断、选区、确认卡、候选不覆盖正文、采用后更新、微博不串稿、刷新恢复和无横向溢出。E2E 路由拦截 prepare/confirm/accept，不调用真实付费模型。
+- 当前未实现 `SEARCH_WEB`/`READ_LINK` 的来源执行、证据主张、图片计划与生成、排版、审核、内容包和发布；这些模块不得根据本记录标记完成。

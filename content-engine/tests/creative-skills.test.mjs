@@ -81,27 +81,28 @@ test('生成小红书内容只冻结写作维度和小红书平台规则', async
 
 test('创作主流程不再把视频列为必经步骤', () => {
   const source = fs.readFileSync(new URL('../src/workspaces/create/CreateWorkspace.tsx', import.meta.url), 'utf8');
-  const server = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
+  const briefSchema = fs.readFileSync(new URL('../server/services/writing-brief.cjs', import.meta.url), 'utf8');
   assert.match(source, /项目概览[\s\S]*资料与研究[\s\S]*文案[\s\S]*配图[\s\S]*排版[\s\S]*审核/);
   assert.doesNotMatch(source, /label: '视频'/);
   assert.match(source, /version\.platform !== 'VIDEO_CHANNEL'/);
   assert.match(source, /webCreative\.saveBrief/);
-  assert.match(server, /const creativePlatform = z\.enum\(\['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO'\]\)/);
-  assert.match(server, /selectedPlatforms: z\.array\(creativePlatform\)/);
-  assert.doesNotMatch(server, /const creativePlatform = z\.enum\([^\n]*VIDEO_CHANNEL/);
+  assert.match(briefSchema, /const creativePlatform = z\.enum\(\['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO'\]\)/);
+  assert.match(briefSchema, /selectedPlatforms: z\.array\(creativePlatform\)/);
+  assert.doesNotMatch(briefSchema, /const creativePlatform = z\.enum\([^\n]*VIDEO_CHANNEL/);
 });
 
 test('Skill 只在文案阶段作为写作策略出现，排版不参与写作确认', () => {
   const source = fs.readFileSync(new URL('../src/workspaces/create/CreateWorkspace.tsx', import.meta.url), 'utf8');
+  const copy = fs.readFileSync(new URL('../src/workspaces/create/CopyWorkspace.tsx', import.meta.url), 'utf8');
   const briefStart = source.indexOf("{stage === 'brief'");
-  const copyStart = source.indexOf("{stage === 'copy' && (activeVersion");
+  const copyStart = source.indexOf("{stage === 'copy' && copyPlatform");
   assert.ok(briefStart > -1 && copyStart > briefStart);
   assert.doesNotMatch(source.slice(briefStart, copyStart), /Skill 组合|creative-skill-panel|写作策略/);
-  assert.match(source.slice(copyStart), /writing-strategy/);
-  assert.match(source, /题材[\s\S]*内容类型[\s\S]*语言风格/);
-  assert.match(source.slice(copyStart), /sharedDimensions\.map/);
-  assert.match(source.slice(copyStart), /文案 · [\s\S]*规则/);
-  assert.doesNotMatch(source.slice(copyStart, source.indexOf('outlineReviewOpen', copyStart)), /platformDimensions|changePlatformSkill/);
+  assert.match(copy, /copy-strategy/);
+  assert.match(copy, /题材[\s\S]*内容类型[\s\S]*语言风格/);
+  assert.match(copy, /sharedDimensions\.map/);
+  assert.match(copy, /内容结构[\s\S]*渠道规则/);
+  assert.doesNotMatch(copy, />排版</);
 });
 
 test('提示词模板按任务和四个图文平台分别配置', () => {

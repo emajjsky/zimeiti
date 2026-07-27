@@ -118,8 +118,8 @@ test('项目资料页具备真实进度、资料选择和 Agent 完整状态', (
   assert.match(agent, /确认调用/);
   assert.match(agent, /QUEUED[\s\S]*RUNNING[\s\S]*FAILED/);
   assert.match(agent, /待回答问题[\s\S]*待核验主张[\s\S]*下一步/);
-  assert.match(workspace, /draftCandidate\?\.status === 'ACCEPTED'/);
-  assert.match(workspace, /body !== project\.coreViewpoint\.trim\(\)/);
+  assert.match(workspace, /hasDraft=\{contentVersions\.some/);
+  assert.match(workspace, /body\.trim\(\) !== project\.coreViewpoint\.trim\(\)/);
   assert.match(styles, /\.project-research-layout/);
   assert.match(styles, /\.project-agent\{/);
   assert.match(styles, /@media \(max-width:1100px\).*\.project-research-layout\{grid-template-columns:1fr\}/s);

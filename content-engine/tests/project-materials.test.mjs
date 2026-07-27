@@ -58,13 +58,14 @@ test('项目资料 API 提供完整 CRUD、鉴权下载和 50MB 限制', () => {
 
 test('创作页将资料与研究拆为独立步骤，篇幅只在写作策略出现', () => {
   const source = fs.readFileSync(new URL('../src/workspaces/create/CreateWorkspace.tsx', import.meta.url), 'utf8');
+  const copy = fs.readFileSync(new URL('../src/workspaces/create/CopyWorkspace.tsx', import.meta.url), 'utf8');
   const materials = fs.readFileSync(new URL('../src/workspaces/create/ProjectMaterials.tsx', import.meta.url), 'utf8');
   const briefStart = source.indexOf("{stage === 'brief'");
   const materialStart = source.indexOf("{stage === 'materials'", briefStart);
   const copyStart = source.indexOf("{stage === 'copy'", materialStart);
   assert.ok(briefStart > -1 && materialStart > briefStart && copyStart > materialStart);
   assert.doesNotMatch(source.slice(briefStart, materialStart), /篇幅目标|目标篇幅/);
-  assert.match(source.slice(copyStart), /目标篇幅/);
+  assert.match(copy, /目标篇幅/);
   assert.match(materials, /我的内容[\s\S]*参考链接[\s\S]*素材文件/);
   assert.match(materials, /webCreative\.createInput[\s\S]*webCreative\.createReference[\s\S]*webCreative\.uploadFile/);
 });
