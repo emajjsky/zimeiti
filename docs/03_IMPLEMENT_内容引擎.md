@@ -445,3 +445,51 @@ API：`http://127.0.0.1:8787/health`
 - `PromptTemplateSettings.tsx` 改为任务一级页签和平台二级选择，五个 Scope 独立缓存、编辑、保存新版本和恢复默认。
 - 前端采用 `DESIGN_VARIANCE 5 / MOTION_INTENSITY 2 / VISUAL_DENSITY 4`。保持现有波普怀旧清新品牌语言，使用单层分区和稳定四列，不新增动效。
 - 自动化新增写作阶段归属、排版排除、双平台 Scope 与默认模板测试；Playwright 验证 Brief 无 Skill、文案页三项选择与平台规则、两平台模板内容不同和 390px 无横向溢出。
+
+## 2026-07-27 设计记录：内容母版与多渠道 Workflow
+
+本节为下一阶段实现契约，尚未实现的对象和页面不得提前展示可操作入口。
+
+### 领域对象
+
+- `project_inputs`：项目级想法、原稿、笔记、转写和补充说明，记录类型、正文、所有者和更新时间。
+- `project_references`：公开链接、上传文档和既有内容，记录 `FACT`、`OPINION`、`STRUCTURE`、`VOICE`、`HOOK`、`VISUAL`、`NEGATIVE` 作用以及全项目/平台/阶段 Scope。
+- `research_runs`、`research_sources`、`evidence_claims`：保存研究问题、工具、来源快照、发布时间、访问时间、可支持论点及 `VERIFIED`、`SINGLE_SOURCE`、`CONFLICTING`、`NEEDS_REVIEW` 状态。
+- `content_master_versions`：保存跨平台共享的核心观点、证据引用、案例、必须保留表达、待核验项和素材引用；采用新版本不得覆盖已有平台版本。
+- `platform_strategies`：按项目和平台保存内容类型、语言风格、目标篇幅范围、传播目标、钩子、CTA、渠道规则版本、账号规则版本和用户覆盖项。
+- `platform_content_versions`：独立保存公众号、小红书及后续渠道候选/正式版本，与内容母版版本建立来源关系。
+- `project_assets`、`image_plan_items`：保存上传/生成素材、来源、授权状态、参考图用途、适用平台、插入位置、生成运行和采用状态。
+- `layout_versions`、`review_reports`：保存平台排版产物和内容、事实、原创、渠道、版权五类审核结果。
+- `content_projects.workflow_version`：`LEGACY_V1` 或 `CONTENT_MASTER_V2`。新 Workflow 未形成完整纵向闭环前保持 V1；V2 开放后旧项目只允许经用户确认迁移。
+
+所有新表必须包含 `workspace_id`，公开 URL 和上传文件执行工作空间隔离、大小/MIME 校验、内容哈希去重和删除引用检查。网页研究只保存允许持久化的正文摘要与证据快照；不得保存登录 Cookie 或绕过访问限制。
+
+`project_assets` 是素材文件、来源和授权状态的权威表；`content_master_versions` 只保存候选素材引用和用途，`platform_content_versions`/`image_plan_items` 保存采用关系、派生物、插入位置与平台适配。删除或撤销授权前先查询活动采用关系；存在引用时默认拒绝删除，授权变化则使关联平台版本进入 `ASSET_BLOCKED`。
+
+### Workflow 与动作契约
+
+Workflow 使用依赖图，不使用所有项目都必须顺序执行的硬编码步骤。`PROJECT_UNDERSTANDING`、`RESEARCH_PLAN`、`VERIFY_CLAIMS`、`BUILD_CONTENT_MASTER`、`POLISH_EXISTING_DRAFT`、`RESTRUCTURE_DRAFT`、`GENERATE_OUTLINE`、`GENERATE_DRAFT`、`REVISE_SELECTION`、`ADAPT_PLATFORM`、`BUILD_IMAGE_PLAN`、`GENERATE_IMAGE`、`APPLY_LAYOUT`、`REVIEW_PACKAGE` 均为 Agent 动作，不是 Skill。
+
+每个动作声明必要输入、可选输入、输出 Schema、可调用工具、模型 Scope、费用确认、候选写入位置和采用后的正式写入范围。自由对话先解析为这些动作组成的计划；没有注册动作或写入范围不匹配时拒绝执行。模型或浏览器结果始终先保存候选，用户采用后才更新正式对象。
+
+完整草稿路径允许跳过 `GENERATE_OUTLINE` 和 `GENERATE_DRAFT`，改用 `POLISH_EXISTING_DRAFT` 或 `RESTRUCTURE_DRAFT`；只有选题/零散想法路径使用研究、大纲和初稿。所有路径在导出前必须完成 `REVIEW_PACKAGE`。
+
+研究动作复用 `public-web.cjs` 的协议、DNS 解析、私网阻断、重定向重检、响应体积和超时约束，并增加站点级并发 1、可配置最小请求间隔、失败冷却和允许持久化字段白名单。明确挑战页、登录页、付费墙、robots/条款禁止或权限不明时返回 `HUMAN_INPUT_REQUIRED`，不得切换抓取器继续尝试。Playwright 使用全新无 Cookie 上下文，只处理公开页面的客户端渲染。
+
+### 规则解析
+
+执行时将平台硬规则、账号规则、栏目模板、项目平台策略、本次用户指令和 Agent 推荐值解析为一个不可变 `resolved_strategy_snapshot`。硬规则冲突阻断准备；建议冲突进入确认卡。目标篇幅从项目级 `writing_briefs.length_target` 迁移到 `platform_strategies`，旧数据按既有平台复制为迁移默认值，用户下一次保存平台策略后形成新快照。
+
+渠道规则定义标题、篇幅建议、正文结构、标签、链接、封面/媒体规格、CTA、发布字段和合规检查；排版规则只作用于已确认文案和素材。钩子作为平台策略中的结构化配置，不新增一个必须手工选择的 Skill 维度。
+
+### 页面与交互
+
+创作项目逐步拆为项目概览、资料与研究、内容母版、平台版本、配图、排版和审核。每页只展示该阶段的主资产、状态和操作；Agent 以项目级可展开对话面板存在，不作为独立页面，也不在每页重复解释能力。
+
+平台版本支持多选创建，但分别显示写作、配图、排版和审核状态。切换平台只读取该平台策略和版本；内容母版更新时只标记“可同步”，用户查看差异并确认后才创建新的平台候选版本。
+
+V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台正文、待核验项和素材引用映射为 V2 候选对象。用户确认后在单一事务中创建 V2 数据并更新 `workflow_version`；不调用模型，不更改 V1 运行/候选状态。迁移失败整体回滚。V2 导出 API 校验内容母版、平台策略、采用文案、素材状态和审核报告，任一质量门缺失时返回结构化阻断项。
+
+### 实施顺序
+
+第一切片先跑通公众号真实案例：一份用户草稿、两条参考链接、一张已有图片、一张视觉参考图。顺序为项目资料与 Scope → 研究计划/证据 → 内容母版 → 公众号平台策略 → 对话式候选修改 → 配图计划与两类素材 → HTML/素材包 → 五类审核。小红书在公众号闭环通过后复用同一母版实现，不并行堆页面；视频保持独立。
