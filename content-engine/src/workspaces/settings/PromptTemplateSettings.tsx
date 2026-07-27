@@ -2,13 +2,14 @@ import { FilePenLine, LoaderCircle, RotateCcw, Save } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { webModels, type PromptTemplate, type PromptTemplateScope } from '../../data/webApi';
 
-type PromptTask = 'ANALYSIS' | 'OUTLINE' | 'DRAFT';
+type PromptTask = 'ANALYSIS' | 'OUTLINE' | 'DRAFT' | 'REVISION';
 type PromptPlatform = 'WECHAT' | 'XIAOHONGSHU' | 'ZHIHU' | 'WEIBO';
 
 const taskTabs: { id: PromptTask; label: string }[] = [
   { id: 'ANALYSIS', label: '热点分析' },
   { id: 'OUTLINE', label: '生成大纲' },
   { id: 'DRAFT', label: '生成初稿' },
+  { id: 'REVISION', label: '修改文案' },
 ];
 
 const platforms: { id: PromptPlatform; label: string }[] = [

@@ -20,6 +20,7 @@ const { saveProjectUpload, removeProjectUpload, openProjectUpload, readProjectUp
 const { PROJECT_RESEARCH_ACTION_VERSION, PROJECT_RESEARCH_SCOPE, researchRunView, researchPlanView } = require('./services/project-research.cjs');
 const { OUTLINE_ACTION_VERSION, OUTLINE_SCOPE, OUTLINE_TEMPLATE_SCOPES, outlineTemplateScope, validateOutlineTemplate, defaultOutlineTemplate, outlineCandidateView } = require('./services/creative-outline.cjs');
 const { DRAFT_ACTION_VERSION, DRAFT_SCOPE, DRAFT_TEMPLATE_SCOPES, draftTemplateScope, validateDraftTemplate, defaultDraftTemplate, draftCandidateView } = require('./services/creative-draft.cjs');
+const { REVISION_TEMPLATE_SCOPES, validateRevisionTemplate, defaultRevisionTemplate } = require('./services/project-copy-action.cjs');
 
 const app = Fastify({ logger: true, bodyLimit: 5 * 1024 * 1024 });
 const credentials = new Set(['TAVILY', 'BAILIAN']);
@@ -38,6 +39,10 @@ const templateStore = createTemplateStore({ query }, {
   [DRAFT_TEMPLATE_SCOPES.XIAOHONGSHU]: { defaultTemplate: () => defaultDraftTemplate('XIAOHONGSHU'), validateTemplate: validateDraftTemplate },
   [DRAFT_TEMPLATE_SCOPES.ZHIHU]: { defaultTemplate: () => defaultDraftTemplate('ZHIHU'), validateTemplate: validateDraftTemplate },
   [DRAFT_TEMPLATE_SCOPES.WEIBO]: { defaultTemplate: () => defaultDraftTemplate('WEIBO'), validateTemplate: validateDraftTemplate },
+  [REVISION_TEMPLATE_SCOPES.WECHAT]: { defaultTemplate: () => defaultRevisionTemplate('WECHAT'), validateTemplate: validateRevisionTemplate },
+  [REVISION_TEMPLATE_SCOPES.XIAOHONGSHU]: { defaultTemplate: () => defaultRevisionTemplate('XIAOHONGSHU'), validateTemplate: validateRevisionTemplate },
+  [REVISION_TEMPLATE_SCOPES.ZHIHU]: { defaultTemplate: () => defaultRevisionTemplate('ZHIHU'), validateTemplate: validateRevisionTemplate },
+  [REVISION_TEMPLATE_SCOPES.WEIBO]: { defaultTemplate: () => defaultRevisionTemplate('WEIBO'), validateTemplate: validateRevisionTemplate },
 });
 const creativeSkillStore = createCreativeSkillStore({ query, transaction });
 const projectMaterialStore = createProjectMaterialStore({ query });
@@ -365,7 +370,7 @@ app.get('/api/v1/models/usage', { preHandler: authenticate }, async (request) =>
 
 function promptTemplateScope(value) {
   const scope = String(value || '');
-  const supported = [ANALYSIS_SCOPE, ...Object.values(OUTLINE_TEMPLATE_SCOPES), ...Object.values(DRAFT_TEMPLATE_SCOPES)];
+  const supported = [ANALYSIS_SCOPE, ...Object.values(OUTLINE_TEMPLATE_SCOPES), ...Object.values(DRAFT_TEMPLATE_SCOPES), ...Object.values(REVISION_TEMPLATE_SCOPES)];
   if (!supported.includes(scope)) { const error = new Error('当前提示词模板尚未接入执行器。'); error.statusCode = 400; throw error; }
   return scope;
 }

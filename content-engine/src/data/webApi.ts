@@ -113,7 +113,11 @@ export type PromptTemplateScope =
   | 'CREATIVE_DRAFT_WECHAT'
   | 'CREATIVE_DRAFT_XIAOHONGSHU'
   | 'CREATIVE_DRAFT_ZHIHU'
-  | 'CREATIVE_DRAFT_WEIBO';
+  | 'CREATIVE_DRAFT_WEIBO'
+  | 'CREATIVE_REVISION_WECHAT'
+  | 'CREATIVE_REVISION_XIAOHONGSHU'
+  | 'CREATIVE_REVISION_ZHIHU'
+  | 'CREATIVE_REVISION_WEIBO';
 export type PromptTemplate = { id: string; scope: PromptTemplateScope; version: number; body: string; source: 'DEFAULT' | 'CUSTOM'; updatedAt: string };
 
 export const webAgent = {
