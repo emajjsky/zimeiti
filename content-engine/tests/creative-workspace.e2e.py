@@ -395,7 +395,41 @@ with sync_playwright() as playwright:
     page.get_by_role("heading", name="内容规划", exact=True).wait_for()
     assert "project=project-hotspot-1" in page.url
 
-    # 4. 旧规划 URL 通过 legacyTopicId 恢复到统一创作项目。
+    # 4. 创作首页使用项目列表与选中项目详情，移动端使用底部详情抽屉。
+    page.get_by_role("button", name="创作", exact=True).click()
+    page.locator(".creative-project-table").wait_for()
+    project_rows = page.locator(".creative-project-table tbody tr")
+    assert project_rows.count() == 2
+    project_rows.filter(has_text=HOTSPOT_TITLE).click()
+    page.locator(".creative-project-detail").get_by_role(
+        "heading", name=HOTSPOT_TITLE, exact=True
+    ).wait_for()
+    assert page.locator(".creative-project-card").count() == 0
+    page.screenshot(path=ARTIFACTS / "project-center-desktop.png", full_page=True)
+
+    page.set_viewport_size({"width": 1024, "height": 900})
+    page.wait_for_timeout(100)
+    assert page.locator(".creative-project-table").is_visible()
+    assert page.locator(".creative-project-detail").is_visible()
+    assert_no_overflow(page, "1024px 创作项目中心")
+
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_timeout(100)
+    assert not page.locator(".creative-project-table").is_visible()
+    mobile_projects = page.locator(".creative-project-mobile-list")
+    mobile_projects.wait_for()
+    assert mobile_projects.locator(".creative-project-mobile-row").count() == 2
+    mobile_projects.locator(".creative-project-mobile-row").filter(
+        has_text=HOTSPOT_TITLE
+    ).click()
+    page.locator(".creative-project-mobile-drawer").get_by_role(
+        "heading", name=HOTSPOT_TITLE, exact=True
+    ).wait_for()
+    assert_no_overflow(page, "390px 创作项目中心")
+    page.screenshot(path=ARTIFACTS / "project-center-mobile.png", full_page=True)
+    page.set_viewport_size({"width": 1440, "height": 1000})
+
+    # 5. 旧规划 URL 通过 legacyTopicId 恢复到统一创作项目。
     page.goto(f"{BASE_URL}/?view=plan&topic=legacy-topic-1")
     page.wait_for_load_state("networkidle")
     page.get_by_role("heading", name="内容规划", exact=True).wait_for()

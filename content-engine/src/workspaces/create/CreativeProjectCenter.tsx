@@ -1,19 +1,14 @@
 import { ArrowRight, FileInput, FileText, Lightbulb, Plus, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import type { CreateProjectInput } from '../../data/webApi';
-import { platformName, projectOriginName, projectStageName, type ContentProject, type Platform, type ProjectStage } from '../../domain/content';
-
-type Filter = 'ALL' | 'PLANNING' | 'RESEARCH' | 'MASTER' | 'PLATFORM' | 'REVIEW' | 'COMPLETED';
-
-const filters: { id: Filter; label: string; stages?: ProjectStage[] }[] = [
-  { id: 'ALL', label: '全部' },
-  { id: 'PLANNING', label: '待规划', stages: ['PLANNING'] },
-  { id: 'RESEARCH', label: '研究中', stages: ['RESEARCH'] },
-  { id: 'MASTER', label: '正文中', stages: ['MASTER_WRITING'] },
-  { id: 'PLATFORM', label: '制作中', stages: ['PLATFORM_ADAPTATION', 'VISUAL', 'LAYOUT'] },
-  { id: 'REVIEW', label: '待审核', stages: ['REVIEW'] },
-  { id: 'COMPLETED', label: '已完成', stages: ['COMPLETED'] },
-];
+import {
+  projectCenterAction,
+  projectCenterFilters,
+  projectsForCenterFilter,
+  selectedProjectIdForList,
+  type ProjectCenterFilterId,
+} from '../../domain/creative-project-center.mjs';
+import { platformName, projectOriginName, projectStageName, type ContentProject, type Platform } from '../../domain/content';
 
 const creationSources: { id: CreateProjectInput['originType']; label: string; icon: typeof Lightbulb }[] = [
   { id: 'MANUAL', label: '手工想法', icon: Lightbulb },
@@ -23,23 +18,61 @@ const creationSources: { id: CreateProjectInput['originType']; label: string; ic
 
 const selectablePlatforms: Platform[] = ['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO', 'VIDEO_CHANNEL'];
 
-function nextAction(project: ContentProject) {
-  return {
-    PLANNING: '完成规划',
-    RESEARCH: '继续研究',
-    MASTER_WRITING: '继续正文',
-    PLATFORM_ADAPTATION: '制作平台版本',
-    VISUAL: '处理配图',
-    LAYOUT: '继续排版',
-    REVIEW: '完成审核',
-    COMPLETED: '查看项目',
-  }[project.stage];
-}
-
 function updatedLabel(value: string) {
   const time = Date.parse(value);
   if (!Number.isFinite(time)) return value;
   return new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(time));
+}
+
+function plannedPublishLabel(value?: string) {
+  if (!value) return '未排期';
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) return value;
+  return new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(time));
+}
+
+function DetailField({ label, value, wide = false }: { label: string; value?: string; wide?: boolean }) {
+  return <div className={wide ? 'creative-project-detail-field wide' : 'creative-project-detail-field'}>
+    <dt>{label}</dt>
+    <dd>{value?.trim() || '—'}</dd>
+  </div>;
+}
+
+function ProjectDetail({ project, onOpenProject, onClose, className = '' }: {
+  project: ContentProject;
+  onOpenProject: (project: ContentProject) => void;
+  onClose?: () => void;
+  className?: string;
+}) {
+  return <section className={`creative-project-detail ${className}`.trim()} aria-label={`${project.title} 项目详情`}>
+    <header>
+      <div className="creative-project-detail-tags">
+        <span className={`creative-origin-tag origin-${project.originType.toLowerCase()}`}>{projectOriginName[project.originType]}</span>
+        <span className={`creative-stage-tag stage-${project.stage.toLowerCase()}`}>{projectStageName[project.stage]}</span>
+      </div>
+      {onClose && <button className="icon-button" type="button" aria-label="关闭项目详情" onClick={onClose}><X size={18}/></button>}
+    </header>
+    <div className="creative-project-detail-title">
+      <h2>{project.title}</h2>
+      <span>{project.planning.category || '未分类'}</span>
+    </div>
+    <dl className="creative-project-detail-grid">
+      <DetailField label="创作角度" value={project.planning.angle} wide />
+      <DetailField label="创作目标" value={project.planning.objective} wide />
+      <DetailField label="目标受众" value={project.planning.targetAudience} />
+      <DetailField label="计划发布时间" value={plannedPublishLabel(project.planning.plannedPublishAt)} />
+      <DetailField label="核心表达" value={project.planning.coreMessage} wide />
+      <DetailField label="来源与核验要求" value={project.planning.sourceRequirements} wide />
+    </dl>
+    <div className="creative-project-detail-platforms">
+      <span>目标平台</span>
+      <div>{project.planning.targetPlatforms.map((platform) => <em className={`platform-${platform.toLowerCase()}`} key={platform}>{platformName[platform]}</em>)}</div>
+    </div>
+    <footer>
+      <time>更新于 {updatedLabel(project.updatedAt)}</time>
+      <button className="button primary" type="button" onClick={() => onOpenProject(project)}>{projectCenterAction(project.stage)}<ArrowRight size={16}/></button>
+    </footer>
+  </section>;
 }
 
 export function CreativeProjectCenter({ projects, onOpenProject, onCreateProject, creationRequested = false, onCreationHandled }: {
@@ -49,7 +82,9 @@ export function CreativeProjectCenter({ projects, onOpenProject, onCreateProject
   creationRequested?: boolean;
   onCreationHandled?: () => void;
 }) {
-  const [filter, setFilter] = useState<Filter>('ALL');
+  const [filter, setFilter] = useState<ProjectCenterFilterId>('ALL');
+  const [selectedProjectId, setSelectedProjectId] = useState(projects[0]?.id ?? '');
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [creating, setCreating] = useState(creationRequested);
   const [originType, setOriginType] = useState<CreateProjectInput['originType']>('MANUAL');
   const [title, setTitle] = useState('');
@@ -64,10 +99,13 @@ export function CreativeProjectCenter({ projects, onOpenProject, onCreateProject
     if (creationRequested) setCreating(true);
   }, [creationRequested]);
 
-  const visibleProjects = useMemo(() => {
-    const stages = filters.find((item) => item.id === filter)?.stages;
-    return stages ? projects.filter((project) => stages.includes(project.stage)) : projects;
-  }, [filter, projects]);
+  const visibleProjects = useMemo(() => projectsForCenterFilter(projects, filter), [filter, projects]);
+  const selectedProject = visibleProjects.find((project) => project.id === selectedProjectId) ?? visibleProjects[0];
+
+  useEffect(() => {
+    setSelectedProjectId((current) => selectedProjectIdForList(visibleProjects, current));
+    setMobileDetailOpen(false);
+  }, [visibleProjects]);
 
   const closeCreation = () => {
     setCreating(false);
@@ -77,6 +115,11 @@ export function CreativeProjectCenter({ projects, onOpenProject, onCreateProject
 
   const togglePlatform = (platform: Platform) => {
     setTargetPlatforms((current) => current.includes(platform) ? current.filter((item) => item !== platform) : [...current, platform]);
+  };
+
+  const selectProject = (project: ContentProject, openMobileDetail = false) => {
+    setSelectedProjectId(project.id);
+    if (openMobileDetail) setMobileDetailOpen(true);
   };
 
   const submit = async (event: React.FormEvent) => {
@@ -102,7 +145,7 @@ export function CreativeProjectCenter({ projects, onOpenProject, onCreateProject
     </header>
 
     <nav className="creative-project-filters" aria-label="内容项目筛选">
-      {filters.map((item) => <button type="button" key={item.id} className={filter === item.id ? 'active' : ''} onClick={() => setFilter(item.id)}>{item.label}</button>)}
+      {projectCenterFilters.map((item) => <button type="button" key={item.id} className={filter === item.id ? 'active' : ''} onClick={() => setFilter(item.id)}>{item.label}</button>)}
     </nav>
 
     {creating && <form className="creative-project-create" onSubmit={submit}>
@@ -121,18 +164,61 @@ export function CreativeProjectCenter({ projects, onOpenProject, onCreateProject
       <footer><button className="button" type="button" onClick={closeCreation}>取消</button><button className="button primary" disabled={busy} type="submit">{busy ? '创建中' : '创建项目'}</button></footer>
     </form>}
 
-    {visibleProjects.length > 0 ? <div className="creative-project-grid">
-      {visibleProjects.map((project) => <article className="creative-project-card" key={project.id}>
-        <div className={`creative-project-accent origin-${project.originType.toLowerCase()}`} />
-        <header><span>{projectOriginName[project.originType]}</span><em>{projectStageName[project.stage]}</em></header>
-        <button type="button" className="creative-project-card-main" onClick={() => onOpenProject(project)}>
-          <h2>{project.title}</h2>
-          {project.planning.coreMessage && <p>{project.planning.coreMessage}</p>}
-        </button>
-        <div className="creative-project-platforms">{project.planning.targetPlatforms.map((platform) => <span key={platform}>{platformName[platform]}</span>)}</div>
-        <footer><time>{updatedLabel(project.updatedAt)}</time><button type="button" onClick={() => onOpenProject(project)}>{nextAction(project)}<ArrowRight size={16}/></button></footer>
-      </article>)}
-    </div> : <div className="creative-project-empty">
+    {visibleProjects.length > 0 && selectedProject ? <>
+      <div className="creative-project-list-layout">
+        <div className="creative-project-table-shell">
+          <table className="creative-project-table">
+            <thead><tr><th>项目</th><th>题材</th><th>目标平台</th><th>来源</th><th>阶段</th><th>更新时间</th></tr></thead>
+            <tbody>{visibleProjects.map((project) => <tr
+              key={project.id}
+              className="creative-project-row"
+              tabIndex={0}
+              aria-selected={selectedProject.id === project.id}
+              onClick={() => selectProject(project)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  selectProject(project);
+                }
+              }}
+            >
+              <td><strong>{project.title}</strong></td>
+              <td><span className="creative-project-category">{project.planning.category || '未分类'}</span></td>
+              <td><div className="creative-project-row-platforms">{project.planning.targetPlatforms.map((platform) => <span className={`platform-${platform.toLowerCase()}`} key={platform}>{platformName[platform]}</span>)}</div></td>
+              <td><span className={`creative-origin-tag origin-${project.originType.toLowerCase()}`}>{projectOriginName[project.originType]}</span></td>
+              <td><span className={`creative-stage-tag stage-${project.stage.toLowerCase()}`}>{projectStageName[project.stage]}</span></td>
+              <td><time>{updatedLabel(project.updatedAt)}</time></td>
+            </tr>)}</tbody>
+          </table>
+        </div>
+        <ProjectDetail project={selectedProject} onOpenProject={onOpenProject} />
+      </div>
+
+      <div className="creative-project-mobile-list" aria-label="内容项目列表">
+        {visibleProjects.map((project) => <button
+          type="button"
+          className="creative-project-mobile-row"
+          aria-pressed={selectedProject.id === project.id}
+          key={project.id}
+          onClick={() => selectProject(project, true)}
+        >
+          <span className="creative-project-mobile-row-head"><strong>{project.title}</strong><ArrowRight size={16}/></span>
+          <span className="creative-project-mobile-row-meta">
+            <em>{project.planning.category || '未分类'}</em>
+            <span className={`creative-origin-tag origin-${project.originType.toLowerCase()}`}>{projectOriginName[project.originType]}</span>
+            <span className={`creative-stage-tag stage-${project.stage.toLowerCase()}`}>{projectStageName[project.stage]}</span>
+            <time>{updatedLabel(project.updatedAt)}</time>
+          </span>
+        </button>)}
+      </div>
+
+      {mobileDetailOpen && <div className="creative-project-mobile-detail-layer">
+        <button className="creative-project-mobile-backdrop" type="button" aria-label="关闭项目详情" onClick={() => setMobileDetailOpen(false)} />
+        <aside className="creative-project-mobile-drawer" role="dialog" aria-modal="true">
+          <ProjectDetail project={selectedProject} onOpenProject={onOpenProject} onClose={() => setMobileDetailOpen(false)} />
+        </aside>
+      </div>}
+    </> : <div className="creative-project-empty">
       <FileText size={28}/><h2>{projects.length ? '这个阶段还没有项目' : '还没有内容项目'}</h2>
       {!projects.length && <button className="button primary" type="button" onClick={() => setCreating(true)}>新建第一篇内容</button>}
     </div>}
