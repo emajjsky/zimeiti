@@ -21,7 +21,7 @@ export interface ProjectInput {
   updatedAt: string;
 }
 
-export type ProjectInputPayload = Pick<ProjectInput, 'kind' | 'title' | 'body' | 'scope' | 'platforms'>;
+export type ProjectInputPayload = Pick<ProjectInput, 'kind' | 'body' | 'scope' | 'platforms'> & { title?: string };
 
 export interface ProjectReference {
   id: string;

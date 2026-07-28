@@ -1,5 +1,5 @@
 import { Bot, Check, CircleAlert, ExternalLink, Eye, FileCheck2, LoaderCircle, Search, Send, Settings2, X } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { webCreative } from '../../data/webApi';
 import { canPrepareAgentRequest, messagesForAgentThread, researchQuickAction } from '../../domain/project-agent-composer.mjs';
 import { platformName, type ContentProject } from '../../domain/content';
@@ -61,6 +61,7 @@ export function ProjectAgent({ projectId, stage, platform, selectedMaterials, se
   const [error, setError] = useState('');
   const [preview, setPreview] = useState<ProjectArtifact | null>(null);
   const [selectedTitle, setSelectedTitle] = useState('');
+  const threadRef = useRef<HTMLDivElement>(null);
   const selectedCount = (selectedMaterials?.inputIds.length ?? 0) + (selectedMaterials?.referenceIds.length ?? 0);
 
   const reload = async (showLoading = false) => {
@@ -176,6 +177,15 @@ export function ProjectAgent({ projectId, stage, platform, selectedMaterials, se
   const artifactById = useMemo(() => new Map((context?.artifacts ?? []).map((artifact) => [artifact.id, artifact])), [context?.artifacts]);
   const threadMessages = useMemo(() => messagesForAgentThread(context?.messages ?? []), [context?.messages]);
   const stageLabel = stage === 'RESEARCH' ? '研究' : `文案${platform ? ` · ${platformName[platform]}` : ''}`;
+  const followKey = `${threadMessages.at(-1)?.id ?? ''}:${context?.activeRun?.id ?? ''}:${context?.activeRun?.status ?? ''}:${context?.artifacts[0]?.id ?? ''}`;
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const thread = threadRef.current;
+      if (thread) thread.scrollTop = thread.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [followKey]);
 
   return <aside className="project-agent" aria-label="项目 Agent">
     <header className="project-agent-head">
@@ -185,7 +195,7 @@ export function ProjectAgent({ projectId, stage, platform, selectedMaterials, se
         <button type="button" className={history === 'ALL' ? 'active' : ''} onClick={() => setHistory('ALL')}>完整历史</button>
       </div>
     </header>
-    <div className="project-agent-thread">
+    <div ref={threadRef} className="project-agent-thread">
       {busy === 'loading' && <div className="project-agent-skeleton" aria-label="正在读取 Agent 上下文"><i/><i/><i/></div>}
       {busy !== 'loading' && !threadMessages.length && <div className="project-agent-empty"><FileCheck2 size={22}/><b>还没有对话</b></div>}
       {(context?.summaries.length ?? 0) > 0 && <div className="project-agent-summary">已继承 {context?.summaries.length} 条前序摘要</div>}

@@ -595,3 +595,11 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - `ProjectAgent.tsx` 在研究计划预览中增加“准备查找资料”，来源确认卡只显示搜索、读取、补充数量、工具和写入范围，不显示不存在的模型、Prompt 或 Skill。来源结果按已保存、需补充和失败展示，刷新后恢复。
 - 调用日志新增 `SOURCE_DISCOVERY`，前端显示“研究资料检索”。本任务不读取模型策略、不调用百炼，因此不存在模型 Token 或模型费用。
 - 当前来源快照尚未经过事实核验。下一实现项为 `SOURCE_VERIFICATION` 模型策略、证据主张、支持/冲突关系与人工复核状态；配图、排版和审核继续保持禁用。
+
+## 2026-07-28 实现记录：研究规划继承与 Agent 时间线修复
+
+- `ProjectMaterials.tsx` 改为接收完整 `ContentProject`，在资料区上方渲染正式 `project.planning` 摘要；`CreateWorkspace.tsx` 直接传递当前项目，避免另建不同步的研究表单状态。
+- `ProjectAgent.tsx` 为滚动容器增加 `threadRef`。消息末项、活动运行 ID/状态或最新产物变化后，在下一帧把 `scrollTop` 更新为 `scrollHeight`。
+- `styles.css` 为 `.project-agent-thread` 增加 `grid-auto-rows:max-content`，并禁止直接子项被压缩。该修复解决长时间线中确认卡外框仅剩 2px、子按钮落到视口外且被父层截获的问题。
+- `projectMaterials.cjs` 新增 `deriveProjectInputTitle()`，从正文首个非空行移除 Markdown 标题/列表前缀后截取 160 字；API 的项目内容标题改为可省略。新建弹窗隐藏标题字段，编辑弹窗继续显示。
+- `creative-workspace.e2e.py` 增加规划摘要、新增内容无标题、长时间线自动跟随、计划卡与确认卡几何无重叠、点击命中和来源确认执行断言。自动化全部使用本地 Mock，不调用百炼或 Tavily。

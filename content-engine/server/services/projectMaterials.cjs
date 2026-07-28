@@ -32,6 +32,22 @@ function referenceView(row) {
   };
 }
 
+const inputKindLabels = {
+  IDEA: '想法',
+  DRAFT: '草稿',
+  NOTE: '笔记',
+  TRANSCRIPT: '转写',
+};
+
+function deriveProjectInputTitle(body, kind) {
+  const firstLine = String(body ?? '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
+  const normalized = firstLine?.replace(/^#{1,6}\s*/, '').replace(/^[-*]\s+/, '').trim();
+  return normalized ? normalized.slice(0, 160) : `未命名${inputKindLabels[kind] ?? '内容'}`;
+}
+
 function createProjectMaterialStore({ query }) {
   async function list(workspaceId, projectId) {
     const [inputs, references] = await Promise.all([
@@ -42,17 +58,19 @@ function createProjectMaterialStore({ query }) {
   }
 
   async function createInput(workspaceId, projectId, input) {
+    const title = String(input.title ?? '').trim() || deriveProjectInputTitle(input.body, input.kind);
     const result = await query(`INSERT INTO project_inputs
       (workspace_id, project_id, kind, title, body, scope, platforms_json)
       VALUES ($1, $2, $3, $4, $5, $6, $7)
-      RETURNING *`, [workspaceId, projectId, input.kind, input.title.trim(), input.body.trim(), input.scope, JSON.stringify(input.platforms)]);
+      RETURNING *`, [workspaceId, projectId, input.kind, title, input.body.trim(), input.scope, JSON.stringify(input.platforms)]);
     return inputView(result.rows[0]);
   }
 
   async function updateInput(workspaceId, id, input) {
+    const title = String(input.title ?? '').trim() || deriveProjectInputTitle(input.body, input.kind);
     const result = await query(`UPDATE project_inputs SET
       kind = $3, title = $4, body = $5, scope = $6, platforms_json = $7, updated_at = now()
-      WHERE workspace_id = $1 AND id = $2 RETURNING *`, [workspaceId, id, input.kind, input.title.trim(), input.body.trim(), input.scope, JSON.stringify(input.platforms)]);
+      WHERE workspace_id = $1 AND id = $2 RETURNING *`, [workspaceId, id, input.kind, title, input.body.trim(), input.scope, JSON.stringify(input.platforms)]);
     if (!result.rowCount) { const error = new Error('未找到这条项目内容。'); error.statusCode = 404; throw error; }
     return inputView(result.rows[0]);
   }
@@ -104,4 +122,4 @@ function createProjectMaterialStore({ query }) {
   return { list, createInput, updateInput, removeInput, createReference, updateReference, getReference, removeReference, researchSnapshot };
 }
 
-module.exports = { createProjectMaterialStore, inputView, referenceView };
+module.exports = { createProjectMaterialStore, deriveProjectInputTitle, inputView, referenceView };

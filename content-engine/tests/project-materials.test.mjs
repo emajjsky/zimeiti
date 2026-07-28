@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { createProjectMaterialStore, inputView, referenceView } from '../server/services/projectMaterials.cjs';
+import { createProjectMaterialStore, deriveProjectInputTitle, inputView, referenceView } from '../server/services/projectMaterials.cjs';
 import { MIME_EXTENSIONS, safePath } from '../server/services/projectUploadStorage.cjs';
 import { creativeStages, planningFieldNames } from '../src/domain/creative-flow.mjs';
 
@@ -21,6 +21,12 @@ test('项目输入和参考 DTO 不暴露服务端存储键', () => {
   const reference = referenceView({ id: 'reference-id', project_id: 'project-id', source_type: 'FILE', role: 'VISUAL', title: '参考图', notes: '', storage_key: 'private/path.png', original_filename: 'reference.png', mime_type: 'image/png', size_bytes: '128', sha256: 'hash', scope: 'IMAGING', platforms_json: [], created_at: 'created', updated_at: 'updated' });
   assert.equal(reference.sizeBytes, 128);
   assert.equal('storageKey' in reference, false);
+});
+
+test('新增项目内容从正文首行生成标题，用户无需先填写标题', () => {
+  assert.equal(deriveProjectInputTitle('  # 普通人如何使用 AI\n后续正文', 'IDEA'), '普通人如何使用 AI');
+  assert.equal(deriveProjectInputTitle('第一行很长但仍然是标题\n第二行', 'DRAFT'), '第一行很长但仍然是标题');
+  assert.equal(deriveProjectInputTitle('   \n   ', 'NOTE'), '未命名笔记');
 });
 
 test('项目资料列表始终按工作空间和项目隔离', async () => {
@@ -65,4 +71,6 @@ test('创作页将资料与研究拆为独立步骤，篇幅只在写作策略�
   assert.match(copy, /目标篇幅/);
   assert.match(materials, /我的内容[\s\S]*参考链接[\s\S]*素材文件/);
   assert.match(materials, /webCreative\.createInput[\s\S]*webCreative\.createReference[\s\S]*webCreative\.uploadFile/);
+  assert.match(materials, /!inputItem[\s\S]*正文/);
+  assert.match(materials, /const canSave = isInput[\s\S]*body\.trim\(\)[\s\S]*!inputItem/);
 });

@@ -95,7 +95,7 @@ const projectScope = z.enum(['PROJECT', 'RESEARCH', 'WRITING', 'IMAGING']);
 const projectPlatforms = z.array(creativePlatform).max(4);
 const projectInputPayload = z.object({
   kind: z.enum(['IDEA', 'DRAFT', 'NOTE', 'TRANSCRIPT']),
-  title: z.string().trim().min(1).max(160),
+  title: z.string().trim().max(160).default(''),
   body: z.string().trim().min(1).max(50_000),
   scope: projectScope,
   platforms: projectPlatforms.default([]),

@@ -142,6 +142,9 @@ test('项目资料页具备真实进度、资料选择和 Agent 完整状态', (
   assert.match(agent, /确认\{activeRun\.action === 'PROJECT_RESEARCH_SOURCES' \? '执行' : '调用'\}/);
   assert.match(agent, /QUEUED[\s\S]*RUNNING[\s\S]*FAILED/);
   assert.match(agent, /待回答问题[\s\S]*待核验主张[\s\S]*下一步/);
+  assert.match(agent, /threadRef[\s\S]*scrollHeight/);
+  assert.match(materials, /已确认规划[\s\S]*创作角度[\s\S]*核心表达[\s\S]*研究要求/);
+  assert.match(workspace, /project=\{project\}/);
   assert.match(workspace, /hasDraft=\{contentVersions\.some/);
   assert.match(workspace, /body\.trim\(\) !== project\.coreViewpoint\.trim\(\)/);
   assert.match(styles, /\.project-research-layout/);

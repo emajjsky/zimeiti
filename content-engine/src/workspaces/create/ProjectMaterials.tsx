@@ -1,7 +1,7 @@
 import { ExternalLink, FileAudio, FileText, FileVideo, Image, Link2, LoaderCircle, Pencil, Plus, Trash2, Upload, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { webCreative } from '../../data/webApi';
-import { platformName } from '../../domain/content';
+import { platformName, type ContentProject } from '../../domain/content';
 import type { CreativePlatform, ProjectAgentContext, ProjectInput, ProjectInputKind, ProjectInputPayload, ProjectMaterialScope, ProjectReference, ProjectReferenceMetadata, ProjectReferenceRole } from '../../domain/creative';
 import { ProjectAgent } from './ProjectAgent';
 
@@ -41,7 +41,8 @@ function scopeText(scope: ProjectMaterialScope, platforms: CreativePlatform[]) {
   return `${scopeName[scope]} · ${platforms.length ? platforms.map((platform) => platformName[platform]).join('、') : '全部平台'}`;
 }
 
-export function ProjectMaterials({ projectId, platforms, overviewReady, hasDraft, onOpenAgentSettings, onOpenSearchSettings }: { projectId: string; platforms: CreativePlatform[]; overviewReady: boolean; hasDraft: boolean; onOpenAgentSettings: () => void; onOpenSearchSettings: () => void }) {
+export function ProjectMaterials({ project, platforms, overviewReady, hasDraft, onOpenAgentSettings, onOpenSearchSettings }: { project: ContentProject; platforms: CreativePlatform[]; overviewReady: boolean; hasDraft: boolean; onOpenAgentSettings: () => void; onOpenSearchSettings: () => void }) {
+  const projectId = project.id;
   const [inputs, setInputs] = useState<ProjectInput[]>([]);
   const [references, setReferences] = useState<ProjectReference[]>([]);
   const [tab, setTab] = useState<MaterialTab>('INPUTS');
@@ -113,6 +114,15 @@ export function ProjectMaterials({ projectId, platforms, overviewReady, hasDraft
 
   return <section className="project-material-workspace">
     <div className="project-progress-band"><div><span>项目进度</span><b>{completed}/{progress.length}</b></div><ol>{progress.map((item, index) => <li key={item.label} className={item.done ? 'done' : index === currentProgressIndex ? 'current' : ''}><i>{item.done ? '✓' : index + 1}</i><span>{item.label}</span></li>)}</ol></div>
+    <section className="research-planning-context" aria-label="已确认规划">
+      <header><span>已确认规划</span><b>{project.planning.title}</b></header>
+      <dl>
+        <div><dt>创作角度</dt><dd>{project.planning.angle}</dd></div>
+        <div><dt>目标受众</dt><dd>{project.planning.targetAudience}</dd></div>
+        <div><dt>核心表达</dt><dd>{project.planning.coreMessage}</dd></div>
+        <div><dt>研究要求</dt><dd>{project.planning.sourceRequirements || '未设置'}</dd></div>
+      </dl>
+    </section>
     <div className="project-research-layout"><section className="project-materials">
     <header className="materials-head">
       <div><h2>资料与研究</h2><div className="materials-counts"><span>{inputs.length} 条内容</span><span>{links.length} 条参考</span><span>{files.length} 个文件</span></div></div>
@@ -183,14 +193,16 @@ function MaterialDialog({ editor, projectId, availablePlatforms, busy, onBusy, o
   const togglePlatform = (platform: CreativePlatform) => setSelectedPlatforms((current) => current.includes(platform) ? current.filter((value) => value !== platform) : [...current, platform]);
   const isInput = editor.type === 'INPUT';
   const isNewFile = editor.type === 'REFERENCE' && editor.sourceType === 'FILE' && !referenceItem;
-  const canSave = title.trim() && (isInput ? body.trim() : editor.type === 'REFERENCE' && editor.sourceType === 'LINK' && !referenceItem ? url.trim() : !isNewFile || file);
+  const canSave = isInput
+    ? Boolean(body.trim() && (!inputItem || title.trim()))
+    : Boolean(title.trim() && (editor.type === 'REFERENCE' && editor.sourceType === 'LINK' && !referenceItem ? url.trim() : !isNewFile || file));
 
   const save = async () => {
     if (!canSave) return;
     onBusy(true); onError('');
     try {
       if (editor.type === 'INPUT') {
-        const payload: ProjectInputPayload = { kind, title, body, scope, platforms: selectedPlatforms };
+        const payload: ProjectInputPayload = { kind, ...(inputItem ? { title } : {}), body, scope, platforms: selectedPlatforms };
         onInput(editor.item ? await webCreative.updateInput(editor.item.id, payload) : await webCreative.createInput(projectId, payload));
       } else {
         const metadata: ProjectReferenceMetadata = { role, title, notes, scope, platforms: selectedPlatforms };
@@ -209,7 +221,7 @@ function MaterialDialog({ editor, projectId, availablePlatforms, busy, onBusy, o
       <header><h2 id="material-dialog-title">{heading}</h2><button className="icon-button" type="button" aria-label="关闭" onClick={onClose}><X size={18}/></button></header>
       <div className="material-dialog-body">
         {isInput ? <label><span>内容类型</span><select value={kind} onChange={(event) => setKind(event.target.value as ProjectInputKind)}>{inputKinds.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label> : <label><span>参考用途</span><select value={role} onChange={(event) => setRole(event.target.value as ProjectReferenceRole)}>{referenceRoles.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>}
-        <label><span>标题</span><input aria-label={isInput ? '项目内容标题' : '参考资料标题'} value={title} maxLength={editor.type === 'INPUT' ? 160 : 200} onChange={(event) => setTitle(event.target.value)}/></label>
+        {(!isInput || inputItem) && <label><span>标题</span><input aria-label={isInput ? '项目内容标题' : '参考资料标题'} value={title} maxLength={editor.type === 'INPUT' ? 160 : 200} onChange={(event) => setTitle(event.target.value)}/></label>}
         {isInput && <label className="wide"><span>正文</span><textarea aria-label="项目内容正文" rows={11} value={body} maxLength={50_000} onChange={(event) => setBody(event.target.value)}/></label>}
         {!isInput && editor.sourceType === 'LINK' && !referenceItem && <label className="wide"><span>公开链接</span><input aria-label="参考资料链接" type="url" value={url} maxLength={2_000} onChange={(event) => setUrl(event.target.value)}/></label>}
         {isNewFile && <label className="wide file-field"><span>选择文件</span><input aria-label="素材文件" type="file" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,text/plain,text/markdown,audio/mpeg,audio/wav,audio/mp4,video/mp4,video/webm" onChange={(event) => { const next = event.target.files?.[0] ?? null; setFile(next); if (next && !title.trim()) setTitle(next.name); }}/></label>}

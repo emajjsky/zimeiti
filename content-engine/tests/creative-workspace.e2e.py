@@ -529,6 +529,16 @@ with sync_playwright() as playwright:
     page.get_by_role("heading", name="资料与研究", exact=True).wait_for()
     assert "stage=research" in page.url
     assert page.get_by_role("button", name="研究", exact=True).get_attribute("class") == "active"
+    planning_context = page.get_by_label("已确认规划")
+    planning_context.get_by_text("从真实任务、使用成本和可验证结果三个维度判断", exact=True).wait_for()
+    planning_context.get_by_text("工具是否值得使用，要看它能否稳定解决真实问题", exact=True).wait_for()
+    planning_context.get_by_text("核验产品当前价格；核验免费额度", exact=True).wait_for()
+
+    page.get_by_role("button", name="新增内容", exact=True).click()
+    material_dialog = page.get_by_role("dialog")
+    assert material_dialog.get_by_label("项目内容标题").count() == 0
+    material_dialog.get_by_label("项目内容正文").wait_for()
+    material_dialog.get_by_role("button", name="取消", exact=True).click()
 
     # 2.1 零资料时可用唯一快捷动作准备研究计划，确认前不调用模型。
     page.get_by_text("未选资料", exact=True).wait_for()
@@ -583,9 +593,23 @@ with sync_playwright() as playwright:
         "createdAt": NOW,
         "acceptedAt": None,
     }
+    prior_messages = [
+        {
+            "id": f"research-history-{index}",
+            "role": "USER" if index % 2 == 0 else "ASSISTANT",
+            "content": f"研究过程记录 {index + 1}",
+            "runId": None,
+            "stage": "RESEARCH",
+            "messageType": "MESSAGE",
+            "artifactRefs": [],
+            "metadata": {},
+            "createdAt": NOW,
+        }
+        for index in range(8)
+    ]
     agent_contexts["project-manual-1"] = {
         **empty_agent_context(),
-        "messages": [
+        "messages": [*prior_messages,
             {
                 "id": "research-plan-message-1",
                 "role": "ASSISTANT",
@@ -611,7 +635,31 @@ with sync_playwright() as playwright:
     assert source_confirmation.get_by_text("补充 1 项", exact=True).count() == 1
     assert source_confirmation.get_by_text("模型", exact=True).count() == 0
     assert prepared_source_payloads[-1]["planArtifactId"] == research_plan_artifact["id"]
-    source_confirmation.get_by_role("button", name="确认执行", exact=True).click()
+    confirm_source_button = source_confirmation.get_by_role("button", name="确认执行", exact=True)
+    thread_metrics = page.locator(".project-agent-thread").evaluate(
+        "element => ({ top: element.scrollTop, height: element.clientHeight, total: element.scrollHeight })"
+    )
+    assert thread_metrics["top"] + thread_metrics["height"] >= thread_metrics["total"] - 2
+    assert confirm_source_button.is_visible() and confirm_source_button.is_enabled()
+    plan_message_box = page.locator(".project-agent-message.type-artifact").bounding_box()
+    plan_link_box = page.get_by_role("button", name="查看计划", exact=True).bounding_box()
+    source_confirmation_box = source_confirmation.bounding_box()
+    assert plan_link_box["y"] + plan_link_box["height"] <= plan_message_box["y"] + plan_message_box["height"] + 1
+    assert plan_message_box["y"] + plan_message_box["height"] + 10 <= source_confirmation_box["y"], (
+        plan_message_box,
+        source_confirmation_box,
+    )
+    confirm_box = confirm_source_button.bounding_box()
+    hit_target = page.evaluate(
+        """box => {
+          const node = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+          return node ? { tag: node.tagName, className: node.className, text: node.textContent } : null;
+        }""",
+        confirm_box,
+    )
+    page.screenshot(path=ARTIFACTS / "research-source-confirmation.png", full_page=False)
+    assert hit_target and hit_target["tag"] in ["BUTTON", "SVG", "PATH"]
+    confirm_source_button.click()
     page.get_by_text("来源结果", exact=True).wait_for()
     page.get_by_role("button", name="查看来源", exact=True).click()
     source_dialog = page.get_by_role("dialog")
