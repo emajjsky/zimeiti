@@ -227,11 +227,134 @@ function createProjectFromIntelligence(item, analysis, angleIndex = 0, now = new
   }, timestamp);
 }
 
+async function updateCreativeState(client, workspaceId, mutate, now = new Date().toISOString()) {
+  const result = await client.query(
+    'SELECT state_json FROM workspace_snapshots WHERE workspace_id = $1 FOR UPDATE',
+    [workspaceId],
+  );
+  const migrated = migrateLegacyCreativeState(result.rows[0]?.state_json ?? {}, now);
+  const next = await mutate(migrated);
+  if (result.rows.length) {
+    await client.query(
+      'UPDATE workspace_snapshots SET state_json = $2, revision = revision + 1, updated_at = now() WHERE workspace_id = $1',
+      [workspaceId, JSON.stringify(next)],
+    );
+  } else {
+    await client.query(
+      'INSERT INTO workspace_snapshots (workspace_id, state_json) VALUES ($1, $2)',
+      [workspaceId, JSON.stringify(next)],
+    );
+  }
+  for (const project of next.projects ?? []) {
+    if (!project.legacyTopicId) continue;
+    await client.query(
+      `INSERT INTO legacy_topic_project_mappings (workspace_id, legacy_topic_id, project_id)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (workspace_id, legacy_topic_id) DO UPDATE SET project_id = excluded.project_id`,
+      [workspaceId, project.legacyTopicId, project.id],
+    );
+  }
+  return next;
+}
+
+function saveProjectPlanning(project, input, now = new Date().toISOString()) {
+  const timestamp = stableTimestamp(now, new Date().toISOString());
+  const nextPlanning = planningDraft(input);
+  return normalizeProject({
+    ...project,
+    title: nextPlanning.title || project.title,
+    planning: nextPlanning,
+    coreViewpoint: nextPlanning.coreMessage,
+    updatedAt: timestamp,
+  }, timestamp);
+}
+
+function validatePlanningForConfirmation(value) {
+  const required = [
+    ['title', '选题标题'],
+    ['angle', '创作角度'],
+    ['objective', '创作目标'],
+    ['targetAudience', '目标受众'],
+    ['coreMessage', '核心表达'],
+  ];
+  for (const [field, label] of required) {
+    if (!String(value?.[field] ?? '').trim()) throw new Error(`请先填写${label}。`);
+  }
+  if (!Array.isArray(value?.targetPlatforms) || value.targetPlatforms.length === 0) throw new Error('请至少选择一个目标平台。');
+}
+
+function confirmProjectPlanning(project, input, now = new Date().toISOString()) {
+  const timestamp = stableTimestamp(now, new Date().toISOString());
+  const saved = saveProjectPlanning(project, input, timestamp);
+  validatePlanningForConfirmation(saved.planning);
+  const versions = [...saved.versions];
+  for (const platform of saved.planning.targetPlatforms) {
+    if (versions.some((version) => version.platform === platform)) continue;
+    versions.push({
+      id: `${saved.id}-${platform.toLowerCase()}-${randomUUID()}`,
+      platform,
+      status: 'DRAFT',
+      title: saved.planning.title,
+      body: '',
+      updatedAt: timestamp,
+    });
+  }
+  const requestedChecks = saved.planning.sourceRequirements
+    .split(/[；\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return normalizeProject({
+    ...saved,
+    title: saved.planning.title,
+    stage: 'RESEARCH',
+    planningVersion: saved.planningVersion + 1,
+    planningConfirmedAt: timestamp,
+    coreViewpoint: saved.planning.coreMessage,
+    factChecks: saved.factChecks.length ? saved.factChecks : requestedChecks,
+    versions,
+    updatedAt: timestamp,
+  }, timestamp);
+}
+
+async function writePlanningVersion(client, input) {
+  const latest = await client.query(
+    `SELECT id, version_number, status, planning_json, created_at, confirmed_at
+      FROM project_planning_versions
+      WHERE workspace_id = $1 AND project_id = $2
+      ORDER BY version_number DESC LIMIT 1`,
+    [input.workspaceId, input.projectId],
+  );
+  const previous = latest.rows[0];
+  if (previous && previous.status === input.status && JSON.stringify(previous.planning_json) === JSON.stringify(input.planning)) return previous;
+  const versionNumber = Number(previous?.version_number ?? 0) + 1;
+  const inserted = await client.query(
+    `INSERT INTO project_planning_versions
+      (workspace_id, project_id, version_number, status, planning_json, source_snapshot_json, confirmed_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING id, version_number, status, planning_json, created_at, confirmed_at`,
+    [
+      input.workspaceId,
+      input.projectId,
+      versionNumber,
+      input.status,
+      JSON.stringify(input.planning),
+      JSON.stringify(input.sourceSnapshot ?? {}),
+      input.status === 'CONFIRMED' ? (input.confirmedAt ?? new Date().toISOString()) : null,
+    ],
+  );
+  return inserted.rows[0];
+}
+
 module.exports = {
+  confirmProjectPlanning,
   createBlankProject,
   createProjectFromIntelligence,
   mapProjectStatusToStage,
   migrateLegacyCreativeState,
   normalizeProject,
   planningDraft,
+  saveProjectPlanning,
+  updateCreativeState,
+  validatePlanningForConfirmation,
+  writePlanningVersion,
 };

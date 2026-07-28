@@ -1,6 +1,6 @@
 import type { LocalState } from './localRepository';
 import type { ApiUsageLog, ApiUsageSummary, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelTaskPolicy } from '../domain/integrations';
-import type { ContentProject, IntelligenceAnalysis, Platform } from '../domain/content';
+import type { ContentProject, IntelligenceAnalysis, Platform, ProjectOriginType, ProjectPlanning } from '../domain/content';
 import type { CreativeDraftCandidate, CreativeDraftPreparation, CreativeDraftRun, CreativeOutlineCandidate, CreativeOutlinePreparation, CreativeOutlineRun, CreativePlatform, CreativeSkillDefinition, ProjectAgentContext, ProjectAgentHistory, ProjectAgentPrepareInput, ProjectAgentPrepareResult, ProjectAgentRun, ProjectArtifact, ProjectInput, ProjectInputPayload, ProjectReference, ProjectReferenceMetadata, ProjectResearchContext, ProjectResearchRun, WritingBrief, WritingBriefInput } from '../domain/creative';
 
 const tokenKey = 'content-engine-web-session-v1';
@@ -38,6 +38,24 @@ export const webAuth = {
 export const webState = {
   async load() { return request<{ state: LocalState; revision: number; updatedAt: string }>('/workspace/state'); },
   async save(state: LocalState) { return request<{ revision: number; updatedAt: string }>('/workspace/state', { method: 'PUT', body: JSON.stringify({ state }) }); },
+};
+
+export type CreateProjectInput = {
+  originType: Extract<ProjectOriginType, 'MANUAL' | 'DRAFT' | 'IMPORT'>;
+  title?: string;
+  category?: string;
+  draftText?: string;
+  importUrl?: string;
+  targetPlatforms?: Platform[];
+};
+
+export const webProjects = {
+  list: () => request<{ projects: ContentProject[] }>('/creative/projects'),
+  create: (input: CreateProjectInput) => request<{ project: ContentProject; created: boolean }>('/creative/projects', { method: 'POST', body: JSON.stringify(input) }),
+  fromIntelligence: (itemId: string, input: { angleIndex?: number } = {}) => request<{ project: ContentProject; created: boolean }>(`/creative/projects/from-intelligence/${encodeURIComponent(itemId)}`, { method: 'POST', body: JSON.stringify(input) }),
+  planning: (projectId: string) => request<{ project: ContentProject; planning: ProjectPlanning }>(`/creative/projects/${encodeURIComponent(projectId)}/planning`),
+  savePlanning: (projectId: string, planning: ProjectPlanning) => request<{ project: ContentProject; planning: ProjectPlanning }>(`/creative/projects/${encodeURIComponent(projectId)}/planning`, { method: 'PUT', body: JSON.stringify(planning) }),
+  completePlanning: (projectId: string) => request<{ project: ContentProject }>(`/creative/projects/${encodeURIComponent(projectId)}/planning/complete`, { method: 'POST', body: '{}' }),
 };
 
 export const webCreative = {

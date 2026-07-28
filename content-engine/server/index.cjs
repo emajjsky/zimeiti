@@ -16,7 +16,15 @@ const { runBailianCli } = require('./runner/bailian.cjs');
 const { ANALYSIS_SCOPE, createTemplateStore, prepareAnalysisInput } = require('./services/intelligence-analysis.cjs');
 const { createCreativeSkillStore } = require('./services/creativeSkills.cjs');
 const { writingBriefInput } = require('./services/writing-brief.cjs');
-const { migrateLegacyCreativeState } = require('./services/project-planning.cjs');
+const {
+  confirmProjectPlanning,
+  createBlankProject,
+  createProjectFromIntelligence,
+  migrateLegacyCreativeState,
+  saveProjectPlanning,
+  updateCreativeState,
+  writePlanningVersion,
+} = require('./services/project-planning.cjs');
 const { createProjectMaterialStore } = require('./services/projectMaterials.cjs');
 const { createProjectAgentStore, artifactView, runView } = require('./services/project-agent.cjs');
 const { saveProjectUpload, removeProjectUpload, openProjectUpload, readProjectUploadText } = require('./services/projectUploadStorage.cjs');
@@ -44,6 +52,27 @@ const creativePlatform = z.enum(['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO']);
 const analysisPlatform = z.enum(['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO', 'VIDEO_CHANNEL']);
 const creativePlatformNames = { WECHAT: '公众号', XIAOHONGSHU: '小红书', ZHIHU: '知乎', WEIBO: '微博' };
 const sourceInput = z.object({ name: z.string().max(160), type: z.literal('RSS'), url: z.string().url().max(2_000), category: z.string().max(120), includeKeywords: z.array(z.string().max(120)).optional(), excludeKeywords: z.array(z.string().max(120)).optional(), language: z.enum(['ALL', 'ZH', 'EN']).optional(), enabled: z.boolean(), refreshMinutes: z.number().min(5).max(10_080), trust: z.string().max(80) });
+const projectPlanningInput = z.object({
+  title: z.string().trim().max(160),
+  category: z.string().trim().max(120),
+  angle: z.string().trim().max(2_000),
+  objective: z.string().trim().max(2_000),
+  targetAudience: z.string().trim().max(1_000),
+  coreMessage: z.string().trim().max(4_000),
+  targetPlatforms: z.array(analysisPlatform).min(1).max(5),
+  timing: z.enum(['TODAY', 'THREE_DAYS', 'ONE_WEEK', 'EVERGREEN']),
+  plannedPublishAt: z.string().trim().max(80).optional(),
+  sourceRequirements: z.string().max(8_000),
+  constraints: z.string().max(8_000),
+});
+const createProjectInput = z.object({
+  originType: z.enum(['MANUAL', 'DRAFT', 'IMPORT']).default('MANUAL'),
+  title: z.string().trim().max(160).default(''),
+  category: z.string().trim().max(120).default(''),
+  draftText: z.string().max(50_000).optional(),
+  importUrl: z.string().url().max(2_000).optional(),
+  targetPlatforms: z.array(analysisPlatform).max(5).default([]),
+});
 const templateStore = createTemplateStore({ query }, {
   [OUTLINE_TEMPLATE_SCOPES.WECHAT]: { defaultTemplate: () => defaultOutlineTemplate('WECHAT'), validateTemplate: validateOutlineTemplate },
   [OUTLINE_TEMPLATE_SCOPES.XIAOHONGSHU]: { defaultTemplate: () => defaultOutlineTemplate('XIAOHONGSHU'), validateTemplate: validateOutlineTemplate },
@@ -166,7 +195,7 @@ app.get('/api/v1/workspace/state', { preHandler: authenticate }, async (request)
 app.put('/api/v1/workspace/state', { preHandler: authenticate }, async (request) => {
   const body = z.object({ state: z.record(z.string(), z.unknown()) }).parse(request.body);
   const workspace = await currentWorkspace(request.user.sub);
-  const result = await query(`INSERT INTO workspace_snapshots (workspace_id, state_json) VALUES ($1, $2) ON CONFLICT (workspace_id) DO UPDATE SET state_json = excluded.state_json, revision = workspace_snapshots.revision + 1, updated_at = now() RETURNING revision, updated_at`, [workspace.id, JSON.stringify(body.state)]);
+  const result = await query(`INSERT INTO workspace_snapshots (workspace_id, state_json) VALUES ($1, $2) ON CONFLICT (workspace_id) DO UPDATE SET state_json = excluded.state_json, revision = workspace_snapshots.revision + 1, updated_at = now() RETURNING revision, updated_at`, [workspace.id, JSON.stringify(migrateLegacyCreativeState(body.state))]);
   return { revision: result.rows[0].revision, updatedAt: result.rows[0].updated_at };
 });
 
@@ -508,6 +537,99 @@ app.delete('/api/v1/intelligence/sources/:id', { preHandler: authenticate }, asy
 app.get('/api/v1/intelligence/items', { preHandler: authenticate }, async (request) => listItems((await currentWorkspace(request.user.sub)).id));
 app.post('/api/v1/intelligence/rss/refresh', { preHandler: authenticate }, async (request) => refreshWorkspaceRss((await currentWorkspace(request.user.sub)).id));
 
+app.get('/api/v1/creative/projects', { preHandler: authenticate }, async (request) => {
+  const workspace = await currentWorkspace(request.user.sub);
+  const result = await query('SELECT state_json FROM workspace_snapshots WHERE workspace_id = $1', [workspace.id]);
+  const state = migrateLegacyCreativeState(result.rows[0]?.state_json ?? defaultState(workspace.name));
+  return { projects: [...state.projects].sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt)) };
+});
+
+app.post('/api/v1/creative/projects', { preHandler: authenticate }, async (request, reply) => {
+  const input = createProjectInput.parse(request.body ?? {});
+  const workspace = await currentWorkspace(request.user.sub);
+  const project = createBlankProject(input);
+  await transaction(async (client) => updateCreativeState(client, workspace.id, (state) => ({ ...state, projects: [project, ...state.projects] })));
+  reply.code(201).send({ project, created: true });
+});
+
+app.post('/api/v1/creative/projects/from-intelligence/:itemId', { preHandler: authenticate }, async (request, reply) => {
+  const itemId = z.string().uuid().parse(request.params.itemId);
+  const input = z.object({ angleIndex: z.number().int().min(0).max(9).default(0) }).parse(request.body ?? {});
+  const workspace = await currentWorkspace(request.user.sub);
+  const [itemResult, analysisResult] = await Promise.all([
+    query('SELECT * FROM intelligence_items WHERE id = $1 AND workspace_id = $2', [itemId, workspace.id]),
+    query(`SELECT a.selected_platforms, a.output_json, a.overall_score, a.decision, a.created_at
+      FROM intelligence_analyses a
+      WHERE a.workspace_id = $1 AND a.intelligence_item_id = $2
+      ORDER BY a.created_at DESC LIMIT 1`, [workspace.id, itemId]),
+  ]);
+  if (!itemResult.rowCount) { const error = new Error('未找到这条资讯。'); error.statusCode = 404; throw error; }
+  const analysisRow = analysisResult.rows[0];
+  const analysis = analysisRow ? {
+    selectedPlatforms: analysisRow.selected_platforms,
+    ...analysisRow.output_json,
+    overallScore: analysisRow.overall_score,
+    decision: analysisRow.decision,
+    analyzedAt: analysisRow.created_at,
+  } : null;
+  let project;
+  let created = false;
+  await transaction(async (client) => {
+    await updateCreativeState(client, workspace.id, (state) => {
+      const existing = state.projects.find((item) => item.originType === 'HOTSPOT' && item.originReferenceId === itemId);
+      if (existing) { project = existing; return state; }
+      project = createProjectFromIntelligence(analysisItem(itemResult.rows[0]), analysis, input.angleIndex);
+      created = true;
+      return { ...state, projects: [project, ...state.projects] };
+    });
+  });
+  reply.code(created ? 201 : 200).send({ project, created });
+});
+
+app.get('/api/v1/creative/projects/:projectId/planning', { preHandler: authenticate }, async (request) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const workspace = await currentWorkspace(request.user.sub);
+  const project = await creativeProject(workspace.id, projectId);
+  return { project, planning: project.planning };
+});
+
+app.put('/api/v1/creative/projects/:projectId/planning', { preHandler: authenticate }, async (request) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const input = projectPlanningInput.parse(request.body);
+  const workspace = await currentWorkspace(request.user.sub);
+  let project;
+  await transaction(async (client) => {
+    await updateCreativeState(client, workspace.id, async (state) => {
+      const index = state.projects.findIndex((item) => item.id === projectId);
+      if (index < 0) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
+      project = saveProjectPlanning(state.projects[index], input);
+      await writePlanningVersion(client, { workspaceId: workspace.id, projectId, status: 'DRAFT', planning: project.planning, sourceSnapshot: project.sourceSnapshot });
+      const projects = [...state.projects];
+      projects[index] = project;
+      return { ...state, projects };
+    });
+  });
+  return { project, planning: project.planning };
+});
+
+app.post('/api/v1/creative/projects/:projectId/planning/complete', { preHandler: authenticate }, async (request) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const workspace = await currentWorkspace(request.user.sub);
+  let project;
+  await transaction(async (client) => {
+    await updateCreativeState(client, workspace.id, async (state) => {
+      const index = state.projects.findIndex((item) => item.id === projectId);
+      if (index < 0) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
+      project = confirmProjectPlanning(state.projects[index], state.projects[index].planning);
+      await writePlanningVersion(client, { workspaceId: workspace.id, projectId, status: 'CONFIRMED', planning: project.planning, sourceSnapshot: project.sourceSnapshot, confirmedAt: project.planningConfirmedAt });
+      const projects = [...state.projects];
+      projects[index] = project;
+      return { ...state, projects };
+    });
+  });
+  return { project };
+});
+
 app.get('/api/v1/creative/skills', { preHandler: authenticate }, async (request) => {
   const workspace = await currentWorkspace(request.user.sub);
   return creativeSkillStore.list(workspace.id);
@@ -528,7 +650,7 @@ app.put('/api/v1/creative/projects/:projectId/brief', { preHandler: authenticate
 
 async function creativeProject(workspaceId, projectId) {
   const result = await query('SELECT state_json FROM workspace_snapshots WHERE workspace_id = $1', [workspaceId]);
-  const project = result.rows[0]?.state_json?.projects?.find((item) => item.id === projectId);
+  const project = migrateLegacyCreativeState(result.rows[0]?.state_json ?? {}).projects.find((item) => item.id === projectId);
   if (!project) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
   return project;
 }
