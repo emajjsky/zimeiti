@@ -794,7 +794,6 @@ app.post('/api/v1/creative/projects/:projectId/agent/prepare', { preHandler: aut
   const input = agentPrepareInput.parse(request.body);
   const workspace = await currentWorkspace(request.user.sub);
   if (input.stage === 'RESEARCH') {
-    if (input.inputIds.length + input.referenceIds.length === 0) throw new Error('请至少选择一条项目资料。');
     const [project, brief, policy, materialRows] = await Promise.all([
       creativeProject(workspace.id, projectId),
       creativeSkillStore.getBrief(workspace.id, projectId),

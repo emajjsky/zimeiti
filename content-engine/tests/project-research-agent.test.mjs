@@ -59,6 +59,19 @@ test('研究提示词区分事实、观点、未读取链接和只有元数据�
   assert.match(prompt.message, /保留我的观点/);
 });
 
+test('没有资料时研究提示词从已确认规划提出问题但不冒充完成研究', () => {
+  const prompt = buildResearchPlanPrompt({
+    project: { title: '普通人如何选择 AI 工具', coreViewpoint: '先看真实任务。', factChecks: ['核验当前价格'] },
+    brief: { objective: '帮助普通创作者决策', targetAudience: '普通内容创作者', coreMessage: '用结果评估工具', sourceRequirements: '优先官方来源', notes: '' },
+    request: '制定研究计划。',
+    materials: [],
+  });
+  assert.match(prompt.system, /没有资料时/);
+  assert.match(prompt.system, /已确认的项目规划/);
+  assert.match(prompt.system, /不宣称已经完成网页检索/);
+  assert.match(prompt.message, /"materials":\[\]/);
+});
+
 test('研究资料选择按工作空间和项目隔离', async () => {
   const calls = [];
   const inputId = '11111111-1111-4111-8111-111111111111';
@@ -103,6 +116,17 @@ test('研究计划先准备确认卡，用户确认后才入队', () => {
   assert.doesNotMatch(server.slice(prepareStart, confirmStart), /await enqueue/);
   assert.match(server.slice(confirmStart, cancelStart), /PROJECT_RESEARCH_PLAN/);
   assert.match(server.slice(confirmStart, cancelStart), /await enqueue/);
+});
+
+test('统一 Agent 研究准备接口接受空资料并继续冻结空快照', () => {
+  const server = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
+  const start = server.indexOf("/creative/projects/:projectId/agent/prepare");
+  const end = server.indexOf("if (!input.platform)", start);
+  const researchPrepare = server.slice(start, end);
+  assert.ok(start > -1 && end > start);
+  assert.doesNotMatch(researchPrepare, /至少选择一条项目资料/);
+  assert.match(researchPrepare, /researchSnapshot\(workspace\.id, projectId, input\.inputIds, input\.referenceIds\)/);
+  assert.match(researchPrepare, /materials, stage: 'RESEARCH'/);
 });
 
 test('项目资料页具备真实进度、资料选择和 Agent 完整状态', () => {
