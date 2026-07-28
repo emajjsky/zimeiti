@@ -1,6 +1,7 @@
 import { Bot, Check, CircleAlert, Eye, FileCheck2, LoaderCircle, Send, Settings2, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { webCreative } from '../../data/webApi';
+import { canPrepareAgentRequest, messagesForAgentThread, researchQuickAction } from '../../domain/project-agent-composer.mjs';
 import { platformName, type ContentProject } from '../../domain/content';
 import type { CreativePlatform, ProjectAgentContext, ProjectAgentHistory, ProjectAgentMessageType, ProjectArtifact } from '../../domain/creative';
 
@@ -97,17 +98,17 @@ export function ProjectAgent({ projectId, stage, platform, selectedMaterials, se
 
   const activeRun = context?.activeRun;
   const runIsActive = Boolean(activeRun && ['DRAFT', 'QUEUED', 'RUNNING'].includes(activeRun.status));
-  const needsMaterials = stage === 'RESEARCH' && selectedCount === 0;
-  const canPrepare = Boolean(request.trim()) && !needsMaterials && !blockedReason && busy === 'idle' && !runIsActive;
+  const canPrepare = canPrepareAgentRequest({ request, blockedReason, busy, runIsActive });
 
-  const prepare = async () => {
-    if (!canPrepare) return;
+  const prepare = async (nextRequest = request) => {
+    const normalizedRequest = nextRequest.trim();
+    if (!canPrepareAgentRequest({ request: normalizedRequest, blockedReason, busy, runIsActive })) return;
     setBusy('preparing'); setError('');
     try {
       await webCreative.prepareAgent(projectId, {
         stage,
         ...(platform ? { platform } : {}),
-        request: request.trim(),
+        request: normalizedRequest,
         ...(selection ? { selection } : {}),
         inputIds: selectedMaterials?.inputIds ?? [],
         referenceIds: selectedMaterials?.referenceIds ?? [],
@@ -153,6 +154,7 @@ export function ProjectAgent({ projectId, stage, platform, selectedMaterials, se
   };
 
   const artifactById = useMemo(() => new Map((context?.artifacts ?? []).map((artifact) => [artifact.id, artifact])), [context?.artifacts]);
+  const threadMessages = useMemo(() => messagesForAgentThread(context?.messages ?? []), [context?.messages]);
   const stageLabel = stage === 'RESEARCH' ? '研究' : `文案${platform ? ` · ${platformName[platform]}` : ''}`;
 
   return <aside className="project-agent" aria-label="项目 Agent">
@@ -165,9 +167,9 @@ export function ProjectAgent({ projectId, stage, platform, selectedMaterials, se
     </header>
     <div className="project-agent-thread">
       {busy === 'loading' && <div className="project-agent-skeleton" aria-label="正在读取 Agent 上下文"><i/><i/><i/></div>}
-      {busy !== 'loading' && !context?.messages.length && <div className="project-agent-empty"><FileCheck2 size={22}/><b>还没有对话</b></div>}
+      {busy !== 'loading' && !threadMessages.length && <div className="project-agent-empty"><FileCheck2 size={22}/><b>还没有对话</b></div>}
       {(context?.summaries.length ?? 0) > 0 && <div className="project-agent-summary">已继承 {context?.summaries.length} 条前序摘要</div>}
-      {context?.messages.map((message) => {
+      {threadMessages.map((message) => {
         const refs = (message.artifactRefs ?? []).map((id) => artifactById.get(id)).filter((item): item is ProjectArtifact => Boolean(item));
         return <article key={message.id} className={`project-agent-message ${message.role.toLowerCase()} type-${(message.messageType ?? 'MESSAGE').toLowerCase()}`}>
           <span>{message.role === 'USER' ? '你' : messageTypeNames[message.messageType ?? 'MESSAGE']}</span>
@@ -191,8 +193,8 @@ export function ProjectAgent({ projectId, stage, platform, selectedMaterials, se
     </div>
     {error && <div className="project-agent-error" role="alert"><CircleAlert size={16}/><span>{error}</span>{/(模型|提示词|核心 Agent|Key)/.test(error) && <button className="text-button" type="button" onClick={() => onOpenSettings(/核心 Agent/.test(error) ? 'agent' : 'policies')}><Settings2 size={14}/>去配置</button>}</div>}
     <div className="project-agent-composer">
-      <div><span>{stage === 'RESEARCH' ? `已选 ${selectedCount} 条资料` : selection ? `已选择 ${selection.text.length} 字` : '自由对话'}</span>{selection && onClearSelection && <button className="selection-clear" type="button" aria-label="清除正文选区" onClick={onClearSelection}><X size={13}/></button>}{needsMaterials && <em>请先选择资料</em>}{blockedReason && <em>{blockedReason}</em>}</div>
-      <textarea rows={3} value={request} maxLength={2_000} placeholder={stage === 'RESEARCH' ? '说明要核验的问题和保留的观点' : '例如：保留事实，把这篇文章润色得更自然'} onChange={(event) => setRequest(event.target.value)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') void prepare(); }}/>
+      <div><span>{stage === 'RESEARCH' ? selectedCount ? `已选 ${selectedCount} 条资料` : '未选资料' : selection ? `已选择 ${selection.text.length} 字` : '自由对话'}</span>{stage === 'RESEARCH' && !runIsActive && !blockedReason && <button className="project-agent-quick-action" type="button" disabled={busy !== 'idle'} onClick={() => void prepare(researchQuickAction.request)}>{researchQuickAction.label}</button>}{selection && onClearSelection && <button className="selection-clear" type="button" aria-label="清除正文选区" onClick={onClearSelection}><X size={13}/></button>}{blockedReason && <em>{blockedReason}</em>}</div>
+      <textarea rows={3} value={request} maxLength={2_000} placeholder={stage === 'RESEARCH' ? '说明要核验的问题，或直接制定研究计划' : '例如：保留事实，把这篇文章润色得更自然'} onChange={(event) => setRequest(event.target.value)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') void prepare(); }}/>
       <button className="button primary" type="button" title="准备 Agent 任务" disabled={!canPrepare} onClick={() => void prepare()}>{busy === 'preparing' ? <LoaderCircle size={16}/> : <Send size={16}/>}发送</button>
     </div>
     {preview && <ArtifactPreview artifact={preview} selectedTitle={selectedTitle} onTitle={setSelectedTitle} busy={busy === 'accepting'} onAccept={() => void acceptArtifact()} onClose={() => setPreview(null)}/>} 

@@ -168,6 +168,8 @@ with sync_playwright() as playwright:
     unexpected_api = []
     console_errors = []
     failed_responses = []
+    agent_contexts = {}
+    prepared_agent_payloads = []
 
     page.on(
         "console",
@@ -321,7 +323,62 @@ with sync_playwright() as playwright:
             return json_response(route, {"inputs": [], "references": []})
         agent_match = re.fullmatch(r"/api/v1/creative/projects/([^/]+)/agent", path)
         if agent_match and method == "GET":
-            return json_response(route, empty_agent_context())
+            return json_response(
+                route,
+                agent_contexts.get(agent_match.group(1), empty_agent_context()),
+            )
+
+        agent_prepare_match = re.fullmatch(
+            r"/api/v1/creative/projects/([^/]+)/agent/prepare", path
+        )
+        if agent_prepare_match and method == "POST":
+            project_id = agent_prepare_match.group(1)
+            payload = json.loads(request.post_data or "{}")
+            prepared_agent_payloads.append(payload)
+            run = {
+                "id": "research-run-draft-1",
+                "action": "PROJECT_RESEARCH_PLAN",
+                "status": "DRAFT",
+                "request": payload["request"],
+                "confirmation": {
+                    "model": "qwen3.7-max-2026-06-08",
+                    "promptVersion": "1.0.0",
+                    "skillNames": [],
+                    "materialCount": len(payload.get("inputIds", []))
+                    + len(payload.get("referenceIds", [])),
+                    "writeScope": "RESEARCH",
+                },
+                "createdAt": NOW,
+            }
+            agent_contexts[project_id] = {
+                **empty_agent_context(),
+                "messages": [
+                    {
+                        "id": "research-user-message-1",
+                        "role": "USER",
+                        "content": payload["request"],
+                        "runId": run["id"],
+                        "stage": "RESEARCH",
+                        "messageType": "MESSAGE",
+                        "artifactRefs": [],
+                        "metadata": {},
+                        "createdAt": NOW,
+                    },
+                    {
+                        "id": "research-confirmation-message-1",
+                        "role": "ASSISTANT",
+                        "content": "研究计划已准备，确认后开始执行。",
+                        "runId": run["id"],
+                        "stage": "RESEARCH",
+                        "messageType": "CONFIRMATION",
+                        "artifactRefs": [],
+                        "metadata": {},
+                        "createdAt": NOW,
+                    },
+                ],
+                "activeRun": run,
+            }
+            return json_response(route, run, status=201)
 
         unexpected_api.append(f"{method} {path}")
         return json_response(
@@ -363,6 +420,17 @@ with sync_playwright() as playwright:
     page.get_by_role("heading", name="资料与研究", exact=True).wait_for()
     assert "stage=research" in page.url
     assert page.get_by_role("button", name="研究", exact=True).get_attribute("class") == "active"
+
+    # 2.1 零资料时可用唯一快捷动作准备研究计划，确认前不调用模型。
+    page.get_by_text("未选资料", exact=True).wait_for()
+    page.get_by_role("button", name="制定研究计划", exact=True).click()
+    confirmation = page.locator(".agent-confirmation")
+    confirmation.get_by_text("生成研究计划", exact=True).wait_for()
+    assert confirmation.get_by_text("0 条", exact=True).count() == 1
+    assert page.locator(".project-agent-message.type-confirmation").count() == 0
+    assert prepared_agent_payloads[-1]["stage"] == "RESEARCH"
+    assert prepared_agent_payloads[-1]["inputIds"] == []
+    assert prepared_agent_payloads[-1]["referenceIds"] == []
 
     page.set_viewport_size({"width": 390, "height": 844})
     page.wait_for_timeout(100)
@@ -449,7 +517,7 @@ with sync_playwright() as playwright:
         "/settings/credentials/",
         "/intelligence/search",
         "/intelligence/rss/refresh",
-        "/agent/prepare",
+        "/agent-runs/",
     ]
     assert not unexpected_api, unexpected_api
     assert not failed_responses, failed_responses
@@ -465,5 +533,6 @@ with sync_playwright() as playwright:
         for request in api_requests
     )
     assert any(request.endswith("/planning/complete") for request in api_requests)
+    assert any(request.endswith("/agent/prepare") for request in api_requests)
 
     browser.close()
