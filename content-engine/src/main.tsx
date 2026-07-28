@@ -188,12 +188,33 @@ function App() {
     }
     const id = `project-${Date.now()}`;
     const now = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
+    const nowIso = new Date().toISOString();
     const project: ContentProject = {
       id,
       title: selectedTopic.title,
+      originType: selectedTopic.sourceIds.length ? 'HOTSPOT' : 'MANUAL',
+      originReferenceId: selectedTopic.sourceIds[0],
+      legacyTopicId: selectedTopic.id,
+      stage: 'PLANNING',
       status: 'BRIEF',
+      planning: {
+        title: selectedTopic.title,
+        category: selectedTopic.category,
+        angle: selectedTopic.analysisSnapshot?.reason ?? '',
+        objective: '',
+        targetAudience: selectedTopic.targetAudience ?? '',
+        coreMessage: selectedTopic.coreViewpoint,
+        targetPlatforms: selectedTopic.platforms,
+        timing: selectedTopic.analysisSnapshot?.timingWindow ?? (selectedTopic.urgency === '高' ? 'TODAY' : selectedTopic.urgency === '中' ? 'ONE_WEEK' : 'EVERGREEN'),
+        plannedPublishAt: selectedTopic.plannedDate,
+        sourceRequirements: (selectedTopic.factsToVerify ?? []).join('；'),
+        constraints: '',
+      },
+      planningVersion: 0,
       coreViewpoint: selectedTopic.coreViewpoint,
       factChecks: selectedTopic.factsToVerify ?? [],
+      sourceSnapshot: { intelligenceIds: selectedTopic.sourceIds, analysis: selectedTopic.analysisSnapshot ?? null },
+      createdAt: nowIso,
       updatedAt: now,
       versions: selectedTopic.platforms.map((platform) => ({
         id: `${id}-${platform.toLowerCase()}`,

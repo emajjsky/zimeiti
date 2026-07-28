@@ -16,6 +16,7 @@ const { runBailianCli } = require('./runner/bailian.cjs');
 const { ANALYSIS_SCOPE, createTemplateStore, prepareAnalysisInput } = require('./services/intelligence-analysis.cjs');
 const { createCreativeSkillStore } = require('./services/creativeSkills.cjs');
 const { writingBriefInput } = require('./services/writing-brief.cjs');
+const { migrateLegacyCreativeState } = require('./services/project-planning.cjs');
 const { createProjectMaterialStore } = require('./services/projectMaterials.cjs');
 const { createProjectAgentStore, artifactView, runView } = require('./services/project-agent.cjs');
 const { saveProjectUpload, removeProjectUpload, openProjectUpload, readProjectUploadText } = require('./services/projectUploadStorage.cjs');
@@ -120,7 +121,7 @@ async function currentWorkspace(userId) {
 }
 
 function defaultState(name) {
-  return { workspace: { name, materialRoot: '', primaryTopics: [], enabledPlatforms: ['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO', 'VIDEO_CHANNEL'], setupCompleted: false }, feishuTemplate: { name: `${name}内容库`, topicStorage: 'ONE_TABLE', includeSchedule: true, includeReview: false, status: 'DRAFT' }, sources: [], intelligence: [], topics: [], projects: [] };
+  return { workspace: { name, materialRoot: '', primaryTopics: [], enabledPlatforms: ['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO', 'VIDEO_CHANNEL'], setupCompleted: false }, feishuTemplate: { name: `${name}内容库`, topicStorage: 'ONE_TABLE', includeSchedule: true, includeReview: false, status: 'DRAFT' }, sources: [], intelligence: [], projects: [] };
 }
 
 const authInput = z.object({ email: z.string().email().max(320), password: z.string().min(8).max(200), displayName: z.string().min(1).max(80).optional(), workspaceName: z.string().min(1).max(80).optional() });
@@ -159,7 +160,7 @@ app.get('/api/v1/auth/me', { preHandler: authenticate }, async (request) => {
 app.get('/api/v1/workspace/state', { preHandler: authenticate }, async (request) => {
   const workspace = await currentWorkspace(request.user.sub);
   const result = await query('SELECT state_json, revision, updated_at FROM workspace_snapshots WHERE workspace_id = $1', [workspace.id]);
-  return { workspace, state: result.rows[0]?.state_json ?? defaultState(workspace.name), revision: result.rows[0]?.revision ?? 1, updatedAt: result.rows[0]?.updated_at ?? new Date().toISOString() };
+  return { workspace, state: migrateLegacyCreativeState(result.rows[0]?.state_json ?? defaultState(workspace.name)), revision: result.rows[0]?.revision ?? 1, updatedAt: result.rows[0]?.updated_at ?? new Date().toISOString() };
 });
 
 app.put('/api/v1/workspace/state', { preHandler: authenticate }, async (request) => {

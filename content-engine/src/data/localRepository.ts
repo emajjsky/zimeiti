@@ -1,4 +1,4 @@
-import type { ContentProject, IntelligenceItem, IntelligenceSource, Platform, TopicCandidate } from '../domain/content';
+import { projectStageForLegacyStatus, type ContentProject, type IntelligenceItem, type IntelligenceSource, type Platform, type ProjectPlanning, type TopicCandidate } from '../domain/content';
 import { webIntelligence, webState } from './webApi';
 
 const key = 'content-engine-prototype-v1';
@@ -48,23 +48,9 @@ export const seedState: LocalState = {
     status: 'DRAFT',
   },
   sources: [],
-  intelligence: [
-    { id: 'intel-sora', title: 'OpenAI 发布 Sora 新功能，视频生成一致性提升', summary: '新版本重点改善长镜头角色一致性和文本指令控制，适合延展为知识视频工具教程。', category: 'AI', source: 'TechCrunch', publishedAt: '10:42', heat: 98, trust: '可信' },
-    { id: 'intel-price', title: '国内大模型价格调整，对个体创作者意味着什么', summary: '多个模型服务更新推理套餐，适合从内容生产成本下降的角度切入。', category: '财经', source: '36Kr', publishedAt: '09:15', heat: 85, trust: '待核验' },
-    { id: 'intel-history', title: '新发现汉墓材料揭示丝路贸易路线细节', summary: '可做“历史并不遥远”的系列选题，关联现代消费与文化交流。', category: '历史', source: '国家文物局', publishedAt: '昨天', heat: 72, trust: '可信' },
-  ],
-  topics: [
-    { id: 'topic-ai-video', title: '普通人如何用 AI 做知识视频', category: 'AI 工具实战', platforms: ['WECHAT', 'XIAOHONGSHU', 'VIDEO_CHANNEL'], urgency: '高', status: 'PENDING', plannedDate: '7 月 23 日', coreViewpoint: '通过结构化工作流，普通人也能稳定产出知识视频。', sourceIds: ['intel-sora'] },
-    { id: 'topic-price', title: '最新大模型价格调整对个体创作者的影响', category: '财经政策解读', platforms: ['WECHAT'], urgency: '中', status: 'ACCEPTED', plannedDate: '7 月 25 日', coreViewpoint: '成本下降不等于内容质量自动提升。', sourceIds: ['intel-price'] },
-  ],
-  projects: [
-    { id: 'project-ai-video', title: '普通人如何用 AI 做知识视频', status: 'VISUAL', coreViewpoint: '无需深厚专业背景，也能完成结构清晰的知识视频。', factChecks: ['确认视频工具订阅价格', '核实剪映功能限制'], updatedAt: '刚刚', versions: [
-      { id: 'version-wechat', platform: 'WECHAT', status: 'PREFLIGHT_PASSED', title: '普通人如何用 AI 做知识视频', body: '本文将把知识视频制作拆解为选题、脚本、视觉和发布四步。', updatedAt: '10:20' },
-      { id: 'version-xhs', platform: 'XIAOHONGSHU', status: 'DRAFT', title: '普通人做知识视频的 6 个步骤', body: '第 1 页：先找到值得讲的真实问题。', updatedAt: '10:35' },
-      { id: 'version-video', platform: 'VIDEO_CHANNEL', status: 'DRAFT', title: '60 秒口播：AI 做知识视频', body: '在信息爆炸的时代，你是否还在为寻找高质量内容素材而烦恼？', updatedAt: '09:48' },
-    ] },
-    { id: 'project-weekly', title: 'AIGC 行业周报（第 32 期）', status: 'WRITING', coreViewpoint: '本周值得创作者关注的模型、工具和政策变化。', factChecks: [], updatedAt: '2 小时前', versions: [] },
-  ],
+  intelligence: [],
+  topics: [],
+  projects: [],
 };
 
 export async function loadState(): Promise<LocalState> {
@@ -100,6 +86,13 @@ export async function persistState(state: LocalState): Promise<void> {
 
 function normalizeState(state: LocalState): LocalState {
   const intelligence = dedupeIntelligence((state.intelligence ?? []).map((item) => ({ ...item, title: normalizeText(item.title), summary: normalizeText(item.summary) })));
+  const normalizedProjects = (state.projects ?? []).map(normalizeProject);
+  const topics = state.topics ?? [];
+  for (const topic of topics) {
+    const existingIndex = normalizedProjects.findIndex((project) => project.legacyTopicId === topic.id || (topic.status === 'PROJECT_CREATED' && project.title === topic.title));
+    if (existingIndex >= 0) normalizedProjects[existingIndex] = mergeTopicProject(normalizedProjects[existingIndex], topic);
+    else normalizedProjects.push(projectFromTopic(topic));
+  }
   return {
     ...state,
     workspace: {
@@ -112,7 +105,111 @@ function normalizeState(state: LocalState): LocalState {
     feishuTemplate: { ...seedState.feishuTemplate, ...state.feishuTemplate },
     sources: state.sources ?? [],
     intelligence,
+    topics: [],
+    projects: normalizedProjects,
   };
+}
+
+function timestamp(value?: string) {
+  if (value && Number.isFinite(Date.parse(value))) return new Date(value).toISOString();
+  return new Date().toISOString();
+}
+
+function projectId() {
+  return `project-${globalThis.crypto?.randomUUID?.() ?? Date.now()}`;
+}
+
+function planning(input: Partial<ProjectPlanning> & Pick<ProjectPlanning, 'title'>): ProjectPlanning {
+  return {
+    title: input.title.trim(),
+    category: input.category?.trim() ?? '',
+    angle: input.angle?.trim() ?? '',
+    objective: input.objective?.trim() ?? '',
+    targetAudience: input.targetAudience?.trim() ?? '',
+    coreMessage: input.coreMessage?.trim() ?? '',
+    targetPlatforms: [...new Set(input.targetPlatforms ?? [])],
+    timing: input.timing ?? 'EVERGREEN',
+    ...(input.plannedPublishAt ? { plannedPublishAt: input.plannedPublishAt } : {}),
+    sourceRequirements: input.sourceRequirements?.trim() ?? '',
+    constraints: input.constraints?.trim() ?? '',
+  };
+}
+
+function normalizeProject(project: ContentProject): ContentProject {
+  const createdAt = timestamp(project.createdAt ?? project.updatedAt);
+  const nextPlanning = planning({
+    title: project.planning?.title ?? project.title,
+    category: project.planning?.category,
+    angle: project.planning?.angle,
+    objective: project.planning?.objective,
+    targetAudience: project.planning?.targetAudience,
+    coreMessage: project.planning?.coreMessage ?? project.coreViewpoint,
+    targetPlatforms: project.planning?.targetPlatforms ?? project.versions.map((version) => version.platform),
+    timing: project.planning?.timing,
+    plannedPublishAt: project.planning?.plannedPublishAt,
+    sourceRequirements: project.planning?.sourceRequirements ?? project.factChecks.join('；'),
+    constraints: project.planning?.constraints,
+  });
+  return {
+    ...project,
+    title: nextPlanning.title || '未命名创作',
+    originType: project.originType ?? 'LEGACY',
+    stage: project.stage ?? projectStageForLegacyStatus(project.status),
+    planning: nextPlanning,
+    planningVersion: project.planningVersion ?? (project.planningConfirmedAt ? 1 : 0),
+    sourceSnapshot: project.sourceSnapshot ?? {},
+    createdAt,
+    updatedAt: timestamp(project.updatedAt ?? createdAt),
+  };
+}
+
+function projectFromTopic(topic: TopicCandidate): ContentProject {
+  const now = new Date().toISOString();
+  return normalizeProject({
+    id: projectId(),
+    title: topic.title,
+    originType: topic.sourceIds.length ? 'HOTSPOT' : 'MANUAL',
+    originReferenceId: topic.sourceIds[0],
+    legacyTopicId: topic.id,
+    stage: 'PLANNING',
+    status: 'BRIEF',
+    planning: planning({
+      title: topic.title,
+      category: topic.category,
+      angle: topic.analysisSnapshot?.reason,
+      targetAudience: topic.targetAudience,
+      coreMessage: topic.coreViewpoint,
+      targetPlatforms: topic.platforms,
+      timing: topic.analysisSnapshot?.timingWindow ?? (topic.urgency === '高' ? 'TODAY' : topic.urgency === '中' ? 'ONE_WEEK' : 'EVERGREEN'),
+      plannedPublishAt: topic.plannedDate,
+      sourceRequirements: (topic.factsToVerify ?? []).join('；'),
+    }),
+    planningVersion: 0,
+    coreViewpoint: topic.coreViewpoint,
+    factChecks: topic.factsToVerify ?? [],
+    versions: [],
+    sourceSnapshot: topic.sourceIds.length ? { intelligenceIds: topic.sourceIds, analysis: topic.analysisSnapshot ?? null } : {},
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
+function mergeTopicProject(project: ContentProject, topic: TopicCandidate): ContentProject {
+  return normalizeProject({
+    ...project,
+    originType: topic.sourceIds.length ? 'HOTSPOT' : project.originType,
+    originReferenceId: project.originReferenceId ?? topic.sourceIds[0],
+    legacyTopicId: project.legacyTopicId ?? topic.id,
+    planning: planning({
+      ...project.planning,
+      category: project.planning.category || topic.category,
+      angle: project.planning.angle || topic.analysisSnapshot?.reason,
+      targetAudience: project.planning.targetAudience || topic.targetAudience,
+      coreMessage: project.planning.coreMessage || topic.coreViewpoint,
+      targetPlatforms: project.planning.targetPlatforms.length ? project.planning.targetPlatforms : topic.platforms,
+      sourceRequirements: project.planning.sourceRequirements || (topic.factsToVerify ?? []).join('；'),
+    }),
+  });
 }
 
 export function intelligenceKey(item: Pick<IntelligenceItem, 'title' | 'source'>) {

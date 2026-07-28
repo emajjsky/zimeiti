@@ -11,6 +11,17 @@ export type ProjectStatus =
   | 'RETROSPECTIVE'
   | 'ARCHIVED';
 
+export type ProjectOriginType = 'HOTSPOT' | 'MANUAL' | 'DRAFT' | 'IMPORT' | 'LEGACY';
+export type ProjectStage =
+  | 'PLANNING'
+  | 'RESEARCH'
+  | 'MASTER_WRITING'
+  | 'PLATFORM_ADAPTATION'
+  | 'VISUAL'
+  | 'LAYOUT'
+  | 'REVIEW'
+  | 'COMPLETED';
+
 export type Platform = 'WECHAT' | 'XIAOHONGSHU' | 'ZHIHU' | 'WEIBO' | 'VIDEO_CHANNEL';
 export type ContentVersionStatus = 'DRAFT' | 'PREFLIGHT_PASSED' | 'WAITING_CONFIRMATION' | 'PUBLISHED' | 'FAILED' | 'CANCELLED';
 
@@ -99,13 +110,36 @@ export interface ContentVersion {
   updatedAt: string;
 }
 
+export interface ProjectPlanning {
+  title: string;
+  category: string;
+  angle: string;
+  objective: string;
+  targetAudience: string;
+  coreMessage: string;
+  targetPlatforms: Platform[];
+  timing: TimingWindow;
+  plannedPublishAt?: string;
+  sourceRequirements: string;
+  constraints: string;
+}
+
 export interface ContentProject {
   id: string;
   title: string;
+  originType: ProjectOriginType;
+  originReferenceId?: string;
+  legacyTopicId?: string;
+  stage: ProjectStage;
   status: ProjectStatus;
+  planning: ProjectPlanning;
+  planningVersion: number;
+  planningConfirmedAt?: string;
   coreViewpoint: string;
   factChecks: string[];
   versions: ContentVersion[];
+  sourceSnapshot: Record<string, unknown>;
+  createdAt: string;
   updatedAt: string;
 }
 
@@ -129,3 +163,30 @@ export const projectStatusName: Record<ProjectStatus, string> = {
   RETROSPECTIVE: '待复盘',
   ARCHIVED: '已归档',
 };
+
+export const projectStageName: Record<ProjectStage, string> = {
+  PLANNING: '待规划',
+  RESEARCH: '研究中',
+  MASTER_WRITING: '正文中',
+  PLATFORM_ADAPTATION: '平台制作中',
+  VISUAL: '配图中',
+  LAYOUT: '排版中',
+  REVIEW: '待审核',
+  COMPLETED: '已完成',
+};
+
+export const projectOriginName: Record<ProjectOriginType, string> = {
+  HOTSPOT: '热点',
+  MANUAL: '手工想法',
+  DRAFT: '已有草稿',
+  IMPORT: '导入内容',
+  LEGACY: '历史项目',
+};
+
+export function projectStageForLegacyStatus(status: ProjectStatus): ProjectStage {
+  if (status === 'BRIEF') return 'PLANNING';
+  if (status === 'WRITING') return 'MASTER_WRITING';
+  if (status === 'VISUAL' || status === 'VIDEO') return 'VISUAL';
+  if (status === 'REVIEW' || status === 'SCHEDULED') return 'REVIEW';
+  return 'COMPLETED';
+}
