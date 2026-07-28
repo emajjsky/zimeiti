@@ -566,3 +566,12 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - 导航兼容读取旧 `view=plan`、`view=topicEditor` 和 `topic`，映射到 `view=create` 与对应 `legacyTopicId` 项目；新地址只保存 `project`、`stage` 和 `platform`。
 - `tests/creative-workspace.e2e.py` 使用单一 API 路由 Mock 覆盖项目中心、创建、规划、研究、热点闭环、刷新恢复和旧 URL；脚本显式拒绝未声明 API，并断言没有触发模型、Tavily、RSS 刷新或 Agent 执行接口。
 - 下一实现项为研究阶段零资料启动。现有 `ProjectAgent` 的 `RESEARCH` 阶段不应因资料数为零而完全阻断，但准备任务仍需冻结规划、用户请求和空资料快照；其后的搜索/读取动作继续走确认卡和证据对象。
+
+## 2026-07-28 实现记录：创作项目中心列表与详情
+
+- `src/domain/creative-project-center.mjs` 集中维护阶段筛选定义、筛选结果、选中项目回退和阶段下一步文案；对应 `.d.mts` 使用 `ContentProject` 与 `ProjectStage` 声明准确类型。
+- `CreativeProjectCenter.tsx` 保留现有项目创建表单和 API 调用，只增加选中项目与移动详情状态。桌面表格行支持点击、Enter、空格和 `aria-selected`，主按钮继续调用原 `onOpenProject(project)`。
+- 桌面列表列为项目、题材、目标平台、来源、阶段和更新时间；详情读取现有 `ProjectPlanning` 字段，不构造演示数据。空字段显示中性占位符，不伪造规划内容。
+- `src/styles.css` 移除 `.creative-project-grid`、`.creative-project-card`、卡片主区和卡片页脚规则，新增 1100px 主从堆叠与 790px 移动抽屉断点。390px 下所有网格子项保持 `min-width: 0`，仅筛选和标签容器允许内部横向滚动。
+- `tests/creative-project-center.test.mjs` 覆盖筛选、选中项回退和阶段动作；`tests/creative-workspace.e2e.py` 覆盖两个真实 Mock 项目、列表选择、详情切换、旧卡片消失、1024px 布局、390px 抽屉和横向溢出。
+- 自动化仍拦截全部业务接口，并显式禁止百炼、Tavily、RSS 刷新和 Agent 执行调用。本次实现没有新增任何计费或外部请求。
