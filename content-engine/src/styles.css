@@ -315,6 +315,80 @@
   .creative-project-platforms::-webkit-scrollbar{display:none}
 }
 
+/* 七步创作工作台：规划是唯一入口，后续阶段按项目进度逐步解锁。 */
+.creative-workspace{display:grid;gap:16px;width:100%;max-width:1400px;min-width:0;margin:0 auto}
+.creative-workspace-head{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:15px;padding-bottom:14px;border-bottom:1px solid var(--ink)}
+.creative-workspace-head>.text-button{display:inline-flex;align-items:center;gap:6px;min-height:38px;border-radius:12px;white-space:nowrap}
+.creative-workspace-head>div{display:flex;min-width:0;align-items:baseline;justify-content:space-between;gap:12px}
+.creative-workspace-head h1{overflow:hidden;margin:0;font-size:clamp(24px,2.5vw,32px);line-height:1.3;text-overflow:ellipsis;white-space:nowrap}
+.creative-workspace-head span{flex:none;padding:4px 8px;border-radius:10px;background:#fff1c7;color:#675300;font-size:10px;font-weight:800}
+.creative-stage-nav{display:grid;grid-template-columns:repeat(7,minmax(92px,1fr));min-width:0;padding:0;overflow:hidden;border:1px solid var(--ink);border-radius:14px;background:#fff}
+.creative-stage-nav button{min-width:0;min-height:44px;padding:0 10px;border:0;border-right:1px solid var(--line);background:#fff;color:var(--muted);font-size:12px;font-weight:800;white-space:nowrap;transition:background-color .16s ease,color .16s ease,transform .12s ease}
+.creative-stage-nav button:last-child{border-right:0}
+.creative-stage-nav button:hover:not(:disabled){background:#f1f5fb;color:var(--ink)}
+.creative-stage-nav button:active:not(:disabled){transform:translateY(1px)}
+.creative-stage-nav button.active{background:var(--ink);color:#fff}
+.creative-stage-nav button:disabled{cursor:not-allowed;background:#f6f7f9;color:#a2aab8}
+.planning-workspace{min-width:0}
+.planning-workspace>form{display:grid;overflow:hidden;border:1px solid var(--ink);border-radius:14px;background:#fff;box-shadow:6px 6px 0 rgba(39,95,232,.1)}
+.planning-workspace>form>header{display:flex;min-height:62px;align-items:center;justify-content:space-between;gap:14px;padding:10px 18px;border-bottom:1px solid var(--ink);background:#dceeff}
+.planning-workspace>form>header>div{display:flex;align-items:center;gap:9px}
+.planning-workspace h2{margin:0;font-size:21px}
+.planning-workspace>form>header span{padding:4px 8px;border-radius:10px;background:#dff5e9;color:#24684f;font-size:10px;font-weight:800}
+.planning-workspace .button,.planning-workspace input,.planning-workspace select,.planning-workspace textarea{border-radius:12px}
+.planning-workspace .button{min-height:39px;white-space:nowrap}
+.planning-workspace .lucide-loader-circle{animation:creativeSpin .8s linear infinite}
+.planning-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:17px;padding:20px}
+.planning-fields>label{display:grid;align-content:start;gap:7px;min-width:0}
+.planning-fields>label.wide,.planning-fields>fieldset.wide{grid-column:1/-1}
+.planning-fields label>span,.planning-fields legend{font-size:12px;font-weight:800}
+.planning-fields input,.planning-fields select,.planning-fields textarea{width:100%;border:1px solid var(--line);background:#fff;color:var(--ink);outline:0}
+.planning-fields input,.planning-fields select{height:42px;padding:0 11px}
+.planning-fields textarea{padding:10px 11px;line-height:1.7;resize:vertical}
+.planning-fields input::placeholder,.planning-fields textarea::placeholder{color:#7a8498}
+.planning-fields input:focus,.planning-fields select:focus,.planning-fields textarea:focus{border-color:var(--accent);outline:3px solid rgba(39,95,232,.18)}
+.planning-fields fieldset{min-width:0;margin:0;padding:11px 12px 12px;border:1px solid var(--line);border-radius:14px}
+.planning-fields legend{padding:0 5px}
+.planning-fields fieldset>div{display:flex;flex-wrap:wrap;gap:7px}
+.planning-fields fieldset label{position:relative;display:inline-flex;align-items:center;cursor:pointer}
+.planning-fields fieldset input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.planning-fields fieldset span{display:inline-flex;min-height:32px;align-items:center;padding:0 10px;border:1px solid var(--line);border-radius:12px;background:#f7f9fc;color:var(--muted);font-size:11px;font-weight:800}
+.planning-fields fieldset input:checked+span{border-color:var(--ink);background:#dff5e9;color:var(--ink)}
+.planning-fields fieldset input:focus-visible+span{outline:3px solid rgba(39,95,232,.24);outline-offset:2px}
+.planning-publish-field input{max-width:320px}
+.planning-workspace>form>footer{display:flex;min-height:62px;align-items:center;justify-content:space-between;gap:14px;padding:10px 18px;border-top:1px solid var(--line);background:#f7f9fc}
+.planning-save-state{display:flex;min-width:0;align-items:center;gap:7px;color:var(--muted);font-size:12px;line-height:1.5}
+.planning-save-state.saved{color:#24684f}
+.planning-save-state.dirty{color:#725600}
+.planning-save-state.error{color:#8c3449}
+.planning-save-state span{overflow-wrap:anywhere}
+.creative-stage-error{display:flex;align-items:flex-start;gap:8px;padding:11px 13px;border:1px solid #e0aeb8;border-radius:12px;background:#ffe0e5;color:#8c3449;font-size:12px}
+.creative-stage-empty{display:grid;min-height:260px;align-content:center;justify-items:center;gap:8px;padding:28px;border:1px dashed #aeb8c9;border-radius:14px;background:#fff;text-align:center}
+.creative-stage-empty h2,.creative-stage-empty p{margin:0}
+.creative-stage-empty h2{font-size:19px}
+.creative-stage-empty p{color:var(--muted);font-size:13px}
+
+@media (max-width:899px){
+  .creative-stage-nav{display:flex;overflow-x:auto;scrollbar-width:none}
+  .creative-stage-nav::-webkit-scrollbar{display:none}
+  .creative-stage-nav button{flex:0 0 112px}
+  .planning-fields{grid-template-columns:1fr}
+  .planning-fields>label.wide,.planning-fields>fieldset.wide{grid-column:auto}
+}
+@media (max-width:560px){
+  .creative-workspace-head{grid-template-columns:1fr;gap:10px}
+  .creative-workspace-head>.text-button{justify-self:start}
+  .creative-workspace-head>div{align-items:flex-start;flex-direction:column;gap:6px}
+  .creative-workspace-head h1{width:100%;font-size:24px;white-space:normal}
+  .planning-workspace>form>header{align-items:stretch;flex-direction:column}
+  .planning-workspace>form>header .button{width:100%}
+  .planning-fields{padding:16px 14px}
+  .planning-publish-field input{max-width:none}
+  .planning-workspace>form>footer{align-items:stretch;flex-direction:column}
+  .planning-workspace>form>footer .button{width:100%}
+}
+@media (prefers-reduced-motion:reduce){.planning-workspace .lucide-loader-circle{animation:none}}
+
 /* 模型与 API：每个页签只保留自己的配置内容。 */
 .ai-settings{width:100%;max-width:1400px}
 .ai-settings .page-title{font-size:40px;line-height:1.05;letter-spacing:-1px}

@@ -5,6 +5,7 @@ import { ArrowLeft, Bell, BrainCircuit, CalendarDays, ChartColumn, CheckCircle2,
 import { intelligenceKey, loadState, persistState, seedState, type FeishuLibraryTemplate, type LocalState, type WorkspaceProfile } from './data/localRepository';
 import { webAgent, webAuth, webIntelligence, webModels, webProjects, webSettings, type CreateProjectInput, type CredentialStatus, type WebSession } from './data/webApi';
 import { platformName, projectStageName, type ContentProject, type ContentVersion, type IntelligenceSource, type Platform } from './domain/content';
+import { stageRouteForProjectStage } from './domain/creative-flow.mjs';
 import { formatTodayTitle, projectTaskEntries } from './domain/today.mjs';
 import type { ApiUsageLog, ApiUsageSummary, ModelCapability, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelOperation, ModelProvider, ModelTask, ModelTaskPolicy } from './domain/integrations';
 import { navigationGroups, readWorkspaceLocation, replaceWorkspaceLocation, resetViewport, type CreateStageRoute, type DiscoverSection, type ModelSection, type SearchPreset, type SettingsSection, type View } from './app/navigation.mjs';
@@ -117,14 +118,10 @@ function App() {
   const completeSetup = (workspace: WorkspaceProfile) => {
     updateState({ ...state, workspace: { ...workspace, setupCompleted: true } });
   };
-  const routeForStage = (project: ContentProject): CreateStageRoute => ({
-    PLANNING: 'planning', RESEARCH: 'research', MASTER_WRITING: 'master', PLATFORM_ADAPTATION: 'platform',
-    VISUAL: 'visual', LAYOUT: 'layout', REVIEW: 'review', COMPLETED: 'review',
-  })[project.stage] as CreateStageRoute;
   const openProject = (project: ContentProject) => {
     setSelectedProjectId(project.id);
     setActivePlatform(project.planning.targetPlatforms[0] ?? project.versions[0]?.platform ?? 'WECHAT');
-    setCreateStage(routeForStage(project));
+    setCreateStage(stageRouteForProjectStage(project.stage));
     setView('create');
   };
   const createProject = async (input: CreateProjectInput) => {
@@ -239,7 +236,7 @@ function App() {
       {view === 'today' && <Today onNavigate={setView} projects={state.projects} intelligence={state.intelligence} onOpenProject={(id) => { const project = state.projects.find((item) => item.id === id); if (project) openProject(project); }} />}
       {view === 'discover' && <DiscoverWorkspace section={discoverSection} onSectionChange={setDiscoverSection} inbox={<IntelligenceInbox item={selectedIntel} intelligence={state.intelligence} sources={state.sources} topics={[]} projects={state.projects} defaultPlatforms={state.workspace.enabledPlatforms} onSelect={setSelectedIntelId} onCreateTopic={addSelectedIntelligenceToCreative} onOpenTopic={openIntelligenceProject} onSaveAnalysis={saveAnalysis} onRefresh={refreshRss} onOpenSources={() => openSettings('sources')} refreshFeedback={refreshFeedback} />} search={<NetworkSearchPanel preset={searchPreset} onSave={saveSearchCandidate} onOpenSearchSettings={() => openSettings('models', 'search')} checkStatus={webSearchStatus} searchWeb={searchWeb} />} linkImport={<LinkImportPanel onSave={saveClippedLink} onShowInbox={() => openDiscover('inbox')} previewLink={previewPublicLink} />} />}
       {view === 'create' && (!selectedProjectId || !featuredProject) && <CreativeProjectCenter projects={state.projects} onOpenProject={openProject} onCreateProject={createProject} creationRequested={creationRequested} onCreationHandled={() => setCreationRequested(false)} />}
-      {view === 'create' && selectedProjectId && featuredProject && <CreateWorkspace project={featuredProject} activePlatform={activePlatform} onPlatform={setActivePlatform} onSaveVersion={saveContentVersion} onProjectAccepted={acceptProjectFromServer} onOpenModelSettings={() => openSettings('models', 'policies')} onOpenAgentSettings={() => openSettings('models', 'agent')} />}
+      {view === 'create' && selectedProjectId && featuredProject && <CreateWorkspace project={featuredProject} stage={createStage} onStage={setCreateStage} onExitProject={() => { setSelectedProjectId(''); setCreateStage('planning'); }} activePlatform={activePlatform} onPlatform={setActivePlatform} onSaveVersion={saveContentVersion} onProjectAccepted={acceptProjectFromServer} onOpenModelSettings={() => openSettings('models', 'policies')} onOpenAgentSettings={() => openSettings('models', 'agent')} />}
       {view === 'publish' && <Publish project={featuredProject} onNavigate={setView} />}
       {view === 'review' && <Review onNavigate={setView} />}
       {view === 'assets' && <Utility title="素材库" description="素材将按目录、类型和所属项目统一管理。" />}
