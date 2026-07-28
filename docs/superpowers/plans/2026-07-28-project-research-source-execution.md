@@ -88,4 +88,4 @@
 
 - [x] Update product, plan, implementation, and acceptance documents with the exact boundary and test evidence.
 - [x] Run `npm test`, `npm run typecheck`, `npm run build`, Mock Playwright, migration idempotency, and `git diff --check`.
-- [ ] Commit implementation and documentation, push `main`, and verify a clean worktree with `HEAD == origin/main`.
+- [x] Commit implementation and documentation, push `main`, and verify a clean worktree with `HEAD == origin/main`.
