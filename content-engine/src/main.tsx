@@ -7,7 +7,7 @@ import { webAgent, webAuth, webIntelligence, webModels, webProjects, webSettings
 import { platformName, projectStageName, type ContentProject, type ContentVersion, type IntelligenceSource, type Platform } from './domain/content';
 import { stageRouteForProjectStage } from './domain/creative-flow.mjs';
 import { completedProjects, formatTodayTitle, projectTaskEntries } from './domain/today.mjs';
-import type { ApiUsageLog, ApiUsageSummary, ModelCapability, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelOperation, ModelProvider, ModelTask, ModelTaskPolicy } from './domain/integrations';
+import type { ApiUsageLog, ApiUsageSummary, ApiUsageTask, ModelCapability, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelOperation, ModelProvider, ModelTask, ModelTaskPolicy } from './domain/integrations';
 import { navigationGroups, readWorkspaceLocation, replaceWorkspaceLocation, resetViewport, type CreateStageRoute, type DiscoverSection, type ModelSection, type SearchPreset, type SettingsSection, type View } from './app/navigation.mjs';
 import { PageHeader } from './components/workspace/PageHeader';
 import { DiscoverWorkspace } from './workspaces/DiscoverWorkspace';
@@ -234,7 +234,7 @@ function App() {
       {view === 'today' && <Today onNavigate={setView} projects={state.projects} intelligence={state.intelligence} onOpenProject={(id) => { const project = state.projects.find((item) => item.id === id); if (project) openProject(project); }} />}
       {view === 'discover' && <DiscoverWorkspace section={discoverSection} onSectionChange={setDiscoverSection} inbox={<IntelligenceInbox item={selectedIntel} intelligence={state.intelligence} sources={state.sources} projects={state.projects} defaultPlatforms={state.workspace.enabledPlatforms} onSelect={setSelectedIntelId} onAddToCreative={(itemId, analysis, angleIndex) => void addIntelligenceToCreative(itemId, analysis, angleIndex)} onOpenProject={openIntelligenceProject} onSaveAnalysis={saveAnalysis} onRefresh={refreshRss} onOpenSources={() => openSettings('sources')} refreshFeedback={refreshFeedback} />} search={<NetworkSearchPanel preset={searchPreset} onSave={saveSearchCandidate} onOpenSearchSettings={() => openSettings('models', 'search')} checkStatus={webSearchStatus} searchWeb={searchWeb} />} linkImport={<LinkImportPanel onSave={saveClippedLink} onShowInbox={() => openDiscover('inbox')} previewLink={previewPublicLink} />} />}
       {view === 'create' && (!selectedProjectId || !featuredProject) && <CreativeProjectCenter projects={state.projects} onOpenProject={openProject} onCreateProject={createProject} creationRequested={creationRequested} onCreationHandled={() => setCreationRequested(false)} />}
-      {view === 'create' && selectedProjectId && featuredProject && <CreateWorkspace project={featuredProject} stage={createStage} onStage={setCreateStage} onExitProject={() => { setSelectedProjectId(''); setCreateStage('planning'); }} activePlatform={activePlatform} onPlatform={setActivePlatform} onSaveVersion={saveContentVersion} onProjectAccepted={acceptProjectFromServer} onOpenModelSettings={() => openSettings('models', 'policies')} onOpenAgentSettings={() => openSettings('models', 'agent')} />}
+      {view === 'create' && selectedProjectId && featuredProject && <CreateWorkspace project={featuredProject} stage={createStage} onStage={setCreateStage} onExitProject={() => { setSelectedProjectId(''); setCreateStage('planning'); }} activePlatform={activePlatform} onPlatform={setActivePlatform} onSaveVersion={saveContentVersion} onProjectAccepted={acceptProjectFromServer} onOpenModelSettings={() => openSettings('models', 'policies')} onOpenAgentSettings={() => openSettings('models', 'agent')} onOpenSearchSettings={() => openSettings('models', 'search')} />}
       {view === 'publish' && <Publish project={featuredProject} onNavigate={setView} />}
       {view === 'review' && <Review projects={state.projects} onOpenProject={(project) => openProject(project)} />}
       {view === 'assets' && <Utility title="素材库" description="素材将按目录、类型和所属项目统一管理。" />}
@@ -346,6 +346,7 @@ const modelTaskNames: Record<ModelTask, string> = {
   REFERENCE_TO_VIDEO: '参考图 / 视频生成',
   VIDEO_EDIT: '视频编辑',
 };
+const usageTaskNames: Record<ApiUsageTask, string> = { ...modelTaskNames, SOURCE_DISCOVERY: '研究资料检索' };
 
 type ModelSettingsSection = ModelSection;
 
@@ -554,7 +555,7 @@ function TaskPolicyScreen({ catalog, policies, onSync, onSave }: { catalog: Mode
 }
 
 function UsageLogScreen({ logs }: { logs: ApiUsageLog[] }) {
-  return <section className="usage-log"><div className="panel-head"><h2>调用记录</h2><span className="chip">最近 80 条</span></div>{logs.length === 0 ? <p>尚无模型调用。</p> : <table><thead><tr><th>时间</th><th>功能</th><th>模型</th><th>结果</th><th>Token</th><th>耗时</th></tr></thead><tbody>{logs.map((log) => <tr key={log.id}><td>{new Date(log.startedAt).toLocaleString('zh-CN', { hour12: false })}</td><td>{modelTaskNames[log.task]}</td><td>{log.connectionLabel} · {log.model}</td><td><span className={`chip ${log.status === 'SUCCESS' ? 'mint' : 'red'}`}>{log.status === 'SUCCESS' ? '成功' : '失败'}</span>{log.error && <small className="usage-error">{log.error}</small>}</td><td>{log.inputTokens ?? '-'} / {log.outputTokens ?? '-'}</td><td>{(log.durationMs / 1000).toFixed(1)}s</td></tr>)}</tbody></table>}</section>;
+  return <section className="usage-log"><div className="panel-head"><h2>调用记录</h2><span className="chip">最近 80 条</span></div>{logs.length === 0 ? <p>尚无 API 调用。</p> : <table><thead><tr><th>时间</th><th>功能</th><th>服务</th><th>结果</th><th>Token</th><th>耗时</th></tr></thead><tbody>{logs.map((log) => <tr key={log.id}><td>{new Date(log.startedAt).toLocaleString('zh-CN', { hour12: false })}</td><td>{usageTaskNames[log.task]}</td><td>{log.connectionLabel} · {log.model}</td><td><span className={`chip ${log.status === 'SUCCESS' ? 'mint' : 'red'}`}>{log.status === 'SUCCESS' ? '成功' : '失败'}</span>{log.error && <small className="usage-error">{log.error}</small>}</td><td>{log.inputTokens ?? '-'} / {log.outputTokens ?? '-'}</td><td>{(log.durationMs / 1000).toFixed(1)}s</td></tr>)}</tbody></table>}</section>;
 }
 
 

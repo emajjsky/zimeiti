@@ -139,7 +139,7 @@ test('项目资料页具备真实进度、资料选择和 Agent 完整状态', (
   assert.match(materials, /研究已引用/);
   assert.match(materials, /webCreative\.agentContext/);
   assert.match(agent, /发送/);
-  assert.match(agent, /确认调用/);
+  assert.match(agent, /确认\{activeRun\.action === 'PROJECT_RESEARCH_SOURCES' \? '执行' : '调用'\}/);
   assert.match(agent, /QUEUED[\s\S]*RUNNING[\s\S]*FAILED/);
   assert.match(agent, /待回答问题[\s\S]*待核验主张[\s\S]*下一步/);
   assert.match(workspace, /hasDraft=\{contentVersions\.some/);

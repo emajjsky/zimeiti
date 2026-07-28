@@ -41,7 +41,7 @@ function scopeText(scope: ProjectMaterialScope, platforms: CreativePlatform[]) {
   return `${scopeName[scope]} · ${platforms.length ? platforms.map((platform) => platformName[platform]).join('、') : '全部平台'}`;
 }
 
-export function ProjectMaterials({ projectId, platforms, overviewReady, hasDraft, onOpenAgentSettings }: { projectId: string; platforms: CreativePlatform[]; overviewReady: boolean; hasDraft: boolean; onOpenAgentSettings: () => void }) {
+export function ProjectMaterials({ projectId, platforms, overviewReady, hasDraft, onOpenAgentSettings, onOpenSearchSettings }: { projectId: string; platforms: CreativePlatform[]; overviewReady: boolean; hasDraft: boolean; onOpenAgentSettings: () => void; onOpenSearchSettings: () => void }) {
   const [inputs, setInputs] = useState<ProjectInput[]>([]);
   const [references, setReferences] = useState<ProjectReference[]>([]);
   const [tab, setTab] = useState<MaterialTab>('INPUTS');
@@ -151,7 +151,7 @@ export function ProjectMaterials({ projectId, platforms, overviewReady, hasDraft
       selectedMaterials={{ inputIds: selectedInputIds, referenceIds: selectedReferenceIds }}
       onContextChange={setResearch}
       onArtifactAccepted={() => undefined}
-      onOpenSettings={() => onOpenAgentSettings()}
+      onOpenSettings={(target) => target === 'search' ? onOpenSearchSettings() : onOpenAgentSettings()}
     /></div>
   </section>;
 }

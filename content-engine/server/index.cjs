@@ -29,6 +29,7 @@ const { createProjectMaterialStore } = require('./services/projectMaterials.cjs'
 const { createProjectAgentStore, artifactView, runView } = require('./services/project-agent.cjs');
 const { saveProjectUpload, removeProjectUpload, openProjectUpload, readProjectUploadText } = require('./services/projectUploadStorage.cjs');
 const { PROJECT_RESEARCH_ACTION_VERSION, PROJECT_RESEARCH_SCOPE, researchRunView, researchPlanView } = require('./services/project-research.cjs');
+const { PROJECT_RESEARCH_SOURCES_VERSION, researchSourceActions } = require('./services/project-research-sources.cjs');
 const { OUTLINE_ACTION_VERSION, OUTLINE_SCOPE, OUTLINE_TEMPLATE_SCOPES, outlineTemplateScope, validateOutlineTemplate, defaultOutlineTemplate, outlineCandidateView } = require('./services/creative-outline.cjs');
 const { DRAFT_ACTION_VERSION, DRAFT_SCOPE, DRAFT_TEMPLATE_SCOPES, draftTemplateScope, validateDraftTemplate, defaultDraftTemplate, draftCandidateView } = require('./services/creative-draft.cjs');
 const {
@@ -957,6 +958,92 @@ app.post('/api/v1/creative/agent-runs/:id/cancel', { preHandler: authenticate },
   return runView(result.rows[0]);
 });
 
+app.post('/api/v1/creative/projects/:projectId/research/sources/prepare', { preHandler: authenticate }, async (request, reply) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const input = z.object({ planArtifactId: z.string().uuid().optional() }).parse(request.body ?? {});
+  const workspace = await currentWorkspace(request.user.sub);
+  await creativeProject(workspace.id, projectId);
+  const planResult = await query(`SELECT p.id, p.output_json, p.artifact_id
+    FROM project_research_plans p
+    WHERE p.workspace_id = $1 AND p.project_id = $2
+      AND ($3::uuid IS NULL OR p.artifact_id = $3)
+    ORDER BY p.created_at DESC LIMIT 1`, [workspace.id, projectId, input.planArtifactId ?? null]);
+  if (!planResult.rowCount) { const error = new Error('请先生成研究计划。'); error.statusCode = 409; throw error; }
+  const plan = researchSourceActions(planResult.rows[0].output_json);
+  if (plan.counts.search > 0) {
+    const tavily = await query("SELECT 1 FROM credential_vault WHERE workspace_id = $1 AND provider = 'TAVILY' AND status = 'READY'", [workspace.id]);
+    if (!tavily.rowCount) { const error = new Error('请先在“检索 API”中保存并验证 Tavily Key。'); error.statusCode = 400; throw error; }
+  }
+  const tools = [
+    ...(plan.counts.search ? ['Tavily 网页搜索'] : []),
+    ...(plan.counts.read ? ['公开网页读取'] : []),
+    ...(plan.counts.askUser ? ['用户补充'] : []),
+  ];
+  const run = await transaction(async (client) => {
+    await client.query(`UPDATE generation_runs SET status = 'CANCELLED', completed_at = now()
+      WHERE workspace_id = $1 AND action_version_id = $2 AND status = 'DRAFT'
+        AND source_snapshot_json->>'projectId' = $3`, [workspace.id, PROJECT_RESEARCH_SOURCES_VERSION, projectId]);
+    const created = await client.query(`INSERT INTO generation_runs
+      (workspace_id, action_version_id, status, source_snapshot_json, input_json, prompt_version, estimated_cost)
+      VALUES ($1, $2, 'DRAFT', $3, '{}'::jsonb, '1.0.0', 'null'::jsonb) RETURNING *`, [
+      workspace.id,
+      PROJECT_RESEARCH_SOURCES_VERSION,
+      JSON.stringify({
+        projectId,
+        planId: planResult.rows[0].id,
+        planArtifactId: planResult.rows[0].artifact_id,
+        request: '查找研究资料',
+        stage: 'RESEARCH',
+        actions: plan.actions,
+        counts: plan.counts,
+        tools,
+      }),
+    ]);
+    await client.query(`INSERT INTO project_agent_messages
+      (workspace_id, project_id, action_run_id, role, content, stage, message_type, metadata_json)
+      VALUES ($1, $2, $3, 'USER', '查找研究资料', 'RESEARCH', 'MESSAGE', '{}'::jsonb),
+             ($1, $2, $3, 'ASSISTANT', '来源任务已准备，确认后开始执行。', 'RESEARCH', 'CONFIRMATION', $4)`, [
+      workspace.id,
+      projectId,
+      created.rows[0].id,
+      JSON.stringify({ action: 'PROJECT_RESEARCH_SOURCES', counts: plan.counts, tools }),
+    ]);
+    return created.rows[0];
+  });
+  reply.code(201).send(runView(run));
+});
+
+app.post('/api/v1/creative/research-source-runs/:id/confirm', { preHandler: authenticate }, async (request, reply) => {
+  const runId = z.string().uuid().parse(request.params.id);
+  const workspace = await currentWorkspace(request.user.sub);
+  const prepared = await transaction(async (client) => {
+    const run = await client.query(`UPDATE generation_runs SET status = 'QUEUED'
+      WHERE id = $1 AND workspace_id = $2 AND action_version_id = $3 AND status = 'DRAFT'
+      RETURNING id`, [runId, workspace.id, PROJECT_RESEARCH_SOURCES_VERSION]);
+    if (!run.rowCount) { const error = new Error('该来源任务当前不能确认。'); error.statusCode = 409; throw error; }
+    const job = await client.query("INSERT INTO jobs (workspace_id, job_type, payload_json) VALUES ($1, 'PROJECT_RESEARCH_SOURCES', $2) RETURNING *", [workspace.id, JSON.stringify({ runId })]);
+    return job.rows[0];
+  });
+  try { await enqueue(prepared); }
+  catch (error) {
+    const message = error instanceof Error ? error.message : '任务入队失败。';
+    await query("UPDATE generation_runs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1", [runId, message.slice(0, 2_000)]);
+    await query("UPDATE jobs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1", [prepared.id, message.slice(0, 2_000)]);
+    throw error;
+  }
+  reply.code(202).send({ id: runId, status: 'QUEUED', jobId: prepared.id });
+});
+
+app.post('/api/v1/creative/research-source-runs/:id/cancel', { preHandler: authenticate }, async (request) => {
+  const runId = z.string().uuid().parse(request.params.id);
+  const workspace = await currentWorkspace(request.user.sub);
+  const result = await query(`UPDATE generation_runs SET status = 'CANCELLED', completed_at = now()
+    WHERE id = $1 AND workspace_id = $2 AND action_version_id = $3 AND status IN ('DRAFT', 'QUEUED') RETURNING *`, [runId, workspace.id, PROJECT_RESEARCH_SOURCES_VERSION]);
+  if (!result.rowCount) { const error = new Error('该来源任务当前不能取消。'); error.statusCode = 409; throw error; }
+  await query("UPDATE jobs SET status = 'CANCELLED', completed_at = now() WHERE workspace_id = $1 AND payload_json->>'runId' = $2 AND status = 'PENDING'", [workspace.id, runId]);
+  return runView(result.rows[0]);
+});
+
 app.get('/api/v1/creative/projects/:projectId/research', { preHandler: authenticate }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const workspace = await currentWorkspace(request.user.sub);
@@ -1639,7 +1726,8 @@ function readableProviderError(provider, error) {
 }
 
 function usageLogView(row) {
-  return { id: row.id, task: row.operation, provider: row.provider, connectionLabel: row.provider === 'BAILIAN_CLI' ? '阿里云百炼' : '外部 API', model: row.model ?? '-', status: row.status === 'SUCCESS' ? 'SUCCESS' : 'ERROR', startedAt: row.created_at, durationMs: row.duration_ms, requestChars: 0, responseChars: 0, inputTokens: row.input_tokens ?? undefined, outputTokens: row.output_tokens ?? undefined, error: row.error ?? undefined };
+  const connectionLabel = row.provider === 'BAILIAN_CLI' ? '阿里云百炼' : row.provider === 'TAVILY' ? 'Tavily' : row.provider === 'PUBLIC_WEB' ? '公开网页' : row.provider === 'UNKNOWN' ? '未知服务' : '外部 API';
+  return { id: row.id, task: row.operation, provider: row.provider, connectionLabel, model: row.model ?? '-', status: row.status === 'SUCCESS' ? 'SUCCESS' : 'ERROR', startedAt: row.created_at, durationMs: row.duration_ms, requestChars: 0, responseChars: 0, inputTokens: row.input_tokens ?? undefined, outputTokens: row.output_tokens ?? undefined, error: row.error ?? undefined };
 }
 
 async function start() {

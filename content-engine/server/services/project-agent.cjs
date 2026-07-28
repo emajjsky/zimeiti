@@ -27,6 +27,7 @@ function summaryView(row) {
 
 function actionName(actionVersionId) {
   if (String(actionVersionId).startsWith('project-research-plan:')) return 'PROJECT_RESEARCH_PLAN';
+  if (String(actionVersionId).startsWith('project-research-sources:')) return 'PROJECT_RESEARCH_SOURCES';
   return String(actionVersionId).replace(/^project-copy-/, '').replace(/:[^:]+$/, '').replace(/-/g, '_').toUpperCase();
 }
 
@@ -36,6 +37,7 @@ function runView(row) {
   const input = row.input_json ?? {};
   const materials = Array.isArray(snapshot.materials) ? snapshot.materials : [];
   const skills = Array.isArray(snapshot.skills) ? snapshot.skills : [];
+  const sourceCounts = snapshot.counts && typeof snapshot.counts === 'object' ? snapshot.counts : undefined;
   return {
     id: row.id,
     action: actionName(row.action_version_id),
@@ -47,6 +49,7 @@ function runView(row) {
       skillNames: skills.map((skill) => skill.name).filter(Boolean),
       materialCount: materials.length,
       writeScope: snapshot.platform ?? snapshot.stage ?? 'RESEARCH',
+      ...(sourceCounts ? { sourceCounts, tools: Array.isArray(snapshot.tools) ? snapshot.tools : [] } : {}),
     },
     ...(row.error ? { error: row.error } : {}),
     createdAt: row.created_at,
@@ -100,7 +103,7 @@ function createProjectAgentStore({ query, transaction }) {
       query(`SELECT r.*
         FROM generation_runs r
         WHERE r.workspace_id = $1 AND r.source_snapshot_json->>'projectId' = $2
-          AND (($3 = 'RESEARCH' AND r.action_version_id LIKE 'project-research-plan:%')
+          AND (($3 = 'RESEARCH' AND (r.action_version_id LIKE 'project-research-plan:%' OR r.action_version_id LIKE 'project-research-sources:%'))
             OR ($3 = 'COPY' AND r.action_version_id LIKE 'project-copy-%'))
           AND ($4::text IS NULL OR r.source_snapshot_json->>'platform' = $4)
           AND r.status IN ('DRAFT', 'QUEUED', 'RUNNING')

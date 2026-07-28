@@ -19,6 +19,8 @@ export type ModelTask =
   | 'VIDEO_EDIT';
 
 export type ModelRouteProvider = 'BAILIAN_CLI' | 'EXTERNAL_API';
+export type ApiUsageTask = ModelTask | 'SOURCE_DISCOVERY';
+export type ApiUsageProvider = ModelRouteProvider | 'TAVILY' | 'PUBLIC_WEB' | 'UNKNOWN';
 export type ModelCapability = 'TEXT' | 'IMAGE' | 'AUDIO' | 'VIDEO' | 'VISION' | 'MULTIMODAL' | 'ASR' | 'MUSIC' | 'REASONING' | 'EMBEDDING' | 'CODE';
 export type ModelOperation = 'TEXT_TO_IMAGE' | 'IMAGE_TO_IMAGE' | 'TEXT_TO_VIDEO' | 'IMAGE_TO_VIDEO' | 'FIRST_LAST_FRAME_TO_VIDEO' | 'REFERENCE_TO_VIDEO' | 'VIDEO_EDIT';
 
@@ -47,8 +49,8 @@ export interface ModelTaskPolicy {
 
 export interface ApiUsageLog {
   id: string;
-  task: ModelTask;
-  provider: ModelRouteProvider;
+  task: ApiUsageTask;
+  provider: ApiUsageProvider;
   connectionLabel: string;
   model: string;
   status: 'SUCCESS' | 'ERROR';

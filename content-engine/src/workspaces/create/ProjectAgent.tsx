@@ -1,4 +1,4 @@
-import { Bot, Check, CircleAlert, Eye, FileCheck2, LoaderCircle, Send, Settings2, X } from 'lucide-react';
+import { Bot, Check, CircleAlert, ExternalLink, Eye, FileCheck2, LoaderCircle, Search, Send, Settings2, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { webCreative } from '../../data/webApi';
 import { canPrepareAgentRequest, messagesForAgentThread, researchQuickAction } from '../../domain/project-agent-composer.mjs';
@@ -17,11 +17,12 @@ type ProjectAgentProps = {
   onContextChange?: (context: ProjectAgentContext) => void;
   onArtifactOpen?: (artifact: ProjectArtifact) => void;
   onArtifactAccepted: (artifact: ProjectArtifact, project?: ContentProject) => void;
-  onOpenSettings: (target: 'agent' | 'policies') => void;
+  onOpenSettings: (target: 'agent' | 'policies' | 'search') => void;
 };
 
 const actionNames = {
   PROJECT_RESEARCH_PLAN: '生成研究计划',
+  PROJECT_RESEARCH_SOURCES: '查找研究来源',
   GENERATE_OUTLINE: '生成大纲',
   GENERATE_DRAFT: '生成正文',
   POLISH_EXISTING_DRAFT: '润色文案',
@@ -49,7 +50,7 @@ function artifactHeading(artifact: ProjectArtifact) {
   if (typeof title === 'string' && title.trim()) return title;
   const options = strings(artifact.payload.titleOptions);
   if (options[0]) return options[0];
-  return artifact.type === 'RESEARCH_PLAN' ? '研究计划' : artifact.type === 'OUTLINE' ? '文案大纲' : '文案候选';
+  return artifact.type === 'RESEARCH_PLAN' ? '研究计划' : artifact.type === 'RESEARCH_SOURCES' ? '研究来源' : artifact.type === 'OUTLINE' ? '文案大纲' : '文案候选';
 }
 
 export function ProjectAgent({ projectId, stage, platform, selectedMaterials, selection, blockedReason, refreshToken = 0, onClearSelection, onContextChange, onArtifactOpen, onArtifactAccepted, onOpenSettings }: ProjectAgentProps) {
@@ -122,7 +123,11 @@ export function ProjectAgent({ projectId, stage, platform, selectedMaterials, se
   const confirm = async () => {
     if (!activeRun || activeRun.status !== 'DRAFT') return;
     setBusy('confirming'); setError('');
-    try { await webCreative.confirmAgentRun(activeRun.id); await reload(); }
+    try {
+      if (activeRun.action === 'PROJECT_RESEARCH_SOURCES') await webCreative.confirmResearchSources(activeRun.id);
+      else await webCreative.confirmAgentRun(activeRun.id);
+      await reload();
+    }
     catch (reason) { setError(reason instanceof Error ? reason.message : 'Agent 任务启动失败。'); }
     finally { setBusy('idle'); }
   };
@@ -130,7 +135,11 @@ export function ProjectAgent({ projectId, stage, platform, selectedMaterials, se
   const cancel = async () => {
     if (!activeRun || !['DRAFT', 'QUEUED'].includes(activeRun.status)) return;
     setBusy('cancelling'); setError('');
-    try { await webCreative.cancelAgentRun(activeRun.id); await reload(); }
+    try {
+      if (activeRun.action === 'PROJECT_RESEARCH_SOURCES') await webCreative.cancelResearchSources(activeRun.id);
+      else await webCreative.cancelAgentRun(activeRun.id);
+      await reload();
+    }
     catch (reason) { setError(reason instanceof Error ? reason.message : '取消失败。'); }
     finally { setBusy('idle'); }
   };
@@ -153,6 +162,17 @@ export function ProjectAgent({ projectId, stage, platform, selectedMaterials, se
     finally { setBusy('idle'); }
   };
 
+  const prepareResearchSources = async (artifactId: string) => {
+    if (busy !== 'idle' || runIsActive) return;
+    setBusy('preparing'); setError('');
+    try {
+      await webCreative.prepareResearchSources(projectId, artifactId);
+      setPreview(null);
+      await reload();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : '来源任务准备失败。'); }
+    finally { setBusy('idle'); }
+  };
+
   const artifactById = useMemo(() => new Map((context?.artifacts ?? []).map((artifact) => [artifact.id, artifact])), [context?.artifacts]);
   const threadMessages = useMemo(() => messagesForAgentThread(context?.messages ?? []), [context?.messages]);
   const stageLabel = stage === 'RESEARCH' ? '研究' : `文案${platform ? ` · ${platformName[platform]}` : ''}`;
@@ -171,37 +191,44 @@ export function ProjectAgent({ projectId, stage, platform, selectedMaterials, se
       {(context?.summaries.length ?? 0) > 0 && <div className="project-agent-summary">已继承 {context?.summaries.length} 条前序摘要</div>}
       {threadMessages.map((message) => {
         const refs = (message.artifactRefs ?? []).map((id) => artifactById.get(id)).filter((item): item is ProjectArtifact => Boolean(item));
+        const messageLabel = refs.some((artifact) => artifact.type === 'RESEARCH_SOURCES') ? '来源结果' : refs.some((artifact) => artifact.type === 'RESEARCH_PLAN') ? '研究计划' : messageTypeNames[message.messageType ?? 'MESSAGE'];
         return <article key={message.id} className={`project-agent-message ${message.role.toLowerCase()} type-${(message.messageType ?? 'MESSAGE').toLowerCase()}`}>
-          <span>{message.role === 'USER' ? '你' : messageTypeNames[message.messageType ?? 'MESSAGE']}</span>
+          <span>{message.role === 'USER' ? '你' : messageLabel}</span>
           <p>{message.content}</p>
-          {refs.map((artifact) => <button key={artifact.id} className="artifact-link" type="button" onClick={() => openArtifact(artifact)}><Eye size={14}/>{artifact.type === 'RESEARCH_PLAN' ? '查看计划' : '查看候选'}</button>)}
+          {refs.map((artifact) => <button key={artifact.id} className="artifact-link" type="button" onClick={() => openArtifact(artifact)}><Eye size={14}/>{artifact.type === 'RESEARCH_PLAN' ? '查看计划' : artifact.type === 'RESEARCH_SOURCES' ? '查看来源' : '查看候选'}</button>)}
         </article>;
       })}
       {activeRun?.status === 'DRAFT' && <section className="agent-confirmation">
         <header><b>{actionNames[activeRun.action]}</b><span>待确认</span></header>
-        <dl>
+        {activeRun.action === 'PROJECT_RESEARCH_SOURCES' ? <dl className="source-confirmation-grid">
+          <div><dt>网页搜索</dt><dd>搜索 {activeRun.confirmation.sourceCounts?.search ?? 0} 次</dd></div>
+          <div><dt>链接读取</dt><dd>读取 {activeRun.confirmation.sourceCounts?.read ?? 0} 个</dd></div>
+          <div><dt>人工补充</dt><dd>补充 {activeRun.confirmation.sourceCounts?.askUser ?? 0} 项</dd></div>
+          <div className="wide"><dt>工具</dt><dd>{activeRun.confirmation.tools?.join('、') || '无外部工具'}</dd></div>
+          <div className="wide"><dt>写入范围</dt><dd>{activeRun.confirmation.writeScope}</dd></div>
+        </dl> : <dl>
           <div><dt>模型</dt><dd>{activeRun.confirmation.model}</dd></div>
           <div><dt>提示词</dt><dd>{activeRun.confirmation.promptVersion ?? '内置'}</dd></div>
           <div><dt>资料</dt><dd>{activeRun.confirmation.materialCount} 条</dd></div>
           <div><dt>Skill</dt><dd>{activeRun.confirmation.skillNames.join('、') || '无'}</dd></div>
           <div className="wide"><dt>写入范围</dt><dd>{activeRun.confirmation.writeScope}</dd></div>
-        </dl>
-        <footer><button className="icon-button" type="button" aria-label="取消任务" disabled={busy !== 'idle'} onClick={() => void cancel()}><X size={16}/></button><button className="button primary" type="button" disabled={busy !== 'idle'} onClick={() => void confirm()}>{busy === 'confirming' ? <LoaderCircle size={15}/> : <Check size={15}/>}确认调用</button></footer>
+        </dl>}
+        <footer><button className="icon-button" type="button" aria-label="取消任务" disabled={busy !== 'idle'} onClick={() => void cancel()}><X size={16}/></button><button className="button primary" type="button" disabled={busy !== 'idle'} onClick={() => void confirm()}>{busy === 'confirming' ? <LoaderCircle size={15}/> : <Check size={15}/>}确认{activeRun.action === 'PROJECT_RESEARCH_SOURCES' ? '执行' : '调用'}</button></footer>
       </section>}
-      {activeRun && ['QUEUED', 'RUNNING'].includes(activeRun.status) && <div className="agent-running" aria-live="polite"><LoaderCircle size={18}/><b>{activeRun.status === 'QUEUED' ? '等待执行' : '正在生成候选'}</b>{activeRun.status === 'QUEUED' && <button className="text-button" type="button" disabled={busy !== 'idle'} onClick={() => void cancel()}>{busy === 'cancelling' ? '取消中' : '取消'}</button>}</div>}
+      {activeRun && ['QUEUED', 'RUNNING'].includes(activeRun.status) && <div className="agent-running" aria-live="polite"><LoaderCircle size={18}/><b>{activeRun.status === 'QUEUED' ? '等待执行' : activeRun.action === 'PROJECT_RESEARCH_SOURCES' ? '正在查找来源' : '正在生成候选'}</b>{activeRun.status === 'QUEUED' && <button className="text-button" type="button" disabled={busy !== 'idle'} onClick={() => void cancel()}>{busy === 'cancelling' ? '取消中' : '取消'}</button>}</div>}
       {activeRun?.status === 'FAILED' && <div className="agent-run-error"><CircleAlert size={17}/><div><b>执行失败</b><p>{activeRun.error}</p></div></div>}
     </div>
-    {error && <div className="project-agent-error" role="alert"><CircleAlert size={16}/><span>{error}</span>{/(模型|提示词|核心 Agent|Key)/.test(error) && <button className="text-button" type="button" onClick={() => onOpenSettings(/核心 Agent/.test(error) ? 'agent' : 'policies')}><Settings2 size={14}/>去配置</button>}</div>}
+    {error && <div className="project-agent-error" role="alert"><CircleAlert size={16}/><span>{error}</span>{/(模型|提示词|核心 Agent|Key)/.test(error) && <button className="text-button" type="button" onClick={() => onOpenSettings(/Tavily|检索 API/.test(error) ? 'search' : /核心 Agent/.test(error) ? 'agent' : 'policies')}><Settings2 size={14}/>去配置</button>}</div>}
     <div className="project-agent-composer">
       <div><span>{stage === 'RESEARCH' ? selectedCount ? `已选 ${selectedCount} 条资料` : '未选资料' : selection ? `已选择 ${selection.text.length} 字` : '自由对话'}</span>{stage === 'RESEARCH' && !runIsActive && !blockedReason && <button className="project-agent-quick-action" type="button" disabled={busy !== 'idle'} onClick={() => void prepare(researchQuickAction.request)}>{researchQuickAction.label}</button>}{selection && onClearSelection && <button className="selection-clear" type="button" aria-label="清除正文选区" onClick={onClearSelection}><X size={13}/></button>}{blockedReason && <em>{blockedReason}</em>}</div>
       <textarea rows={3} value={request} maxLength={2_000} placeholder={stage === 'RESEARCH' ? '说明要核验的问题，或直接制定研究计划' : '例如：保留事实，把这篇文章润色得更自然'} onChange={(event) => setRequest(event.target.value)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') void prepare(); }}/>
       <button className="button primary" type="button" title="准备 Agent 任务" disabled={!canPrepare} onClick={() => void prepare()}>{busy === 'preparing' ? <LoaderCircle size={16}/> : <Send size={16}/>}发送</button>
     </div>
-    {preview && <ArtifactPreview artifact={preview} selectedTitle={selectedTitle} onTitle={setSelectedTitle} busy={busy === 'accepting'} onAccept={() => void acceptArtifact()} onClose={() => setPreview(null)}/>} 
+    {preview && <ArtifactPreview artifact={preview} selectedTitle={selectedTitle} onTitle={setSelectedTitle} busy={busy !== 'idle'} onAccept={() => void acceptArtifact()} onPrepareSources={(artifactId) => void prepareResearchSources(artifactId)} onClose={() => setPreview(null)}/>}
   </aside>;
 }
 
-function ArtifactPreview({ artifact, selectedTitle, onTitle, busy, onAccept, onClose }: { artifact: ProjectArtifact; selectedTitle: string; onTitle: (value: string) => void; busy: boolean; onAccept: () => void; onClose: () => void }) {
+function ArtifactPreview({ artifact, selectedTitle, onTitle, busy, onAccept, onPrepareSources, onClose }: { artifact: ProjectArtifact; selectedTitle: string; onTitle: (value: string) => void; busy: boolean; onAccept: () => void; onPrepareSources: (artifactId: string) => void; onClose: () => void }) {
   const titleOptions = strings(artifact.payload.titleOptions);
   const facts = strings(artifact.payload.factsToVerify);
   const body = typeof artifact.payload.body === 'string' ? artifact.payload.body : '';
@@ -209,6 +236,8 @@ function ArtifactPreview({ artifact, selectedTitle, onTitle, busy, onAccept, onC
   const researchQuestions = objectItems(artifact.payload.questions, 'question');
   const researchClaims = objectItems(artifact.payload.claims, 'claim');
   const researchActions = objectItems(artifact.payload.nextActions, 'purpose');
+  const researchSources = objectItems(artifact.payload.sources, 'title');
+  const sourceNotice = typeof artifact.payload.notice === 'string' ? artifact.payload.notice : '';
   const canAccept = artifact.status === 'CANDIDATE' && ['OUTLINE', 'PLATFORM_COPY'].includes(artifact.type);
   return <div className="agent-artifact-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
     <section className="agent-artifact-preview" role="dialog" aria-modal="true" aria-labelledby="agent-artifact-title">
@@ -219,10 +248,21 @@ function ArtifactPreview({ artifact, selectedTitle, onTitle, busy, onAccept, onC
         {researchQuestions.length > 0 && <div className="research-plan-block"><b>待回答问题</b><ol>{researchQuestions.map((item) => <li key={item.text}><span>{item.text}</span>{strings(item.value.preferredSources).length > 0 && <small>{strings(item.value.preferredSources).join('、')}</small>}</li>)}</ol></div>}
         {researchClaims.length > 0 && <div className="research-plan-block"><b>待核验主张</b><ul>{researchClaims.map((item) => <li key={item.text}><span className={`priority-${String(item.value.priority ?? 'MEDIUM').toLowerCase()}`}>{priorityName(item.value.priority)}</span>{item.text}</li>)}</ul></div>}
         {researchActions.length > 0 && <div className="research-plan-actions"><b>下一步</b>{researchActions.map((item) => <div key={`${String(item.value.action)}-${item.text}`}><span>{actionName(item.value.action)}</span><p>{item.text}</p>{typeof item.value.target === 'string' && <small>{item.value.target}</small>}</div>)}</div>}
+        {sourceNotice && <div className="research-source-notice"><CircleAlert size={15}/><span>{sourceNotice}</span></div>}
+        {researchSources.length > 0 && <div className="research-source-list">{researchSources.map((item) => {
+          const status = String(item.value.status ?? 'FAILED');
+          const url = typeof item.value.url === 'string' ? item.value.url : '';
+          return <article key={String(item.value.id ?? `${status}-${item.text}`)} className={`research-source-row status-${status.toLowerCase()}`}>
+            <header><span>{sourceStatusName(status)}</span><b>{item.text}</b>{url && <a href={url} target="_blank" rel="noreferrer" aria-label={`打开来源：${item.text}`}><ExternalLink size={14}/></a>}</header>
+            <small>{String(item.value.source ?? '')}{item.value.retrievedAt ? ` · ${new Date(String(item.value.retrievedAt)).toLocaleString('zh-CN', { hour12: false })}` : ''}</small>
+            {typeof item.value.summary === 'string' && item.value.summary && <p>{item.value.summary}</p>}
+            {typeof item.value.error === 'string' && item.value.error && <p className="source-error">{item.value.error}</p>}
+          </article>;
+        })}</div>}
         {body && <div className="artifact-copy"><h3>{artifactHeading(artifact)}</h3><p>{body}</p></div>}
         {facts.length > 0 && <div className="artifact-facts"><b>待核验</b><ul>{facts.map((fact) => <li key={fact}>{fact}</li>)}</ul></div>}
       </div>
-      <footer><button className="button" type="button" disabled={busy} onClick={onClose}>关闭</button>{canAccept && <button className="button primary" type="button" disabled={busy || (artifact.type === 'OUTLINE' && !selectedTitle)} onClick={onAccept}>{busy ? <LoaderCircle size={16}/> : <Check size={16}/>}采用为当前版本</button>}</footer>
+      <footer><button className="button" type="button" disabled={busy} onClick={onClose}>关闭</button>{artifact.type === 'RESEARCH_PLAN' && <button className="button primary" type="button" disabled={busy} onClick={() => onPrepareSources(artifact.id)}>{busy ? <LoaderCircle size={16}/> : <Search size={16}/>}准备查找资料</button>}{canAccept && <button className="button primary" type="button" disabled={busy || (artifact.type === 'OUTLINE' && !selectedTitle)} onClick={onAccept}>{busy ? <LoaderCircle size={16}/> : <Check size={16}/>}采用为当前版本</button>}</footer>
     </section>
   </div>;
 }
@@ -243,4 +283,8 @@ function priorityName(value: unknown) {
 
 function actionName(value: unknown) {
   return value === 'SEARCH_WEB' ? '网络搜索' : value === 'READ_LINK' ? '读取链接' : '补充资料';
+}
+
+function sourceStatusName(value: string) {
+  return value === 'CAPTURED' ? '已保存' : value === 'NEEDS_USER' ? '需补充' : '失败';
 }

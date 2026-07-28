@@ -170,6 +170,7 @@ with sync_playwright() as playwright:
     failed_responses = []
     agent_contexts = {}
     prepared_agent_payloads = []
+    prepared_source_payloads = []
 
     page.on(
         "console",
@@ -380,6 +381,114 @@ with sync_playwright() as playwright:
             }
             return json_response(route, run, status=201)
 
+        source_prepare_match = re.fullmatch(
+            r"/api/v1/creative/projects/([^/]+)/research/sources/prepare", path
+        )
+        if source_prepare_match and method == "POST":
+            project_id = source_prepare_match.group(1)
+            payload = json.loads(request.post_data or "{}")
+            prepared_source_payloads.append(payload)
+            current = agent_contexts[project_id]
+            run = {
+                "id": "research-source-run-1",
+                "action": "PROJECT_RESEARCH_SOURCES",
+                "status": "DRAFT",
+                "request": "查找研究资料",
+                "confirmation": {
+                    "model": "",
+                    "promptVersion": "1.0.0",
+                    "skillNames": [],
+                    "materialCount": 0,
+                    "writeScope": "项目研究来源",
+                    "sourceCounts": {
+                        "search": 1,
+                        "read": 1,
+                        "askUser": 1,
+                        "automatic": 2,
+                    },
+                    "tools": ["Tavily 网页搜索", "公开网页读取", "用户补充"],
+                },
+                "createdAt": NOW,
+            }
+            agent_contexts[project_id] = {**current, "activeRun": run}
+            return json_response(route, run, status=201)
+
+        source_confirm_match = re.fullmatch(
+            r"/api/v1/creative/research-source-runs/([^/]+)/confirm", path
+        )
+        if source_confirm_match and method == "POST":
+            project_id = "project-manual-1"
+            current = agent_contexts[project_id]
+            source_artifact = {
+                "id": "research-sources-artifact-1",
+                "type": "RESEARCH_SOURCES",
+                "status": "CANDIDATE",
+                "platform": None,
+                "version": 1,
+                "parentArtifactId": None,
+                "payload": {
+                    "title": "研究来源",
+                    "summary": "已保存 1 条来源，1 项需要补充，0 项失败。",
+                    "notice": "来源已保存，尚未完成事实核验。",
+                    "verified": False,
+                    "counts": {"captured": 1, "needsUser": 1, "failed": 0},
+                    "sources": [
+                        {
+                            "id": "source-result-1",
+                            "actionIndex": 0,
+                            "action": "SEARCH_WEB",
+                            "purpose": "查找官方说明",
+                            "target": "AI 工具 官方说明",
+                            "status": "CAPTURED",
+                            "title": "AI 工具官方说明",
+                            "url": "https://example.com/official",
+                            "source": "example.com",
+                            "summary": "官方说明摘要",
+                            "error": None,
+                            "retrievedAt": NOW,
+                        },
+                        {
+                            "id": "source-result-2",
+                            "actionIndex": 2,
+                            "action": "ASK_USER",
+                            "purpose": "补充实测截图",
+                            "target": "上传自己的测试截图",
+                            "status": "NEEDS_USER",
+                            "title": "补充实测截图",
+                            "url": None,
+                            "source": "用户补充",
+                            "summary": "上传自己的测试截图",
+                            "error": None,
+                            "retrievedAt": NOW,
+                        },
+                    ],
+                },
+                "createdAt": NOW,
+                "acceptedAt": None,
+            }
+            source_message = {
+                "id": "research-source-message-1",
+                "role": "ASSISTANT",
+                "content": "已保存 1 条来源，1 项需要补充，0 项失败。",
+                "runId": "research-source-run-1",
+                "stage": "RESEARCH",
+                "messageType": "ARTIFACT",
+                "artifactRefs": [source_artifact["id"]],
+                "metadata": {"verified": False},
+                "createdAt": NOW,
+            }
+            agent_contexts[project_id] = {
+                **current,
+                "activeRun": None,
+                "messages": [*current["messages"], source_message],
+                "artifacts": [source_artifact, *current["artifacts"]],
+            }
+            return json_response(
+                route,
+                {"id": "research-source-run-1", "status": "QUEUED", "jobId": "job-source-1"},
+                status=202,
+            )
+
         unexpected_api.append(f"{method} {path}")
         return json_response(
             route,
@@ -443,6 +552,80 @@ with sync_playwright() as playwright:
     page.get_by_role("heading", name="资料与研究", exact=True).wait_for()
     page.get_by_role("heading", name="普通人如何判断 AI 工具是否值得长期使用", exact=True).wait_for()
     assert "project=project-manual-1" in page.url and "stage=research" in page.url
+
+    # 2.2 研究计划可准备来源任务，确认卡不伪装成模型调用；来源结果刷新后仍存在。
+    research_plan_artifact = {
+        "id": "research-plan-artifact-1",
+        "type": "RESEARCH_PLAN",
+        "status": "CANDIDATE",
+        "platform": None,
+        "version": 1,
+        "parentArtifactId": None,
+        "payload": {
+            "title": "AI 工具研究计划",
+            "summary": "先查官方说明，再核对用户实测。",
+            "questions": [
+                {
+                    "question": "当前支持哪些能力？",
+                    "why": "避免使用过期信息",
+                    "preferredSources": ["官方说明"],
+                }
+            ],
+            "claims": [
+                {"claim": "免费版可长期使用", "priority": "HIGH", "reason": "影响结论"}
+            ],
+            "nextActions": [
+                {"action": "SEARCH_WEB", "purpose": "查找官方说明", "target": "AI 工具 官方说明"},
+                {"action": "READ_LINK", "purpose": "读取产品文档", "target": "https://example.com/docs"},
+                {"action": "ASK_USER", "purpose": "补充实测截图", "target": "上传自己的测试截图"},
+            ],
+        },
+        "createdAt": NOW,
+        "acceptedAt": None,
+    }
+    agent_contexts["project-manual-1"] = {
+        **empty_agent_context(),
+        "messages": [
+            {
+                "id": "research-plan-message-1",
+                "role": "ASSISTANT",
+                "content": "先查官方说明，再核对用户实测。",
+                "runId": "research-plan-run-1",
+                "stage": "RESEARCH",
+                "messageType": "ARTIFACT",
+                "artifactRefs": [research_plan_artifact["id"]],
+                "metadata": {},
+                "createdAt": NOW,
+            }
+        ],
+        "artifacts": [research_plan_artifact],
+    }
+    page.reload()
+    page.get_by_role("button", name="查看计划", exact=True).click()
+    plan_dialog = page.get_by_role("dialog")
+    plan_dialog.get_by_role("button", name="准备查找资料", exact=True).click()
+    source_confirmation = page.locator(".agent-confirmation")
+    source_confirmation.get_by_text("查找研究来源", exact=True).wait_for()
+    assert source_confirmation.get_by_text("搜索 1 次", exact=True).count() == 1
+    assert source_confirmation.get_by_text("读取 1 个", exact=True).count() == 1
+    assert source_confirmation.get_by_text("补充 1 项", exact=True).count() == 1
+    assert source_confirmation.get_by_text("模型", exact=True).count() == 0
+    assert prepared_source_payloads[-1]["planArtifactId"] == research_plan_artifact["id"]
+    source_confirmation.get_by_role("button", name="确认执行", exact=True).click()
+    page.get_by_text("来源结果", exact=True).wait_for()
+    page.get_by_role("button", name="查看来源", exact=True).click()
+    source_dialog = page.get_by_role("dialog")
+    source_dialog.get_by_text("来源已保存，尚未完成事实核验。", exact=True).wait_for()
+    source_dialog.get_by_text("AI 工具官方说明", exact=True).wait_for()
+    source_dialog.get_by_text("补充实测截图", exact=True).wait_for()
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_timeout(100)
+    assert_no_overflow(page, "390px 研究来源结果")
+    page.screenshot(path=ARTIFACTS / "research-sources-mobile.png", full_page=True)
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    source_dialog.get_by_role("button", name="关闭", exact=True).click()
+    page.reload()
+    page.get_by_role("button", name="查看来源", exact=True).wait_for()
 
     # 3. 热点加入创作后，发现卡片显示“已加入”，并可继续进入原项目。
     page.get_by_role("button", name="发现", exact=True).click()

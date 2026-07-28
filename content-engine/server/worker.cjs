@@ -11,6 +11,16 @@ const { buildAnalysisPrompt, buildAnalysisRepairPrompt, calculateOverallScore, d
 const { buildOutlinePrompt, buildOutlineRepairPrompt, parseOutlineContent } = require('./services/creative-outline.cjs');
 const { DRAFT_ACTION_VERSION, buildDraftPrompt, buildDraftRepairPrompt, parseDraftContent } = require('./services/creative-draft.cjs');
 const { PROJECT_RESEARCH_ACTION_VERSION, buildResearchPlanPrompt, buildResearchPlanRepairPrompt, parseResearchPlan } = require('./services/project-research.cjs');
+const { searchTavily } = require('./services/tavily.cjs');
+const { clipPublicLink } = require('./services/public-web.cjs');
+const {
+  PROJECT_RESEARCH_SOURCES_VERSION,
+  dedupeSourceSnapshots,
+  failedSourceSnapshot,
+  manualSourceSnapshot,
+  normalizeReadResult,
+  normalizeSearchResults,
+} = require('./services/project-research-sources.cjs');
 const { createProjectAgentStore } = require('./services/project-agent.cjs');
 const { buildCopyPrompt, buildCopyRepairPrompt, mergeFactsToVerify, parseCopyOutput } = require('./services/project-copy-action.cjs');
 
@@ -26,6 +36,7 @@ async function processJob(queueJob) {
     if (queueJob.name === 'AGENT_PLAN') return await generateAgentPlan({ jobId, workspaceId, planId: payload.planId });
     if (queueJob.name === 'INTELLIGENCE_ANALYSIS') return await generateIntelligenceAnalysis({ jobId, workspaceId, runId: payload.runId });
     if (queueJob.name === 'PROJECT_RESEARCH_PLAN') return await generateProjectResearchPlan({ jobId, workspaceId, runId: payload.runId });
+    if (queueJob.name === 'PROJECT_RESEARCH_SOURCES') return await generateProjectResearchSources({ jobId, workspaceId, runId: payload.runId });
     if (queueJob.name === 'CREATIVE_OUTLINE') return await generateCreativeOutline({ jobId, workspaceId, runId: payload.runId });
     if (queueJob.name === 'CREATIVE_DRAFT') return await generateCreativeDraft({ jobId, workspaceId, runId: payload.runId });
     if (queueJob.name === 'PROJECT_COPY_ACTION') return await generateProjectCopyAction({ jobId, workspaceId, runId: payload.runId });
@@ -39,6 +50,144 @@ async function processJob(queueJob) {
     const message = error instanceof Error ? error.message : '任务失败。';
     if (queueJob.name === 'AGENT_PLAN' && payload.planId) await query('UPDATE agent_plans SET status = $1, error = $2, updated_at = now() WHERE id = $3 AND workspace_id = $4', ['FAILED', message.slice(0, 2_000), payload.planId, workspaceId]);
     await query('UPDATE jobs SET status = $1, error = $2, completed_at = now() WHERE id = $3', ['FAILED', message.slice(0, 2_000), jobId]);
+    throw error;
+  }
+}
+
+async function generateProjectResearchSources({ jobId, workspaceId, runId }) {
+  const startedAt = Date.now();
+  try {
+    const runResult = await query(`SELECT id, source_snapshot_json
+      FROM generation_runs
+      WHERE id = $1 AND workspace_id = $2 AND action_version_id = $3 AND status = 'QUEUED'`, [
+      runId,
+      workspaceId,
+      PROJECT_RESEARCH_SOURCES_VERSION,
+    ]);
+    if (!runResult.rowCount) throw new Error('研究来源任务当前不能执行。');
+    await query("UPDATE generation_runs SET status = 'RUNNING', started_at = now() WHERE id = $1 AND workspace_id = $2", [runId, workspaceId]);
+    const snapshot = runResult.rows[0].source_snapshot_json;
+    const captured = [];
+    for (const action of Array.isArray(snapshot.actions) ? snapshot.actions : []) {
+      if (action.action === 'ASK_USER') {
+        captured.push(manualSourceSnapshot(action));
+        continue;
+      }
+      try {
+        if (action.action === 'SEARCH_WEB') {
+          const results = normalizeSearchResults(action, await searchTavily(workspaceId, { query: action.target, category: '其它', domains: [] }));
+          if (results.length) captured.push(...results);
+          else captured.push(failedSourceSnapshot(action, new Error('网页搜索没有返回可保存的结果。')));
+        } else if (action.action === 'READ_LINK') {
+          captured.push(normalizeReadResult(action, await clipPublicLink(action.target)));
+        }
+      } catch (error) {
+        captured.push(failedSourceSnapshot(action, error));
+      }
+    }
+    const sources = dedupeSourceSnapshots(captured);
+    const counts = {
+      captured: sources.filter((item) => item.status === 'CAPTURED').length,
+      needsUser: sources.filter((item) => item.status === 'NEEDS_USER').length,
+      failed: sources.filter((item) => item.status === 'FAILED').length,
+    };
+    const automaticCount = Number(snapshot.counts?.automatic ?? 0);
+    const allAutomaticFailed = automaticCount > 0 && counts.captured === 0 && counts.failed >= automaticCount;
+    const runStatus = allAutomaticFailed ? 'FAILED' : 'SUCCEEDED';
+    const errorMessage = allAutomaticFailed ? '所有自动来源动作均执行失败，请查看来源结果并调整研究计划。' : null;
+    const summary = counts.captured
+      ? `已保存 ${counts.captured} 条来源，${counts.needsUser} 项需要补充，${counts.failed} 项失败。`
+      : `${counts.needsUser} 项需要补充，${counts.failed} 项自动动作失败。`;
+
+    const saved = await transaction(async (client) => {
+      const sourceRun = await client.query(`INSERT INTO project_research_source_runs
+        (workspace_id, project_id, research_plan_id, generation_run_id, summary_json)
+        VALUES ($1, $2, $3, $4, $5) RETURNING id`, [
+        workspaceId,
+        snapshot.projectId,
+        snapshot.planId,
+        runId,
+        JSON.stringify({ counts, summary, verified: false }),
+      ]);
+      const savedSources = [];
+      for (const source of sources) {
+        const inserted = await client.query(`INSERT INTO project_research_sources
+          (workspace_id, project_id, source_run_id, action_index, action, purpose, target, status,
+           title, url, source_name, summary, error)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+          RETURNING id, retrieved_at`, [
+          workspaceId,
+          snapshot.projectId,
+          sourceRun.rows[0].id,
+          source.actionIndex,
+          source.action,
+          source.purpose,
+          source.target,
+          source.status,
+          source.title,
+          source.url,
+          source.source,
+          source.summary,
+          source.error,
+        ]);
+        savedSources.push({ ...source, id: inserted.rows[0].id, retrievedAt: inserted.rows[0].retrieved_at });
+      }
+      const payload = {
+        title: '研究来源',
+        summary,
+        notice: '来源已保存，尚未完成事实核验。',
+        verified: false,
+        counts,
+        sources: savedSources,
+      };
+      const artifact = await projectAgentStore.createArtifact(client, {
+        workspaceId,
+        projectId: snapshot.projectId,
+        type: 'RESEARCH_SOURCES',
+        stage: 'RESEARCH',
+        status: 'CANDIDATE',
+        actionRunId: runId,
+        title: '研究来源',
+        metadata: { action: 'PROJECT_RESEARCH_SOURCES', payload },
+      });
+      await client.query('UPDATE project_research_source_runs SET artifact_id = $1 WHERE id = $2', [artifact.id, sourceRun.rows[0].id]);
+      const message = await client.query(`INSERT INTO project_agent_messages
+        (workspace_id, project_id, action_run_id, role, content, stage, message_type, artifact_refs_json, metadata_json)
+        VALUES ($1, $2, $3, 'ASSISTANT', $4, 'RESEARCH', 'ARTIFACT', $5, $6) RETURNING id`, [
+        workspaceId,
+        snapshot.projectId,
+        runId,
+        summary,
+        JSON.stringify([artifact.id]),
+        JSON.stringify({ action: 'PROJECT_RESEARCH_SOURCES', status: runStatus, verified: false }),
+      ]);
+      await client.query('UPDATE project_artifacts SET created_by_message_id = $1 WHERE id = $2 AND workspace_id = $3', [message.rows[0].id, artifact.id, workspaceId]);
+      await client.query(`UPDATE generation_runs
+        SET status = $2, output_json = $3, error = $4, completed_at = now()
+        WHERE id = $1`, [runId, runStatus, JSON.stringify(payload), errorMessage]);
+      await client.query(`UPDATE jobs SET status = $2, result_json = $3, error = $4, completed_at = now()
+        WHERE id = $1`, [jobId, runStatus, JSON.stringify({ artifactId: artifact.id, sourceRunId: sourceRun.rows[0].id }), errorMessage]);
+      await client.query(`INSERT INTO api_usage_logs
+        (workspace_id, job_id, provider, model, operation, status, duration_ms, error)
+        VALUES ($1, $2, $3, NULL, 'SOURCE_DISCOVERY', $4, $5, $6)`, [
+        workspaceId,
+        jobId,
+        snapshot.counts?.search ? 'TAVILY' : 'PUBLIC_WEB',
+        runStatus === 'SUCCEEDED' ? 'SUCCESS' : 'FAILED',
+        Date.now() - startedAt,
+        errorMessage,
+      ]);
+      return { artifactId: artifact.id, sourceRunId: sourceRun.rows[0].id, status: runStatus };
+    });
+    return saved;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '研究来源任务失败。';
+    await transaction(async (client) => {
+      await client.query("UPDATE generation_runs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1 AND workspace_id = $3", [runId, message.slice(0, 2_000), workspaceId]);
+      await client.query(`INSERT INTO api_usage_logs
+        (workspace_id, job_id, provider, model, operation, status, duration_ms, error)
+        VALUES ($1, $2, 'UNKNOWN', NULL, 'SOURCE_DISCOVERY', 'FAILED', $3, $4)`, [workspaceId, jobId, Date.now() - startedAt, message.slice(0, 2_000)]);
+    });
     throw error;
   }
 }
