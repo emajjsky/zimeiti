@@ -1,15 +1,16 @@
 from copy import deepcopy
-from datetime import datetime
 import json
 import os
 from pathlib import Path
 import re
-from urllib.parse import parse_qs, urlparse
+import tempfile
+from urllib.parse import urlparse
 
 from playwright.sync_api import sync_playwright
 
 
-ARTIFACTS = Path(__file__).resolve().parents[1] / "artifacts"
+BASE_URL = os.getenv("CONTENT_ENGINE_E2E_URL", "http://127.0.0.1:5173")
+ARTIFACTS = Path(tempfile.gettempdir()) / "content-engine-creative-workspace-e2e"
 ARTIFACTS.mkdir(exist_ok=True)
 
 
@@ -34,6 +35,127 @@ def json_response(route, body, status=200):
     )
 
 
+def empty_agent_context():
+    return {
+        "stage": "RESEARCH",
+        "platform": None,
+        "messages": [],
+        "summaries": [],
+        "activeRun": None,
+        "artifacts": [],
+        "usedMaterialIds": {"inputIds": [], "referenceIds": []},
+    }
+
+
+def project_from_input(project_id, payload, now, legacy_topic_id=None):
+    title = payload.get("title", "").strip() or "未命名创作"
+    platforms = payload.get("targetPlatforms") or ["WECHAT"]
+    return {
+        "id": project_id,
+        "title": title,
+        "originType": payload.get("originType", "MANUAL"),
+        **({"legacyTopicId": legacy_topic_id} if legacy_topic_id else {}),
+        "stage": "PLANNING",
+        "status": "BRIEF",
+        "planning": {
+            "title": title,
+            "category": payload.get("category", "").strip(),
+            "angle": "",
+            "objective": "",
+            "targetAudience": "",
+            "coreMessage": "",
+            "targetPlatforms": platforms,
+            "timing": "EVERGREEN",
+            "sourceRequirements": "",
+            "constraints": "",
+        },
+        "planningVersion": 0,
+        "coreViewpoint": "",
+        "factChecks": [],
+        "versions": [],
+        "sourceSnapshot": {
+            "draftText": payload.get("draftText"),
+            "importUrl": payload.get("importUrl"),
+        },
+        "createdAt": now,
+        "updatedAt": now,
+    }
+
+
+def assert_no_overflow(page, label):
+    dimensions = page.evaluate(
+        """() => ({
+          documentWidth: document.documentElement.scrollWidth,
+          viewportWidth: document.documentElement.clientWidth,
+          bodyWidth: document.body.scrollWidth,
+        })"""
+    )
+    assert dimensions["documentWidth"] <= dimensions["viewportWidth"], (
+        f"{label} 横向溢出: {dimensions}"
+    )
+    assert dimensions["bodyWidth"] <= dimensions["viewportWidth"], (
+        f"{label} body 横向溢出: {dimensions}"
+    )
+
+
+NOW = "2026-07-28T08:00:00.000Z"
+HOTSPOT_ID = "intel-ai-1"
+HOTSPOT_TITLE = "普通人使用 AI 搜索时，如何核验答案来源"
+SESSION = {
+    "accessToken": "mock-access-token",
+    "user": {"id": "user-1", "email": "creator@example.com", "display_name": "创作者"},
+    "workspace": {"id": "workspace-1", "name": "验收工作室"},
+}
+STATE = {
+    "workspace": {
+        "name": "验收工作室",
+        "materialRoot": "",
+        "primaryTopics": ["AI 工具", "财经"],
+        "accountPositioning": "帮助普通人把复杂信息转化为可执行内容",
+        "targetAudience": "普通内容创作者",
+        "enabledPlatforms": ["WECHAT", "XIAOHONGSHU", "ZHIHU", "WEIBO"],
+        "setupCompleted": True,
+    },
+    "feishuTemplate": {
+        "name": "内容引擎内容库",
+        "topicStorage": "ONE_TABLE",
+        "includeSchedule": True,
+        "includeReview": False,
+        "status": "DRAFT",
+    },
+    "sources": [
+        {
+            "id": "source-1",
+            "name": "中国新闻网",
+            "type": "RSS",
+            "url": "https://example.com/rss.xml",
+            "category": "综合",
+            "enabled": True,
+            "refreshMinutes": 60,
+            "trust": "可信",
+        }
+    ],
+    "intelligence": [
+        {
+            "id": HOTSPOT_ID,
+            "title": HOTSPOT_TITLE,
+            "summary": "从出处、时间、交叉来源和原始材料四个维度核验 AI 搜索答案。",
+            "category": "AI",
+            "keywords": ["AI 搜索", "事实核验"],
+            "source": "中国新闻网",
+            "publishedAt": NOW,
+            "heat": 88,
+            "trust": "可信",
+            "url": "https://example.com/ai-search-fact-check",
+            "captureMethod": "RSS",
+            "language": "zh",
+        }
+    ],
+    "topics": [],
+    "projects": [],
+}
+
+
 with sync_playwright() as playwright:
     executable = chrome_path()
     browser = playwright.chromium.launch(
@@ -41,8 +163,12 @@ with sync_playwright() as playwright:
         **({"executable_path": executable} if executable else {}),
     )
     page = browser.new_page(viewport={"width": 1440, "height": 1000})
+    state = deepcopy(STATE)
+    api_requests = []
+    unexpected_api = []
     console_errors = []
     failed_responses = []
+
     page.on(
         "console",
         lambda message: console_errors.append(message.text)
@@ -58,332 +184,252 @@ with sync_playwright() as playwright:
         else None,
     )
 
-    page.goto("http://127.0.0.1:5173")
-    page.wait_for_load_state("networkidle")
-    page.get_by_role("button", name="创建新工作室").click()
-    unique = datetime.now().strftime("%Y%m%d%H%M%S%f")
-    page.get_by_label("你的名称").fill("文案验收")
-    page.get_by_label("工作室名称").fill("四平台验收工作室")
-    page.get_by_label("邮箱").fill(f"copy-{unique}@example.com")
-    page.get_by_label("密码").fill("CreativeTest123!")
-    page.get_by_role("button", name="创建并进入").click()
-    page.get_by_role("button", name="进入内容引擎").click()
-    page.get_by_role("button", name="新建选题").click()
-    page.get_by_label("选题标题").fill("普通人如何判断一个 AI 工具是否值得使用")
-    page.get_by_label("题材").fill("AI 工具实战")
-    page.get_by_label("核心观点").fill("先看真实问题、使用成本和可验证结果，不追逐功能数量。")
-    page.get_by_role("button", name="保存选题").click()
-    page.get_by_role("button", name="确认立项").click()
-    page.wait_for_selector(".creative-brief-form")
-
-    assert page.locator(".creative-stepper button").count() == 6
-    assert page.get_by_role("button", name="配图").is_disabled()
-    assert page.get_by_role("button", name="排版").is_disabled()
-    assert page.get_by_role("button", name="审核").is_disabled()
-    assert page.get_by_text("视频号", exact=True).count() == 0
-
-    page.get_by_label("目标受众").fill("想提高内容效率但不熟悉技术的普通创作者")
-    save_overview = page.get_by_role("button", name="保存概览")
-    assert not save_overview.is_disabled()
-    with page.expect_response(
-        lambda response: "/brief" in response.url
-        and response.request.method == "PUT"
-    ) as overview_response:
-        save_overview.click()
-    response = overview_response.value
-    assert response.status == 200, response.text()
-    try:
-        page.get_by_text("已保存", exact=False).wait_for(timeout=10_000)
-    except Exception as error:
-        raise AssertionError(f"项目概览未保存，失败请求：{failed_responses}") from error
-
-    workspace_payload = page.evaluate(
-        """async () => {
-          const response = await fetch('/api/v1/workspace/state', {
-            headers: { Authorization: `Bearer ${JSON.parse(localStorage.getItem('content-engine-web-session-v1')).accessToken}` }
-          });
-          return response.json();
-        }"""
+    session_value = json.dumps(SESSION, ensure_ascii=False)
+    page.add_init_script(
+        f"window.localStorage.setItem('content-engine-web-session-v1', {json.dumps(session_value, ensure_ascii=False)});"
     )
-    project = next(
-        item
-        for item in workspace_payload["state"]["projects"]
-        if item["title"] == "普通人如何判断一个 AI 工具是否值得使用"
-    )
-    project_state = {"project": deepcopy(project)}
-    agent_state = {"WECHAT": "IDLE", "XIAOHONGSHU": "IDLE", "ZHIHU": "IDLE", "WEIBO": "IDLE"}
-    agent_requests = {"WECHAT": "", "XIAOHONGSHU": "", "ZHIHU": "", "WEIBO": ""}
-    intercepted_confirms = []
-    candidate_body = """先定义要解决的问题
 
-选择 AI 工具前，先写清楚真实任务、输入和验收标准。功能再多，无法稳定完成任务也没有价值。
+    def find_project(project_id):
+        return next((item for item in state["projects"] if item["id"] == project_id), None)
 
-算清完整使用成本
+    def replace_project(project):
+        state["projects"] = [
+            project if item["id"] == project["id"] else item
+            for item in state["projects"]
+        ]
 
-除了订阅费，还要计算学习、整理输入和核验结果的时间。
+    def handle_api(route):
+        request = route.request
+        parsed = urlparse(request.url)
+        path = parsed.path
+        method = request.method
+        api_requests.append(f"{method} {path}")
 
-用真实结果做决定
+        if path == "/api/v1/auth/me" and method == "GET":
+            return json_response(route, {"user": SESSION["user"], "workspace": SESSION["workspace"]})
+        if path == "/api/v1/workspace/state" and method == "GET":
+            return json_response(route, {"state": state, "revision": 1, "updatedAt": NOW})
+        if path == "/api/v1/workspace/state" and method == "PUT":
+            payload = json.loads(request.post_data or "{}")
+            state.clear()
+            state.update(deepcopy(payload["state"]))
+            return json_response(route, {"revision": 2, "updatedAt": NOW})
+        if path == "/api/v1/intelligence/sources" and method == "GET":
+            return json_response(route, state["sources"])
+        if path == "/api/v1/intelligence/items" and method == "GET":
+            return json_response(route, state["intelligence"])
+        if re.fullmatch(r"/api/v1/intelligence/items/[^/]+/analyses/latest", path) and method == "GET":
+            return json_response(route, None)
+        if re.fullmatch(r"/api/v1/intelligence/items/[^/]+/analyses/latest-run", path) and method == "GET":
+            return json_response(route, None)
+        if path == "/api/v1/creative/skills" and method == "GET":
+            return json_response(route, [])
+        if path == "/api/v1/creative/projects" and method == "GET":
+            return json_response(route, {"projects": state["projects"]})
+        if path == "/api/v1/creative/projects" and method == "POST":
+            payload = json.loads(request.post_data or "{}")
+            project = project_from_input(
+                "project-manual-1", payload, NOW, legacy_topic_id="legacy-topic-1"
+            )
+            state["projects"] = [project, *state["projects"]]
+            return json_response(route, {"project": project, "created": True}, status=201)
 
-拿一个日常任务连续验证三次，再决定是否长期使用。"""
-    candidate_id = "44444444-4444-4444-8444-444444444444"
-    run_id = "33333333-3333-4333-8333-333333333333"
-
-    def version_for(platform):
-        existing = next(
-            (
-                item
-                for item in project_state["project"]["versions"]
-                if item["platform"] == platform
-            ),
-            None,
+        hotspot_match = re.fullmatch(
+            r"/api/v1/creative/projects/from-intelligence/([^/]+)", path
         )
-        if existing:
-            return existing
-        bodies = {"ZHIHU": "知乎独立草稿", "WEIBO": "微博独立草稿"}
-        return {
-            "id": f"mock-{platform.lower()}-version",
-            "platform": platform,
-            "status": "DRAFT",
-            "title": f"{platform} 草稿",
-            "body": bodies.get(platform, ""),
-            "updatedAt": "10:00",
-        }
-
-    def mock_enable_platform(route):
-        platform = urlparse(route.request.url).path.rsplit("/", 1)[-1]
-        current = deepcopy(project_state["project"])
-        created = not any(item["platform"] == platform for item in current["versions"])
-        if created:
-            current["versions"].append(version_for(platform))
-        current["updatedAt"] = "10:00"
-        project_state["project"] = current
-        json_response(route, {"project": current, "platform": platform, "created": created})
-
-    def artifact(status="CANDIDATE"):
-        return {
-            "id": candidate_id,
-            "type": "PLATFORM_COPY",
-            "status": status,
-            "platform": "WECHAT",
-            "version": 1,
-            "parentArtifactId": None,
-            "payload": {
-                "title": "判断 AI 工具，先看这三件事",
-                "body": candidate_body,
-                "changeSummary": "保留核心观点，补全判断步骤并收紧表达。",
-                "factsToVerify": ["核验产品当前价格和免费额度"],
-            },
-            "createdAt": "2026-07-27T10:01:00.000Z",
-            "acceptedAt": "2026-07-27T10:02:00.000Z" if status == "ACCEPTED" else None,
-        }
-
-    def run(platform, status):
-        return {
-            "id": run_id,
-            "action": "POLISH_EXISTING_DRAFT",
-            "status": status,
-            "request": agent_requests[platform],
-            "confirmation": {
-                "model": "qwen-plus",
-                "promptVersion": 1,
-                "skillNames": ["AI 科技", "清新自然", "公众号规则"],
-                "materialCount": 0,
-                "writeScope": "公众号正式文案候选",
-            },
-            "createdAt": "2026-07-27T10:00:00.000Z",
-        }
-
-    def context(platform):
-        status = agent_state[platform]
-        messages = []
-        artifacts = []
-        active_run = None
-        if status != "IDLE":
-            messages.append(
-                {
-                    "id": f"message-user-{platform}",
-                    "role": "USER",
-                    "content": agent_requests[platform],
-                    "runId": run_id,
-                    "stage": "COPY",
-                    "messageType": "MESSAGE",
-                    "artifactRefs": [],
-                    "createdAt": "2026-07-27T10:00:00.000Z",
-                }
+        if hotspot_match and method == "POST":
+            item_id = hotspot_match.group(1)
+            existing = next(
+                (
+                    item
+                    for item in state["projects"]
+                    if item.get("originType") == "HOTSPOT"
+                    and item.get("originReferenceId") == item_id
+                ),
+                None,
             )
-            active_run = run(platform, "DRAFT" if status == "DRAFT" else "SUCCEEDED")
-        if status == "DRAFT":
-            messages.append(
+            if existing:
+                return json_response(route, {"project": existing, "created": False})
+            intelligence = next(item for item in state["intelligence"] if item["id"] == item_id)
+            project = project_from_input(
+                "project-hotspot-1",
                 {
-                    "id": f"message-confirmation-{platform}",
-                    "role": "ASSISTANT",
-                    "content": "文案任务已准备，确认后生成候选。",
-                    "runId": run_id,
-                    "stage": "COPY",
-                    "messageType": "CONFIRMATION",
-                    "artifactRefs": [],
-                    "createdAt": "2026-07-27T10:00:01.000Z",
-                }
+                    "originType": "HOTSPOT",
+                    "title": intelligence["title"],
+                    "category": intelligence["category"],
+                    "targetPlatforms": ["WECHAT", "XIAOHONGSHU"],
+                },
+                NOW,
             )
-        if status in ("SUCCEEDED", "ACCEPTED") and platform == "WECHAT":
-            copy_artifact = artifact("ACCEPTED" if status == "ACCEPTED" else "CANDIDATE")
-            artifacts.append(copy_artifact)
-            messages.append(
+            project["originReferenceId"] = item_id
+            project["sourceSnapshot"] = {"intelligenceIds": [item_id]}
+            state["projects"] = [project, *state["projects"]]
+            return json_response(route, {"project": project, "created": True}, status=201)
+
+        complete_match = re.fullmatch(
+            r"/api/v1/creative/projects/([^/]+)/planning/complete", path
+        )
+        if complete_match and method == "POST":
+            project = deepcopy(find_project(complete_match.group(1)))
+            project["stage"] = "RESEARCH"
+            project["planningVersion"] = 1
+            project["planningConfirmedAt"] = NOW
+            project["coreViewpoint"] = project["planning"]["coreMessage"]
+            project["factChecks"] = [
+                value.strip()
+                for value in project["planning"]["sourceRequirements"].split("；")
+                if value.strip()
+            ]
+            project["versions"] = [
                 {
-                    "id": "message-artifact-wechat",
-                    "role": "ASSISTANT",
-                    "content": "候选已生成，请审核差异后决定是否采用。",
-                    "runId": run_id,
-                    "stage": "COPY",
-                    "messageType": "ARTIFACT",
-                    "artifactRefs": [candidate_id],
-                    "createdAt": "2026-07-27T10:01:00.000Z",
+                    "id": f"version-{platform.lower()}",
+                    "platform": platform,
+                    "status": "DRAFT",
+                    "title": project["title"],
+                    "body": "",
+                    "updatedAt": NOW,
                 }
-            )
-            if status == "ACCEPTED":
-                messages.append(
-                    {
-                        "id": "message-accepted-wechat",
-                        "role": "ASSISTANT",
-                        "content": "候选已采用为公众号当前版本。",
-                        "runId": run_id,
-                        "stage": "COPY",
-                        "messageType": "SYSTEM_EVENT",
-                        "artifactRefs": [candidate_id],
-                        "createdAt": "2026-07-27T10:02:00.000Z",
-                    }
-                )
-        return {
-            "stage": "COPY",
-            "platform": platform,
-            "messages": messages,
-            "summaries": [],
-            "activeRun": active_run,
-            "artifacts": artifacts,
-            "usedMaterialIds": {"inputIds": [], "referenceIds": []},
-        }
+                for platform in project["planning"]["targetPlatforms"]
+            ]
+            project["updatedAt"] = NOW
+            replace_project(project)
+            return json_response(route, {"project": project})
 
-    def mock_agent_context(route):
-        platform = parse_qs(urlparse(route.request.url).query).get("platform", ["WECHAT"])[0]
-        json_response(route, context(platform))
+        planning_match = re.fullmatch(
+            r"/api/v1/creative/projects/([^/]+)/planning", path
+        )
+        if planning_match:
+            project = find_project(planning_match.group(1))
+            if method == "GET":
+                return json_response(route, {"project": project, "planning": project["planning"]})
+            if method == "PUT":
+                planning = json.loads(request.post_data or "{}")
+                project = deepcopy(project)
+                project["planning"] = planning
+                project["title"] = planning["title"]
+                project["updatedAt"] = NOW
+                replace_project(project)
+                return json_response(route, {"project": project, "planning": planning})
 
-    def mock_prepare_agent(route):
-        payload = json.loads(route.request.post_data or "{}")
-        platform = payload["platform"]
-        agent_requests[platform] = payload["request"]
-        agent_state[platform] = "DRAFT"
-        json_response(route, run(platform, "DRAFT"), status=201)
+        brief_match = re.fullmatch(r"/api/v1/creative/projects/([^/]+)/brief", path)
+        if brief_match and method == "GET":
+            return json_response(route, {"brief": None})
+        materials_match = re.fullmatch(
+            r"/api/v1/creative/projects/([^/]+)/materials", path
+        )
+        if materials_match and method == "GET":
+            return json_response(route, {"inputs": [], "references": []})
+        agent_match = re.fullmatch(r"/api/v1/creative/projects/([^/]+)/agent", path)
+        if agent_match and method == "GET":
+            return json_response(route, empty_agent_context())
 
-    def mock_confirm_agent(route):
-        intercepted_confirms.append(route.request.url)
-        agent_state["WECHAT"] = "SUCCEEDED"
-        json_response(
+        unexpected_api.append(f"{method} {path}")
+        return json_response(
             route,
-            {"id": run_id, "status": "QUEUED", "jobId": "55555555-5555-4555-8555-555555555555"},
-            status=202,
+            {"error": {"message": f"E2E 未配置接口：{method} {path}"}},
+            status=418,
         )
 
-    def mock_accept_artifact(route):
-        agent_state["WECHAT"] = "ACCEPTED"
-        accepted_project = deepcopy(project_state["project"])
-        accepted_project["status"] = "WRITING"
-        accepted_project["updatedAt"] = "10:02"
-        for item in accepted_project["versions"]:
-            if item["platform"] == "WECHAT":
-                item.update(
-                    {
-                        "title": "判断 AI 工具，先看这三件事",
-                        "body": candidate_body,
-                        "updatedAt": "10:02",
-                    }
-                )
-        project_state["project"] = accepted_project
-        json_response(route, {"artifact": artifact("ACCEPTED"), "project": accepted_project})
+    page.route("**/api/v1/**", handle_api)
 
-    page.route("**/api/v1/creative/projects/*/platforms/*", mock_enable_platform)
-    page.route(
-        re.compile(r".*/api/v1/creative/projects/[^/]+/agent\?.*stage=COPY.*$"),
-        mock_agent_context,
-    )
-    page.route("**/api/v1/creative/projects/*/agent/prepare", mock_prepare_agent)
-    page.route("**/api/v1/creative/agent-runs/*/confirm", mock_confirm_agent)
-    page.route("**/api/v1/creative/project-artifacts/*/accept", mock_accept_artifact)
-
-    page.locator(".creative-stepper button").filter(has_text="文案").click()
-    page.wait_for_selector(".copy-workspace")
-    assert page.locator(".project-agent").count() == 1
-    assert page.locator(".creative-agent-panel").count() == 0
-
-    page.get_by_role("button", name="增加图文平台").click()
-    page.get_by_role("button", name="知乎", exact=True).click()
-    page.wait_for_function("document.querySelectorAll('.copy-platform-tabs button').length === 3")
-    page.get_by_role("button", name="增加图文平台").click()
-    page.get_by_role("button", name="微博", exact=True).click()
-    page.wait_for_function("document.querySelectorAll('.copy-platform-tabs button').length === 4")
-    assert page.locator(".copy-platform-tabs button").count() == 4
-
-    length_input = page.get_by_label("目标篇幅")
-    length_input.fill("1800-2200 字")
-    page.get_by_text("请先保存写作策略", exact=True).wait_for()
-    composer = page.locator(".project-agent-composer textarea")
-    composer.fill("保留事实，把这篇文章润色得更自然。")
-    assert page.get_by_role("button", name="发送", exact=True).is_disabled()
-    page.get_by_role("button", name="保存策略", exact=True).click()
-    page.get_by_role("button", name="已保存", exact=True).wait_for()
-
-    page.locator(".copy-platform-tabs").get_by_role("button", name="公众号", exact=True).click()
-    body_editor = page.locator(".copy-document textarea").nth(1)
-    original_body = body_editor.input_value()
-    body_editor.click()
-    page.keyboard.press("Home")
-    page.keyboard.down("Shift")
-    for _ in range(min(8, len(original_body))):
-        page.keyboard.press("ArrowRight")
-    page.keyboard.up("Shift")
-    page.get_by_text(re.compile(r"已选择 \d+ 字"), exact=False).wait_for()
-    composer.fill("保留事实，把这篇文章润色得更自然。")
-    page.get_by_role("button", name="发送", exact=True).click()
-    page.get_by_text("润色文案", exact=True).wait_for()
-    assert page.get_by_text("qwen-plus", exact=True).count() == 1
-    page.get_by_role("button", name="确认调用", exact=True).click()
-    page.get_by_role("button", name="查看候选", exact=True).click()
-    page.get_by_role("heading", name="审核文案", exact=True).wait_for()
-    assert body_editor.input_value() == original_body
-    assert page.locator(".candidate-diff .added").count() > 0
-    assert page.locator(".candidate-diff .removed").count() > 0
-    assert page.get_by_text("核验产品当前价格和免费额度", exact=True).count() == 1
-    page.screenshot(path=ARTIFACTS / "creative-copy-candidate-desktop.png", full_page=True)
-
+    # 1. 创作项目中心空状态与手工新建。
+    page.goto(f"{BASE_URL}/?view=create")
+    page.wait_for_load_state("networkidle")
+    page.get_by_role("heading", name="创作", exact=True).wait_for()
+    page.get_by_text("还没有内容项目", exact=True).wait_for()
     page.set_viewport_size({"width": 1024, "height": 900})
-    page.wait_for_timeout(200)
-    assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
-    page.get_by_role("button", name="关闭候选", exact=True).click()
-    page.set_viewport_size({"width": 390, "height": 844})
-    page.wait_for_timeout(200)
-    assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
-    page.screenshot(path=ARTIFACTS / "creative-copy-mobile.png", full_page=True)
-
+    page.wait_for_timeout(100)
+    assert_no_overflow(page, "1024px 项目中心")
     page.set_viewport_size({"width": 1440, "height": 1000})
-    page.get_by_role("button", name="查看候选", exact=True).click()
-    page.get_by_role("button", name="采用为当前版本", exact=True).click()
-    page.wait_for_selector(".copy-candidate-dialog", state="detached")
-    assert body_editor.input_value() == candidate_body
-    assert len(intercepted_confirms) == 1
 
-    page.locator(".copy-platform-tabs").get_by_role("button", name="微博", exact=True).click()
-    assert page.locator(".copy-document textarea").nth(1).input_value() == "微博独立草稿"
-    page.locator(".copy-platform-tabs").get_by_role("button", name="公众号", exact=True).click()
-    assert page.locator(".copy-document textarea").nth(1).input_value() == candidate_body
+    page.get_by_role("button", name="新建第一篇内容", exact=True).click()
+    page.get_by_label("项目标题").fill("普通人如何判断 AI 工具是否值得长期使用")
+    page.get_by_label("题材").fill("AI 工具")
+    page.get_by_role("button", name="创建项目", exact=True).click()
+    page.get_by_role("heading", name="内容规划", exact=True).wait_for()
+    assert "view=create" in page.url and "project=project-manual-1" in page.url
+    assert "stage=planning" in page.url
+
+    # 2. 保存规划，确认后进入研究；刷新仍恢复同一项目与阶段。
+    page.get_by_label("创作角度").fill("从真实任务、使用成本和可验证结果三个维度判断")
+    page.get_by_label("创作目标").fill("帮助普通创作者建立一套可重复使用的工具评估方法")
+    page.get_by_label("目标受众").fill("想提高效率但不熟悉技术的普通内容创作者")
+    page.get_by_label("核心表达").fill("工具是否值得使用，要看它能否稳定解决真实问题")
+    page.get_by_label("来源与核验要求").fill("核验产品当前价格；核验免费额度")
+    page.get_by_label("禁止表达与必须保留内容").fill("不夸大能力；保留真实测试结果")
+    page.get_by_role("button", name="保存规划", exact=True).click()
+    page.get_by_text(re.compile(r"已保存"), exact=False).wait_for()
+    page.get_by_role("button", name="确认规划，开始研究", exact=True).click()
+    page.get_by_role("heading", name="资料与研究", exact=True).wait_for()
+    assert "stage=research" in page.url
+    assert page.get_by_role("button", name="研究", exact=True).get_attribute("class") == "active"
+
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_timeout(100)
+    assert_no_overflow(page, "390px 研究工作台")
+    page.screenshot(path=ARTIFACTS / "research-mobile.png", full_page=True)
+    page.set_viewport_size({"width": 1440, "height": 1000})
 
     page.reload()
-    page.wait_for_selector(".creative-brief-form")
-    page.locator(".creative-stepper button").filter(has_text="文案").click()
-    page.wait_for_selector(".copy-workspace")
-    restored_body = page.locator(".copy-document textarea").nth(1)
-    assert restored_body.input_value() == candidate_body
-    page.get_by_role("button", name=re.compile(r"版本 1")).click()
-    assert page.get_by_text("已采用 · V1", exact=True).count() == 1
-    assert page.get_by_text("候选已采用为公众号当前版本。", exact=True).count() == 1
-    assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
+    page.wait_for_load_state("networkidle")
+    page.get_by_role("heading", name="资料与研究", exact=True).wait_for()
+    page.get_by_role("heading", name="普通人如何判断 AI 工具是否值得长期使用", exact=True).wait_for()
+    assert "project=project-manual-1" in page.url and "stage=research" in page.url
+
+    # 3. 热点加入创作后，发现卡片显示“已加入”，并可继续进入原项目。
+    page.get_by_role("button", name="发现", exact=True).click()
+    page.get_by_role("heading", name="热点情报", exact=True).wait_for()
+    hotspot_card = page.locator(".intelligence-card").filter(has_text=HOTSPOT_TITLE)
+    hotspot_card.click()
+    page.get_by_role("button", name="加入创作", exact=True).click()
+    page.get_by_role("heading", name="内容规划", exact=True).wait_for()
+    page.get_by_role("heading", name=HOTSPOT_TITLE, exact=True).wait_for()
+    assert "project=project-hotspot-1" in page.url
+
+    page.get_by_role("button", name="发现", exact=True).click()
+    page.get_by_role("heading", name="热点情报", exact=True).wait_for()
+    hotspot_card = page.locator(".intelligence-card").filter(has_text=HOTSPOT_TITLE)
+    assert hotspot_card.get_by_text("已加入", exact=True).count() == 1
+    hotspot_card.click()
+    page.get_by_role("button", name="继续创作", exact=True).click()
+    page.get_by_role("heading", name="内容规划", exact=True).wait_for()
+    assert "project=project-hotspot-1" in page.url
+
+    # 4. 旧规划 URL 通过 legacyTopicId 恢复到统一创作项目。
+    page.goto(f"{BASE_URL}/?view=plan&topic=legacy-topic-1")
+    page.wait_for_load_state("networkidle")
+    page.get_by_role("heading", name="内容规划", exact=True).wait_for()
+    page.get_by_role("heading", name="普通人如何判断 AI 工具是否值得长期使用", exact=True).wait_for()
+    assert "view=create" in page.url and "project=project-manual-1" in page.url
+    assert "topic=" not in page.url and "stage=planning" in page.url
+
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_timeout(100)
+    assert_no_overflow(page, "390px 旧规划 URL 恢复")
+
+    # 所有业务请求都由本脚本 Mock；没有触发模型、搜索或刷新接口。
+    forbidden_fragments = [
+        "/analyses/prepare",
+        "/generation-runs/",
+        "/models/",
+        "/settings/credentials/",
+        "/intelligence/search",
+        "/intelligence/rss/refresh",
+        "/agent/prepare",
+    ]
+    assert not unexpected_api, unexpected_api
+    assert not failed_responses, failed_responses
     assert not console_errors, console_errors
+    assert not [
+        request
+        for request in api_requests
+        if any(fragment in request for fragment in forbidden_fragments)
+    ], api_requests
+    assert any("POST /api/v1/creative/projects" == request for request in api_requests)
+    assert any(
+        request == f"POST /api/v1/creative/projects/from-intelligence/{HOTSPOT_ID}"
+        for request in api_requests
+    )
+    assert any(request.endswith("/planning/complete") for request in api_requests)
+
     browser.close()

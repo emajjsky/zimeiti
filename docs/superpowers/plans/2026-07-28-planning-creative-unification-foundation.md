@@ -1,5 +1,7 @@
 # Planning And Creative Unification Foundation Implementation Plan
 
+> **Execution status (2026-07-28):** Tasks 1-6 completed on `main`. Domain, API, project center, planning workspace, intelligence/today/review integration, Mock Playwright E2E, migrations and four product documents have passed final verification. The unchecked boxes below preserve the original implementation script rather than representing current completion state.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 删除独立选题链路，把热点、手工想法和旧选题统一为内容项目，并交付可保存、可确认、可刷新恢复的“规划”第一步。

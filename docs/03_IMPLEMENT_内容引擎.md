@@ -1,7 +1,7 @@
 # 内容引擎技术实施方案
 
 > 版本：Web-only v1.0
-> 更新：2026-07-27
+> 更新：2026-07-28
 > 适用阶段：P0-P2
 
 ## 1. 架构决策
@@ -23,8 +23,8 @@ Fastify API
 
 | 组件 | 责任 | 当前状态 |
 | --- | --- | --- |
-| Web 前端 | 登录、工作空间、编辑部页面和 API 客户端 | 已建立 |
-| Fastify API | 认证、工作空间、凭据、情报与任务 API | 已建立 |
+| Web 前端 | 登录、项目中心、七步创作工作台和 API 客户端 | 已建立规划、研究、正文及后续真实空状态 |
+| Fastify API | 认证、工作空间、凭据、情报、统一项目与任务 API | 已建立 |
 | PostgreSQL | 用户、工作空间、凭据、情报、任务和审计主数据 | 已建立初始迁移 |
 | Redis/BullMQ | 延迟任务、异步任务、重试与 Worker 通信 | 已建立骨架 |
 | 百炼 CLI Runner | 每个任务临时注入 Key 并执行 CLI | 已建立骨架 |
@@ -54,6 +54,8 @@ Fastify API
 | `workspace_snapshots` | 从早期原型迁移的临时状态桥 |
 | `project_inputs` | 项目想法、草稿、笔记和转写；保存使用阶段与适用平台 |
 | `project_references` | 公开链接和上传文件的用途、Scope、元数据与私有存储键 |
+| `project_planning_versions` | 内容项目规划的草稿/确认不可变版本 |
+| `legacy_topic_project_mappings` | 旧选题到统一内容项目的幂等迁移映射 |
 
 阶段 1 首个迁移必须新增 `generation_runs`：记录确认卡、来源快照、Scope、模型、提示词版本、预估/实际用量、状态、错误和产物引用。阶段 3 必须新增 `publication_tasks`：一个平台版本可关联多次排期、提交、失败重试或取消。
 
@@ -550,3 +552,17 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - 响应式断点为 1024px、790px 和 460px。桌面为正文/Agent 双栏，窄屏为单栏；候选在移动端占满视口。视觉参数保持 `DESIGN_VARIANCE 4 / MOTION_INTENSITY 2 / VISUAL_DENSITY 6`，只保留加载反馈动画。
 - 自动化覆盖四平台隔离、策略阻断、选区、确认卡、候选不覆盖正文、采用后更新、微博不串稿、刷新恢复和无横向溢出。E2E 路由拦截 prepare/confirm/accept，不调用真实付费模型。
 - 当前未实现 `SEARCH_WEB`/`READ_LINK` 的来源执行、证据主张、图片计划与生成、排版、审核、内容包和发布；这些模块不得根据本记录标记完成。
+
+## 2026-07-28 实现记录：规划与创作统一
+
+- `server/services/project-planning.cjs` 负责旧状态幂等迁移、项目规范化、空白创建、热点创建、规划校验和阶段推进。`ContentProject.originType` 固定为 `HOTSPOT | MANUAL | DRAFT | IMPORT | LEGACY`，阶段固定为 `PLANNING | RESEARCH | MASTER_WRITING | PLATFORM_ADAPTATION | VISUAL | LAYOUT | REVIEW | COMPLETED`。
+- 迁移 `018_planning_creative_unification.sql` 新增 `project_planning_versions` 和 `legacy_topic_project_mappings`。规划草稿与确认版本按工作空间和项目保存，旧选题映射保证重复迁移不产生重复项目。
+- Fastify 新增 `GET/POST /creative/projects`、`POST /creative/projects/from-intelligence/:itemId`、`GET/PUT /creative/projects/:projectId/planning` 和 `POST /creative/projects/:projectId/planning/complete`。项目更新在 `workspace_snapshots` 行锁事务中迁移、修改并写回；热点创建按来源引用幂等。
+- `CreativeProjectCenter.tsx` 替代旧规划/选题页面，展示真实项目、来源、阶段、平台、更新时间和单一下一步；创建入口只接受手工想法、草稿或导入内容。
+- `PlanningWorkspace.tsx` 编辑规划决策稿并显示未保存、保存中、已保存和错误状态。确认前校验标题、角度、目标、受众、核心表达和至少一个平台；目标篇幅不进入规划字段。
+- `CreateWorkspace.tsx` 使用 `creativeStages` 渲染七步单一导航。规划、研究和正文接入真实工作台；平台版本、配图、排版和审核在实现前只显示真实空状态，不提供假动作。
+- `IntelligenceInbox.tsx` 不再接收 Topic；`projectForIntelligence()` 只以热点来源引用判断“已加入”。加入后直接进入项目，重复操作返回原项目。
+- `today.mjs` 从 `ProjectStage` 派生真实下一步，`completedProjects()` 只返回完成项目；今天和复盘已删除旧选题与演示表现数据。
+- 导航兼容读取旧 `view=plan`、`view=topicEditor` 和 `topic`，映射到 `view=create` 与对应 `legacyTopicId` 项目；新地址只保存 `project`、`stage` 和 `platform`。
+- `tests/creative-workspace.e2e.py` 使用单一 API 路由 Mock 覆盖项目中心、创建、规划、研究、热点闭环、刷新恢复和旧 URL；脚本显式拒绝未声明 API，并断言没有触发模型、Tavily、RSS 刷新或 Agent 执行接口。
+- 下一实现项为研究阶段零资料启动。现有 `ProjectAgent` 的 `RESEARCH` 阶段不应因资料数为零而完全阻断，但准备任务仍需冻结规划、用户请求和空资料快照；其后的搜索/读取动作继续走确认卡和证据对象。
