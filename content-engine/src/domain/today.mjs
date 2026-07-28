@@ -20,3 +20,30 @@ export function projectTaskMeta(status) {
   };
   return values[status] ?? null;
 }
+
+const projectStatusLabels = {
+  BRIEF: '创作设定',
+  WRITING: '文案创作',
+  VISUAL: '视觉制作',
+  VIDEO: '视频制作',
+  REVIEW: '内容审核',
+  SCHEDULED: '待发布',
+  PARTIALLY_PUBLISHED: '部分发布',
+  PUBLISHED: '已发布',
+  RETROSPECTIVE: '复盘中',
+};
+
+export function projectTaskEntries(projects) {
+  return projects.flatMap((project) => {
+    const meta = projectTaskMeta(project.status);
+    if (!meta) return [];
+    return [{
+      id: `project:${project.id}`,
+      projectId: project.id,
+      title: `${meta.prefix}：${project.title}`,
+      sub: `${projectStatusLabels[project.status] ?? project.status} · 更新于 ${project.updatedAt}`,
+      action: meta.action,
+      view: meta.view,
+    }];
+  });
+}

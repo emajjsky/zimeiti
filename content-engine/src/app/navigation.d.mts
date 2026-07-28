@@ -1,13 +1,13 @@
 export type View =
   | 'today'
   | 'discover'
-  | 'plan'
-  | 'topicEditor'
   | 'create'
   | 'publish'
   | 'review'
   | 'assets'
   | 'settings';
+
+export type CreateStageRoute = 'planning' | 'research' | 'master' | 'platform' | 'visual' | 'layout' | 'review';
 
 export type DiscoverSection = 'inbox' | 'search' | 'import';
 
@@ -27,7 +27,7 @@ export interface SearchPreset {
 }
 
 export interface NavigationItem {
-  view: Exclude<View, 'topicEditor'>;
+  view: View;
   label: string;
 }
 
@@ -71,9 +71,10 @@ export interface WorkspaceLocationState {
   settingsSection: SettingsSection;
   modelSection: ModelSection | null;
   intelligenceId: string | null;
-  topicId: string | null;
+  legacyTopicId: string | null;
   projectId: string | null;
   platform: 'WECHAT' | 'XIAOHONGSHU' | 'ZHIHU' | 'WEIBO' | 'VIDEO_CHANNEL';
+  stage: CreateStageRoute;
 }
 
 export interface WorkspaceLocationTarget {

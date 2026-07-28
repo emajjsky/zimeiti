@@ -1,13 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { animate, createScope, stagger } from 'animejs';
-import { ArrowLeft, Bell, BrainCircuit, CalendarDays, ChartColumn, CheckCircle2, ChevronRight, CircleAlert, CircleCheck, ClipboardList, Compass, FilePenLine, FolderOpen, KeyRound, Lightbulb, Menu, PenLine, Pencil, Plus, RefreshCw, Search, Send, Settings, Trash2 } from 'lucide-react';
+import { ArrowLeft, Bell, BrainCircuit, CalendarDays, ChartColumn, CheckCircle2, ChevronRight, CircleAlert, CircleCheck, Compass, FilePenLine, FolderOpen, KeyRound, Lightbulb, Menu, PenLine, Pencil, Plus, RefreshCw, Search, Send, Settings, Trash2 } from 'lucide-react';
 import { intelligenceKey, loadState, persistState, seedState, type FeishuLibraryTemplate, type LocalState, type WorkspaceProfile } from './data/localRepository';
-import { webAgent, webAuth, webIntelligence, webModels, webSettings, type CredentialStatus, type WebSession } from './data/webApi';
-import { platformName, projectStatusName, type ContentProject, type ContentVersion, type IntelligenceSource, type Platform, type TopicCandidate } from './domain/content';
-import { formatTodayTitle, projectTaskMeta } from './domain/today.mjs';
+import { webAgent, webAuth, webIntelligence, webModels, webProjects, webSettings, type CreateProjectInput, type CredentialStatus, type WebSession } from './data/webApi';
+import { platformName, projectStageName, type ContentProject, type ContentVersion, type IntelligenceSource, type Platform } from './domain/content';
+import { formatTodayTitle, projectTaskEntries } from './domain/today.mjs';
 import type { ApiUsageLog, ApiUsageSummary, ModelCapability, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelOperation, ModelProvider, ModelTask, ModelTaskPolicy } from './domain/integrations';
-import { navigationGroups, readWorkspaceLocation, replaceWorkspaceLocation, resetViewport, type DiscoverSection, type ModelSection, type SearchPreset, type SettingsSection, type View } from './app/navigation.mjs';
+import { navigationGroups, readWorkspaceLocation, replaceWorkspaceLocation, resetViewport, type CreateStageRoute, type DiscoverSection, type ModelSection, type SearchPreset, type SettingsSection, type View } from './app/navigation.mjs';
 import { PageHeader } from './components/workspace/PageHeader';
 import { DiscoverWorkspace } from './workspaces/DiscoverWorkspace';
 import { SettingsWorkspace } from './workspaces/SettingsWorkspace';
@@ -19,6 +19,7 @@ import { WorkspaceProfileSettings } from './workspaces/settings/WorkspaceProfile
 import { AccountAuthorizationSettings } from './workspaces/settings/AccountAuthorizationSettings';
 import { PromptTemplateSettings } from './workspaces/settings/PromptTemplateSettings';
 import { CreateWorkspace } from './workspaces/create/CreateWorkspace';
+import { CreativeProjectCenter } from './workspaces/create/CreativeProjectCenter';
 import './styles.css';
 
 function displayError(error: unknown, fallback: string) {
@@ -34,10 +35,9 @@ function webSearchStatus() { return webIntelligence.webSearchStatus(); }
 function saveWebSearchKey(apiKey: string) { return webIntelligence.saveWebSearchKey(apiKey); }
 function searchWeb(input: { query: string; category: string; domains: string[] }) { return webIntelligence.searchWeb(input); }
 
-const navigationIcons: Record<Exclude<View, 'topicEditor'>, typeof CalendarDays> = {
+const navigationIcons: Record<View, typeof CalendarDays> = {
   today: CalendarDays,
   discover: Compass,
-  plan: ClipboardList,
   create: PenLine,
   publish: Send,
   review: ChartColumn,
@@ -49,11 +49,11 @@ function App() {
   const initialRoute = useRef(readWorkspaceLocation()).current;
   const [view, setView] = useState<View>(initialRoute.view);
   const [state, setState] = useState<LocalState>(seedState);
-  const [selectedIntelId, setSelectedIntelId] = useState(initialRoute.intelligenceId ?? 'intel-sora');
-  const [selectedTopicId, setSelectedTopicId] = useState(initialRoute.topicId ?? 'topic-ai-video');
-  const [editingTopicId, setEditingTopicId] = useState<string | null>(null);
-  const [selectedProjectId, setSelectedProjectId] = useState(initialRoute.projectId ?? 'project-ai-video');
+  const [selectedIntelId, setSelectedIntelId] = useState(initialRoute.intelligenceId ?? '');
+  const [selectedProjectId, setSelectedProjectId] = useState(initialRoute.projectId ?? '');
   const [activePlatform, setActivePlatform] = useState<Platform>(initialRoute.platform);
+  const [createStage, setCreateStage] = useState<CreateStageRoute>(initialRoute.stage);
+  const [creationRequested, setCreationRequested] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const [refreshFeedback, setRefreshFeedback] = useState<{ status: 'idle' | 'running' | 'success' | 'empty' | 'error'; message: string }>({ status: 'idle', message: '' });
   const [searchPreset, setSearchPreset] = useState<SearchPreset | null>(null);
@@ -63,8 +63,7 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const selectedIntel = state.intelligence.find((item) => item.id === selectedIntelId) ?? state.intelligence[0];
-  const selectedTopic = state.topics.find((item) => item.id === selectedTopicId) ?? state.topics[0];
-  const featuredProject = state.projects.find((item) => item.id === selectedProjectId) ?? state.projects[0];
+  const featuredProject = state.projects.find((item) => item.id === selectedProjectId);
 
   useLayoutEffect(() => {
     resetViewport();
@@ -74,8 +73,11 @@ function App() {
     void loadState().then((loaded) => {
       setState(loaded);
       setSelectedIntelId((current) => loaded.intelligence.some((item) => item.id === current) ? current : loaded.intelligence[0]?.id ?? '');
-      setSelectedTopicId((current) => loaded.topics.some((item) => item.id === current) ? current : loaded.topics[0]?.id ?? '');
-      setSelectedProjectId((current) => loaded.projects.some((item) => item.id === current) ? current : loaded.projects[0]?.id ?? '');
+      setSelectedProjectId((current) => {
+        if (loaded.projects.some((item) => item.id === current)) return current;
+        if (initialRoute.legacyTopicId) return loaded.projects.find((item) => item.legacyTopicId === initialRoute.legacyTopicId)?.id ?? '';
+        return '';
+      });
     }).catch((error) => {
       console.error('加载本地工作空间失败', error);
     }).finally(() => setIsLoaded(true));
@@ -89,11 +91,12 @@ function App() {
       settingsSection,
       modelSection: requestedModelSection,
       intelligenceId: selectedIntelId || null,
-      topicId: selectedTopicId || null,
+      legacyTopicId: null,
       projectId: selectedProjectId || null,
       platform: activePlatform,
+      stage: createStage,
     });
-  }, [activePlatform, discoverSection, isLoaded, requestedModelSection, selectedIntelId, selectedProjectId, selectedTopicId, settingsSection, view]);
+  }, [activePlatform, createStage, discoverSection, isLoaded, requestedModelSection, selectedIntelId, selectedProjectId, settingsSection, view]);
 
   const updateState = (next: LocalState) => {
     setState(next);
@@ -114,125 +117,36 @@ function App() {
   const completeSetup = (workspace: WorkspaceProfile) => {
     updateState({ ...state, workspace: { ...workspace, setupCompleted: true } });
   };
-  const createTopicFromIntel = (analysis?: LocalState['intelligence'][number]['analysis'], angleIndex = 0) => {
+  const routeForStage = (project: ContentProject): CreateStageRoute => ({
+    PLANNING: 'planning', RESEARCH: 'research', MASTER_WRITING: 'master', PLATFORM_ADAPTATION: 'platform',
+    VISUAL: 'visual', LAYOUT: 'layout', REVIEW: 'review', COMPLETED: 'review',
+  })[project.stage] as CreateStageRoute;
+  const openProject = (project: ContentProject) => {
+    setSelectedProjectId(project.id);
+    setActivePlatform(project.planning.targetPlatforms[0] ?? project.versions[0]?.platform ?? 'WECHAT');
+    setCreateStage(routeForStage(project));
+    setView('create');
+  };
+  const createProject = async (input: CreateProjectInput) => {
+    const result = await webProjects.create(input);
+    setState((current) => ({ ...current, projects: [result.project, ...current.projects.filter((project) => project.id !== result.project.id)] }));
+    return result.project;
+  };
+  const addSelectedIntelligenceToCreative = async (_analysis?: LocalState['intelligence'][number]['analysis'], angleIndex = 0) => {
     if (!selectedIntel) return;
-    const angle = analysis?.angles[angleIndex];
-    const id = `topic-${Date.now()}`;
-    const next = { ...state, topics: [{
-      id,
-      title: angle?.title || selectedIntel.title,
-      category: selectedIntel.category,
-      platforms: analysis?.selectedPlatforms ?? ['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO', 'VIDEO_CHANNEL'] as Platform[],
-      urgency: analysis?.decision === 'FOLLOW' ? '高' as const : '中' as const,
-      status: 'PENDING' as const,
-      coreViewpoint: angle?.coreViewpoint || selectedIntel.summary,
-      targetAudience: angle?.targetAudience,
-      factsToVerify: analysis?.factsToVerify ?? [],
-      sourceIds: [selectedIntel.id],
-      analysisSnapshot: analysis ? {
-        score: analysis.overallScore,
-        decision: analysis.decision,
-        reason: analysis.decisionReason,
-        timingWindow: analysis.timingWindow,
-        platformRecommendations: analysis.platforms,
-      } : undefined,
-    }, ...state.topics] };
-    updateState(next); setSelectedTopicId(id); setView('plan');
+    const result = await webProjects.fromIntelligence(selectedIntel.id, { angleIndex });
+    setState((current) => ({ ...current, projects: [result.project, ...current.projects.filter((project) => project.id !== result.project.id)] }));
+    openProject(result.project);
   };
-  const openTopicFromIntel = (sourceId: string) => {
-    const topic = state.topics.find((candidate) => candidate.sourceIds.includes(sourceId));
-    if (!topic) { createTopicFromIntel(); return; }
-    setSelectedTopicId(topic.id);
-    setView('plan');
+  const openIntelligenceProject = (sourceId: string) => {
+    const project = state.projects.find((item) => item.originReferenceId === sourceId);
+    if (project) openProject(project);
+    else void addSelectedIntelligenceToCreative();
   };
-  const openTopicEditor = (topic?: TopicCandidate) => {
-    if (topic?.status === 'PROJECT_CREATED') {
-      window.alert('该选题已经立项，请在内容项目中继续编辑。');
-      return;
-    }
-    setEditingTopicId(topic?.id ?? null);
-    setView('topicEditor');
-  };
-  const saveTopic = (draft: Omit<TopicCandidate, 'id' | 'status' | 'sourceIds'>) => {
-    if (editingTopicId) {
-      const next = { ...state, topics: state.topics.map((topic) => topic.id === editingTopicId ? { ...topic, ...draft } : topic) };
-      updateState(next);
-      setSelectedTopicId(editingTopicId);
-    } else {
-      const id = `topic-${Date.now()}`;
-      const next = { ...state, topics: [{ ...draft, id, status: 'PENDING' as const, sourceIds: [] }, ...state.topics] };
-      updateState(next);
-      setSelectedTopicId(id);
-    }
-    setEditingTopicId(null);
-    setView('plan');
-  };
-  const deleteTopic = (topic: TopicCandidate) => {
-    if (topic.status === 'PROJECT_CREATED') {
-      window.alert('该选题已经立项，请在项目归档后再处理。');
-      return;
-    }
-    if (!window.confirm(`确定删除「${topic.title}」吗？`)) return;
-    const remaining = state.topics.filter((item) => item.id !== topic.id);
-    updateState({ ...state, topics: remaining });
-    setSelectedTopicId(remaining[0]?.id ?? '');
-  };
-  const createProjectFromTopic = () => {
-    if (!selectedTopic) return;
-    const existing = state.projects.find((project) => project.title === selectedTopic.title);
-    if (existing) {
-      setSelectedProjectId(existing.id);
-      setActivePlatform(existing.versions[0]?.platform ?? 'WECHAT');
-      setView('create');
-      return;
-    }
-    const id = `project-${Date.now()}`;
-    const now = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
-    const nowIso = new Date().toISOString();
-    const project: ContentProject = {
-      id,
-      title: selectedTopic.title,
-      originType: selectedTopic.sourceIds.length ? 'HOTSPOT' : 'MANUAL',
-      originReferenceId: selectedTopic.sourceIds[0],
-      legacyTopicId: selectedTopic.id,
-      stage: 'PLANNING',
-      status: 'BRIEF',
-      planning: {
-        title: selectedTopic.title,
-        category: selectedTopic.category,
-        angle: selectedTopic.analysisSnapshot?.reason ?? '',
-        objective: '',
-        targetAudience: selectedTopic.targetAudience ?? '',
-        coreMessage: selectedTopic.coreViewpoint,
-        targetPlatforms: selectedTopic.platforms,
-        timing: selectedTopic.analysisSnapshot?.timingWindow ?? (selectedTopic.urgency === '高' ? 'TODAY' : selectedTopic.urgency === '中' ? 'ONE_WEEK' : 'EVERGREEN'),
-        plannedPublishAt: selectedTopic.plannedDate,
-        sourceRequirements: (selectedTopic.factsToVerify ?? []).join('；'),
-        constraints: '',
-      },
-      planningVersion: 0,
-      coreViewpoint: selectedTopic.coreViewpoint,
-      factChecks: selectedTopic.factsToVerify ?? [],
-      sourceSnapshot: { intelligenceIds: selectedTopic.sourceIds, analysis: selectedTopic.analysisSnapshot ?? null },
-      createdAt: nowIso,
-      updatedAt: now,
-      versions: selectedTopic.platforms.map((platform) => ({
-        id: `${id}-${platform.toLowerCase()}`,
-        platform,
-        status: 'DRAFT',
-        title: selectedTopic.title,
-        body: selectedTopic.coreViewpoint,
-        updatedAt: now,
-      })),
-    };
-    const next: LocalState = {
-      ...state,
-      topics: state.topics.map((topic) => topic.id === selectedTopic.id ? { ...topic, status: 'PROJECT_CREATED' } : topic),
-      projects: [project, ...state.projects],
-    };
-    updateState(next);
-    setSelectedProjectId(id);
-    setActivePlatform(project.versions[0]?.platform ?? 'WECHAT');
+  const requestNewCreation = () => {
+    setSelectedProjectId('');
+    setCreateStage('planning');
+    setCreationRequested(true);
     setView('create');
   };
   const saveContentVersion = (projectId: string, versionId: string, patch: Pick<ContentVersion, 'title' | 'body'>) => {
@@ -314,19 +228,18 @@ function App() {
     <header className="topbar">
       <button className="mobile-menu-button" type="button" aria-label="打开导航" onClick={() => setSidebarOpen(true)}><Menu size={20} /></button>
       <div className="wordmark">知行<span>内容</span>实验室</div>
-      <label className="global-search"><Search size={17}/><input placeholder="搜索热点、选题、内容、素材" /></label>
-      <div className="top-actions"><button className="button primary" onClick={() => openTopicEditor()}><Plus size={16}/>新建选题</button><button className="icon-button" aria-label="通知"><Bell size={20}/></button><button className="icon-button" aria-label="同步"><RefreshCw size={20}/></button><span className="avatar" /></div>
+      <label className="global-search"><Search size={17}/><input placeholder="搜索热点、项目、内容、素材" /></label>
+      <div className="top-actions"><button className="button primary" onClick={requestNewCreation}><Plus size={16}/>新建创作</button><button className="icon-button" aria-label="通知"><Bell size={20}/></button><button className="icon-button" aria-label="同步"><RefreshCw size={20}/></button><span className="avatar" /></div>
     </header>
     <aside className={sidebarOpen ? 'sidebar open' : 'sidebar'}>
-      <nav className="primary-navigation" aria-label="主导航">{navigationGroups.map((group) => <section className="nav-group" key={group.id}><div className="nav-group-label">{group.label}</div>{group.items.map(({ view: target, label }) => { const Icon = navigationIcons[target]; return <button key={target} className={`nav-item ${view === target ? 'active' : ''}`} aria-current={view === target ? 'page' : undefined} onClick={() => { setView(target); setSidebarOpen(false); }}><Icon size={19}/><span>{label}</span></button>; })}</section>)}</nav>
+      <nav className="primary-navigation" aria-label="主导航">{navigationGroups.map((group) => <section className="nav-group" key={group.id}><div className="nav-group-label">{group.label}</div>{group.items.map(({ view: target, label }) => { const Icon = navigationIcons[target]; return <button key={target} className={`nav-item ${view === target ? 'active' : ''}`} aria-current={view === target ? 'page' : undefined} onClick={() => { if (target === 'create') { setSelectedProjectId(''); setCreateStage('planning'); } setView(target); setSidebarOpen(false); }}><Icon size={19}/><span>{label}</span></button>; })}</section>)}</nav>
     </aside>
     {sidebarOpen && <button className="sidebar-backdrop" type="button" aria-label="关闭导航" onClick={() => setSidebarOpen(false)} />}
     <main className="main-content">
-      {view === 'today' && <Today onNavigate={setView} projects={state.projects} topics={state.topics} intelligence={state.intelligence} onOpenTopic={(id) => { setSelectedTopicId(id); setView('plan'); }} onOpenProject={(id, target) => { setSelectedProjectId(id); setView(target); }} />}
-      {view === 'discover' && <DiscoverWorkspace section={discoverSection} onSectionChange={setDiscoverSection} inbox={<IntelligenceInbox item={selectedIntel} intelligence={state.intelligence} sources={state.sources} topics={state.topics} projects={state.projects} defaultPlatforms={state.workspace.enabledPlatforms} onSelect={setSelectedIntelId} onCreateTopic={createTopicFromIntel} onOpenTopic={openTopicFromIntel} onSaveAnalysis={saveAnalysis} onRefresh={refreshRss} onOpenSources={() => openSettings('sources')} refreshFeedback={refreshFeedback} />} search={<NetworkSearchPanel preset={searchPreset} onSave={saveSearchCandidate} onOpenSearchSettings={() => openSettings('models', 'search')} checkStatus={webSearchStatus} searchWeb={searchWeb} />} linkImport={<LinkImportPanel onSave={saveClippedLink} onShowInbox={() => openDiscover('inbox')} previewLink={previewPublicLink} />} />}
-      {view === 'plan' && selectedTopic && <Plan topics={state.topics} selected={selectedTopic} intelligence={state.intelligence} onSelect={setSelectedTopicId} onCreateProject={createProjectFromTopic} onEdit={openTopicEditor} onDelete={deleteTopic} />}
-      {view === 'topicEditor' && <TopicEditor key={editingTopicId ?? 'new'} topic={state.topics.find((topic) => topic.id === editingTopicId)} defaultCategory={state.workspace.primaryTopics[0] ?? '未分类'} onSave={saveTopic} onCancel={() => { setEditingTopicId(null); setView('plan'); }} />}
-      {view === 'create' && <CreateWorkspace project={featuredProject} activePlatform={activePlatform} onPlatform={setActivePlatform} onSaveVersion={saveContentVersion} onProjectAccepted={acceptProjectFromServer} onOpenModelSettings={() => openSettings('models', 'policies')} onOpenAgentSettings={() => openSettings('models', 'agent')} />}
+      {view === 'today' && <Today onNavigate={setView} projects={state.projects} intelligence={state.intelligence} onOpenProject={(id) => { const project = state.projects.find((item) => item.id === id); if (project) openProject(project); }} />}
+      {view === 'discover' && <DiscoverWorkspace section={discoverSection} onSectionChange={setDiscoverSection} inbox={<IntelligenceInbox item={selectedIntel} intelligence={state.intelligence} sources={state.sources} topics={[]} projects={state.projects} defaultPlatforms={state.workspace.enabledPlatforms} onSelect={setSelectedIntelId} onCreateTopic={addSelectedIntelligenceToCreative} onOpenTopic={openIntelligenceProject} onSaveAnalysis={saveAnalysis} onRefresh={refreshRss} onOpenSources={() => openSettings('sources')} refreshFeedback={refreshFeedback} />} search={<NetworkSearchPanel preset={searchPreset} onSave={saveSearchCandidate} onOpenSearchSettings={() => openSettings('models', 'search')} checkStatus={webSearchStatus} searchWeb={searchWeb} />} linkImport={<LinkImportPanel onSave={saveClippedLink} onShowInbox={() => openDiscover('inbox')} previewLink={previewPublicLink} />} />}
+      {view === 'create' && (!selectedProjectId || !featuredProject) && <CreativeProjectCenter projects={state.projects} onOpenProject={openProject} onCreateProject={createProject} creationRequested={creationRequested} onCreationHandled={() => setCreationRequested(false)} />}
+      {view === 'create' && selectedProjectId && featuredProject && <CreateWorkspace project={featuredProject} activePlatform={activePlatform} onPlatform={setActivePlatform} onSaveVersion={saveContentVersion} onProjectAccepted={acceptProjectFromServer} onOpenModelSettings={() => openSettings('models', 'policies')} onOpenAgentSettings={() => openSettings('models', 'agent')} />}
       {view === 'publish' && <Publish project={featuredProject} onNavigate={setView} />}
       {view === 'review' && <Review onNavigate={setView} />}
       {view === 'assets' && <Utility title="素材库" description="素材将按目录、类型和所属项目统一管理。" />}
@@ -363,17 +276,16 @@ function Onboarding({ initial, onComplete }: { initial: WorkspaceProfile; onComp
   </main>;
 }
 
-function Today({ onNavigate, projects, topics, intelligence, onOpenTopic, onOpenProject }: { onNavigate: (view: View) => void; projects: ContentProject[]; topics: TopicCandidate[]; intelligence: LocalState['intelligence']; onOpenTopic: (id: string) => void; onOpenProject: (id: string, view: View) => void }) {
-  const topicTasks = topics.filter((topic) => topic.status === 'PENDING' || topic.status === 'ACCEPTED').map((topic) => ({ id: `topic:${topic.id}`, title: `确认选题：${topic.title}`, sub: [topic.urgency ? `${topic.urgency}优先级` : '', topic.platforms.map((platform) => platformName[platform]).join('、'), topic.plannedDate || '未安排日期'].filter(Boolean).join(' · '), action: '去确认', onClick: () => onOpenTopic(topic.id) }));
-  const projectTasks = projects.map((project) => ({ project, meta: projectTaskMeta(project.status) })).filter((item): item is { project: ContentProject; meta: NonNullable<ReturnType<typeof projectTaskMeta>> } => Boolean(item.meta)).map(({ project, meta }) => ({ id: `project:${project.id}`, title: `${meta.prefix}：${project.title}`, sub: `${projectStatusName[project.status]} · 更新于 ${project.updatedAt}`, action: meta.action, onClick: () => onOpenProject(project.id, meta.view) }));
-  const tasks = [...topicTasks, ...projectTasks].slice(0, 6);
-  const scheduledTopics = topics.filter((topic) => topic.plannedDate && topic.status !== 'DISCARDED').slice(0, 4);
+function Today({ onNavigate, projects, intelligence, onOpenProject }: { onNavigate: (view: View) => void; projects: ContentProject[]; intelligence: LocalState['intelligence']; onOpenProject: (id: string) => void }) {
+  const projectTasks = projectTaskEntries(projects).map((task) => ({ ...task, onClick: () => onOpenProject(task.projectId) }));
+  const tasks = projectTasks.slice(0, 6);
+  const scheduledProjects = projects.filter((project) => project.planning.plannedPublishAt).slice(0, 4);
   return <>
   <PageHeader eyebrow="TODAY / 行动中心" title={formatTodayTitle()} subtitle={tasks.length ? `你有 ${tasks.length} 件内容工作需要处理。` : '今天没有需要立即处理的内容工作。'} />
   <div className="today-layout"><div>
     <section className="panel"><div className="panel-head"><h2>▣ 今日优先事项</h2><span className="chip mint">{tasks.length} 待办</span></div><div className="task-list">{tasks.length ? tasks.map((task) => <Task key={task.id} title={task.title} sub={task.sub} action={task.action} onClick={task.onClick} />) : <div className="today-empty">暂无待处理工作</div>}</div></section>
-    <div className="editorial-rule compact" /><section className="panel"><div className="panel-head"><h2>✎ 进行中的内容项目</h2><button className="text-button" onClick={() => onNavigate('create')}>查看全部</button></div>{projects.length ? <div className="project-grid">{projects.slice(0,2).map((project) => <article className="project-card" key={project.id}><span className="chip yellow">{projectStatusName[project.status]}</span><h3>{project.title}</h3><p>{project.coreViewpoint}</p><footer><span>更新于 {project.updatedAt}</span><button className="text-button" onClick={() => onOpenProject(project.id, 'create')}>继续编辑</button></footer></article>)}</div> : <div className="today-empty">暂无进行中的内容项目</div>}</section>
-  </div><aside className="today-aside"><section className="hot-card"><h2>♨ 今日热点</h2>{intelligence.slice(0,8).map((item) => <div key={item.id}><small>#{item.category}</small><strong>{item.title}</strong></div>)}{!intelligence.length && <p>暂无热点资讯</p>}<button className="text-button inverted" onClick={() => onNavigate('discover')}>前往发现中心 →</button></section><section className="schedule-card"><h2>▣ 近期排期</h2>{scheduledTopics.length ? scheduledTopics.map((topic) => <p key={topic.id}><b>{topic.plannedDate}</b><br/>{topic.title}<br/>平台：{topic.platforms.map((platform) => platformName[platform]).join('、')}</p>) : <p>暂无已安排选题</p>}</section></aside></div>
+    <div className="editorial-rule compact" /><section className="panel"><div className="panel-head"><h2>✎ 进行中的内容项目</h2><button className="text-button" onClick={() => onNavigate('create')}>查看全部</button></div>{projects.length ? <div className="project-grid">{projects.slice(0,2).map((project) => <article className="project-card" key={project.id}><span className="chip yellow">{projectStageName[project.stage]}</span><h3>{project.title}</h3><p>{project.planning.coreMessage || project.coreViewpoint}</p><footer><span>更新于 {project.updatedAt}</span><button className="text-button" onClick={() => onOpenProject(project.id)}>继续编辑</button></footer></article>)}</div> : <div className="today-empty">暂无进行中的内容项目</div>}</section>
+  </div><aside className="today-aside"><section className="hot-card"><h2>♨ 今日热点</h2>{intelligence.slice(0,8).map((item) => <div key={item.id}><small>#{item.category}</small><strong>{item.title}</strong></div>)}{!intelligence.length && <p>暂无热点资讯</p>}<button className="text-button inverted" onClick={() => onNavigate('discover')}>前往发现中心 →</button></section><section className="schedule-card"><h2>▣ 近期排期</h2>{scheduledProjects.length ? scheduledProjects.map((project) => <p key={project.id}><b>{project.planning.plannedPublishAt}</b><br/>{project.title}<br/>平台：{project.planning.targetPlatforms.map((platform) => platformName[platform]).join('、')}</p>) : <p>暂无已安排项目</p>}</section></aside></div>
   </>; }
 
 function Task({ title, sub, action, onClick }: { title: string; sub: string; action: string; onClick: () => void }) { return <article className="task"><span className="checkbox"/><div><b>{title}</b><small>{sub}</small></div><button className="text-button" onClick={onClick}>{action}</button></article>; }
@@ -382,47 +294,6 @@ function Task({ title, sub, action, onClick }: { title: string; sub: string; act
 
 
 
-function TopicEditor({ topic, defaultCategory, onSave, onCancel }: { topic?: TopicCandidate; defaultCategory: string; onSave: (draft: Omit<TopicCandidate, 'id' | 'status' | 'sourceIds'>) => void; onCancel: () => void }) {
-  const [title, setTitle] = useState(topic?.title ?? '');
-  const [category, setCategory] = useState(topic?.category ?? defaultCategory);
-  const [coreViewpoint, setCoreViewpoint] = useState(topic?.coreViewpoint ?? '');
-  const [urgency, setUrgency] = useState<TopicCandidate['urgency']>(topic?.urgency ?? '中');
-  const [plannedDate, setPlannedDate] = useState(topic?.plannedDate ?? '');
-  const [platforms, setPlatforms] = useState<Platform[]>(topic?.platforms ?? ['WECHAT', 'XIAOHONGSHU']);
-  const togglePlatform = (platform: Platform) => setPlatforms((current) => current.includes(platform) ? current.filter((item) => item !== platform) : [...current, platform]);
-  const submit = (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!title.trim() || !coreViewpoint.trim() || platforms.length === 0) return;
-    onSave({ title: title.trim(), category: category.trim() || '未分类', coreViewpoint: coreViewpoint.trim(), urgency, plannedDate: plannedDate.trim() || undefined, platforms });
-  };
-  return <section className="topic-editor-page">
-    <div className="editor-page-head"><div><div className="eyebrow">PLAN / 选题编辑</div><h1 className="page-title">{topic ? '修改选题' : '建立一个好选题'}</h1><p className="page-subtitle">先把观点说清楚，后续文案、视觉和视频才能准确展开。</p></div><button className="text-button" onClick={onCancel}>取消并返回</button></div>
-    <form className="topic-form" onSubmit={submit}>
-      <label className="form-title">选题标题<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="一句话描述这期要解决的问题" autoFocus /></label>
-      <div className="form-grid"><label>题材<input value={category} onChange={(event) => setCategory(event.target.value)} placeholder="例如：国学生活化" /></label><label>时效<select value={urgency} onChange={(event) => setUrgency(event.target.value as TopicCandidate['urgency'])}><option value="高">高：需要尽快跟进</option><option value="中">中：常规排期</option><option value="低">低：常青内容</option></select></label></div>
-      <label>核心观点<textarea value={coreViewpoint} onChange={(event) => setCoreViewpoint(event.target.value)} placeholder="你希望读者看完后认同或能做到什么？" rows={5} /></label>
-      <fieldset><legend>目标平台</legend><div className="platform-options">{(['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO', 'VIDEO_CHANNEL'] as Platform[]).map((platform) => <button type="button" key={platform} className={platforms.includes(platform) ? 'chosen' : ''} onClick={() => togglePlatform(platform)}>{platforms.includes(platform) ? '✓ ' : '+ '}{platformName[platform]}</button>)}</div></fieldset>
-      <label>计划日期 <span>（可选）</span><input value={plannedDate} onChange={(event) => setPlannedDate(event.target.value)} placeholder="例如：2026-07-25" /></label>
-      <footer><button className="text-button" type="button" onClick={onCancel}>取消</button><button className="button primary" type="submit" disabled={!title.trim() || !coreViewpoint.trim() || platforms.length === 0}>保存选题 <ChevronRight size={17}/></button></footer>
-    </form>
-  </section>;
-}
-
-function Plan({ topics, selected, intelligence, onSelect, onCreateProject, onEdit, onDelete }: { topics: LocalState['topics']; selected: LocalState['topics'][number]; intelligence: LocalState['intelligence']; onSelect: (id: string) => void; onCreateProject: () => void; onEdit: (topic: TopicCandidate) => void; onDelete: (topic: TopicCandidate) => void }) {
-  const related = intelligence.filter((item) => selected.sourceIds.includes(item.id));
-  const analysis = selected.analysisSnapshot;
-  const decision = analysis?.decision === 'FOLLOW' ? '建议跟进' : analysis?.decision === 'WATCH' ? '继续观察' : analysis?.decision === 'SKIP' ? '暂不建议' : '未分析';
-  const timing = analysis?.timingWindow === 'TODAY' ? '今天发布' : analysis?.timingWindow === 'THREE_DAYS' ? '三天内有效' : analysis?.timingWindow === 'ONE_WEEK' ? '一周内有效' : analysis?.timingWindow === 'EVERGREEN' ? '长期可做' : '未分析';
-  const platformAdvice = analysis?.platformRecommendations.map((item) => `${platformName[item.platform]}：${item.recommendedFormat}`).join('；') || '未生成平台建议';
-  const relatedText = related.length ? related.map((item) => `${item.source} · ${item.title}`).join('\n') : '未关联热点';
-  return <>
-    <PageHeader eyebrow="PLAN / 内容规划" title="选题池" subtitle="从热点里选择值得投入制作成本的内容。" />
-    <div className="plan-layout"><section><div className="filter-row slim"><div>{['全部','AI 工具实战','财经政策解读','历史人文'].map((label,index) => <button key={label} className={`filter ${index === 0 ? 'active' : ''}`}>{label}</button>)}</div></div><table><thead><tr><th>选题</th><th>题材</th><th>目标平台</th><th>时效</th><th>状态</th><th>计划日期</th></tr></thead><tbody>{topics.map((topic) => <tr key={topic.id} className={topic.id === selected.id ? 'selected-row' : ''} onClick={() => onSelect(topic.id)}><td>{topic.title}</td><td>{topic.category}</td><td>{topic.platforms.map((platform) => platformName[platform]).join(' / ')}</td><td>{topic.urgency}</td><td><span className="chip yellow">{topic.status === 'PENDING' ? '待判断' : topic.status === 'ACCEPTED' ? '已采纳' : '已立项'}</span></td><td>{topic.plannedDate ?? '未安排'}</td></tr>)}</tbody></table></section><aside className="topic-detail"><h2>选题详情</h2><DetailBlock label="核心观点" value={selected.coreViewpoint}/><DetailBlock label="目标受众" value={selected.targetAudience || '未填写'}/><DetailBlock label="关联热点" value={relatedText}/>{analysis && <><DetailBlock label={`分析建议 · ${analysis.score} 分`} value={`${decision} · ${timing}\n${analysis.reason}`}/><DetailBlock label="平台建议" value={platformAdvice}/></>}<DetailBlock label="待核验" value={selected.factsToVerify?.join('；') || '暂无待核验事项'}/><div className="topic-detail-actions"><button className="text-button" onClick={() => onEdit(selected)}>编辑</button><button className="text-button danger" onClick={() => onDelete(selected)}>删除</button></div><button className="button primary wide" onClick={onCreateProject}>{selected.status === 'PROJECT_CREATED' ? '查看内容项目' : '确认立项'}</button></aside></div>
-  </>;
-}
-
-function DetailBlock({ label, value }: { label: string; value: string }) { return <div className="detail-block"><small>{label}</small><p>{value}</p></div>; }
-
 function Publish({ project, onNavigate }: { project: ContentProject | undefined; onNavigate: (view: View) => void }) { return <>
   <PageHeader eyebrow="PUBLISH / 发布中心" title="内容日历" subtitle="先安排发布时间，再进入独立的发布审核。" />
   <div className="publish-layout"><section><div className="filter-row slim"><div><button className="filter active">本周</button><button className="filter">公众号</button><button className="filter">小红书</button><button className="filter">视频号</button></div></div><div className="calendar-grid">{['周一 21','周二 22','周三 23','周四 24','周五 25','周六 26','周日 27'].map((day,index) => <div className="calendar-day" key={day}><b>{day}</b>{index === 1 && <div className="calendar-post">小红书：Notion AI 教程下集</div>}{index === 2 && <div className="calendar-post red">待审核：{project?.title}</div>}{index === 4 && <div className="calendar-post mint">公众号：AIGC 行业周报</div>}</div>)}</div></section><aside className="publish-review"><span className="chip yellow">待发布审核</span><h2>{project?.title}</h2><img src="https://images.unsplash.com/photo-1551434678-e076c223a692?auto=format&fit=crop&w=900&q=80" alt="发布封面预览"/><p><b>小红书 · 图文 8 页</b><br/><small>计划：7 月 23 日 18:30</small></p><ul><li><CheckCircle2 size={16}/>标题与封面已确认</li><li><CheckCircle2 size={16}/>图片比例符合平台要求</li><li className="pending">! 有 1 条事实待确认</li></ul><button className="button primary wide" onClick={() => onNavigate('create')}>进入发布审核 →</button></aside></div>
@@ -430,7 +301,7 @@ function Publish({ project, onNavigate }: { project: ContentProject | undefined;
 
 function Review({ onNavigate }: { onNavigate: (view: View) => void }) { return <>
   <PageHeader eyebrow="REVIEW / 数据复盘" title="什么内容值得继续做？" subtitle="近 30 天 · 全部账号 · 以可复用结论为目标。" />
-  <div className="review-layout"><section className="chart-panel"><h2>栏目表现</h2>{[['国学生活化',88,'blue'],['AI 工具实战',71,'yellow'],['财经政策解读',56,'mint'],['历史人物',39,'red']].map(([label,value,color]) => <div className="bar" key={String(label)}><span>{label}</span><div><i className={String(color)} style={{width:`${value}%`}}/></div><b>{value}</b></div>)}<div className="editorial-rule compact"/><h2>本周期表现最佳</h2><p><b>《国学里的情绪管理》</b><br/>小红书收藏率 14.8% · 视频号完播率 42%</p></section><aside className="insight-panel"><span className="chip mint">可执行结论</span><h2>继续做“国学生活化”系列</h2><p>这个栏目在小红书的收藏率最高。建议下一期围绕“职场焦虑”和“关系边界”两个现代场景，将视频号口播控制在 45-60 秒。</p><button className="text-button" onClick={() => onNavigate('plan')}>创建系列选题 →</button></aside></div>
+  <div className="review-layout"><section className="chart-panel"><h2>栏目表现</h2>{[['国学生活化',88,'blue'],['AI 工具实战',71,'yellow'],['财经政策解读',56,'mint'],['历史人物',39,'red']].map(([label,value,color]) => <div className="bar" key={String(label)}><span>{label}</span><div><i className={String(color)} style={{width:`${value}%`}}/></div><b>{value}</b></div>)}<div className="editorial-rule compact"/><h2>本周期表现最佳</h2><p><b>《国学里的情绪管理》</b><br/>小红书收藏率 14.8% · 视频号完播率 42%</p></section><aside className="insight-panel"><span className="chip mint">可执行结论</span><h2>继续做“国学生活化”系列</h2><p>这个栏目在小红书的收藏率最高。建议下一期围绕“职场焦虑”和“关系边界”两个现代场景，将视频号口播控制在 45-60 秒。</p><button className="text-button" onClick={() => onNavigate('create')}>创建内容项目 →</button></aside></div>
   </>; }
 
 const modelProviders: { provider: ModelProvider; label: string; detail: string; baseUrl: string; model: string }[] = [

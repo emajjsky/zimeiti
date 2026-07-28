@@ -4,7 +4,7 @@ import test from 'node:test';
 
 const navigation = await import('../src/app/navigation.mjs').catch(() => null);
 
-test('一级导航只生成八个工作入口', () => {
+test('一级导航移除独立规划，只保留七个工作入口', () => {
   assert.ok(navigation, '导航模型尚未实现');
   const entries = navigation.navigationGroups.flatMap((group) => group.items);
   assert.deepEqual(
@@ -12,7 +12,6 @@ test('一级导航只生成八个工作入口', () => {
     [
       ['today', '今天'],
       ['discover', '发现'],
-      ['plan', '规划'],
       ['create', '创作'],
       ['publish', '发布'],
       ['review', '复盘'],
@@ -71,16 +70,40 @@ test('刷新地址可以恢复创作项目和平台', () => {
     settingsSection: 'workspace',
     modelSection: null,
     intelligenceId: null,
-    topicId: null,
+    legacyTopicId: null,
     projectId: 'project-42',
     platform: 'XIAOHONGSHU',
+    stage: 'planning',
   });
+});
+
+test('旧规划和选题编辑 URL 兼容映射到创作项目中心', () => {
+  assert.deepEqual(navigation.readWorkspaceLocation({ search: '?view=plan&topic=topic-1' }), {
+    view: 'create',
+    discoverSection: 'inbox',
+    settingsSection: 'workspace',
+    modelSection: null,
+    intelligenceId: null,
+    legacyTopicId: 'topic-1',
+    projectId: null,
+    platform: 'WECHAT',
+    stage: 'planning',
+  });
+  assert.equal(navigation.readWorkspaceLocation({ search: '?view=topicEditor' }).view, 'create');
+});
+
+test('创作地址保存项目、阶段和平台', () => {
+  const url = navigation.workspaceLocationUrl({
+    view: 'create', discoverSection: 'inbox', settingsSection: 'workspace', modelSection: null,
+    intelligenceId: null, legacyTopicId: null, projectId: 'project-1', platform: 'WECHAT', stage: 'research',
+  }, { href: 'http://127.0.0.1:5173/' });
+  assert.equal(url, '/?view=create&project=project-1&stage=research&platform=WECHAT');
 });
 
 test('页面地址只保留当前工作区相关参数', () => {
   const url = navigation.workspaceLocationUrl({
     view: 'settings', discoverSection: 'search', settingsSection: 'models', modelSection: 'policies',
-    intelligenceId: 'intel-1', topicId: 'topic-1', projectId: 'project-1', platform: 'WECHAT',
+    intelligenceId: 'intel-1', legacyTopicId: 'topic-1', projectId: 'project-1', platform: 'WECHAT', stage: 'planning',
   }, { href: 'http://127.0.0.1:5173/?view=create&project=old&platform=WECHAT' });
   assert.equal(url, '/?view=settings&settings=models&model=policies');
 });
@@ -120,10 +143,8 @@ test('已完成分析的资讯卡片显示已分析状态', async () => {
   assert.match(source, /entry\.analysis && <em className="analyzed">已分析<\/em>/);
 });
 
-test('分析创建选题会冻结选中角度与分析快照，并由规划页显示真实资讯', async () => {
+test('创作项目中心取代旧规划和选题编辑页面', async () => {
   const source = await readFile(new URL('../src/main.tsx', import.meta.url), 'utf8');
-  assert.match(source, /analysisSnapshot: analysis \? \{/);
-  assert.match(source, /targetAudience: angle\?\.targetAudience/);
-  assert.match(source, /<Plan topics=\{state\.topics\} selected=\{selectedTopic\} intelligence=\{state\.intelligence\}/);
-  assert.doesNotMatch(source, /value="新中产职场人、AI 工具爱好者"/);
+  assert.match(source, /<CreativeProjectCenter/);
+  assert.doesNotMatch(source, /function TopicEditor|function Plan\(/);
 });
