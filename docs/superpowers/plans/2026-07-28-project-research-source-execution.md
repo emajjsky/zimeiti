@@ -33,10 +33,10 @@
 - Produces `PROJECT_RESEARCH_SOURCES_VERSION`, `researchSourceActions(plan)`, `sourceRunView(row)`, `normalizeSearchResults(action, results)`, and `normalizeReadResult(action, result)`.
 - Adds `project_research_source_runs`, `project_research_sources`, and `RESEARCH_SOURCES` project artifacts.
 
-- [ ] Write failing tests for allowed actions, action counts, five-results-per-search limit, URL de-duplication data shape, and migration constraints.
-- [ ] Run `node --test tests/project-research-sources.test.mjs` and verify failure is caused by the missing module/migration.
-- [ ] Implement the migration and focused service.
-- [ ] Re-run the targeted test and verify it passes.
+- [x] Write failing tests for allowed actions, action counts, five-results-per-search limit, URL de-duplication data shape, and migration constraints.
+- [x] Run `node --test tests/project-research-sources.test.mjs` and verify failure is caused by the missing module/migration.
+- [x] Implement the migration and focused service.
+- [x] Re-run the targeted test and verify it passes.
 
 ### Task 2: Prepare, confirm, execute, and persist
 
@@ -52,10 +52,10 @@
 - Adds `POST /creative/research-source-runs/:id/confirm` and `/cancel`.
 - Adds `PROJECT_RESEARCH_SOURCES` Worker execution with dependency-injectable normalization helpers.
 
-- [ ] Extend tests first to assert prepare creates only DRAFT state, confirm is the only enqueue boundary, active-run lookup includes both research action versions, and Worker dispatch exists.
-- [ ] Run the targeted test and verify the route/Worker assertions fail.
-- [ ] Implement route validation, Tavily credential preflight, queue boundaries, per-action execution, partial failure persistence, usage logging, and result artifact creation.
-- [ ] Re-run the targeted tests and the existing research-agent tests.
+- [x] Extend tests first to assert prepare creates only DRAFT state, confirm is the only enqueue boundary, active-run lookup includes both research action versions, and Worker dispatch exists.
+- [x] Run the targeted test and verify the route/Worker assertions fail.
+- [x] Implement route validation, Tavily credential preflight, queue boundaries, per-action execution, partial failure persistence, usage logging, and result artifact creation.
+- [x] Re-run the targeted tests and the existing research-agent tests.
 
 ### Task 3: Project Agent controls and source-result preview
 
@@ -70,10 +70,10 @@
 - Adds `PROJECT_RESEARCH_SOURCES` run action and `RESEARCH_SOURCES` artifact type.
 - Adds `webCreative.prepareResearchSources(projectId)`, `confirmResearchSources(runId)`, and `cancelResearchSources(runId)` for the source-specific confirmation flow.
 
-- [ ] Extend Playwright first: open a completed plan, prepare source execution, assert confirmation counts, mock completion, open source results, refresh, and assert results remain.
-- [ ] Run Playwright and verify it fails because the action and artifact UI are absent.
-- [ ] Implement the single plan action, source-specific confirmation fields, source-result list, links, failure states, loading, and responsive CSS.
-- [ ] Run typecheck and Playwright at 1024px and 390px.
+- [x] Extend Playwright first: open a completed plan, prepare source execution, assert confirmation counts, mock completion, open source results, refresh, and assert results remain.
+- [x] Run Playwright and verify it fails because the action and artifact UI are absent.
+- [x] Implement the single plan action, source-specific confirmation fields, source-result list, links, failure states, loading, and responsive CSS.
+- [x] Run typecheck and Playwright at 1024px and 390px.
 
 ### Task 4: Documentation, verification, commit, and push
 
@@ -86,6 +86,6 @@
 **Interfaces:**
 - Records source execution as completed without claiming AI evidence verification.
 
-- [ ] Update product, plan, implementation, and acceptance documents with the exact boundary and test evidence.
-- [ ] Run `npm test`, `npm run typecheck`, `npm run build`, Mock Playwright, migration idempotency, and `git diff --check`.
+- [x] Update product, plan, implementation, and acceptance documents with the exact boundary and test evidence.
+- [x] Run `npm test`, `npm run typecheck`, `npm run build`, Mock Playwright, migration idempotency, and `git diff --check`.
 - [ ] Commit implementation and documentation, push `main`, and verify a clean worktree with `HEAD == origin/main`.

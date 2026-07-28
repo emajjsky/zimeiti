@@ -454,3 +454,20 @@
 | 移动端 | 浏览器通过 | 390×844 截图中确认卡显示模型、提示词、0 条资料和写入范围，操作按钮可达，页面无横向溢出。 |
 | 未实现边界 | 明确 | 当前产物仍是研究计划，不执行 `SEARCH_WEB`、`READ_LINK`、Playwright 浏览、来源快照、证据主张或事实结论。 |
 | 完整回归 | 通过 | `npm test` 167/167、`npm run typecheck`、`npm run build`、Mock Playwright 创作主链路和 `git diff --check` 全部 exit 0。 |
+
+## A33. 研究来源执行（2026-07-28）
+
+| 验收项 | 状态 | 证据 |
+| --- | --- | --- |
+| TDD 与迁移修复 | 通过 | 来源契约测试先因模块/迁移缺失失败后完成实现；迁移实跑发现新关系约束误用已有平台枚举约束名，新增回归断言先失败，再改为 `project_artifacts_type_platform_check` 后通过。 |
+| 数据迁移 | 通过 | `019_project_research_sources.sql` 已应用；首次输出“已应用迁移”，第二次无重复迁移输出且 exit 0。来源运行、来源快照和 `RESEARCH_SOURCES` 产物表已建立。 |
+| prepare/confirm 边界 | 自动化通过 | prepare 只创建 DRAFT 并返回搜索、读取、人工补充数量；confirm 才创建 `PROJECT_RESEARCH_SOURCES` Job。取消和研究阶段活动运行恢复均已覆盖。 |
+| 搜索与读取执行 | 自动化通过 | Worker 对 `SEARCH_WEB` 使用 Tavily，对 `READ_LINK` 使用公开网页读取器和已有公众号受限 Playwright 回退；每个搜索最多 5 条、整次最多 20 条并按 URL 去重。自动化使用测试替身，未访问真实外部服务。 |
+| 人工补充与失败 | 自动化通过 | `ASK_USER` 保存为 `NEEDS_USER`，不伪造来源；单条失败保存错误并继续其它动作，全部自动动作失败时运行失败但快照仍可读取。 |
+| Agent 展示与恢复 | 浏览器自动化通过 | 研究计划提供“准备查找资料”；确认卡使用“确认执行”；来源结果区分已保存、需补充和失败，并显示来源、时间、摘要、错误及原链接。刷新后结果继续存在。 |
+| 事实核验边界 | 通过 | 结果明确显示“来源已保存，尚未完成事实核验”；本切片未读取模型策略、未调用百炼，也未生成支持、冲突或可信结论。 |
+| 响应式与视觉 | 浏览器通过 | Mock Playwright 在桌面与 390px 工作台完成来源流程，移动端无横向溢出；视觉证据为 `research-sources-mobile.png`。界面沿用高密度浅色工作台，没有新增装饰动画或冗余说明。 |
+| 完整回归 | 通过 | `npm test` 176/176、`npm run typecheck`、`npm run build`、三个服务端语法检查和 `python tests/creative-workspace.e2e.py` 全部 exit 0。 |
+| 依赖审计 | 通过 | `npm audit --omit=dev` 返回 `found 0 vulnerabilities`。 |
+| 真实外部调用 | 待用户验收 | 自动化没有请求真实 Tavily、公众号、网页或百炼。用户需使用自己已验证的 Tavily Key，对一个包含搜索/公开链接/人工补充的研究计划执行一次真实任务。 |
+| 下一切片 | 待实现 | `SOURCE_VERIFICATION` 模型策略、证据主张、支持/冲突关系和人工复核状态。来源快照通过该质量门前不能作为已核验事实进入正文。 |

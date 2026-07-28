@@ -28,7 +28,7 @@ Fastify API
 | PostgreSQL | 用户、工作空间、凭据、情报、任务和审计主数据 | 已建立初始迁移 |
 | Redis/BullMQ | 延迟任务、异步任务、重试与 Worker 通信 | 已建立骨架 |
 | 百炼 CLI Runner | 每个任务临时注入 Key 并执行 CLI | 已建立骨架 |
-| Agent 动作与 Skill 组合 | 受限动作计划、版本化创作规则、确认前运行记录 | 通用项目 Agent、研究计划和八个四平台文案动作已建立；来源执行待实施 |
+| Agent 动作与 Skill 组合 | 受限动作计划、版本化创作规则、确认前运行记录 | 通用项目 Agent、研究计划、研究来源执行和八个四平台文案动作已建立；证据判定待实施 |
 | RSS/剪藏/Tavily 服务 | 合规信息采集、统一分类和候选搜索 | RSS 目录与分类已验收，Tavily/剪藏待真实用户验收 |
 | 飞书适配器 | OAuth、模板、字段映射、同步 | 未实现 |
 | 发布扩展 | 浏览器预填与人工确认 | 未实现 |
@@ -584,3 +584,14 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - `ProjectAgent.tsx` 将快捷动作与自由输入统一到 `prepare(nextRequest)`；0 条资料显示“未选资料”，唯一快捷按钮在没有活动运行时显示。`CONFIRMATION` 消息不进入普通线程，当前状态由确认卡单独渲染。
 - `tests/creative-workspace.e2e.py` Mock 研究 prepare，断言请求中的两个资料数组为空、确认卡资料数为 0、重复确认消息不存在，并继续禁止任何 confirm、模型、检索和 RSS 请求。
 - 本切片不增加数据库迁移，不执行 `SEARCH_WEB`、`READ_LINK` 或 Playwright 浏览，也不创建证据结论。
+
+## 2026-07-28 实现记录：研究来源执行
+
+- 迁移 `019_project_research_sources.sql` 新增 `project_research_source_runs` 和 `project_research_sources`，并登记 `project-research-sources:1.0.0`。来源执行继续复用 `generation_runs`、`jobs`、项目消息与项目产物。
+- `project-research-sources.cjs` 负责筛出 `SEARCH_WEB`、`READ_LINK`、`ASK_USER`，生成来源确认摘要，并归一化 Tavily 与公开网页结果。每个搜索动作最多保留 5 条，整次最多 20 条，URL 规范化去重。
+- `POST /creative/projects/:projectId/research/sources/prepare` 读取已完成研究计划并创建 DRAFT；`POST /creative/research-source-runs/:id/confirm` 是唯一入队边界；cancel 只取消尚未执行的运行。研究阶段活动运行同时识别研究计划与来源任务，避免并发覆盖。
+- Worker 的 `PROJECT_RESEARCH_SOURCES` 任务逐项执行。`SEARCH_WEB` 调用 Tavily，`READ_LINK` 复用 `public-web.cjs` 及公众号受限 Playwright 回退，`ASK_USER` 保存为 `NEEDS_USER`。单条失败保存 `FAILED` 后继续，全部自动动作失败时运行标记失败。
+- 结果产物类型为 `RESEARCH_SOURCES`。来源快照保存动作索引、状态、标题、URL、来源、摘要、获取时间和错误，不保存整页 HTML、Cookie 或登录状态。
+- `ProjectAgent.tsx` 在研究计划预览中增加“准备查找资料”，来源确认卡只显示搜索、读取、补充数量、工具和写入范围，不显示不存在的模型、Prompt 或 Skill。来源结果按已保存、需补充和失败展示，刷新后恢复。
+- 调用日志新增 `SOURCE_DISCOVERY`，前端显示“研究资料检索”。本任务不读取模型策略、不调用百炼，因此不存在模型 Token 或模型费用。
+- 当前来源快照尚未经过事实核验。下一实现项为 `SOURCE_VERIFICATION` 模型策略、证据主张、支持/冲突关系与人工复核状态；配图、排版和审核继续保持禁用。
