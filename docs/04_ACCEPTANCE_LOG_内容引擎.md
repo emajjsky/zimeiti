@@ -440,3 +440,17 @@
 | 视觉证据 | 已生成 | Playwright 产出 `project-center-desktop.png` 与 `project-center-mobile.png`，用于本轮视觉 QA。 |
 | 非计费边界 | 通过 | E2E 使用本地路由 Mock，并断言未触发模型、检索、RSS 刷新或 Agent 执行接口。 |
 | 完整回归 | 通过 | `npm test` 162/162、`npm run typecheck`、`npm run build`、Mock Playwright 创作主链路与 `git diff --check` 全部 exit 0。 |
+
+## A32. 零资料研究计划（2026-07-28）
+
+| 验收项 | 状态 | 证据 |
+| --- | --- | --- |
+| TDD 红灯 | 通过 | 新测试先因 composer 领域模块不存在、零资料提示词缺失和服务端仍存在资料阻断而失败；Playwright 先在“未选资料”状态缺失处失败。 |
+| 空资料 prepare | 自动化通过 | 统一 Agent 研究 prepare 接受空 `inputIds` 与 `referenceIds`，继续调用 `researchSnapshot()` 并把空 `materials` 冻结到运行快照。 |
+| 研究提示词 | 自动化通过 | 零资料 Prompt 明确从已确认规划提出问题、来源和动作，并保留“不宣称已经完成网页检索”的硬约束。 |
+| 唯一快捷动作 | 浏览器自动化通过 | 空资料研究页显示“制定研究计划”；点击后发送固定请求并进入资料数为 0 的确认卡，自由输入仍可使用。 |
+| 单一确认状态 | 浏览器自动化通过 | Mock 上下文同时返回用户消息、`CONFIRMATION` 消息和 DRAFT 运行；页面只显示用户消息与一张确认卡，不渲染 `.type-confirmation`。 |
+| 确认与计费边界 | 通过 | E2E 只 Mock prepare，不点击“确认调用”，并断言没有请求 `/agent-runs/`、模型、Tavily、RSS 刷新或媒体接口。 |
+| 移动端 | 浏览器通过 | 390×844 截图中确认卡显示模型、提示词、0 条资料和写入范围，操作按钮可达，页面无横向溢出。 |
+| 未实现边界 | 明确 | 当前产物仍是研究计划，不执行 `SEARCH_WEB`、`READ_LINK`、Playwright 浏览、来源快照、证据主张或事实结论。 |
+| 完整回归 | 通过 | `npm test` 167/167、`npm run typecheck`、`npm run build`、Mock Playwright 创作主链路和 `git diff --check` 全部 exit 0。 |

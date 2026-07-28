@@ -575,3 +575,12 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - `src/styles.css` 移除 `.creative-project-grid`、`.creative-project-card`、卡片主区和卡片页脚规则，新增 1100px 主从堆叠与 790px 移动抽屉断点。390px 下所有网格子项保持 `min-width: 0`，仅筛选和标签容器允许内部横向滚动。
 - `tests/creative-project-center.test.mjs` 覆盖筛选、选中项回退和阶段动作；`tests/creative-workspace.e2e.py` 覆盖两个真实 Mock 项目、列表选择、详情切换、旧卡片消失、1024px 布局、390px 抽屉和横向溢出。
 - 自动化仍拦截全部业务接口，并显式禁止百炼、Tavily、RSS 刷新和 Agent 执行调用。本次实现没有新增任何计费或外部请求。
+
+## 2026-07-28 实现记录：零资料研究计划
+
+- `src/domain/project-agent-composer.mjs` 提供 `researchQuickAction`、`canPrepareAgentRequest()` 和 `messagesForAgentThread()`；对应声明文件约束消息类型和准备条件，资料数量不再参与可发送判断。
+- `server/index.cjs` 的统一研究 prepare 分支移除零资料拒绝，但继续读取项目、WritingBrief、`AGENT_PLANNER` 策略、READY 百炼凭据和 `researchSnapshot()`；非空资料 ID 仍按工作空间与项目严格校验。
+- `buildResearchPlanPrompt()` 新增零资料规则：必须从已确认规划派生问题、建议来源和后续动作，不得把常识或推测当作已核验证据。
+- `ProjectAgent.tsx` 将快捷动作与自由输入统一到 `prepare(nextRequest)`；0 条资料显示“未选资料”，唯一快捷按钮在没有活动运行时显示。`CONFIRMATION` 消息不进入普通线程，当前状态由确认卡单独渲染。
+- `tests/creative-workspace.e2e.py` Mock 研究 prepare，断言请求中的两个资料数组为空、确认卡资料数为 0、重复确认消息不存在，并继续禁止任何 confirm、模型、检索和 RSS 请求。
+- 本切片不增加数据库迁移，不执行 `SEARCH_WEB`、`READ_LINK` 或 Playwright 浏览，也不创建证据结论。
