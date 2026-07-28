@@ -19,3 +19,7 @@ export function formatIntelligenceTime(value, now = Date.now()) {
   if (timestamp >= startYesterday) return `昨天 ${time}`;
   return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${time}`;
 }
+
+export function projectForIntelligence(projects, intelligenceId) {
+  return projects.find((project) => project.originType === 'HOTSPOT' && project.originReferenceId === intelligenceId);
+}

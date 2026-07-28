@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createCreativeSkillStore, DIMENSIONS, WRITING_DIMENSIONS } from '../server/services/creativeSkills.cjs';
+import { creativeStages } from '../src/domain/creative-flow.mjs';
 
 const selection = {
   SUBJECT: 'creative-subject-ai:1.0.0',
@@ -80,10 +81,22 @@ test('生成小红书内容只冻结写作维度和小红书平台规则', async
 });
 
 test('创作主流程不再把视频列为必经步骤', () => {
+  assert.deepEqual(
+    creativeStages.map(({ id, label }) => ({ id, label })),
+    [
+      { id: 'planning', label: '规划' },
+      { id: 'research', label: '研究' },
+      { id: 'master', label: '正文' },
+      { id: 'platform', label: '平台版本' },
+      { id: 'visual', label: '配图' },
+      { id: 'layout', label: '排版' },
+      { id: 'review', label: '审核' },
+    ],
+  );
+  assert.equal(creativeStages.some(({ id, label }) => id === 'video' || label === '视频'), false);
+
   const source = fs.readFileSync(new URL('../src/workspaces/create/CreateWorkspace.tsx', import.meta.url), 'utf8');
   const briefSchema = fs.readFileSync(new URL('../server/services/writing-brief.cjs', import.meta.url), 'utf8');
-  assert.match(source, /项目概览[\s\S]*资料与研究[\s\S]*文案[\s\S]*配图[\s\S]*排版[\s\S]*审核/);
-  assert.doesNotMatch(source, /label: '视频'/);
   assert.match(source, /version\.platform !== 'VIDEO_CHANNEL'/);
   assert.match(source, /webCreative\.saveBrief/);
   assert.match(briefSchema, /const creativePlatform = z\.enum\(\['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO'\]\)/);
@@ -92,12 +105,10 @@ test('创作主流程不再把视频列为必经步骤', () => {
 });
 
 test('Skill 只在文案阶段作为写作策略出现，排版不参与写作确认', () => {
-  const source = fs.readFileSync(new URL('../src/workspaces/create/CreateWorkspace.tsx', import.meta.url), 'utf8');
+  const planning = fs.readFileSync(new URL('../src/workspaces/create/PlanningWorkspace.tsx', import.meta.url), 'utf8');
   const copy = fs.readFileSync(new URL('../src/workspaces/create/CopyWorkspace.tsx', import.meta.url), 'utf8');
-  const briefStart = source.indexOf("{stage === 'brief'");
-  const copyStart = source.indexOf("{stage === 'copy' && copyPlatform");
-  assert.ok(briefStart > -1 && copyStart > briefStart);
-  assert.doesNotMatch(source.slice(briefStart, copyStart), /Skill 组合|creative-skill-panel|写作策略/);
+  assert.deepEqual(WRITING_DIMENSIONS, ['SUBJECT', 'CONTENT_TYPE', 'VOICE', 'CHANNEL']);
+  assert.doesNotMatch(planning, /Skill 组合|creative-skill-panel|写作策略/);
   assert.match(copy, /copy-strategy/);
   assert.match(copy, /题材[\s\S]*内容类型[\s\S]*语言风格/);
   assert.match(copy, /sharedDimensions\.map/);

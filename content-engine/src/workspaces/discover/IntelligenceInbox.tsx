@@ -5,7 +5,7 @@ import type { LocalState } from '../../data/localRepository';
 import { webIntelligence, type AnalysisPreparation } from '../../data/webApi';
 import { platformName, type IntelligenceAnalysis, type Platform } from '../../domain/content';
 import { filterIntelligenceItems, intelligenceSourceLabel } from '../../../shared/intelligence-filters.mjs';
-import { formatIntelligenceTime, toneForValue } from '../../../shared/intelligence-presentation.mjs';
+import { formatIntelligenceTime, projectForIntelligence, toneForValue } from '../../../shared/intelligence-presentation.mjs';
 
 type Feedback = { status: 'idle' | 'running' | 'success' | 'empty' | 'error'; message: string };
 type AnalysisState = { status: 'idle' | 'preparing' | 'confirming' | 'running' | 'error'; message: string };
@@ -15,17 +15,16 @@ const decisionNames = { FOLLOW: '建议跟进', WATCH: '继续观察', SKIP: '�
 const timingNames = { TODAY: '建议今天发布', THREE_DAYS: '三天内有效', ONE_WEEK: '一周内有效', EVERGREEN: '可长期跟进' } as const;
 
 export function IntelligenceInbox({
-  item, intelligence, sources, topics, projects, defaultPlatforms, onSelect, onCreateTopic, onOpenTopic, onSaveAnalysis, onRefresh, onOpenSources, refreshFeedback,
+  item, intelligence, sources, projects, defaultPlatforms, onSelect, onAddToCreative, onOpenProject, onSaveAnalysis, onRefresh, onOpenSources, refreshFeedback,
 }: {
   item?: LocalState['intelligence'][number];
   intelligence: LocalState['intelligence'];
   sources: LocalState['sources'];
-  topics: LocalState['topics'];
   projects: LocalState['projects'];
   defaultPlatforms: Platform[];
   onSelect: (id: string) => void;
-  onCreateTopic: (analysis?: IntelligenceAnalysis, angleIndex?: number) => void;
-  onOpenTopic: (sourceId: string) => void;
+  onAddToCreative: (itemId: string, analysis?: IntelligenceAnalysis, angleIndex?: number) => void;
+  onOpenProject: (projectId: string) => void;
   onSaveAnalysis: (itemId: string, analysis: IntelligenceAnalysis) => void;
   onRefresh: () => void;
   onOpenSources: () => void;
@@ -46,8 +45,7 @@ export function IntelligenceInbox({
 
   const categories = useMemo(() => [...new Set(intelligence.map((entry) => entry.category).filter(Boolean))], [intelligence]);
   const sourceNames = useMemo(() => [...new Set(intelligence.map(intelligenceSourceLabel).filter(Boolean))].sort((left, right) => left.localeCompare(right, 'zh-CN')), [intelligence]);
-  const projectTitles = useMemo(() => new Set(projects.map((project) => project.title)), [projects]);
-  const projectedIds = useMemo(() => new Set(topics.filter((topic) => topic.status === 'PROJECT_CREATED' && projectTitles.has(topic.title)).flatMap((topic) => topic.sourceIds)), [topics, projectTitles]);
+  const projectedIds = useMemo(() => new Set(projects.filter((project) => project.originType === 'HOTSPOT' && project.originReferenceId).map((project) => project.originReferenceId as string)), [projects]);
   const filtered = filterIntelligenceItems(intelligence, { category, source, language: 'ALL', timeRange, query });
   const visible = filtered.filter((entry) => projectState === 'ALL' || (projectState === 'PROJECTED' ? projectedIds.has(entry.id) : !projectedIds.has(entry.id)));
   const selected = visible.find((entry) => entry.id === item?.id) ?? visible[0];
@@ -125,16 +123,16 @@ export function IntelligenceInbox({
       <select aria-label="时间范围" value={timeRange} onChange={(event) => setTimeRange(event.target.value as 'DAY' | 'WEEK' | 'MONTH')}><option value="DAY">今天</option><option value="WEEK">近 7 天</option><option value="MONTH">近 30 天</option></select>
       <select aria-label="来源" value={source} onChange={(event) => setSource(event.target.value)}><option value="ALL">全部来源</option>{sourceNames.map((value) => <option key={value}>{value}</option>)}</select>
       <select aria-label="题材" value={category} onChange={(event) => setCategory(event.target.value)}><option value="ALL">全部题材</option>{categories.map((value) => <option key={value}>{value}</option>)}</select>
-      <select aria-label="立项状态" value={projectState} onChange={(event) => setProjectState(event.target.value as 'ALL' | 'PROJECTED' | 'UNPROJECTED')}><option value="ALL">全部状态</option><option value="PROJECTED">已立项</option><option value="UNPROJECTED">未立项</option></select>
+      <select aria-label="创作状态" value={projectState} onChange={(event) => setProjectState(event.target.value as 'ALL' | 'PROJECTED' | 'UNPROJECTED')}><option value="ALL">全部状态</option><option value="PROJECTED">已加入创作</option><option value="UNPROJECTED">未加入创作</option></select>
       <label className="filter-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标题、摘要或关键词" /></label>
     </div>
-    {intelligence.length === 0 ? <section className="inbox-empty-state"><h2>热点池还是空的</h2><div><button className="button" type="button" onClick={onOpenSources}>配置资讯来源</button></div></section> : visible.length === 0 ? <section className="inbox-empty-state"><h2>没有符合当前条件的情报</h2></section> : <section className="intelligence-grid" aria-label="热点情报列表">{visible.map((entry) => <button className="intelligence-card" type="button" key={entry.id} onClick={() => select(entry.id)}><header className={`intelligence-source-bar ${toneForValue(intelligenceSourceLabel(entry))}`}><span>{intelligenceSourceLabel(entry)}</span><div className="intelligence-card-status">{entry.analysis && <em className="analyzed">已分析</em>}{projectedIds.has(entry.id) && <em>已立项</em>}</div></header><h2>{entry.title}</h2><p>{entry.summary}</p><div className="intelligence-tags"><span className={toneForValue(entry.category || '其它')}>{entry.category || '其它'}</span>{keywordTags(entry).map((keyword) => <span className={toneForValue(keyword)} key={keyword}>{keyword}</span>)}</div><footer><time>{formatIntelligenceTime(entry.publishedAt)}</time><span>查看详情</span></footer></button>)}</section>}
+    {intelligence.length === 0 ? <section className="inbox-empty-state"><h2>热点池还是空的</h2><div><button className="button" type="button" onClick={onOpenSources}>配置资讯来源</button></div></section> : visible.length === 0 ? <section className="inbox-empty-state"><h2>没有符合当前条件的情报</h2></section> : <section className="intelligence-grid" aria-label="热点情报列表">{visible.map((entry) => <button className="intelligence-card" type="button" key={entry.id} onClick={() => select(entry.id)}><header className={`intelligence-source-bar ${toneForValue(intelligenceSourceLabel(entry))}`}><span>{intelligenceSourceLabel(entry)}</span><div className="intelligence-card-status">{entry.analysis && <em className="analyzed">已分析</em>}{projectedIds.has(entry.id) && <em>已加入</em>}</div></header><h2>{entry.title}</h2><p>{entry.summary}</p><div className="intelligence-tags"><span className={toneForValue(entry.category || '其它')}>{entry.category || '其它'}</span>{keywordTags(entry).map((keyword) => <span className={toneForValue(keyword)} key={keyword}>{keyword}</span>)}</div><footer><time>{formatIntelligenceTime(entry.publishedAt)}</time><span>查看详情</span></footer></button>)}</section>}
     {drawerOpen && selected && <><button className="drawer-backdrop" type="button" aria-label="关闭详情" onClick={() => setDrawerOpen(false)} /><aside className="intelligence-drawer" aria-label="情报详情"><header><span className={toneForValue(selected.category || '其它')}>{selected.category || '其它'}</span><button className="icon-button" type="button" aria-label="关闭详情" onClick={() => setDrawerOpen(false)}><X size={19} /></button></header><h2>{selected.title}</h2><div className="drawer-meta"><span>{intelligenceSourceLabel(selected)}</span><span>{formatIntelligenceTime(selected.publishedAt)}</span></div><p>{selected.summary}</p>
       {analysis && <AnalysisResult analysis={analysis} angleIndex={angleIndex} onAngle={setAngleIndex} />}
       {selected.url && <a className="source-link" href={selected.url} target="_blank" rel="noreferrer">查看原文</a>}
       {analysisState.status === 'error' && <p className="inline-notice error">{analysisState.message}</p>}
       {prepared ? <section className="analysis-confirmation"><div><b>{prepared.confirmation.model}</b><small>模板 V{prepared.confirmation.promptVersion} · {prepared.confirmation.platforms.map((platform) => platformName[platform]).join('、')}</small></div>{prepared.confirmation.generalAudienceWarning && <p>将按通用受众分析</p>}<footer><button className="button" type="button" onClick={() => void cancelPrepared()}>取消</button><button className="button primary" type="button" onClick={() => void confirm()} disabled={analysisState.status === 'confirming'}>{analysisState.status === 'confirming' ? '提交中' : '确认分析'}</button></footer></section> : <section className="analysis-controls"><div className="analysis-platforms">{defaultPlatforms.map((platform) => <label key={platform}><input type="checkbox" checked={platforms.includes(platform)} onChange={() => togglePlatform(platform)} disabled={analysisState.status === 'running'} />{platformName[platform]}</label>)}</div><button className="button" type="button" disabled={!platforms.length || analysisState.status === 'preparing' || analysisState.status === 'running'} onClick={() => void prepare()}>{analysisState.status === 'running' ? <LoaderCircle className="spin" size={16} /> : <BrainCircuit size={16} />}{analysisState.status === 'preparing' ? '准备中' : analysisState.status === 'running' ? '分析中' : 'AI 分析'}</button></section>}
-      <footer><button className="button primary" type="button" onClick={() => projectedIds.has(selected.id) ? onOpenTopic(selected.id) : onCreateTopic(analysis, angleIndex)}>{projectedIds.has(selected.id) ? '查看选题' : '创建选题'}</button></footer></aside></>}
+      <footer>{projectForIntelligence(projects, selected.id) ? <button className="button primary" type="button" onClick={() => onOpenProject(projectForIntelligence(projects, selected.id)!.id)}>继续创作</button> : <button className="button primary" type="button" onClick={() => onAddToCreative(selected.id, analysis, angleIndex)}>加入创作</button>}</footer></aside></>}
   </div>;
 }
 

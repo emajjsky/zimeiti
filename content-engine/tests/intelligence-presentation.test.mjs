@@ -17,3 +17,14 @@ test('来源和标签颜色由文本稳定映射', () => {
   assert.equal(presentation.toneForValue('中国新闻网'), presentation.toneForValue('中国新闻网'));
   assert.match(presentation.toneForValue('科技'), /^tone-(blue|mint|yellow|coral|lilac)$/);
 });
+
+test('热点已加入状态只由项目来源引用决定', () => {
+  assert.ok(presentation, '热点展示规则尚未实现');
+  const projects = [
+    { id: 'project-1', originType: 'HOTSPOT', originReferenceId: 'intel-1' },
+    { id: 'project-2', originType: 'MANUAL', originReferenceId: 'intel-2' },
+  ];
+  assert.equal(presentation.projectForIntelligence(projects, 'intel-1')?.id, 'project-1');
+  assert.equal(presentation.projectForIntelligence(projects, 'intel-2'), undefined);
+  assert.equal(presentation.projectForIntelligence(projects, 'intel-3'), undefined);
+});

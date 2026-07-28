@@ -389,6 +389,22 @@
 }
 @media (prefers-reduced-motion:reduce){.planning-workspace .lucide-loader-circle{animation:none}}
 
+.review-project-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;max-width:1180px}
+.review-project-grid>article{display:grid;min-height:210px;overflow:hidden;border:1px solid var(--line);border-radius:14px;background:#fff;box-shadow:0 8px 24px rgba(48,69,105,.06)}
+.review-project-grid article>header{display:flex;min-height:42px;align-items:center;justify-content:space-between;gap:10px;padding:0 15px;background:#dff5e9;color:#345d4c;font-size:10px;font-weight:800}
+.review-project-grid time{color:#586579;font:10px "DM Mono",monospace}
+.review-project-grid h2{margin:0;padding:18px 15px 12px;font-size:20px;line-height:1.5}
+.review-project-grid article>div{display:flex;flex-wrap:wrap;gap:6px;padding:0 15px 16px}
+.review-project-grid article>div span{padding:4px 7px;border-radius:10px;background:#edf3ff;color:#36548a;font-size:10px;font-weight:800}
+.review-project-grid article>footer{display:flex;align-items:center;justify-content:flex-end;margin-top:auto;padding:10px 15px;border-top:1px solid var(--line);background:#fafbfc}
+.review-project-grid .text-button{border-radius:12px}
+.review-empty-state{display:grid;min-height:280px;align-content:center;justify-items:center;gap:9px;max-width:1180px;padding:28px;border:1px dashed #aeb8c9;border-radius:14px;background:#fff;text-align:center}
+.review-empty-state svg{color:var(--accent)}
+.review-empty-state h2,.review-empty-state p{margin:0}
+.review-empty-state h2{font-size:20px}
+.review-empty-state p{color:var(--muted);font-size:13px}
+@media (max-width:899px){.review-project-grid{grid-template-columns:1fr}}
+
 /* 模型与 API：每个页签只保留自己的配置内容。 */
 .ai-settings{width:100%;max-width:1400px}
 .ai-settings .page-title{font-size:40px;line-height:1.05;letter-spacing:-1px}

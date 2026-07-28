@@ -6,7 +6,7 @@ import { intelligenceKey, loadState, persistState, seedState, type FeishuLibrary
 import { webAgent, webAuth, webIntelligence, webModels, webProjects, webSettings, type CreateProjectInput, type CredentialStatus, type WebSession } from './data/webApi';
 import { platformName, projectStageName, type ContentProject, type ContentVersion, type IntelligenceSource, type Platform } from './domain/content';
 import { stageRouteForProjectStage } from './domain/creative-flow.mjs';
-import { formatTodayTitle, projectTaskEntries } from './domain/today.mjs';
+import { completedProjects, formatTodayTitle, projectTaskEntries } from './domain/today.mjs';
 import type { ApiUsageLog, ApiUsageSummary, ModelCapability, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelOperation, ModelProvider, ModelTask, ModelTaskPolicy } from './domain/integrations';
 import { navigationGroups, readWorkspaceLocation, replaceWorkspaceLocation, resetViewport, type CreateStageRoute, type DiscoverSection, type ModelSection, type SearchPreset, type SettingsSection, type View } from './app/navigation.mjs';
 import { PageHeader } from './components/workspace/PageHeader';
@@ -129,16 +129,14 @@ function App() {
     setState((current) => ({ ...current, projects: [result.project, ...current.projects.filter((project) => project.id !== result.project.id)] }));
     return result.project;
   };
-  const addSelectedIntelligenceToCreative = async (_analysis?: LocalState['intelligence'][number]['analysis'], angleIndex = 0) => {
-    if (!selectedIntel) return;
-    const result = await webProjects.fromIntelligence(selectedIntel.id, { angleIndex });
+  const addIntelligenceToCreative = async (itemId: string, _analysis?: LocalState['intelligence'][number]['analysis'], angleIndex = 0) => {
+    const result = await webProjects.fromIntelligence(itemId, { angleIndex });
     setState((current) => ({ ...current, projects: [result.project, ...current.projects.filter((project) => project.id !== result.project.id)] }));
     openProject(result.project);
   };
-  const openIntelligenceProject = (sourceId: string) => {
-    const project = state.projects.find((item) => item.originReferenceId === sourceId);
+  const openIntelligenceProject = (projectId: string) => {
+    const project = state.projects.find((item) => item.id === projectId);
     if (project) openProject(project);
-    else void addSelectedIntelligenceToCreative();
   };
   const requestNewCreation = () => {
     setSelectedProjectId('');
@@ -234,11 +232,11 @@ function App() {
     {sidebarOpen && <button className="sidebar-backdrop" type="button" aria-label="关闭导航" onClick={() => setSidebarOpen(false)} />}
     <main className="main-content">
       {view === 'today' && <Today onNavigate={setView} projects={state.projects} intelligence={state.intelligence} onOpenProject={(id) => { const project = state.projects.find((item) => item.id === id); if (project) openProject(project); }} />}
-      {view === 'discover' && <DiscoverWorkspace section={discoverSection} onSectionChange={setDiscoverSection} inbox={<IntelligenceInbox item={selectedIntel} intelligence={state.intelligence} sources={state.sources} topics={[]} projects={state.projects} defaultPlatforms={state.workspace.enabledPlatforms} onSelect={setSelectedIntelId} onCreateTopic={addSelectedIntelligenceToCreative} onOpenTopic={openIntelligenceProject} onSaveAnalysis={saveAnalysis} onRefresh={refreshRss} onOpenSources={() => openSettings('sources')} refreshFeedback={refreshFeedback} />} search={<NetworkSearchPanel preset={searchPreset} onSave={saveSearchCandidate} onOpenSearchSettings={() => openSettings('models', 'search')} checkStatus={webSearchStatus} searchWeb={searchWeb} />} linkImport={<LinkImportPanel onSave={saveClippedLink} onShowInbox={() => openDiscover('inbox')} previewLink={previewPublicLink} />} />}
+      {view === 'discover' && <DiscoverWorkspace section={discoverSection} onSectionChange={setDiscoverSection} inbox={<IntelligenceInbox item={selectedIntel} intelligence={state.intelligence} sources={state.sources} projects={state.projects} defaultPlatforms={state.workspace.enabledPlatforms} onSelect={setSelectedIntelId} onAddToCreative={(itemId, analysis, angleIndex) => void addIntelligenceToCreative(itemId, analysis, angleIndex)} onOpenProject={openIntelligenceProject} onSaveAnalysis={saveAnalysis} onRefresh={refreshRss} onOpenSources={() => openSettings('sources')} refreshFeedback={refreshFeedback} />} search={<NetworkSearchPanel preset={searchPreset} onSave={saveSearchCandidate} onOpenSearchSettings={() => openSettings('models', 'search')} checkStatus={webSearchStatus} searchWeb={searchWeb} />} linkImport={<LinkImportPanel onSave={saveClippedLink} onShowInbox={() => openDiscover('inbox')} previewLink={previewPublicLink} />} />}
       {view === 'create' && (!selectedProjectId || !featuredProject) && <CreativeProjectCenter projects={state.projects} onOpenProject={openProject} onCreateProject={createProject} creationRequested={creationRequested} onCreationHandled={() => setCreationRequested(false)} />}
       {view === 'create' && selectedProjectId && featuredProject && <CreateWorkspace project={featuredProject} stage={createStage} onStage={setCreateStage} onExitProject={() => { setSelectedProjectId(''); setCreateStage('planning'); }} activePlatform={activePlatform} onPlatform={setActivePlatform} onSaveVersion={saveContentVersion} onProjectAccepted={acceptProjectFromServer} onOpenModelSettings={() => openSettings('models', 'policies')} onOpenAgentSettings={() => openSettings('models', 'agent')} />}
       {view === 'publish' && <Publish project={featuredProject} onNavigate={setView} />}
-      {view === 'review' && <Review onNavigate={setView} />}
+      {view === 'review' && <Review projects={state.projects} onOpenProject={(project) => openProject(project)} />}
       {view === 'assets' && <Utility title="素材库" description="素材将按目录、类型和所属项目统一管理。" />}
       {view === 'settings' && <SettingsWorkspace section={settingsSection} onSectionChange={setSettingsSection} workspace={<WorkspaceProfileSettings workspace={state.workspace} onChange={(workspace) => updateState({ ...state, workspace })} />} sources={<SourceSettings sources={state.sources} onAddSource={addSource} onAddSources={addSources} onUpdateSource={updateSource} onRemoveSource={removeSource} />} models={<ModelSettingsScreen initialSection={requestedModelSection} onSectionChange={setRequestedModelSection} />} feishu={<WorkspaceSettings template={state.feishuTemplate} onTemplateChange={saveFeishuTemplate} />} accounts={<AccountAuthorizationSettings />} />}
     </main>
@@ -296,10 +294,13 @@ function Publish({ project, onNavigate }: { project: ContentProject | undefined;
   <div className="publish-layout"><section><div className="filter-row slim"><div><button className="filter active">本周</button><button className="filter">公众号</button><button className="filter">小红书</button><button className="filter">视频号</button></div></div><div className="calendar-grid">{['周一 21','周二 22','周三 23','周四 24','周五 25','周六 26','周日 27'].map((day,index) => <div className="calendar-day" key={day}><b>{day}</b>{index === 1 && <div className="calendar-post">小红书：Notion AI 教程下集</div>}{index === 2 && <div className="calendar-post red">待审核：{project?.title}</div>}{index === 4 && <div className="calendar-post mint">公众号：AIGC 行业周报</div>}</div>)}</div></section><aside className="publish-review"><span className="chip yellow">待发布审核</span><h2>{project?.title}</h2><img src="https://images.unsplash.com/photo-1551434678-e076c223a692?auto=format&fit=crop&w=900&q=80" alt="发布封面预览"/><p><b>小红书 · 图文 8 页</b><br/><small>计划：7 月 23 日 18:30</small></p><ul><li><CheckCircle2 size={16}/>标题与封面已确认</li><li><CheckCircle2 size={16}/>图片比例符合平台要求</li><li className="pending">! 有 1 条事实待确认</li></ul><button className="button primary wide" onClick={() => onNavigate('create')}>进入发布审核 →</button></aside></div>
   </>; }
 
-function Review({ onNavigate }: { onNavigate: (view: View) => void }) { return <>
-  <PageHeader eyebrow="REVIEW / 数据复盘" title="什么内容值得继续做？" subtitle="近 30 天 · 全部账号 · 以可复用结论为目标。" />
-  <div className="review-layout"><section className="chart-panel"><h2>栏目表现</h2>{[['国学生活化',88,'blue'],['AI 工具实战',71,'yellow'],['财经政策解读',56,'mint'],['历史人物',39,'red']].map(([label,value,color]) => <div className="bar" key={String(label)}><span>{label}</span><div><i className={String(color)} style={{width:`${value}%`}}/></div><b>{value}</b></div>)}<div className="editorial-rule compact"/><h2>本周期表现最佳</h2><p><b>《国学里的情绪管理》</b><br/>小红书收藏率 14.8% · 视频号完播率 42%</p></section><aside className="insight-panel"><span className="chip mint">可执行结论</span><h2>继续做“国学生活化”系列</h2><p>这个栏目在小红书的收藏率最高。建议下一期围绕“职场焦虑”和“关系边界”两个现代场景，将视频号口播控制在 45-60 秒。</p><button className="text-button" onClick={() => onNavigate('create')}>创建内容项目 →</button></aside></div>
-  </>; }
+function Review({ projects, onOpenProject }: { projects: ContentProject[]; onOpenProject: (project: ContentProject) => void }) {
+  const reviewable = completedProjects(projects);
+  return <>
+    <PageHeader title="内容复盘" subtitle={reviewable.length ? `${reviewable.length} 个已完成项目等待回填数据。` : undefined} />
+    {reviewable.length ? <section className="review-project-grid">{reviewable.map((project) => <article key={project.id}><header><span>{project.planning.category || '未分类'}</span><time>{project.updatedAt}</time></header><h2>{project.title}</h2><div>{[...new Set(project.versions.map((version) => version.platform))].map((platform) => <span key={platform}>{platformName[platform]}</span>)}</div><footer><button className="text-button" type="button" onClick={() => onOpenProject(project)}>查看项目</button></footer></article>)}</section> : <section className="review-empty-state"><ChartColumn size={28}/><h2>还没有可复盘的内容</h2><p>完成审核与发布后，项目会进入这里。</p></section>}
+  </>;
+}
 
 const modelProviders: { provider: ModelProvider; label: string; detail: string; baseUrl: string; model: string }[] = [
   { provider: 'DASHSCOPE', label: '阿里云百炼', detail: '通义千问兼容接口', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus' },

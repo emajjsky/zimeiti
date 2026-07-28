@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createProjectMaterialStore, inputView, referenceView } from '../server/services/projectMaterials.cjs';
 import { MIME_EXTENSIONS, safePath } from '../server/services/projectUploadStorage.cjs';
+import { creativeStages, planningFieldNames } from '../src/domain/creative-flow.mjs';
 
 test('项目资料迁移建立输入、参考和文件元数据表', () => {
   const migration = fs.readFileSync(new URL('../server/migrations/013_project_materials.sql', import.meta.url), 'utf8');
@@ -57,14 +58,10 @@ test('项目资料 API 提供完整 CRUD、鉴权下载和 50MB 限制', () => {
 });
 
 test('创作页将资料与研究拆为独立步骤，篇幅只在写作策略出现', () => {
-  const source = fs.readFileSync(new URL('../src/workspaces/create/CreateWorkspace.tsx', import.meta.url), 'utf8');
   const copy = fs.readFileSync(new URL('../src/workspaces/create/CopyWorkspace.tsx', import.meta.url), 'utf8');
   const materials = fs.readFileSync(new URL('../src/workspaces/create/ProjectMaterials.tsx', import.meta.url), 'utf8');
-  const briefStart = source.indexOf("{stage === 'brief'");
-  const materialStart = source.indexOf("{stage === 'materials'", briefStart);
-  const copyStart = source.indexOf("{stage === 'copy'", materialStart);
-  assert.ok(briefStart > -1 && materialStart > briefStart && copyStart > materialStart);
-  assert.doesNotMatch(source.slice(briefStart, materialStart), /篇幅目标|目标篇幅/);
+  assert.deepEqual(creativeStages.slice(0, 3).map(({ id }) => id), ['planning', 'research', 'master']);
+  assert.equal(planningFieldNames.some((name) => /篇幅/.test(name)), false);
   assert.match(copy, /目标篇幅/);
   assert.match(materials, /我的内容[\s\S]*参考链接[\s\S]*素材文件/);
   assert.match(materials, /webCreative\.createInput[\s\S]*webCreative\.createReference[\s\S]*webCreative\.uploadFile/);

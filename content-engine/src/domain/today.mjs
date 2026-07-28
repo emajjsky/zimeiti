@@ -6,44 +6,44 @@ export function formatTodayTitle(value = new Date(), timeZone = 'Asia/Shanghai')
   return month && day ? `今天，${Number(month)} 月 ${Number(day)} 日` : '今天';
 }
 
-export function projectTaskMeta(status) {
+export function projectTaskMeta(stage) {
   const values = {
-    BRIEF: { prefix: '完善创作设定', action: '去设定', view: 'create' },
-    WRITING: { prefix: '继续文案', action: '继续编辑', view: 'create' },
-    VISUAL: { prefix: '完成配图', action: '去处理', view: 'create' },
-    VIDEO: { prefix: '处理视频任务', action: '去处理', view: 'create' },
-    REVIEW: { prefix: '审核内容', action: '去审核', view: 'create' },
-    SCHEDULED: { prefix: '确认发布安排', action: '去发布', view: 'publish' },
-    PARTIALLY_PUBLISHED: { prefix: '完成剩余发布', action: '去发布', view: 'publish' },
-    PUBLISHED: { prefix: '回填内容数据', action: '去复盘', view: 'review' },
-    RETROSPECTIVE: { prefix: '复盘内容表现', action: '去复盘', view: 'review' },
+    PLANNING: { prefix: '完成规划', action: '去规划', view: 'create' },
+    RESEARCH: { prefix: '继续研究', action: '去研究', view: 'create' },
+    MASTER_WRITING: { prefix: '继续正文', action: '去写作', view: 'create' },
+    PLATFORM_ADAPTATION: { prefix: '制作平台版本', action: '去制作', view: 'create' },
+    VISUAL: { prefix: '处理配图', action: '去配图', view: 'create' },
+    LAYOUT: { prefix: '继续排版', action: '去排版', view: 'create' },
+    REVIEW: { prefix: '完成审核', action: '去审核', view: 'create' },
   };
-  return values[status] ?? null;
+  return values[stage] ?? null;
 }
 
-const projectStatusLabels = {
-  BRIEF: '创作设定',
-  WRITING: '文案创作',
-  VISUAL: '视觉制作',
-  VIDEO: '视频制作',
-  REVIEW: '内容审核',
-  SCHEDULED: '待发布',
-  PARTIALLY_PUBLISHED: '部分发布',
-  PUBLISHED: '已发布',
-  RETROSPECTIVE: '复盘中',
+const projectStageLabels = {
+  PLANNING: '待规划',
+  RESEARCH: '研究中',
+  MASTER_WRITING: '正文中',
+  PLATFORM_ADAPTATION: '平台制作中',
+  VISUAL: '配图中',
+  LAYOUT: '排版中',
+  REVIEW: '待审核',
 };
 
 export function projectTaskEntries(projects) {
   return projects.flatMap((project) => {
-    const meta = projectTaskMeta(project.status);
+    const meta = projectTaskMeta(project.stage);
     if (!meta) return [];
     return [{
       id: `project:${project.id}`,
       projectId: project.id,
       title: `${meta.prefix}：${project.title}`,
-      sub: `${projectStatusLabels[project.status] ?? project.status} · 更新于 ${project.updatedAt}`,
+      sub: `${projectStageLabels[project.stage] ?? project.stage} · 更新于 ${project.updatedAt}`,
       action: meta.action,
       view: meta.view,
     }];
   });
+}
+
+export function completedProjects(projects) {
+  return projects.filter((project) => project.stage === 'COMPLETED');
 }
