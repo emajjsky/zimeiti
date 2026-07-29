@@ -129,35 +129,54 @@ test('统一 Agent 研究准备接口接受空资料并继续冻结空快照', (
   assert.match(researchPrepare, /materials, stage: 'RESEARCH'/);
 });
 
-test('项目资料页具备真实进度、资料选择和 Agent 完整状态', () => {
+test('项目资料管理与统一研究结果在界面上分离', () => {
   const materials = fs.readFileSync(new URL('../src/workspaces/create/ProjectMaterials.tsx', import.meta.url), 'utf8');
   const agent = fs.readFileSync(new URL('../src/workspaces/create/ProjectAgent.tsx', import.meta.url), 'utf8');
   const workspace = fs.readFileSync(new URL('../src/workspaces/create/CreateWorkspace.tsx', import.meta.url), 'utf8');
   const styles = fs.readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
-  assert.match(materials, /项目概览[\s\S]*项目资料[\s\S]*研究计划[\s\S]*正式文案/);
-  assert.match(materials, /selectedInputIds[\s\S]*selectedReferenceIds/);
-  assert.match(materials, /研究已引用/);
-  assert.match(materials, /webCreative\.agentContext/);
-  assert.match(agent, /发送/);
-  assert.match(agent, /确认\{activeRun\.action === 'PROJECT_RESEARCH_SOURCES' \? '执行' : '调用'\}/);
-  assert.match(agent, /QUEUED[\s\S]*RUNNING[\s\S]*FAILED/);
-  assert.match(agent, /待回答问题[\s\S]*待核验主张[\s\S]*下一步/);
-  assert.match(agent, /threadRef[\s\S]*scrollHeight/);
-  assert.match(materials, /已确认规划[\s\S]*创作角度[\s\S]*核心表达[\s\S]*研究要求/);
-  assert.match(workspace, /project=\{project\}/);
-  assert.match(workspace, /hasDraft=\{contentVersions\.some/);
-  assert.match(workspace, /body\.trim\(\) !== project\.coreViewpoint\.trim\(\)/);
+  assert.match(materials, /我的内容[\s\S]*参考链接[\s\S]*素材文件/);
+  assert.match(materials, /webCreative\.createInput[\s\S]*webCreative\.createReference[\s\S]*webCreative\.uploadFile/);
+  assert.doesNotMatch(materials, /selectedInputIds|selectedReferenceIds|webCreative\.agentContext/);
+  assert.match(agent, /SimplifiedResearchAgent[\s\S]*ResearchResultPreview/);
+  assert.match(agent, /startResearch[\s\S]*skipResearch[\s\S]*acceptResearchResult/);
+  assert.match(agent, /正在整理/);
+  assert.match(agent, /正在检索/);
+  assert.match(agent, /正在核验/);
+  assert.match(workspace, /<ProjectMaterials project=\{project\}/);
+  assert.match(workspace, /<ProjectAgent projectId=\{project\.id\} stage="RESEARCH"/);
+  assert.match(workspace, /onStage\('master'\)/);
   assert.match(styles, /\.project-research-layout/);
-  assert.match(styles, /\.project-agent\{/);
+  assert.match(styles, /\.simplified-research\{/);
   assert.match(styles, /@media \(max-width:1100px\).*\.project-research-layout\{grid-template-columns:1fr\}/s);
 });
 
-test('研究与文案共用一个 ProjectAgent 组件', () => {
+test('研究与文案复用同一个 ProjectAgent 入口并按阶段分流', () => {
   const agent = fs.readFileSync(new URL('../src/workspaces/create/ProjectAgent.tsx', import.meta.url), 'utf8');
   const materials = fs.readFileSync(new URL('../src/workspaces/create/ProjectMaterials.tsx', import.meta.url), 'utf8');
+  const workspace = fs.readFileSync(new URL('../src/workspaces/create/CreateWorkspace.tsx', import.meta.url), 'utf8');
+  const copy = fs.readFileSync(new URL('../src/workspaces/create/CopyWorkspace.tsx', import.meta.url), 'utf8');
   assert.match(agent, /CURRENT[\s\S]*ALL/);
   assert.match(agent, /MESSAGE[\s\S]*CONFIRMATION[\s\S]*RUN_STATUS[\s\S]*ARTIFACT[\s\S]*SYSTEM_EVENT/);
   assert.match(agent, /acceptArtifact/);
-  assert.match(materials, /<ProjectAgent/);
-  assert.doesNotMatch(materials, /ProjectResearchAgent/);
+  assert.match(agent, /props\.stage === 'RESEARCH'/);
+  assert.doesNotMatch(materials, /<ProjectAgent/);
+  assert.match(workspace, /stage="RESEARCH"/);
+  assert.match(copy, /stage="COPY"/);
+});
+
+test('研究页只保留开始、补充、采用和跳过的主路径', () => {
+  const materials = fs.readFileSync(new URL('../src/workspaces/create/ProjectMaterials.tsx', import.meta.url), 'utf8');
+  const agent = fs.readFileSync(new URL('../src/workspaces/create/ProjectAgent.tsx', import.meta.url), 'utf8');
+  const api = fs.readFileSync(new URL('../src/data/webApi.ts', import.meta.url), 'utf8');
+
+  assert.match(agent, /startResearch/);
+  assert.match(agent, /采用并进入正文/);
+  assert.match(agent, /无需研究，直接进入正文/);
+  assert.match(agent, /ResearchResultPreview/);
+  assert.match(api, /acceptResearchResult/);
+  assert.match(api, /skipResearch/);
+  assert.doesNotMatch(materials, /selectedInputIds/);
+  assert.doesNotMatch(materials, /selectedReferenceIds/);
+  assert.doesNotMatch(agent, /research-source-row/);
+  assert.doesNotMatch(agent, /research-source-toolbar/);
 });

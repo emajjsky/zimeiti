@@ -604,6 +604,16 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - `projectMaterials.cjs` 新增 `deriveProjectInputTitle()`，从正文首个非空行移除 Markdown 标题/列表前缀后截取 160 字；API 的项目内容标题改为可省略。新建弹窗隐藏标题字段，编辑弹窗继续显示。
 - `creative-workspace.e2e.py` 增加规划摘要、新增内容无标题、长时间线自动跟随、计划卡与确认卡几何无重叠、点击命中和来源确认执行断言。自动化全部使用本地 Mock，不调用百炼或 Tavily。
 
+## 2026-07-29 实现记录：简化研究工作流
+
+- `server/services/project-agent.cjs` 在研究阶段上下文中返回统一运行的阶段和进度，供前端轮询展示。
+- `src/data/webApi.ts` 提供 `startResearch`、`acceptResearchResult` 与 `skipResearch`；研究页不再调用旧的 prepare/confirm 客户端链路。
+- `ProjectMaterials.tsx` 仅承担项目资料的新增、编辑、打开和删除；移除了研究资料勾选、全选、研究引用提示和重复进度。
+- `ProjectAgent.tsx` 在 `RESEARCH` 阶段分流到 `SimplifiedResearchAgent`，仅呈现开始或补充研究、运行状态、结构化结果、采用和跳过；`COPY` 阶段继续使用通用对话 Agent。
+- `CreateWorkspace.tsx` 在采用或跳过后先更新项目，再跳转到正文阶段，避免刷新后回到过期研究状态。
+- `styles.css` 新增结果卡、折叠来源详情和 1100px/720px/460px 响应式规则；视觉 QA 已确认桌面双栏与移动单列均无横向滚动。
+- `tests/project-research-agent.test.mjs` 更新为简化路径契约；`tests/creative-workspace.e2e.py` 使用 Playwright Mock 覆盖开始研究、轮询、结果采用和正文跳转。
+
 ## 2026-07-29 实现记录：来源筛选与事实核验
 
 - `020_source_verification.sql` 为 `project_research_sources` 增加 `metadata_json` 和 `selected`，扩展 `project_artifacts` 类型约束，并新增 `project_source_verifications`。

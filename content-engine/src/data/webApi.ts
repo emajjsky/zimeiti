@@ -81,6 +81,9 @@ export const webCreative = {
     return response.blob();
   },
   research: (projectId: string) => request<ProjectResearchContext>(`/creative/projects/${encodeURIComponent(projectId)}/research`),
+  startResearch: (projectId: string, input: { request?: string } = {}) => request<ProjectAgentRun>(`/creative/projects/${encodeURIComponent(projectId)}/research/start`, { method: 'POST', body: JSON.stringify(input) }),
+  acceptResearchResult: (artifactId: string) => request<{ artifact: ProjectArtifact; project: ContentProject }>(`/creative/research-results/${encodeURIComponent(artifactId)}/accept`, { method: 'POST', body: '{}' }),
+  skipResearch: (projectId: string) => request<{ project: ContentProject }>(`/creative/projects/${encodeURIComponent(projectId)}/research/skip`, { method: 'POST', body: '{}' }),
   prepareResearch: (projectId: string, input: { request: string; inputIds: string[]; referenceIds: string[] }) => request<ProjectResearchRun>(`/creative/projects/${encodeURIComponent(projectId)}/research/prepare`, { method: 'POST', body: JSON.stringify(input) }),
   confirmResearch: (runId: string) => request<{ id: string; status: 'QUEUED'; jobId: string }>(`/creative/research-runs/${encodeURIComponent(runId)}/confirm`, { method: 'POST', body: '{}' }),
   cancelResearch: (runId: string) => request<{ id: string; status: 'CANCELLED' }>(`/creative/research-runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST', body: '{}' }),

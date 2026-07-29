@@ -407,6 +407,16 @@
 5. Playwright 使用 8 条历史消息、研究计划产物和来源待确认卡复现截图场景，逐项校验滚动到底、卡片无重叠、确认按钮命中真实 Button 并可完成点击。
 6. 下一产品切片仍为 `SOURCE_VERIFICATION`，本修复不提前增加事实结论、配图、排版或发布能力。
 
+## 2026-07-29 已完成：简化研究工作流交付
+
+1. 统一研究运行 `PROJECT_RESEARCH_WORKFLOW` 已作为前台唯一研究动作，旧的计划、来源和事实核验接口保留给历史兼容与审计，不再作为新用户的必经界面。
+2. 研究结果采用和跳过均推进项目到正文；采用路径向正文传递已确认事实、谨慎项和创作参考，跳过路径不伪造研究资产。
+3. 研究工作台已重构为资料管理与结果卡双栏，运行态、错误态、空态、结果态和移动端均有明确状态，不再显示资料勾选、全选工具条或内部确认卡。
+4. 浏览器回归已替换为聚焦测试：Mock 一键研究、轮询运行状态、结果预览、采用进入正文、1440px 与 390px 无横向溢出。测试全程不调用真实模型、检索或媒体接口。
+5. 本轮完成后的下一产品切片是正文创作：在已保存项目上下文和研究结果基础上，完善大纲、初稿、修改意见和候选采用闭环；配图、排版、审核仍保持真实未实现状态。
+
+验收命令：`npm test`、`npm run typecheck`、`npm run build`、`python C:\Users\Administrator\.agents\skills\webapp-testing\scripts\with_server.py --server "npm run dev:web" --port 5173 -- python tests/creative-workspace.e2e.py`、`git diff --check`。
+
 ## 2026-07-29 执行完成：来源筛选与事实核验
 
 1. 已完成迁移 `020_source_verification.sql`，为来源增加质量元数据和选择状态，新增 `project_source_verifications` 与 `RESEARCH_VERIFICATION` 产物。

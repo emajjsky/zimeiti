@@ -7,6 +7,7 @@ import { projectStageName, type ContentProject, type ContentVersion, type Platfo
 import type { CreativePlatform, CreativePlatformSkillMap, CreativeSkillDefinition, CreativeSkillDimension, CreativeSkillSelection, WritingBriefInput } from '../../domain/creative';
 import { CopyWorkspace } from './CopyWorkspace';
 import { PlanningWorkspace } from './PlanningWorkspace';
+import { ProjectAgent } from './ProjectAgent';
 import { ProjectMaterials } from './ProjectMaterials';
 
 const emptySelection: CreativeSkillSelection = { SUBJECT: '', CONTENT_TYPE: '', VOICE: '', LAYOUT: '', CHANNEL: '' };
@@ -163,7 +164,10 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
     </nav>
 
     {stage === 'planning' && <PlanningWorkspace project={project} onProjectChange={onProjectAccepted} onComplete={(next) => { onProjectAccepted(next); onStage('research'); }} />}
-    {stage === 'research' && <ProjectMaterials project={project} platforms={contentVersions.map((version) => version.platform)} overviewReady={Boolean(project.planningConfirmedAt) || project.stage !== 'PLANNING'} hasDraft={contentVersions.some((version) => Boolean(version.body.trim()) && (version.body.trim() !== project.coreViewpoint.trim() || version.title.trim() !== project.title.trim()))} onOpenAgentSettings={onOpenAgentSettings} onOpenSearchSettings={onOpenSearchSettings} />}
+    {stage === 'research' && <div className="project-research-layout">
+      <ProjectMaterials project={project} platforms={contentVersions.map((version) => version.platform)}/>
+      <ProjectAgent projectId={project.id} stage="RESEARCH" onArtifactAccepted={(_artifact, nextProject) => { if (!nextProject) return; onProjectAccepted(nextProject); onStage('master'); }} onOpenSettings={(target) => target === 'search' ? onOpenSearchSettings() : onOpenAgentSettings()}/>
+    </div>}
     {stage === 'master' && briefError && <div className="creative-stage-error"><CircleAlert size={18}/><span>{briefError}</span></div>}
     {stage === 'master' && copyPlatform && <CopyWorkspace project={project} brief={brief} skills={skills} activePlatform={copyPlatform} onPlatform={onPlatform} onProjectChange={onProjectAccepted} onSaveBrief={saveBrief} onSaveVersion={onSaveVersion} onOpenModelSettings={onOpenModelSettings} onOpenAgentSettings={onOpenAgentSettings} />}
     {stage === 'master' && !copyPlatform && <div className="creative-stage-empty"><h2>没有可写作的图文平台</h2><p>请先在规划中选择公众号、小红书、知乎或微博。</p></div>}
