@@ -171,6 +171,7 @@ with sync_playwright() as playwright:
     agent_contexts = {}
     prepared_agent_payloads = []
     prepared_source_payloads = []
+    prepared_verification_payloads = []
 
     page.on(
         "console",
@@ -444,6 +445,8 @@ with sync_playwright() as playwright:
                             "url": "https://example.com/official",
                             "source": "example.com",
                             "summary": "官方说明摘要",
+                            "metadata": {"relevanceScore": 0.92, "publishedAt": NOW, "language": "ZH", "sourceType": "OFFICIAL"},
+                            "selected": True,
                             "error": None,
                             "retrievedAt": NOW,
                         },
@@ -458,6 +461,8 @@ with sync_playwright() as playwright:
                             "url": None,
                             "source": "用户补充",
                             "summary": "上传自己的测试截图",
+                            "metadata": {"relevanceScore": None, "publishedAt": None, "language": "ZH", "sourceType": "USER"},
+                            "selected": False,
                             "error": None,
                             "retrievedAt": NOW,
                         },
@@ -488,6 +493,102 @@ with sync_playwright() as playwright:
                 {"id": "research-source-run-1", "status": "QUEUED", "jobId": "job-source-1"},
                 status=202,
             )
+
+        verification_prepare_match = re.fullmatch(
+            r"/api/v1/creative/projects/([^/]+)/research/verification/prepare", path
+        )
+        if verification_prepare_match and method == "POST":
+            project_id = verification_prepare_match.group(1)
+            payload = json.loads(request.post_data or "{}")
+            prepared_verification_payloads.append(payload)
+            current = agent_contexts[project_id]
+            for artifact in current["artifacts"]:
+                if artifact["id"] == payload["sourceArtifactId"]:
+                    for source in artifact["payload"]["sources"]:
+                        source["selected"] = source["id"] in payload["selectedSourceIds"]
+            run = {
+                "id": "source-verification-run-1",
+                "action": "SOURCE_VERIFICATION",
+                "status": "DRAFT",
+                "request": "核验研究事实",
+                "confirmation": {
+                    "model": "qwen-plus",
+                    "promptVersion": "1.0.0",
+                    "skillNames": [],
+                    "materialCount": len(payload["selectedSourceIds"]),
+                    "writeScope": "RESEARCH",
+                },
+                "createdAt": NOW,
+            }
+            agent_contexts[project_id] = {**current, "activeRun": run}
+            return json_response(route, run, status=201)
+
+        verification_confirm_match = re.fullmatch(
+            r"/api/v1/creative/source-verification-runs/([^/]+)/confirm", path
+        )
+        if verification_confirm_match and method == "POST":
+            project_id = "project-manual-1"
+            current = agent_contexts[project_id]
+            verification_artifact = {
+                "id": "research-verification-artifact-1",
+                "type": "RESEARCH_VERIFICATION",
+                "status": "CANDIDATE",
+                "platform": None,
+                "version": 1,
+                "parentArtifactId": None,
+                "payload": {
+                    "title": "事实核验结论",
+                    "summary": "免费版长期使用目前只有一个官方来源支持。",
+                    "sourceCount": 1,
+                    "confirmed": False,
+                    "claims": [{
+                        "claim": "免费版可长期使用",
+                        "status": "SINGLE_SOURCE",
+                        "explanation": "目前只有一条官方说明，仍需补充独立来源。",
+                        "evidence": [{
+                            "sourceId": "source-result-1",
+                            "relation": "SUPPORTS",
+                            "quote": "官方说明摘要",
+                            "note": "官方来源直接说明。",
+                            "title": "AI 工具官方说明",
+                            "url": "https://example.com/official",
+                            "source": "example.com",
+                        }],
+                    }],
+                },
+                "createdAt": NOW,
+                "acceptedAt": None,
+            }
+            verification_message = {
+                "id": "research-verification-message-1",
+                "role": "ASSISTANT",
+                "content": verification_artifact["payload"]["summary"],
+                "runId": "source-verification-run-1",
+                "stage": "RESEARCH",
+                "messageType": "ARTIFACT",
+                "artifactRefs": [verification_artifact["id"]],
+                "metadata": {"action": "SOURCE_VERIFICATION"},
+                "createdAt": NOW,
+            }
+            agent_contexts[project_id] = {
+                **current,
+                "activeRun": None,
+                "messages": [*current["messages"], verification_message],
+                "artifacts": [verification_artifact, *current["artifacts"]],
+            }
+            return json_response(route, {"id": "source-verification-run-1", "status": "QUEUED", "jobId": "job-verification-1"}, status=202)
+
+        verification_accept_match = re.fullmatch(
+            r"/api/v1/creative/research-verifications/([^/]+)/accept", path
+        )
+        if verification_accept_match and method == "POST":
+            project_id = "project-manual-1"
+            current = agent_contexts[project_id]
+            artifact = next(item for item in current["artifacts"] if item["id"] == verification_accept_match.group(1))
+            artifact["status"] = "ACCEPTED"
+            artifact["acceptedAt"] = NOW
+            artifact["payload"]["confirmed"] = True
+            return json_response(route, {"artifact": artifact})
 
         unexpected_api.append(f"{method} {path}")
         return json_response(
@@ -627,6 +728,7 @@ with sync_playwright() as playwright:
     page.reload()
     page.get_by_role("button", name="查看计划", exact=True).click()
     plan_dialog = page.get_by_role("dialog")
+    assert plan_dialog.locator(".verification-claim-list").count() == 0
     plan_dialog.get_by_role("button", name="准备查找资料", exact=True).click()
     source_confirmation = page.locator(".agent-confirmation")
     source_confirmation.get_by_text("查找研究来源", exact=True).wait_for()
@@ -666,12 +768,42 @@ with sync_playwright() as playwright:
     source_dialog.get_by_text("来源已保存，尚未完成事实核验。", exact=True).wait_for()
     source_dialog.get_by_text("AI 工具官方说明", exact=True).wait_for()
     source_dialog.get_by_text("补充实测截图", exact=True).wait_for()
+    source_dialog.get_by_text("官方", exact=True).wait_for()
+    captured_checkbox = source_dialog.get_by_role("checkbox", name="选择来源：AI 工具官方说明")
+    manual_checkbox = source_dialog.get_by_role("checkbox", name="选择来源：补充实测截图")
+    assert captured_checkbox.is_checked()
+    assert manual_checkbox.is_disabled()
+    source_dialog.get_by_role("button", name="清空", exact=True).click()
+    prepare_verification = source_dialog.get_by_role("button", name="准备事实核验", exact=True)
+    assert prepare_verification.is_disabled()
+    source_dialog.get_by_role("button", name="全选", exact=True).click()
+    assert captured_checkbox.is_checked() and not manual_checkbox.is_checked()
+    assert_no_overflow(page, "1440px 研究来源结果")
+    page.screenshot(path=ARTIFACTS / "research-sources-desktop.png", full_page=False)
     page.set_viewport_size({"width": 390, "height": 844})
     page.wait_for_timeout(100)
     assert_no_overflow(page, "390px 研究来源结果")
     page.screenshot(path=ARTIFACTS / "research-sources-mobile.png", full_page=True)
     page.set_viewport_size({"width": 1440, "height": 1000})
-    source_dialog.get_by_role("button", name="关闭", exact=True).click()
+    prepare_verification.click()
+    verification_confirmation = page.locator(".agent-confirmation")
+    verification_confirmation.get_by_text("核验研究事实", exact=True).wait_for()
+    assert verification_confirmation.get_by_text("qwen-plus", exact=True).count() == 1
+    assert verification_confirmation.get_by_text("1 条", exact=True).count() == 1
+    assert prepared_verification_payloads[-1] == {
+        "sourceArtifactId": "research-sources-artifact-1",
+        "selectedSourceIds": ["source-result-1"],
+    }
+    verification_confirmation.get_by_role("button", name="确认调用", exact=True).click()
+    page.get_by_text("核验结论", exact=True).wait_for()
+    page.get_by_role("button", name="查看核验", exact=True).click()
+    verification_dialog = page.get_by_role("dialog")
+    assert verification_dialog.locator(".research-plan-block").count() == 0
+    verification_dialog.get_by_text("单一来源", exact=True).wait_for()
+    verification_dialog.get_by_text("目前只有一条官方说明，仍需补充独立来源。", exact=True).wait_for()
+    verification_dialog.get_by_role("button", name="确认研究结论", exact=True).click()
+    assert verification_dialog.get_by_role("button", name="确认研究结论", exact=True).count() == 0
+    verification_dialog.get_by_role("button", name="关闭", exact=True).click()
     page.reload()
     page.get_by_role("button", name="查看来源", exact=True).wait_for()
 

@@ -20,7 +20,14 @@ const {
   manualSourceSnapshot,
   normalizeReadResult,
   normalizeSearchResults,
+  recommendSourceSelection,
 } = require('./services/project-research-sources.cjs');
+const {
+  SOURCE_VERIFICATION_VERSION,
+  buildSourceVerificationPrompt,
+  buildSourceVerificationRepairPrompt,
+  parseSourceVerification,
+} = require('./services/source-verification.cjs');
 const { createProjectAgentStore } = require('./services/project-agent.cjs');
 const { buildCopyPrompt, buildCopyRepairPrompt, mergeFactsToVerify, parseCopyOutput } = require('./services/project-copy-action.cjs');
 
@@ -37,6 +44,7 @@ async function processJob(queueJob) {
     if (queueJob.name === 'INTELLIGENCE_ANALYSIS') return await generateIntelligenceAnalysis({ jobId, workspaceId, runId: payload.runId });
     if (queueJob.name === 'PROJECT_RESEARCH_PLAN') return await generateProjectResearchPlan({ jobId, workspaceId, runId: payload.runId });
     if (queueJob.name === 'PROJECT_RESEARCH_SOURCES') return await generateProjectResearchSources({ jobId, workspaceId, runId: payload.runId });
+    if (queueJob.name === 'SOURCE_VERIFICATION') return await generateSourceVerification({ jobId, workspaceId, runId: payload.runId });
     if (queueJob.name === 'CREATIVE_OUTLINE') return await generateCreativeOutline({ jobId, workspaceId, runId: payload.runId });
     if (queueJob.name === 'CREATIVE_DRAFT') return await generateCreativeDraft({ jobId, workspaceId, runId: payload.runId });
     if (queueJob.name === 'PROJECT_COPY_ACTION') return await generateProjectCopyAction({ jobId, workspaceId, runId: payload.runId });
@@ -113,8 +121,8 @@ async function generateProjectResearchSources({ jobId, workspaceId, runId }) {
       for (const source of sources) {
         const inserted = await client.query(`INSERT INTO project_research_sources
           (workspace_id, project_id, source_run_id, action_index, action, purpose, target, status,
-           title, url, source_name, summary, error)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+           title, url, source_name, summary, metadata_json, selected, error)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, false, $14)
           RETURNING id, retrieved_at`, [
           workspaceId,
           snapshot.projectId,
@@ -128,17 +136,22 @@ async function generateProjectResearchSources({ jobId, workspaceId, runId }) {
           source.url,
           source.source,
           source.summary,
+          JSON.stringify(source.metadata ?? {}),
           source.error,
         ]);
-        savedSources.push({ ...source, id: inserted.rows[0].id, retrievedAt: inserted.rows[0].retrieved_at });
+        savedSources.push({ ...source, id: inserted.rows[0].id, selected: false, retrievedAt: inserted.rows[0].retrieved_at });
       }
+      const recommendedIds = recommendSourceSelection(savedSources);
+      if (recommendedIds.length) await client.query('UPDATE project_research_sources SET selected = true WHERE workspace_id = $1 AND id = ANY($2::uuid[])', [workspaceId, recommendedIds]);
+      const recommended = new Set(recommendedIds);
+      const sourcesWithSelection = savedSources.map((source) => ({ ...source, selected: recommended.has(source.id) }));
       const payload = {
         title: '研究来源',
         summary,
         notice: '来源已保存，尚未完成事实核验。',
         verified: false,
         counts,
-        sources: savedSources,
+        sources: sourcesWithSelection,
       };
       const artifact = await projectAgentStore.createArtifact(client, {
         workspaceId,
@@ -187,6 +200,78 @@ async function generateProjectResearchSources({ jobId, workspaceId, runId }) {
       await client.query(`INSERT INTO api_usage_logs
         (workspace_id, job_id, provider, model, operation, status, duration_ms, error)
         VALUES ($1, $2, 'UNKNOWN', NULL, 'SOURCE_DISCOVERY', 'FAILED', $3, $4)`, [workspaceId, jobId, Date.now() - startedAt, message.slice(0, 2_000)]);
+    });
+    throw error;
+  }
+}
+
+async function generateSourceVerification({ jobId, workspaceId, runId }) {
+  const startedAt = Date.now();
+  let route;
+  let inputTokens;
+  let outputTokens;
+  try {
+    const runResult = await query(`SELECT id, source_snapshot_json, input_json FROM generation_runs
+      WHERE id = $1 AND workspace_id = $2 AND action_version_id = $3 AND status = 'QUEUED'`, [runId, workspaceId, SOURCE_VERIFICATION_VERSION]);
+    if (!runResult.rowCount) throw new Error('事实核验任务当前不能执行。');
+    await query("UPDATE generation_runs SET status = 'RUNNING', started_at = now() WHERE id = $1 AND workspace_id = $2", [runId, workspaceId]);
+    const snapshot = runResult.rows[0].source_snapshot_json;
+    route = runResult.rows[0].input_json.route;
+    const connectionInput = await textConnectionInput(workspaceId, route);
+    const prompt = buildSourceVerificationPrompt({ claims: snapshot.claims, sources: snapshot.sources, template: runResult.rows[0].input_json.template?.body });
+    const first = await textRunner.runText({ provider: route.provider, model: route.model, system: prompt.system, message: prompt.message, ...connectionInput });
+    inputTokens = first.inputTokens;
+    outputTokens = first.outputTokens;
+    let output;
+    try { output = parseSourceVerification(first.content, { claims: snapshot.claims, sources: snapshot.sources }); }
+    catch (error) {
+      const validationError = error instanceof Error ? error.message : '输出不符合事实核验 JSON 契约。';
+      const repaired = await textRunner.runText({ provider: route.provider, model: route.model, system: buildSourceVerificationRepairPrompt(prompt.system, validationError), message: first.content, ...connectionInput });
+      inputTokens = (inputTokens ?? 0) + (repaired.inputTokens ?? 0);
+      outputTokens = (outputTokens ?? 0) + (repaired.outputTokens ?? 0);
+      output = parseSourceVerification(repaired.content, { claims: snapshot.claims, sources: snapshot.sources });
+    }
+    const payload = { title: '事实核验结论', ...output, sourceCount: snapshot.sources.length, confirmed: false };
+    const saved = await transaction(async (client) => {
+      await client.query("UPDATE generation_runs SET status = 'SUCCEEDED', output_json = $2, usage_json = $3, completed_at = now() WHERE id = $1", [runId, JSON.stringify(payload), JSON.stringify({ inputTokens, outputTokens })]);
+      const artifact = await projectAgentStore.createArtifact(client, {
+        workspaceId,
+        projectId: snapshot.projectId,
+        type: 'RESEARCH_VERIFICATION',
+        stage: 'RESEARCH',
+        status: 'CANDIDATE',
+        actionRunId: runId,
+        title: '事实核验结论',
+        metadata: { action: 'SOURCE_VERIFICATION', payload },
+      });
+      const verification = await client.query(`INSERT INTO project_source_verifications
+        (workspace_id, project_id, source_run_id, generation_run_id, artifact_id, output_json)
+        VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`, [workspaceId, snapshot.projectId, snapshot.sourceRunId, runId, artifact.id, JSON.stringify(payload)]);
+      const message = await client.query(`INSERT INTO project_agent_messages
+        (workspace_id, project_id, action_run_id, role, content, stage, message_type, artifact_refs_json, metadata_json)
+        VALUES ($1, $2, $3, 'ASSISTANT', $4, 'RESEARCH', 'ARTIFACT', $5, $6) RETURNING id`, [
+        workspaceId,
+        snapshot.projectId,
+        runId,
+        output.summary,
+        JSON.stringify([artifact.id]),
+        JSON.stringify({ action: 'SOURCE_VERIFICATION', model: route.model, status: 'CANDIDATE' }),
+      ]);
+      await client.query('UPDATE project_artifacts SET created_by_message_id = $1 WHERE id = $2 AND workspace_id = $3', [message.rows[0].id, artifact.id, workspaceId]);
+      await client.query("UPDATE jobs SET status = 'SUCCEEDED', result_json = $2, completed_at = now() WHERE id = $1", [jobId, JSON.stringify({ artifactId: artifact.id, verificationId: verification.rows[0].id })]);
+      await client.query(`INSERT INTO api_usage_logs
+        (workspace_id, job_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens)
+        VALUES ($1, $2, $3, $4, 'SOURCE_VERIFICATION', 'SUCCESS', $5, $6, $7)`, [workspaceId, jobId, route.provider, route.model, Date.now() - startedAt, inputTokens ?? null, outputTokens ?? null]);
+      return { artifactId: artifact.id, verificationId: verification.rows[0].id };
+    });
+    return saved;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '事实核验失败。';
+    await transaction(async (client) => {
+      await client.query("UPDATE generation_runs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1 AND workspace_id = $3 AND status <> 'CANCELLED'", [runId, message.slice(0, 2_000), workspaceId]);
+      await client.query(`INSERT INTO api_usage_logs
+        (workspace_id, job_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens, error)
+        VALUES ($1, $2, $3, $4, 'SOURCE_VERIFICATION', 'FAILED', $5, $6, $7, $8)`, [workspaceId, jobId, route?.provider ?? 'UNKNOWN', route?.model ?? null, Date.now() - startedAt, inputTokens ?? null, outputTokens ?? null, message.slice(0, 2_000)]);
     });
     throw error;
   }

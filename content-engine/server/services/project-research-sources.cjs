@@ -52,8 +52,52 @@ function normalizeCaptured(action, result) {
     url,
     source: String(result?.source ?? new URL(url).hostname).trim().slice(0, 160),
     summary: String(result?.summary ?? '').trim().slice(0, 2_000),
+    metadata: sourceMetadata(result, url),
     error: null,
   };
+}
+
+function sourceMetadata(result, url) {
+  const score = Number(result?.relevanceScore);
+  const publishedAt = validDate(result?.publishedAt);
+  const text = `${String(result?.title ?? '')} ${String(result?.summary ?? '')}`;
+  const language = String(result?.language ?? '').toUpperCase();
+  return {
+    relevanceScore: Number.isFinite(score) ? Math.max(0, Math.min(1, score)) : null,
+    publishedAt,
+    language: ['ZH', 'EN'].includes(language) ? language : /[\u3400-\u9fff]/.test(text) ? 'ZH' : 'EN',
+    sourceType: sourceTypeForUrl(url),
+  };
+}
+
+function sourceTypeForUrl(value) {
+  const host = new URL(value).hostname.toLowerCase();
+  if (host.endsWith('.gov.cn') || host === 'gov.cn' || host.endsWith('.gov') || host.endsWith('.edu') || host.endsWith('.edu.cn')) return 'OFFICIAL';
+  if (host === 'mp.weixin.qq.com' || host.includes('toutiao.com') || host === 'x.com' || host.endsWith('.x.com')) return 'PUBLISHING';
+  if (/news|finance|cctv|xinhuanet|people|cnstock|stcn|yicai|caixin|sina/.test(host)) return 'NEWS';
+  return 'WEB';
+}
+
+function validDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function recommendSourceSelection(sources, limit = 8) {
+  return (Array.isArray(sources) ? sources : [])
+    .filter((source) => source?.status === 'CAPTURED' && source?.id)
+    .sort((left, right) => sourceRank(right) - sourceRank(left))
+    .slice(0, Math.max(0, limit))
+    .map((source) => source.id);
+}
+
+function sourceRank(source) {
+  const metadata = source?.metadata ?? {};
+  const relevance = Number.isFinite(Number(metadata.relevanceScore)) ? Number(metadata.relevanceScore) : 0;
+  const typeBonus = metadata.sourceType === 'OFFICIAL' ? 0.2 : metadata.sourceType === 'NEWS' ? 0.08 : 0;
+  const languageBonus = metadata.language === 'ZH' ? 0.03 : 0;
+  return relevance + typeBonus + languageBonus;
 }
 
 function manualSourceSnapshot(action) {
@@ -67,6 +111,7 @@ function manualSourceSnapshot(action) {
     url: null,
     source: '用户补充',
     summary: action.target,
+    metadata: { relevanceScore: null, publishedAt: null, language: 'ZH', sourceType: 'USER' },
     error: null,
   };
 }
@@ -82,6 +127,7 @@ function failedSourceSnapshot(action, error) {
     url: action.action === 'READ_LINK' ? safeUrl(action.target) : null,
     source: action.action === 'SEARCH_WEB' ? '网页搜索' : '公开网页',
     summary: '',
+    metadata: { relevanceScore: null, publishedAt: null, language: 'ZH', sourceType: 'WEB' },
     error: (error instanceof Error ? error.message : String(error || '来源读取失败。')).slice(0, 2_000),
   };
 }
@@ -137,6 +183,7 @@ module.exports = {
   manualSourceSnapshot,
   normalizeReadResult,
   normalizeSearchResults,
+  recommendSourceSelection,
   researchSourceActions,
   sourceRunView,
 };

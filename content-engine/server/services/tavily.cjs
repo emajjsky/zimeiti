@@ -36,7 +36,8 @@ function tavilyResultToItem(result, input, id = crypto.randomUUID()) {
   if (!title) return null;
   const summary = String(result?.content ?? '').trim().slice(0, 500);
   const classification = classifyIntelligence({ title, summary, fallbackCategory: String(input?.category || '其它').trim() || '其它' });
-  return { id, title, summary, url: url.toString(), source: sourceName(url), category: classification.category, keywords: classification.keywords, publishedAt: result?.published_date || new Date().toISOString(), heat: 0, trust: '待核验', captureMethod: 'SEARCH', language: /[\u3400-\u9fff]/.test(`${title} ${summary}`) ? 'zh' : 'en' };
+  const relevanceScore = Number(result?.score);
+  return { id, title, summary, url: url.toString(), source: sourceName(url), category: classification.category, keywords: classification.keywords, publishedAt: result?.published_date || new Date().toISOString(), relevanceScore: Number.isFinite(relevanceScore) ? relevanceScore : undefined, heat: 0, trust: '待核验', captureMethod: 'SEARCH', language: /[\u3400-\u9fff]/.test(`${title} ${summary}`) ? 'zh' : 'en' };
 }
 
 module.exports = { searchTavily, tavilyResultToItem };

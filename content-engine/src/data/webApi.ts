@@ -95,6 +95,10 @@ export const webCreative = {
   prepareResearchSources: (projectId: string, planArtifactId: string) => request<ProjectAgentRun>(`/creative/projects/${encodeURIComponent(projectId)}/research/sources/prepare`, { method: 'POST', body: JSON.stringify({ planArtifactId }) }),
   confirmResearchSources: (runId: string) => request<{ id: string; status: 'QUEUED'; jobId: string }>(`/creative/research-source-runs/${encodeURIComponent(runId)}/confirm`, { method: 'POST', body: '{}' }),
   cancelResearchSources: (runId: string) => request<ProjectAgentRun>(`/creative/research-source-runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST', body: '{}' }),
+  prepareSourceVerification: (projectId: string, sourceArtifactId: string, selectedSourceIds: string[]) => request<ProjectAgentRun>(`/creative/projects/${encodeURIComponent(projectId)}/research/verification/prepare`, { method: 'POST', body: JSON.stringify({ sourceArtifactId, selectedSourceIds }) }),
+  confirmSourceVerification: (runId: string) => request<{ id: string; status: 'QUEUED'; jobId: string }>(`/creative/source-verification-runs/${encodeURIComponent(runId)}/confirm`, { method: 'POST', body: '{}' }),
+  cancelSourceVerification: (runId: string) => request<ProjectAgentRun>(`/creative/source-verification-runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST', body: '{}' }),
+  acceptSourceVerification: (artifactId: string) => request<{ artifact: ProjectArtifact }>(`/creative/research-verifications/${encodeURIComponent(artifactId)}/accept`, { method: 'POST', body: '{}' }),
   acceptArtifact: (artifactId: string, selectedTitle?: string) => request<{ artifact: ProjectArtifact; project: ContentProject }>(`/creative/project-artifacts/${encodeURIComponent(artifactId)}/accept`, { method: 'POST', body: JSON.stringify(selectedTitle ? { selectedTitle } : {}) }),
   rejectArtifact: (artifactId: string) => request<{ id: string; status: 'REJECTED' }>(`/creative/project-artifacts/${encodeURIComponent(artifactId)}/reject`, { method: 'POST', body: '{}' }),
   enableProjectPlatform: (projectId: string, platform: CreativePlatform) => request<{ project: ContentProject; platform: CreativePlatform; created: boolean }>(`/creative/projects/${encodeURIComponent(projectId)}/platforms/${encodeURIComponent(platform)}`, { method: 'POST', body: '{}' }),
@@ -138,6 +142,7 @@ export type AnalysisRun = Omit<AnalysisPreparation, 'status'> & { status: 'DRAFT
 export type CredentialStatus = { provider: 'BAILIAN' | 'TAVILY'; configured: boolean; status: 'UNCONFIGURED' | 'UNVERIFIED' | 'READY' | 'ERROR'; updatedAt?: string | null; lastTestedAt?: string | null; lastError?: string | null };
 export type PromptTemplateScope =
   | 'INTELLIGENCE_ANALYSIS'
+  | 'SOURCE_VERIFICATION'
   | 'CREATIVE_OUTLINE_WECHAT'
   | 'CREATIVE_OUTLINE_XIAOHONGSHU'
   | 'CREATIVE_OUTLINE_ZHIHU'

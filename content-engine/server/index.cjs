@@ -30,6 +30,7 @@ const { createProjectAgentStore, artifactView, runView } = require('./services/p
 const { saveProjectUpload, removeProjectUpload, openProjectUpload, readProjectUploadText } = require('./services/projectUploadStorage.cjs');
 const { PROJECT_RESEARCH_ACTION_VERSION, PROJECT_RESEARCH_SCOPE, researchRunView, researchPlanView } = require('./services/project-research.cjs');
 const { PROJECT_RESEARCH_SOURCES_VERSION, researchSourceActions } = require('./services/project-research-sources.cjs');
+const { SOURCE_VERIFICATION_SCOPE, SOURCE_VERIFICATION_VERSION, defaultSourceVerificationTemplate, validateSourceVerificationTemplate } = require('./services/source-verification.cjs');
 const { OUTLINE_ACTION_VERSION, OUTLINE_SCOPE, OUTLINE_TEMPLATE_SCOPES, outlineTemplateScope, validateOutlineTemplate, defaultOutlineTemplate, outlineCandidateView } = require('./services/creative-outline.cjs');
 const { DRAFT_ACTION_VERSION, DRAFT_SCOPE, DRAFT_TEMPLATE_SCOPES, draftTemplateScope, validateDraftTemplate, defaultDraftTemplate, draftCandidateView } = require('./services/creative-draft.cjs');
 const {
@@ -47,7 +48,7 @@ const {
 
 const app = Fastify({ logger: true, bodyLimit: 5 * 1024 * 1024 });
 const credentials = new Set(['TAVILY', 'BAILIAN']);
-const modelTasks = ['INTELLIGENCE_ANALYSIS', 'TOPIC_RECOMMENDATION', 'CONTENT_WRITING', 'CONTENT_REWRITE', 'CONTENT_LAYOUT', 'TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE', 'SPEECH_SYNTHESIS', 'SPEECH_RECOGNITION', 'TEXT_TO_VIDEO', 'IMAGE_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO', 'REFERENCE_TO_VIDEO', 'VIDEO_EDIT'];
+const modelTasks = ['INTELLIGENCE_ANALYSIS', 'SOURCE_VERIFICATION', 'TOPIC_RECOMMENDATION', 'CONTENT_WRITING', 'CONTENT_REWRITE', 'CONTENT_LAYOUT', 'TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE', 'SPEECH_SYNTHESIS', 'SPEECH_RECOGNITION', 'TEXT_TO_VIDEO', 'IMAGE_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO', 'REFERENCE_TO_VIDEO', 'VIDEO_EDIT'];
 const externalProviders = new Set(['DASHSCOPE', 'SILICONFLOW', 'VOLCENGINE_ARK', 'KIMI', 'ZHIPU', 'OPENAI', 'OPENAI_COMPATIBLE']);
 const creativePlatform = z.enum(['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO']);
 const analysisPlatform = z.enum(['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO', 'VIDEO_CHANNEL']);
@@ -75,6 +76,7 @@ const createProjectInput = z.object({
   targetPlatforms: z.array(analysisPlatform).max(5).default([]),
 });
 const templateStore = createTemplateStore({ query }, {
+  [SOURCE_VERIFICATION_SCOPE]: { defaultTemplate: defaultSourceVerificationTemplate, validateTemplate: validateSourceVerificationTemplate },
   [OUTLINE_TEMPLATE_SCOPES.WECHAT]: { defaultTemplate: () => defaultOutlineTemplate('WECHAT'), validateTemplate: validateOutlineTemplate },
   [OUTLINE_TEMPLATE_SCOPES.XIAOHONGSHU]: { defaultTemplate: () => defaultOutlineTemplate('XIAOHONGSHU'), validateTemplate: validateOutlineTemplate },
   [OUTLINE_TEMPLATE_SCOPES.ZHIHU]: { defaultTemplate: () => defaultOutlineTemplate('ZHIHU'), validateTemplate: validateOutlineTemplate },
@@ -395,7 +397,7 @@ app.get('/api/v1/models/usage', { preHandler: authenticate }, async (request) =>
 
 function promptTemplateScope(value) {
   const scope = String(value || '');
-  const supported = [ANALYSIS_SCOPE, ...Object.values(OUTLINE_TEMPLATE_SCOPES), ...Object.values(DRAFT_TEMPLATE_SCOPES), ...Object.values(REVISION_TEMPLATE_SCOPES)];
+  const supported = [ANALYSIS_SCOPE, SOURCE_VERIFICATION_SCOPE, ...Object.values(OUTLINE_TEMPLATE_SCOPES), ...Object.values(DRAFT_TEMPLATE_SCOPES), ...Object.values(REVISION_TEMPLATE_SCOPES)];
   if (!supported.includes(scope)) { const error = new Error('当前提示词模板尚未接入执行器。'); error.statusCode = 400; throw error; }
   return scope;
 }
@@ -1042,6 +1044,128 @@ app.post('/api/v1/creative/research-source-runs/:id/cancel', { preHandler: authe
   if (!result.rowCount) { const error = new Error('该来源任务当前不能取消。'); error.statusCode = 409; throw error; }
   await query("UPDATE jobs SET status = 'CANCELLED', completed_at = now() WHERE workspace_id = $1 AND payload_json->>'runId' = $2 AND status = 'PENDING'", [workspace.id, runId]);
   return runView(result.rows[0]);
+});
+
+app.post('/api/v1/creative/projects/:projectId/research/verification/prepare', { preHandler: authenticate }, async (request, reply) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const input = z.object({
+    sourceArtifactId: z.string().uuid(),
+    selectedSourceIds: z.array(z.string().uuid()).min(1).max(20),
+  }).parse(request.body ?? {});
+  const selectedSourceIds = [...new Set(input.selectedSourceIds)];
+  const workspace = await currentWorkspace(request.user.sub);
+  await creativeProject(workspace.id, projectId);
+  const sourceRunResult = await query(`SELECT sr.id, sr.artifact_id, p.output_json AS plan_output, a.metadata_json
+    FROM project_research_source_runs sr
+    JOIN project_research_plans p ON p.id = sr.research_plan_id
+    JOIN project_artifacts a ON a.id = sr.artifact_id
+    WHERE sr.workspace_id = $1 AND sr.project_id = $2 AND sr.artifact_id = $3`, [workspace.id, projectId, input.sourceArtifactId]);
+  if (!sourceRunResult.rowCount) { const error = new Error('未找到这组研究来源。'); error.statusCode = 404; throw error; }
+  const sourceRun = sourceRunResult.rows[0];
+  const sourceRows = await query(`SELECT id, title, url, source_name, summary, metadata_json, status, selected, retrieved_at
+    FROM project_research_sources WHERE workspace_id = $1 AND project_id = $2 AND source_run_id = $3
+    ORDER BY action_index, retrieved_at`, [workspace.id, projectId, sourceRun.id]);
+  const selectedSet = new Set(selectedSourceIds);
+  const selectedSources = sourceRows.rows.filter((row) => selectedSet.has(row.id) && row.status === 'CAPTURED').map((row) => ({
+    id: row.id,
+    title: row.title,
+    url: row.url,
+    source: row.source_name,
+    summary: row.summary,
+    metadata: row.metadata_json ?? {},
+    retrievedAt: row.retrieved_at,
+  }));
+  if (selectedSources.length !== selectedSourceIds.length) { const error = new Error('选择中包含不存在或不可核验的来源，请刷新后重试。'); error.statusCode = 400; throw error; }
+  const claims = Array.isArray(sourceRun.plan_output?.claims) ? sourceRun.plan_output.claims : [];
+  if (!claims.length) { const error = new Error('研究计划没有待核验主张，请先重新制定研究计划。'); error.statusCode = 400; throw error; }
+  const [route, template] = await Promise.all([
+    textTaskRoute(workspace.id, SOURCE_VERIFICATION_SCOPE, '事实核验'),
+    templateStore.get(workspace.id, SOURCE_VERIFICATION_SCOPE),
+  ]);
+  const artifactPayload = sourceRun.metadata_json?.payload ?? {};
+  const artifactSources = Array.isArray(artifactPayload.sources) ? artifactPayload.sources.map((source) => ({ ...source, selected: selectedSet.has(source.id) })) : [];
+  const run = await transaction(async (client) => {
+    const active = await client.query(`SELECT 1 FROM generation_runs WHERE workspace_id = $1
+      AND source_snapshot_json->>'projectId' = $2 AND action_version_id = $3 AND status IN ('QUEUED', 'RUNNING')`, [workspace.id, projectId, SOURCE_VERIFICATION_VERSION]);
+    if (active.rowCount) { const error = new Error('当前已有事实核验任务正在执行。'); error.statusCode = 409; throw error; }
+    await client.query(`UPDATE generation_runs SET status = 'CANCELLED', completed_at = now()
+      WHERE workspace_id = $1 AND source_snapshot_json->>'projectId' = $2 AND action_version_id = $3 AND status = 'DRAFT'`, [workspace.id, projectId, SOURCE_VERIFICATION_VERSION]);
+    await client.query('UPDATE project_research_sources SET selected = (id = ANY($4::uuid[])) WHERE workspace_id = $1 AND project_id = $2 AND source_run_id = $3', [workspace.id, projectId, sourceRun.id, selectedSourceIds]);
+    await client.query(`UPDATE project_artifacts SET metadata_json = jsonb_set(metadata_json, '{payload,sources}', $2::jsonb, true), updated_at = now()
+      WHERE id = $1 AND workspace_id = $3`, [input.sourceArtifactId, JSON.stringify(artifactSources), workspace.id]);
+    const created = await client.query(`INSERT INTO generation_runs
+      (workspace_id, action_version_id, status, source_snapshot_json, input_json, model, prompt_version, estimated_cost)
+      VALUES ($1, $2, 'DRAFT', $3, $4, $5, '1.0.0', 'null'::jsonb) RETURNING *`, [
+      workspace.id,
+      SOURCE_VERIFICATION_VERSION,
+      JSON.stringify({ projectId, sourceRunId: sourceRun.id, sourceArtifactId: input.sourceArtifactId, request: '核验研究事实', stage: 'RESEARCH', claims, sources: selectedSources, materials: selectedSources }),
+      JSON.stringify({ route, template: { id: template.id, version: template.version, body: template.body } }),
+      route.model,
+    ]);
+    await client.query(`INSERT INTO project_agent_messages
+      (workspace_id, project_id, action_run_id, role, content, stage, message_type, metadata_json)
+      VALUES ($1, $2, $3, 'USER', '核验研究事实', 'RESEARCH', 'MESSAGE', '{}'::jsonb),
+             ($1, $2, $3, 'ASSISTANT', '事实核验已准备，确认后调用模型。', 'RESEARCH', 'CONFIRMATION', $4)`, [
+      workspace.id,
+      projectId,
+      created.rows[0].id,
+      JSON.stringify({ action: 'SOURCE_VERIFICATION', sourceCount: selectedSources.length, model: route.model }),
+    ]);
+    return created.rows[0];
+  });
+  reply.code(201).send(runView(run));
+});
+
+app.post('/api/v1/creative/source-verification-runs/:id/confirm', { preHandler: authenticate }, async (request, reply) => {
+  const runId = z.string().uuid().parse(request.params.id);
+  const workspace = await currentWorkspace(request.user.sub);
+  const prepared = await transaction(async (client) => {
+    const run = await client.query(`UPDATE generation_runs SET status = 'QUEUED'
+      WHERE id = $1 AND workspace_id = $2 AND action_version_id = $3 AND status = 'DRAFT' RETURNING id`, [runId, workspace.id, SOURCE_VERIFICATION_VERSION]);
+    if (!run.rowCount) { const error = new Error('该事实核验任务当前不能确认。'); error.statusCode = 409; throw error; }
+    const job = await client.query("INSERT INTO jobs (workspace_id, job_type, payload_json) VALUES ($1, 'SOURCE_VERIFICATION', $2) RETURNING *", [workspace.id, JSON.stringify({ runId })]);
+    return job.rows[0];
+  });
+  try { await enqueue(prepared); }
+  catch (error) {
+    const message = error instanceof Error ? error.message : '任务入队失败。';
+    await query("UPDATE generation_runs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1", [runId, message.slice(0, 2_000)]);
+    await query("UPDATE jobs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1", [prepared.id, message.slice(0, 2_000)]);
+    throw error;
+  }
+  reply.code(202).send({ id: runId, status: 'QUEUED', jobId: prepared.id });
+});
+
+app.post('/api/v1/creative/source-verification-runs/:id/cancel', { preHandler: authenticate }, async (request) => {
+  const runId = z.string().uuid().parse(request.params.id);
+  const workspace = await currentWorkspace(request.user.sub);
+  const result = await query(`UPDATE generation_runs SET status = 'CANCELLED', completed_at = now()
+    WHERE id = $1 AND workspace_id = $2 AND action_version_id = $3 AND status IN ('DRAFT', 'QUEUED') RETURNING *`, [runId, workspace.id, SOURCE_VERIFICATION_VERSION]);
+  if (!result.rowCount) { const error = new Error('该事实核验任务当前不能取消。'); error.statusCode = 409; throw error; }
+  await query("UPDATE jobs SET status = 'CANCELLED', completed_at = now() WHERE workspace_id = $1 AND payload_json->>'runId' = $2 AND status = 'PENDING'", [workspace.id, runId]);
+  return runView(result.rows[0]);
+});
+
+app.post('/api/v1/creative/research-verifications/:artifactId/accept', { preHandler: authenticate }, async (request) => {
+  const artifactId = z.string().uuid().parse(request.params.artifactId);
+  const workspace = await currentWorkspace(request.user.sub);
+  return transaction(async (client) => {
+    const result = await client.query(`SELECT a.*, v.id AS verification_id, v.output_json
+      FROM project_artifacts a JOIN project_source_verifications v ON v.artifact_id = a.id
+      WHERE a.id = $1 AND a.workspace_id = $2 AND a.artifact_type = 'RESEARCH_VERIFICATION' AND a.status = 'CANDIDATE'
+      FOR UPDATE OF a`, [artifactId, workspace.id]);
+    if (!result.rowCount) { const error = new Error('该核验结论当前不能确认。'); error.statusCode = 409; throw error; }
+    const artifact = result.rows[0];
+    await client.query(`UPDATE project_artifacts SET status = 'REJECTED', updated_at = now()
+      WHERE workspace_id = $1 AND project_id = $2 AND artifact_type = 'RESEARCH_VERIFICATION' AND status = 'ACCEPTED' AND id <> $3`, [workspace.id, artifact.project_id, artifact.id]);
+    const accepted = await client.query("UPDATE project_artifacts SET status = 'ACCEPTED', accepted_at = now(), updated_at = now() WHERE id = $1 RETURNING *", [artifact.id]);
+    await client.query('UPDATE project_source_verifications SET confirmed_at = now() WHERE id = $1', [artifact.verification_id]);
+    const message = await client.query(`INSERT INTO project_agent_messages
+      (workspace_id, project_id, role, content, stage, message_type, artifact_refs_json, metadata_json)
+      VALUES ($1, $2, 'ASSISTANT', '研究结论已确认。', 'RESEARCH', 'SYSTEM_EVENT', $3, $4) RETURNING id`, [workspace.id, artifact.project_id, JSON.stringify([artifact.id]), JSON.stringify({ action: 'SOURCE_VERIFICATION_ACCEPTED' })]);
+    await projectAgentStore.upsertStageSummary(client, { workspaceId: workspace.id, projectId: artifact.project_id, stage: 'RESEARCH', summary: artifact.output_json.summary, throughMessageId: message.rows[0].id });
+    return { artifact: artifactView({ ...accepted.rows[0], payload_json: artifact.output_json, version_number: 1 }) };
+  });
 });
 
 app.get('/api/v1/creative/projects/:projectId/research', { preHandler: authenticate }, async (request) => {

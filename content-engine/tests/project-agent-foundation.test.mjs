@@ -1,7 +1,21 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
-import { createProjectAgentStore } from '../server/services/project-agent.cjs';
+import { createProjectAgentStore, runView } from '../server/services/project-agent.cjs';
+
+test('Agent 确认卡保留语义化提示词版本', () => {
+  const view = runView({
+    id: 'run-1',
+    action_version_id: 'source-verification:1.0.0',
+    status: 'DRAFT',
+    source_snapshot_json: { projectId: 'project-1', materials: [] },
+    input_json: { route: { model: 'qwen-plus' } },
+    model: 'qwen-plus',
+    prompt_version: '1.0.0',
+    created_at: '2026-07-29T00:00:00.000Z',
+  });
+  assert.equal(view.confirmation.promptVersion, '1.0.0');
+});
 
 test('015 建立通用 Agent、阶段摘要和四平台产物', () => {
   const migration = fs.readFileSync(new URL('../server/migrations/015_universal_project_agent.sql', import.meta.url), 'utf8');

@@ -2,11 +2,12 @@ import { FilePenLine, LoaderCircle, RotateCcw, Save } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { webModels, type PromptTemplate, type PromptTemplateScope } from '../../data/webApi';
 
-type PromptTask = 'ANALYSIS' | 'OUTLINE' | 'DRAFT' | 'REVISION';
+type PromptTask = 'ANALYSIS' | 'VERIFICATION' | 'OUTLINE' | 'DRAFT' | 'REVISION';
 type PromptPlatform = 'WECHAT' | 'XIAOHONGSHU' | 'ZHIHU' | 'WEIBO';
 
 const taskTabs: { id: PromptTask; label: string }[] = [
   { id: 'ANALYSIS', label: '热点分析' },
+  { id: 'VERIFICATION', label: '事实核验' },
   { id: 'OUTLINE', label: '生成大纲' },
   { id: 'DRAFT', label: '生成初稿' },
   { id: 'REVISION', label: '修改文案' },
@@ -23,6 +24,7 @@ const analysisVariables = ['{{title}}', '{{summary}}', '{{source}}', '{{publishe
 
 function scopeFor(task: PromptTask, platform: PromptPlatform): PromptTemplateScope {
   if (task === 'ANALYSIS') return 'INTELLIGENCE_ANALYSIS';
+  if (task === 'VERIFICATION') return 'SOURCE_VERIFICATION';
   return `CREATIVE_${task}_${platform}` as PromptTemplateScope;
 }
 
@@ -41,7 +43,7 @@ export function PromptTemplateSettings() {
   const dirty = Boolean(template && body !== template.body);
   const taskLabel = taskTabs.find((item) => item.id === task)?.label ?? '';
   const platformLabel = platforms.find((item) => item.id === platform)?.label ?? '';
-  const editorTitle = task === 'ANALYSIS' ? taskLabel : `${taskLabel} · ${platformLabel}`;
+  const editorTitle = ['ANALYSIS', 'VERIFICATION'].includes(task) ? taskLabel : `${taskLabel} · ${platformLabel}`;
   const variables = useMemo(() => task === 'ANALYSIS' ? analysisVariables : [], [task]);
 
   useEffect(() => {
@@ -109,7 +111,7 @@ export function PromptTemplateSettings() {
     <nav className="prompt-template-tabs" aria-label="提示词任务">
       {taskTabs.map((item) => <button type="button" key={item.id} className={task === item.id ? 'active' : ''} onClick={() => changeTask(item.id)}>{item.label}</button>)}
     </nav>
-    {task !== 'ANALYSIS' && <nav className="prompt-platform-tabs" aria-label="目标平台">
+    {!['ANALYSIS', 'VERIFICATION'].includes(task) && <nav className="prompt-platform-tabs" aria-label="目标平台">
       {platforms.map((item) => <button type="button" key={item.id} className={platform === item.id ? 'active' : ''} onClick={() => changePlatform(item.id)}>{item.label}</button>)}
     </nav>}
     <header className="prompt-template-head"><div><FilePenLine size={19}/><b>{editorTitle}</b></div>{template && <small>V{template.version} · {template.source === 'DEFAULT' ? '默认' : '自定义'}{dirty ? ' · 未保存' : ''}</small>}</header>

@@ -48,7 +48,7 @@ export type ProjectAgentStage = 'RESEARCH' | 'COPY' | 'VISUAL' | 'LAYOUT' | 'REV
 export type ProjectAgentMessageType = 'MESSAGE' | 'CONFIRMATION' | 'RUN_STATUS' | 'ARTIFACT' | 'SYSTEM_EVENT';
 export type ProjectAgentHistory = 'CURRENT' | 'ALL';
 export type CopyAction = 'GENERATE_OUTLINE' | 'GENERATE_DRAFT' | 'POLISH_EXISTING_DRAFT' | 'RESTRUCTURE_DRAFT' | 'EXPAND_DRAFT' | 'SHORTEN_DRAFT' | 'REVISE_SELECTION' | 'ADAPT_PLATFORM';
-export type ProjectArtifactType = 'RESEARCH_PLAN' | 'RESEARCH_SOURCES' | 'OUTLINE' | 'CONTENT_MASTER' | 'PLATFORM_COPY';
+export type ProjectArtifactType = 'RESEARCH_PLAN' | 'RESEARCH_SOURCES' | 'RESEARCH_VERIFICATION' | 'OUTLINE' | 'CONTENT_MASTER' | 'PLATFORM_COPY';
 export type ProjectArtifactStatus = 'CANDIDATE' | 'ACCEPTED' | 'REJECTED';
 
 export interface ProjectAgentMessage {
@@ -74,7 +74,7 @@ export interface ProjectStageSummary {
 
 export interface ProjectAgentRun {
   id: string;
-  action: CopyAction | 'PROJECT_RESEARCH_PLAN' | 'PROJECT_RESEARCH_SOURCES';
+  action: CopyAction | 'PROJECT_RESEARCH_PLAN' | 'PROJECT_RESEARCH_SOURCES' | 'SOURCE_VERIFICATION';
   status: ProjectResearchRunStatus;
   request: string;
   confirmation: {

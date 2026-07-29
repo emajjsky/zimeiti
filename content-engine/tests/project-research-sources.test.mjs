@@ -6,6 +6,7 @@ import {
   dedupeSourceSnapshots,
   normalizeReadResult,
   normalizeSearchResults,
+  recommendSourceSelection,
   researchSourceActions,
 } from '../server/services/project-research-sources.cjs';
 
@@ -49,8 +50,45 @@ test('单个网页搜索动作最多保留五条规范化来源', () => {
     url: 'https://example.com/1',
     source: 'example.com',
     summary: '摘要 1',
+    metadata: { relevanceScore: null, publishedAt: null, language: 'ZH', sourceType: 'WEB' },
     error: null,
   });
+});
+
+test('网页搜索来源保留核验所需的质量元数据', () => {
+  const action = researchSourceActions(plan).actions[0];
+  const [source] = normalizeSearchResults(action, [{
+    title: '官方能力说明',
+    url: 'https://www.gov.cn/zhengce/content/2026/example.htm',
+    source: '中国政府网',
+    summary: '官方发布的完整能力说明。',
+    relevanceScore: 0.86,
+    publishedAt: '2026-07-28T08:00:00.000Z',
+    language: 'zh',
+  }]);
+  assert.deepEqual(source.metadata, {
+    relevanceScore: 0.86,
+    publishedAt: '2026-07-28T08:00:00.000Z',
+    language: 'ZH',
+    sourceType: 'OFFICIAL',
+  });
+});
+
+test('推荐选择最多八条并优先官方高相关来源', () => {
+  const sources = Array.from({ length: 11 }, (_, index) => ({
+    id: `source-${index}`,
+    status: 'CAPTURED',
+    title: `来源 ${index}`,
+    metadata: {
+      relevanceScore: index === 10 ? 0.95 : 0.4 + index / 100,
+      sourceType: index === 10 ? 'OFFICIAL' : 'WEB',
+      language: index % 2 ? 'EN' : 'ZH',
+    },
+  }));
+  const selected = recommendSourceSelection(sources, 8);
+  assert.equal(selected.length, 8);
+  assert.equal(selected[0], 'source-10');
+  assert.equal(new Set(selected).size, selected.length);
 });
 
 test('公开链接读取结果使用同一来源快照形状', () => {
@@ -70,6 +108,7 @@ test('公开链接读取结果使用同一来源快照形状', () => {
     url: 'https://example.com/guide',
     source: 'example.com',
     summary: '正文摘要',
+    metadata: { relevanceScore: null, publishedAt: null, language: 'ZH', sourceType: 'WEB' },
     error: null,
   });
 });

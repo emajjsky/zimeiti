@@ -603,3 +603,15 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - `styles.css` 为 `.project-agent-thread` 增加 `grid-auto-rows:max-content`，并禁止直接子项被压缩。该修复解决长时间线中确认卡外框仅剩 2px、子按钮落到视口外且被父层截获的问题。
 - `projectMaterials.cjs` 新增 `deriveProjectInputTitle()`，从正文首个非空行移除 Markdown 标题/列表前缀后截取 160 字；API 的项目内容标题改为可省略。新建弹窗隐藏标题字段，编辑弹窗继续显示。
 - `creative-workspace.e2e.py` 增加规划摘要、新增内容无标题、长时间线自动跟随、计划卡与确认卡几何无重叠、点击命中和来源确认执行断言。自动化全部使用本地 Mock，不调用百炼或 Tavily。
+
+## 2026-07-29 实现记录：来源筛选与事实核验
+
+- `020_source_verification.sql` 为 `project_research_sources` 增加 `metadata_json` 和 `selected`，扩展 `project_artifacts` 类型约束，并新增 `project_source_verifications`。
+- `project-research-sources.cjs` 新增来源类型、语言、发布时间、相关度归一化和 `recommendSourceSelection()`。Worker 保存质量字段，并按官方性、相关度和语言最多推荐 8 条。
+- `source-verification.cjs` 使用 Zod 定义严格输出：主张、四种状态、支持/冲突关系、引用和说明。解析阶段校验主张全集与唯一性、所选来源 ID、非空摘要原文引用、单一来源和多源通过状态条件，并允许一次模型修复。
+- `SOURCE_VERIFICATION` 已加入任务策略、调用日志和提示词模板。prepare 从 `templateStore` 冻结当前模板版本与模型路由，confirm 才创建同名 Job。
+- Worker 只向模型传递已选来源的标题、摘要、URL、来源元数据和研究计划主张；成功后生成 `RESEARCH_VERIFICATION` 候选产物，失败时不生成结论。
+- `ProjectAgent.tsx` 继续承担研究交互：来源预览可勾选、全选、清空，确认卡显示模型与来源数，核验结果显示状态、解释、原文引用和链接。采用核验结论只更新研究产物与阶段摘要，不改写正文。
+- `research-source-selection.mjs` 集中维护可选来源集合和切换逻辑。`creative-workspace.e2e.py` 覆盖选择恢复、零选择禁用、prepare、confirm、结果预览、确认结论和 390px 无溢出。
+- 研究计划和核验结论虽然都包含 `claims`，前端按 `artifact.type` 分支读取；E2E 明确断言计划弹窗没有核验卡、核验弹窗没有计划主张块，并生成 `research-sources-desktop.png` 与移动端截图。
+- 下一实现项是让正文 Agent 只读取已确认的 `RESEARCH_VERIFICATION`，并把 `CONFLICTING`、`NEEDS_REVIEW` 继续保留为待核验项。
