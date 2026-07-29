@@ -1,9 +1,9 @@
-import { Bot, Check, CircleAlert, Eye, FileCheck2, LoaderCircle, Search, Send, Settings2, X } from 'lucide-react';
+import { Bot, Check, CircleAlert, Eye, FileCheck2, LoaderCircle, Search, Settings2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { webCreative } from '../../data/webApi';
-import { canPrepareAgentRequest, messagesForAgentThread } from '../../domain/project-agent-composer.mjs';
+import { copyActionPanelState, copyActionRequest, type CopyPanelAction } from '../../domain/copy-action-panel.mjs';
 import { platformName, type ContentProject } from '../../domain/content';
-import type { CreativePlatform, ProjectAgentContext, ProjectAgentHistory, ProjectAgentMessageType, ProjectArtifact, ResearchResult } from '../../domain/creative';
+import type { CreativePlatform, ProjectAgentContext, ProjectArtifact, ResearchResult } from '../../domain/creative';
 
 type ProjectAgentProps = {
   projectId: string;
@@ -11,6 +11,7 @@ type ProjectAgentProps = {
   platform?: CreativePlatform;
   selectedMaterials?: { inputIds: string[]; referenceIds: string[] };
   selection?: { text: string; start: number; end: number };
+  hasBody?: boolean;
   blockedReason?: string;
   refreshToken?: number;
   onClearSelection?: () => void;
@@ -18,25 +19,6 @@ type ProjectAgentProps = {
   onArtifactOpen?: (artifact: ProjectArtifact) => void;
   onArtifactAccepted: (artifact: ProjectArtifact, project?: ContentProject) => void;
   onOpenSettings: (target: 'agent' | 'policies' | 'search') => void;
-};
-
-const actionNames = {
-  GENERATE_OUTLINE: '生成大纲',
-  GENERATE_DRAFT: '生成正文',
-  POLISH_EXISTING_DRAFT: '润色文案',
-  RESTRUCTURE_DRAFT: '重构文案',
-  EXPAND_DRAFT: '扩写文案',
-  SHORTEN_DRAFT: '压缩文案',
-  REVISE_SELECTION: '修改选区',
-  ADAPT_PLATFORM: '适配平台',
-} as const;
-
-const messageTypeNames: Record<ProjectAgentMessageType, string> = {
-  MESSAGE: '对话',
-  CONFIRMATION: '待确认',
-  RUN_STATUS: '任务状态',
-  ARTIFACT: '候选产物',
-  SYSTEM_EVENT: '项目记录',
 };
 
 function strings(value: unknown) {
@@ -159,168 +141,89 @@ function researchRunLabel(phase: string | undefined) {
   return phase === 'VERIFYING' ? '正在核验' : phase === 'SOURCES' ? '正在检索' : phase === 'PLANNING' ? '正在整理' : '正在研究';
 }
 
-function CopyProjectAgent({ projectId, stage, platform, selectedMaterials, selection, blockedReason, refreshToken = 0, onClearSelection, onContextChange, onArtifactOpen, onArtifactAccepted, onOpenSettings }: ProjectAgentProps) {
-  const [history, setHistory] = useState<ProjectAgentHistory>('CURRENT');
+function CopyProjectAgent({ projectId, stage, platform, selectedMaterials, selection, hasBody = false, blockedReason, refreshToken = 0, onClearSelection, onContextChange, onArtifactOpen, onOpenSettings }: ProjectAgentProps) {
   const [context, setContext] = useState<ProjectAgentContext | null>(null);
-  const [request, setRequest] = useState('');
-  const [busy, setBusy] = useState<'idle' | 'loading' | 'preparing' | 'confirming' | 'cancelling' | 'accepting'>('loading');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState<'idle' | 'loading' | 'starting' | 'cancelling'>('loading');
   const [error, setError] = useState('');
-  const [preview, setPreview] = useState<ProjectArtifact | null>(null);
-  const [selectedTitle, setSelectedTitle] = useState('');
-  const threadRef = useRef<HTMLDivElement>(null);
+  const openedCandidateId = useRef<string | null>(null);
 
-  const reload = async (showLoading = false) => {
-    if (showLoading) setBusy('loading');
-    const result = await webCreative.agentContext(projectId, { stage, platform, history });
+  const reload = async () => {
+    const result = await webCreative.agentContext(projectId, { stage, platform, history: 'CURRENT' });
     setContext(result); onContextChange?.(result);
-    if (showLoading) setBusy('idle');
     return result;
   };
 
   useEffect(() => {
     let cancelled = false;
-    setBusy('loading'); setError(''); setContext(null); setPreview(null);
-    webCreative.agentContext(projectId, { stage, platform, history })
+    setBusy('loading'); setError(''); setContext(null);
+    void webCreative.agentContext(projectId, { stage, platform, history: 'CURRENT' })
       .then((result) => { if (!cancelled) { setContext(result); onContextChange?.(result); } })
-      .catch((reason) => { if (!cancelled) setError(reason instanceof Error ? reason.message : '读取 Agent 上下文失败。'); })
+      .catch((reason) => { if (!cancelled) setError(reason instanceof Error ? reason.message : '读取文案状态失败。'); })
       .finally(() => { if (!cancelled) setBusy('idle'); });
     return () => { cancelled = true; };
-  }, [history, platform, projectId, refreshToken, stage]);
-
-  useEffect(() => {
-    const status = context?.activeRun?.status;
-    if (status !== 'QUEUED' && status !== 'RUNNING') return;
-    let cancelled = false;
-    const refresh = async () => {
-      try {
-        const result = await webCreative.agentContext(projectId, { stage, platform, history });
-        if (!cancelled) { setContext(result); onContextChange?.(result); }
-      } catch (reason) {
-        if (!cancelled) setError(reason instanceof Error ? reason.message : 'Agent 状态更新失败。');
-      }
-    };
-    const timer = window.setInterval(() => { void refresh(); }, 1_500);
-    return () => { cancelled = true; window.clearInterval(timer); };
-  }, [context?.activeRun?.status, history, platform, projectId, stage]);
+  }, [platform, projectId, refreshToken, stage]);
 
   const activeRun = context?.activeRun;
   const runIsActive = Boolean(activeRun && ['DRAFT', 'QUEUED', 'RUNNING'].includes(activeRun.status));
-  const canPrepare = canPrepareAgentRequest({ request, blockedReason, busy, runIsActive });
+  useEffect(() => {
+    if (!runIsActive) return;
+    const timer = window.setInterval(() => { void reload().catch((reason) => setError(reason instanceof Error ? reason.message : '文案状态更新失败。')); }, 1_500);
+    return () => window.clearInterval(timer);
+  }, [runIsActive, platform, projectId, stage]);
 
-  const prepare = async (nextRequest = request) => {
-    const normalizedRequest = nextRequest.trim();
-    if (!canPrepareAgentRequest({ request: normalizedRequest, blockedReason, busy, runIsActive })) return;
-    setBusy('preparing'); setError('');
+  const candidate = useMemo(() => (context?.artifacts ?? []).find((artifact) => (artifact.type === 'OUTLINE' || artifact.type === 'PLATFORM_COPY') && artifact.platform === platform && artifact.status === 'CANDIDATE') ?? null, [context?.artifacts, platform]);
+  const panel = copyActionPanelState({ hasBody, hasSelection: Boolean(selection?.text), hasCandidate: Boolean(candidate) });
+  const disabled = busy !== 'idle' || Boolean(blockedReason) || runIsActive;
+
+  const openCandidate = () => { if (candidate && onArtifactOpen) onArtifactOpen(candidate); };
+  useEffect(() => {
+    if (!candidate || openedCandidateId.current === candidate.id || !onArtifactOpen) return;
+    openedCandidateId.current = candidate.id;
+    onArtifactOpen(candidate);
+  }, [candidate, onArtifactOpen]);
+
+  const startAction = async (action: CopyPanelAction) => {
+    if (disabled) return;
+    setBusy('starting'); setError('');
     try {
-      await webCreative.prepareAgent(projectId, {
+      const prepared = await webCreative.prepareAgent(projectId, {
         stage,
         ...(platform ? { platform } : {}),
-        request: normalizedRequest,
+        request: copyActionRequest(action, note),
         ...(selection ? { selection } : {}),
         inputIds: selectedMaterials?.inputIds ?? [],
         referenceIds: selectedMaterials?.referenceIds ?? [],
       });
-      setRequest('');
+      if ('needsClarification' in prepared) throw new Error(prepared.message.content);
+      await webCreative.confirmAgentRun(prepared.id);
+      setNote('');
       await reload();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Agent 任务准备失败。'); }
-    finally { setBusy('idle'); }
-  };
-
-  const confirm = async () => {
-    if (!activeRun || activeRun.status !== 'DRAFT') return;
-    setBusy('confirming'); setError('');
-    try {
-      await webCreative.confirmAgentRun(activeRun.id);
-      await reload();
-    }
-    catch (reason) { setError(reason instanceof Error ? reason.message : 'Agent 任务启动失败。'); }
+    } catch (reason) { setError(reason instanceof Error ? reason.message : '文案任务启动失败。'); }
     finally { setBusy('idle'); }
   };
 
   const cancel = async () => {
     if (!activeRun || !['DRAFT', 'QUEUED'].includes(activeRun.status)) return;
     setBusy('cancelling'); setError('');
-    try {
-      await webCreative.cancelAgentRun(activeRun.id);
-      await reload();
-    }
+    try { await webCreative.cancelAgentRun(activeRun.id); await reload(); }
     catch (reason) { setError(reason instanceof Error ? reason.message : '取消失败。'); }
     finally { setBusy('idle'); }
   };
 
-  const openArtifact = (artifact: ProjectArtifact) => {
-    if (onArtifactOpen) { onArtifactOpen(artifact); return; }
-    setPreview(artifact);
-    setSelectedTitle(strings(artifact.payload.titleOptions)[0] ?? '');
-  };
-
-  const acceptArtifact = async () => {
-    if (!preview || preview.status !== 'CANDIDATE' || !['OUTLINE', 'PLATFORM_COPY'].includes(preview.type)) return;
-    setBusy('accepting'); setError('');
-    try {
-      const result = await webCreative.acceptArtifact(preview.id, preview.type === 'OUTLINE' ? selectedTitle : undefined);
-      onArtifactAccepted(result.artifact, result.project);
-      setPreview(result.artifact);
-      await reload();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : '采用候选失败。'); }
-    finally { setBusy('idle'); }
-  };
-
-  const artifactById = useMemo(() => new Map((context?.artifacts ?? []).map((artifact) => [artifact.id, artifact])), [context?.artifacts]);
-  const threadMessages = useMemo(() => messagesForAgentThread(context?.messages ?? []), [context?.messages]);
-  const stageLabel = `文案${platform ? ` · ${platformName[platform]}` : ''}`;
-  const followKey = `${threadMessages.at(-1)?.id ?? ''}:${context?.activeRun?.id ?? ''}:${context?.activeRun?.status ?? ''}:${context?.artifacts[0]?.id ?? ''}`;
-
-  useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      const thread = threadRef.current;
-      if (thread) thread.scrollTop = thread.scrollHeight;
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [followKey]);
-
-  return <aside className="project-agent" aria-label="项目 Agent">
-    <header className="project-agent-head">
-      <div><Bot size={19}/><div><h2>项目 Agent</h2><span>{stageLabel}</span></div></div>
-      <div className="project-agent-history" aria-label="Agent 历史范围">
-        <button type="button" className={history === 'CURRENT' ? 'active' : ''} onClick={() => setHistory('CURRENT')}>当前阶段</button>
-        <button type="button" className={history === 'ALL' ? 'active' : ''} onClick={() => setHistory('ALL')}>完整历史</button>
-      </div>
-    </header>
-    <div ref={threadRef} className="project-agent-thread">
-      {busy === 'loading' && <div className="project-agent-skeleton" aria-label="正在读取 Agent 上下文"><i/><i/><i/></div>}
-      {busy !== 'loading' && !threadMessages.length && <div className="project-agent-empty"><FileCheck2 size={22}/><b>还没有对话</b></div>}
-      {(context?.summaries.length ?? 0) > 0 && <div className="project-agent-summary">已继承 {context?.summaries.length} 条前序摘要</div>}
-      {threadMessages.map((message) => {
-        const refs = (message.artifactRefs ?? []).map((id) => artifactById.get(id)).filter((item): item is ProjectArtifact => Boolean(item));
-        const messageLabel = messageTypeNames[message.messageType ?? 'MESSAGE'];
-        return <article key={message.id} className={`project-agent-message ${message.role.toLowerCase()} type-${(message.messageType ?? 'MESSAGE').toLowerCase()}`}>
-          <span>{message.role === 'USER' ? '你' : messageLabel}</span>
-          <p>{message.content}</p>
-          {refs.map((artifact) => <button key={artifact.id} className="artifact-link" type="button" onClick={() => openArtifact(artifact)}><Eye size={14}/>查看候选</button>)}
-        </article>;
-      })}
-      {activeRun?.status === 'DRAFT' && <section className="agent-confirmation">
-        <header><b>{actionNames[activeRun.action as keyof typeof actionNames] ?? '文案任务'}</b><span>待确认</span></header>
-        <dl>
-          <div><dt>模型</dt><dd>{activeRun.confirmation.model}</dd></div>
-          <div><dt>提示词</dt><dd>{activeRun.confirmation.promptVersion ?? '内置'}</dd></div>
-          <div><dt>资料</dt><dd>{activeRun.confirmation.materialCount} 条</dd></div>
-          <div><dt>Skill</dt><dd>{activeRun.confirmation.skillNames.join('、') || '无'}</dd></div>
-          <div className="wide"><dt>写入范围</dt><dd>{activeRun.confirmation.writeScope}</dd></div>
-        </dl>
-        <footer><button className="icon-button" type="button" aria-label="取消任务" disabled={busy !== 'idle'} onClick={() => void cancel()}><X size={16}/></button><button className="button primary" type="button" disabled={busy !== 'idle'} onClick={() => void confirm()}>{busy === 'confirming' ? <LoaderCircle size={15}/> : <Check size={15}/>}确认调用</button></footer>
-      </section>}
-      {activeRun && ['QUEUED', 'RUNNING'].includes(activeRun.status) && <div className="agent-running" aria-live="polite"><LoaderCircle size={18}/><b>{activeRun.status === 'QUEUED' ? '等待执行' : '正在生成候选'}</b>{activeRun.status === 'QUEUED' && <button className="text-button" type="button" disabled={busy !== 'idle'} onClick={() => void cancel()}>{busy === 'cancelling' ? '取消中' : '取消'}</button>}</div>}
-      {activeRun?.status === 'FAILED' && <div className="agent-run-error"><CircleAlert size={17}/><div><b>执行失败</b><p>{activeRun.error}</p></div></div>}
-    </div>
-    {error && <div className="project-agent-error" role="alert"><CircleAlert size={16}/><span>{error}</span>{/(模型|提示词|核心 Agent|Key)/.test(error) && <button className="text-button" type="button" onClick={() => onOpenSettings(/Tavily|检索 API/.test(error) ? 'search' : /核心 Agent/.test(error) ? 'agent' : 'policies')}><Settings2 size={14}/>去配置</button>}</div>}
-    <div className="project-agent-composer">
-      <div><span>{selection ? `已选择 ${selection.text.length} 字` : '自由对话'}</span>{selection && onClearSelection && <button className="selection-clear" type="button" aria-label="清除正文选区" onClick={onClearSelection}><X size={13}/></button>}{blockedReason && <em>{blockedReason}</em>}</div>
-      <textarea rows={3} value={request} maxLength={2_000} placeholder="例如：保留事实，把这篇文章润色得更自然" onChange={(event) => setRequest(event.target.value)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') void prepare(); }}/>
-      <button className="button primary" type="button" title="准备 Agent 任务" disabled={!canPrepare} onClick={() => void prepare()}>{busy === 'preparing' ? <LoaderCircle size={16}/> : <Send size={16}/>}发送</button>
-    </div>
-    {preview && <ArtifactPreview artifact={preview} selectedTitle={selectedTitle} onTitle={setSelectedTitle} busy={busy !== 'idle'} onAccept={() => void acceptArtifact()} onClose={() => setPreview(null)}/>}
+  return <aside className="copy-action-panel" aria-label="文案助手">
+    <header className="copy-action-panel-head"><div><Bot size={19}/><div><h2>文案助手</h2><span>{platform ? platformName[platform] : '当前平台'}</span></div></div></header>
+    {busy === 'loading' && <div className="copy-action-loading" aria-label="正在读取文案状态"><i/><i/></div>}
+    {busy !== 'loading' && candidate && <section className="copy-action-candidate"><div><b>{candidate.type === 'OUTLINE' ? '大纲候选已生成' : '正文候选已生成'}</b><span>正式文稿尚未改变</span></div><button className="button" type="button" onClick={openCandidate}><Eye size={15}/>查看并采用</button></section>}
+    {busy !== 'loading' && activeRun && ['DRAFT', 'QUEUED', 'RUNNING'].includes(activeRun.status) && <section className="copy-action-running" aria-live="polite"><LoaderCircle size={18}/><div><b>{activeRun.status === 'RUNNING' ? '正在生成正文候选' : '正文任务已排队'}</b><span>完成后会自动打开候选审核</span></div>{['DRAFT', 'QUEUED'].includes(activeRun.status) && <button className="text-button" type="button" disabled={busy !== 'idle'} onClick={() => void cancel()}>{busy === 'cancelling' ? '取消中' : '取消'}</button>}</section>}
+    {busy !== 'loading' && !candidate && !runIsActive && <div className="copy-action-body">
+      {panel.quickActions.length > 0 && <div className="copy-action-quick" aria-label="快捷修改">{panel.quickActions.map((item) => <button key={item.action} type="button" className="text-button" disabled={disabled} onClick={() => void startAction(item.action)}>{item.label}</button>)}</div>}
+      {(hasBody || Boolean(selection?.text)) && <label className="copy-action-note"><span>{selection?.text ? `修改选中 ${selection.text.length} 字` : '补充要求（可选）'}</span><textarea rows={3} value={note} maxLength={2_000} placeholder={selection?.text ? '例如：语气更有说服力，保留事实' : '例如：更口语化，保留已有案例'} onChange={(event) => setNote(event.target.value)}/>{selection?.text && onClearSelection && <button className="text-button" type="button" onClick={onClearSelection}>取消选区</button>}</label>}
+      <button className="button primary copy-action-primary" type="button" disabled={disabled} onClick={() => panel.primary.action === 'REVIEW_CANDIDATE' ? openCandidate() : void startAction(panel.primary.action)}>{busy === 'starting' ? <LoaderCircle size={16}/> : <Check size={16}/>}{panel.primary.label}</button>
+      {!hasBody && <button className="text-button copy-action-outline" type="button" disabled={disabled} onClick={() => void startAction('GENERATE_OUTLINE')}>先生成大纲</button>}
+    </div>}
+    {blockedReason && <div className="copy-action-blocked"><CircleAlert size={16}/><span>{blockedReason}</span></div>}
+    {error && <div className="copy-action-error" role="alert"><CircleAlert size={16}/><span>{error}</span>{/(模型|提示词|核心 Agent|Key)/.test(error) && <button className="text-button" type="button" onClick={() => onOpenSettings(/核心 Agent/.test(error) ? 'agent' : 'policies')}>去配置</button>}</div>}
   </aside>;
 }
 

@@ -93,6 +93,24 @@ test('文案提示词冻结动作、平台规则并禁止洗掉待核验事实',
   assert.match(prompt.message, /核验价格/);
 });
 
+test('文案提示词锁定项目主题，并把未经核验的信息排除在确定事实之外', () => {
+  const prompt = buildCopyPrompt({
+    action: 'GENERATE_DRAFT',
+    request: '生成正文',
+    platform: 'WECHAT',
+    template: '写成适合公众号阅读的文章。',
+    project: { title: '传统家具的 AI 进化论', coreViewpoint: 'AI 应服务于传统家具的设计、生产与传播', factChecks: [] },
+    brief: { objective: '完成文章', targetAudience: '家居从业者', coreMessage: '技术要服务于真实行业问题', sourceRequirements: '使用已核验资料', lengthTarget: '1500 字', notes: '' },
+    currentContent: { title: '', body: '', factsToVerify: [] },
+    researchContext: { verifiedFacts: ['某工厂已将 AI 用于产品建模'], cautions: ['7 月 27 日有 300 人参加某会议'] },
+    materials: [],
+  });
+  assert.match(prompt.system, /项目标题、核心观点和目标平台是硬主题边界/);
+  assert.match(prompt.system, /不得用研究资料中的单条事件替换项目主题/);
+  assert.match(prompt.system, /不得写入未出现在 verifiedFacts 中的具体日期、单位、人数、引语、会议或产品能力/);
+  assert.match(prompt.system, /没有 verifiedFacts 时，只能依据用户材料、当前正文或观点方法写作/);
+});
+
 test('017 注册八个需要确认的受控文案动作', () => {
   const migration = fs.readFileSync(new URL('../server/migrations/017_project_copy_actions.sql', import.meta.url), 'utf8');
   for (const action of COPY_ACTIONS) assert.match(migration, new RegExp(copyActionVersion(action).replace(/[.]/g, '\\.')));

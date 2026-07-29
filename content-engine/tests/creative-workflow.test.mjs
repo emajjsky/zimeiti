@@ -23,7 +23,7 @@ test('文案工作区支持启用缺失平台、正文选区和明确采用候�
   assert.match(copy, /selection=\{selection\}/);
   assert.match(copy, /blockedReason=.*正在保存创作设定/s);
   assert.doesNotMatch(copy, /请先保存写作策略/);
-  assert.match(agent, /已选择.*字/);
+  assert.match(agent, /修改选中.*字/);
   assert.match(agent, /blockedReason/);
   assert.match(dialog, /added[\s\S]*removed[\s\S]*unchanged/);
   assert.match(dialog, /采用为当前版本/);

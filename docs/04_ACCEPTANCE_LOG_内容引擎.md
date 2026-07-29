@@ -552,3 +552,15 @@
 | 根因 | 已定位 | 实际运行任务停在 `SOURCES` 阶段；研究计划允许最多 8 个动作，原实现把所有自动网页动作串行执行，网络超时会叠加为数分钟。 |
 | 来源上限 | 通过 | 简化研究只保留前 2 条 `SEARCH_WEB` 或 `READ_LINK` 自动动作；`ASK_USER` 不计入自动动作上限。 |
 | 定向回归 | 通过 | `node --test tests/project-research-agent.test.mjs` 12/12 通过，覆盖自动来源动作截断。 |
+
+## A41. 正文动作优先与候选隔离（2026-07-29）
+
+| 验收项 | 状态 | 证据 |
+| --- | --- | --- |
+| 空正文主操作 | 通过 | `copyActionPanelState()` 在空正文状态只返回“生成正文”；“先生成大纲”为次级操作。 |
+| 一键实际执行 | 通过 | 前端点击后依次执行 `prepareAgent()` 与 `confirmAgentRun()`，不再展示“确认调用”中间界面。 |
+| 候选隔离 | 通过 | 大纲、正文都只以 `CANDIDATE` 资产出现；`CopyWorkspace` 仅在采用成功后读取并写入正式平台版本。 |
+| 主题与事实锁 | 通过 | `buildCopyPrompt()` 明确锁定项目标题、核心观点、目标平台；只允许 `verifiedFacts` 作为确定事实。 |
+| 单元测试 | 通过 | `tests/copy-action-panel.test.mjs`、`tests/project-copy-action.test.mjs` 定向通过。 |
+| 类型检查 | 通过 | `npm run typecheck` exit 0。 |
+| 待用户验收 | 待执行 | 用已配置模型生成一篇真实正文，检查候选自动打开、未采用前正式稿不变，以及不出现无来源的具体事实。 |

@@ -171,10 +171,12 @@ test('研究与文案复用同一个 ProjectAgent 入口并按阶段分流', () 
   const materials = fs.readFileSync(new URL('../src/workspaces/create/ProjectMaterials.tsx', import.meta.url), 'utf8');
   const workspace = fs.readFileSync(new URL('../src/workspaces/create/CreateWorkspace.tsx', import.meta.url), 'utf8');
   const copy = fs.readFileSync(new URL('../src/workspaces/create/CopyWorkspace.tsx', import.meta.url), 'utf8');
-  assert.match(agent, /CURRENT[\s\S]*ALL/);
-  assert.match(agent, /MESSAGE[\s\S]*CONFIRMATION[\s\S]*RUN_STATUS[\s\S]*ARTIFACT[\s\S]*SYSTEM_EVENT/);
-  assert.match(agent, /acceptArtifact/);
   assert.match(agent, /props\.stage === 'RESEARCH'/);
+  assert.match(agent, /SimplifiedResearchAgent/);
+  assert.match(agent, /CopyProjectAgent/);
+  assert.match(agent, /copyActionPanelState/);
+  assert.match(agent, /confirmAgentRun\(prepared\.id\)/);
+  assert.doesNotMatch(agent, /自由对话/);
   assert.doesNotMatch(materials, /<ProjectAgent/);
   assert.match(workspace, /stage="RESEARCH"/);
   assert.match(copy, /stage="COPY"/);
