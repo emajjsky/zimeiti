@@ -9,6 +9,9 @@ import {
   buildResearchPlanPrompt,
   parseResearchPlan,
 } from '../server/services/project-research.cjs';
+import simplifiedResearch from '../server/services/simplified-research.cjs';
+
+const { workflowSourceActions } = simplifiedResearch;
 import { readProjectUploadText } from '../server/services/projectUploadStorage.cjs';
 
 const validPlan = {
@@ -70,6 +73,19 @@ test('没有资料时研究提示词从已确认规划提出问题但不冒充�
   assert.match(prompt.system, /已确认的项目规划/);
   assert.match(prompt.system, /不宣称已经完成网页检索/);
   assert.match(prompt.message, /"materials":\[\]/);
+});
+
+test('简化研究最多自动检索两项来源，避免长时间串行等待', () => {
+  const actions = workflowSourceActions({
+    nextActions: [
+      { action: 'SEARCH_WEB', purpose: '一', target: '一' },
+      { action: 'READ_LINK', purpose: '二', target: 'https://example.com/2' },
+      { action: 'SEARCH_WEB', purpose: '三', target: '三' },
+      { action: 'ASK_USER', purpose: '补充', target: '请提供资料' },
+    ],
+  });
+
+  assert.deepEqual(actions.map((item) => item.action), ['SEARCH_WEB', 'READ_LINK', 'ASK_USER']);
 });
 
 test('研究资料选择按工作空间和项目隔离', async () => {

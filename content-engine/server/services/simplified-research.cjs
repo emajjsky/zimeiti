@@ -1,6 +1,7 @@
 const { z } = require('zod');
 
 const SIMPLIFIED_RESEARCH_WORKFLOW_VERSION = 'project-research-workflow:1.0.0';
+const WORKFLOW_MAX_AUTOMATIC_SOURCE_ACTIONS = 2;
 
 const materialContextSchema = z.object({
   userContent: z.array(z.object({ id: z.string(), title: z.string(), body: z.string().nullable(), kind: z.string() })),
@@ -36,6 +37,16 @@ function classifyMaterials(materials) {
   return output;
 }
 
+function workflowSourceActions(plan) {
+  const actions = Array.isArray(plan?.nextActions) ? plan.nextActions : [];
+  let automaticCount = 0;
+  return actions.filter((action) => {
+    if (!['SEARCH_WEB', 'READ_LINK'].includes(action?.action)) return true;
+    automaticCount += 1;
+    return automaticCount <= WORKFLOW_MAX_AUTOMATIC_SOURCE_ACTIONS;
+  });
+}
+
 function buildResearchResult({ plan = {}, sources = [], verification = null, materials = [], allowSingleSource = false }) {
   const claims = Array.isArray(verification?.claims) ? verification.claims : (Array.isArray(plan.claims) ? plan.claims.map((item) => ({ claim: item.claim, status: 'NEEDS_REVIEW', explanation: '尚未完成事实核验。', evidence: [] })) : []);
   const usableStatuses = allowSingleSource ? new Set(['VERIFIED', 'SINGLE_SOURCE']) : new Set(['VERIFIED']);
@@ -54,4 +65,4 @@ function buildResearchResult({ plan = {}, sources = [], verification = null, mat
   });
 }
 
-module.exports = { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, researchResultSchema, classifyMaterials, buildResearchResult };
+module.exports = { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, WORKFLOW_MAX_AUTOMATIC_SOURCE_ACTIONS, researchResultSchema, classifyMaterials, workflowSourceActions, buildResearchResult };

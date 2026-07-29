@@ -29,7 +29,7 @@ const {
   buildSourceVerificationRepairPrompt,
   parseSourceVerification,
 } = require('./services/source-verification.cjs');
-const { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, buildResearchResult } = require('./services/simplified-research.cjs');
+const { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, workflowSourceActions, buildResearchResult } = require('./services/simplified-research.cjs');
 const { createProjectAgentStore } = require('./services/project-agent.cjs');
 const { buildCopyPrompt, buildCopyRepairPrompt, mergeFactsToVerify, parseCopyOutput } = require('./services/project-copy-action.cjs');
 
@@ -90,7 +90,7 @@ async function runWorkflowResearchPlan(workspaceId, snapshot, route) {
 
 async function captureWorkflowSources(workspaceId, plan) {
   let actions;
-  try { actions = researchSourceActions(plan).actions; }
+  try { actions = researchSourceActions({ ...plan, nextActions: workflowSourceActions(plan) }).actions; }
   catch { return []; }
   const captured = [];
   for (const action of actions) {

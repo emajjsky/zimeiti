@@ -544,3 +544,11 @@
 | 默认意图 | 通过 | 正文为空时，用户输入“开始”或“正文”会确定性映射为 `GENERATE_DRAFT`，不再反问“先生成大纲还是完整正文”。 |
 | 大纲路径 | 保留 | 用户明确提出“大纲”时，仍按既有规则生成大纲，不改变可选的大纲工作流。 |
 | 回归 | 通过 | `node --test tests/project-copy-action.test.mjs` 13/13、`npm test` 205/205、`npm run typecheck`、`npm run build` 与 `git diff --check` 均通过。 |
+
+## A40. 简化研究的来源动作上限（2026-07-29）
+
+| 验收项 | 状态 | 证据 |
+| --- | --- | --- |
+| 根因 | 已定位 | 实际运行任务停在 `SOURCES` 阶段；研究计划允许最多 8 个动作，原实现把所有自动网页动作串行执行，网络超时会叠加为数分钟。 |
+| 来源上限 | 通过 | 简化研究只保留前 2 条 `SEARCH_WEB` 或 `READ_LINK` 自动动作；`ASK_USER` 不计入自动动作上限。 |
+| 定向回归 | 通过 | `node --test tests/project-research-agent.test.mjs` 12/12 通过，覆盖自动来源动作截断。 |
