@@ -5,9 +5,10 @@ import test from 'node:test';
 test('账号声音设置入口独立于模型配置', async () => {
   const settings = await readFile(new URL('../src/workspaces/settings/AccountVoiceSettings.tsx', import.meta.url), 'utf8');
   assert.ok(navigation.settingsTabs.some((item) => item.id === 'voices' && item.label === '账号声音'));
-  assert.match(settings, /把话说透/);
-  assert.match(settings, /代表作校准/);
-  assert.doesNotMatch(settings, /提示词正文|模仿作者/);
+  assert.match(settings, /导入我的文章/);
+  assert.match(settings, /读取并提炼/);
+  assert.match(settings, /createCalibrationDraft/);
+  assert.doesNotMatch(settings, /提示词正文|先选原型/);
 });
 
 const navigation = await import('../src/app/navigation.mjs').catch(() => null);

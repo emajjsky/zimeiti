@@ -7,7 +7,7 @@ const { z } = require('zod');
 const config = require('./config.cjs');
 const { query, transaction } = require('./db.cjs');
 const { encrypt, decrypt, hashPassword, verifyPassword } = require('./crypto.cjs');
-const { clipPublicLink } = require('./services/public-web.cjs');
+const { clipPublicLink, readPublicArticle } = require('./services/public-web.cjs');
 const { searchTavily } = require('./services/tavily.cjs');
 const { listSources, createSources, updateSource, removeSource, listItems, refreshWorkspaceRss } = require('./services/intelligenceRepository.cjs');
 const { enqueue } = require('./queue.cjs');
@@ -17,6 +17,8 @@ const { ANALYSIS_SCOPE, createTemplateStore, prepareAnalysisInput } = require('.
 const { createCreativeSkillStore } = require('./services/creativeSkills.cjs');
 const { writingBriefInput } = require('./services/writing-brief.cjs');
 const { accountVoiceInput, accountVoiceCalibrationInput, createAccountVoiceStore } = require('./services/accountVoices.cjs');
+const { accountVoiceCalibrationDraftInput, buildVoiceCalibrationPrompt, parseVoiceCalibrationDraft } = require('./services/voiceCalibration.cjs');
+const { createTextModelRunner } = require('./services/text-model.cjs');
 const {
   confirmProjectPlanning,
   createBlankProject,
@@ -50,7 +52,7 @@ const {
 
 const app = Fastify({ logger: true, bodyLimit: 5 * 1024 * 1024 });
 const credentials = new Set(['TAVILY', 'BAILIAN']);
-const modelTasks = ['INTELLIGENCE_ANALYSIS', 'SOURCE_VERIFICATION', 'TOPIC_RECOMMENDATION', 'CONTENT_WRITING', 'CONTENT_REWRITE', 'CONTENT_LAYOUT', 'TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE', 'SPEECH_SYNTHESIS', 'SPEECH_RECOGNITION', 'TEXT_TO_VIDEO', 'IMAGE_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO', 'REFERENCE_TO_VIDEO', 'VIDEO_EDIT'];
+const modelTasks = ['INTELLIGENCE_ANALYSIS', 'SOURCE_VERIFICATION', 'TOPIC_RECOMMENDATION', 'VOICE_CALIBRATION', 'CONTENT_WRITING', 'CONTENT_REWRITE', 'CONTENT_LAYOUT', 'TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE', 'SPEECH_SYNTHESIS', 'SPEECH_RECOGNITION', 'TEXT_TO_VIDEO', 'IMAGE_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO', 'REFERENCE_TO_VIDEO', 'VIDEO_EDIT'];
 const externalProviders = new Set(['DASHSCOPE', 'SILICONFLOW', 'VOLCENGINE_ARK', 'KIMI', 'ZHIPU', 'OPENAI', 'OPENAI_COMPATIBLE']);
 const creativePlatform = z.enum(['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO']);
 const analysisPlatform = z.enum(['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO', 'VIDEO_CHANNEL']);
@@ -93,6 +95,7 @@ const templateStore = createTemplateStore({ query }, {
   [REVISION_TEMPLATE_SCOPES.WEIBO]: { defaultTemplate: () => defaultRevisionTemplate('WEIBO'), validateTemplate: validateRevisionTemplate },
 });
 const accountVoiceStore = createAccountVoiceStore({ query, transaction });
+const textRunner = createTextModelRunner();
 const creativeSkillStore = createCreativeSkillStore({ query, transaction, accountVoiceStore });
 const projectMaterialStore = createProjectMaterialStore({ query });
 const projectAgentStore = createProjectAgentStore({ query, transaction });
@@ -676,6 +679,28 @@ app.post('/api/v1/account-voices/:id/calibrations', { preHandler: authenticate }
   const workspace = await currentWorkspace(request.user.sub);
   const calibration = await accountVoiceStore.addCalibration(workspace.id, z.string().uuid().parse(request.params.id), input);
   reply.code(201).send({ calibration });
+});
+
+app.post('/api/v1/account-voices/calibration-drafts', { preHandler: authenticate }, async (request) => {
+  const input = accountVoiceCalibrationDraftInput.parse(request.body);
+  const workspace = await currentWorkspace(request.user.sub);
+  const startedAt = Date.now();
+  let route;
+  try {
+    route = await textTaskRoute(workspace.id, 'VOICE_CALIBRATION', '账号声音提炼');
+    const article = await readPublicArticle(input.sourceUrl);
+    const prompt = buildVoiceCalibrationPrompt(article);
+    const result = await textRunner.runText({ provider: route.provider, model: route.model, system: prompt.system, message: prompt.message, ...await textConnectionInput(workspace.id, route) });
+    const draft = parseVoiceCalibrationDraft(result.content);
+    await query(`INSERT INTO api_usage_logs (workspace_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens)
+      VALUES ($1, $2, $3, 'VOICE_CALIBRATION', 'SUCCESS', $4, $5, $6)`, [workspace.id, route.provider, route.model, Date.now() - startedAt, result.inputTokens ?? null, result.outputTokens ?? null]);
+    return { article: { title: article.title, url: article.url, source: article.source }, draft };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '账号声音提炼失败。';
+    await query(`INSERT INTO api_usage_logs (workspace_id, provider, model, operation, status, duration_ms, error)
+      VALUES ($1, $2, $3, 'VOICE_CALIBRATION', 'FAILED', $4, $5)`, [workspace.id, route?.provider ?? 'UNKNOWN', route?.model ?? null, Date.now() - startedAt, message.slice(0, 2_000)]);
+    throw error;
+  }
 });
 
 app.get('/api/v1/creative/skills', { preHandler: authenticate }, async (request) => {
@@ -1918,6 +1943,13 @@ async function credentialSecret(workspaceId, provider) {
   const result = await query('SELECT encrypted_secret FROM credential_vault WHERE workspace_id = $1 AND provider = $2', [workspaceId, provider]);
   if (!result.rowCount) { const error = new Error('请先保存 API Key。'); error.statusCode = 400; throw error; }
   return decrypt(result.rows[0].encrypted_secret);
+}
+
+async function textConnectionInput(workspaceId, route) {
+  if (route.provider === 'BAILIAN_CLI') return { apiKey: await credentialSecret(workspaceId, 'BAILIAN') };
+  const result = await query('SELECT base_url, encrypted_secret FROM model_connections WHERE id = $1 AND workspace_id = $2 AND status = \'READY\'', [route.connectionId, workspaceId]);
+  if (!result.rowCount) throw new Error('账号声音提炼使用的外部 API 连接不可用。');
+  return { connection: { baseUrl: result.rows[0].base_url, apiKey: decrypt(result.rows[0].encrypted_secret) } };
 }
 
 function modelConnectionInput(requireKey) {

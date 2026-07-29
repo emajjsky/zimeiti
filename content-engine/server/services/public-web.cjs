@@ -18,6 +18,14 @@ async function clipPublicLink(rawUrl) {
   return buildPublicPreviewFromHtml(page.url, page.html);
 }
 
+async function readPublicArticle(rawUrl) {
+  const page = await fetchPublicPage(rawUrl);
+  const preview = buildPublicPreviewFromHtml(page.url, page.html);
+  const text = htmlContentText(page.html);
+  if (text.length < 120) throw new Error('网页没有可用于提炼的文章正文。请确认链接是公开文章页，而不是列表、登录页或图片页。');
+  return { ...preview, text: text.slice(0, 30_000) };
+}
+
 async function fetchPublicPage(rawUrl, { fetchImpl = fetch, validateUrl = validatePublicUrl, browserFetch = readWeChatArticleWithBrowser } = {}) {
   let url = await validateUrl(rawUrl);
   assertNotVerificationPage(url);
@@ -147,6 +155,13 @@ function htmlArticleText(html) {
   const article = /<article\b[^>]*>([\s\S]*?)<\/article>/i.exec(html)?.[1];
   return clean((weChat || article || '').replace(/<script\b[\s\S]*?<\/script>/gi, ' ').replace(/<style\b[\s\S]*?<\/style>/gi, ' ').replace(/<br\s*\/?>/gi, ' ').replace(/<\/p>/gi, ' '));
 }
+function htmlContentText(html) {
+  const weChat = htmlElementInnerById(html, 'js_content');
+  const article = /<article\b[^>]*>([\s\S]*?)<\/article>/i.exec(html)?.[1];
+  const main = /<main\b[^>]*>([\s\S]*?)<\/main>/i.exec(html)?.[1];
+  const body = /<body\b[^>]*>([\s\S]*?)<\/body>/i.exec(html)?.[1];
+  return clean((weChat || article || main || body || '').replace(/<script\b[\s\S]*?<\/script>/gi, ' ').replace(/<style\b[\s\S]*?<\/style>/gi, ' ').replace(/<br\s*\/?>/gi, ' ').replace(/<\/(?:p|div|li|h[1-6])>/gi, ' '));
+}
 function htmlElementInnerById(html, id) {
   const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const opening = new RegExp(`<([a-z][\\w:-]*)\\b[^>]*\\bid=["']${escaped}["'][^>]*>`, 'i').exec(html);
@@ -178,4 +193,4 @@ function clean(value) {
 }
 function isPrivateAddress(address) { const value = address.toLowerCase(); if (value === '::1' || value.startsWith('fc') || value.startsWith('fd') || value.startsWith('fe80:')) return true; if (!/^\d+\.\d+\.\d+\.\d+$/.test(value)) return false; const [a, b] = value.split('.').map(Number); return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168); }
 
-module.exports = { clipPublicLink, fetchPublicPage, buildPublicPreviewFromHtml, sourceName, validatePublicUrl, buildPublicPreview };
+module.exports = { clipPublicLink, readPublicArticle, fetchPublicPage, buildPublicPreviewFromHtml, sourceName, validatePublicUrl, buildPublicPreview };

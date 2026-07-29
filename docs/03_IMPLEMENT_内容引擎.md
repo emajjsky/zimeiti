@@ -658,3 +658,11 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - 新增 `buildCopyQualityReviewPrompt()` 与 `parseCopyQualityReview()`。审稿模型只接收候选、`verifiedFacts` 与 `cautions`，返回 `approved + issues`，不允许用模型已有知识补全事实。
 - `generateProjectCopyAction()` 的正文路径变为：生成/结构修复 → 质量审稿 → 基于审稿问题重写一次 → 二次审稿。二次不通过时任务失败并返回“研究事实不足，暂不生成正文”，不会创建候选、平台版本或正式稿。
 - 审稿调用复用当前 `CONTENT_WRITING` 路由并累计写入本次 `PROJECT_COPY` 的 Token 用量；不引入隐式兜底模型。
+
+## 2026-07-29 实现：账号声音链接蒸馏
+
+- `server/services/public-web.cjs` 新增 `readPublicArticle()`：复用 URL 安全校验、公众号浏览器回退与验证页阻断，提取正文后仅在内存中截断到 30,000 字符。
+- 新增 `server/services/voiceCalibration.cjs`，定义授权输入、严格结构化规则草案、提示词和 JSON 解析。提示词明确禁止模仿作者、复写全文、摘抄独特句子以及虚构身份。
+- `POST /api/v1/account-voices/calibration-drafts` 读取文章后调用 `VOICE_CALIBRATION` 路由，成功或失败均写入 `api_usage_logs`；接口响应不返回原文，数据库不保存原文。
+- `AccountVoiceSettings.tsx` 重构为低密度三屏：列表、导入链接、确认规则。导入结果只让用户命名和编辑四项规则；默认声音和链接校准元数据在保存时一并写入。
+- 模型任务策略、前端领域类型、调用记录名称和模型筛选均纳入 `VOICE_CALIBRATION`，只接受文本能力模型。

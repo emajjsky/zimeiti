@@ -40,6 +40,11 @@ export interface AccountVoiceInput {
   readerTakeawayText: string;
   editedRules?: AccountVoiceRules;
 }
+
+export interface AccountVoiceCalibrationDraft extends AccountVoiceInput {
+  editedRules: AccountVoiceRules;
+  ruleSummary: string;
+}
 export type CreativePlatform = Exclude<Platform, 'VIDEO_CHANNEL'>;
 export type CreativePlatformSkillSelection = Record<'LAYOUT' | 'CHANNEL', string>;
 export type CreativePlatformSkillMap = Partial<Record<CreativePlatform, CreativePlatformSkillSelection>>;
