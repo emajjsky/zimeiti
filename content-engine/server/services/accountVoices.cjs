@@ -216,13 +216,30 @@ function createAccountVoiceStore({ query, transaction }) {
     return profile;
   }
 
+  async function addCalibration(workspaceId, profileId, input) {
+    const profile = await get(workspaceId, profileId);
+    if (!profile) { const error = new Error('未找到账号声音。'); error.statusCode = 404; throw error; }
+    const result = await query(`INSERT INTO account_voice_calibrations
+      (profile_id, source_type, title, source_url, file_reference, rule_summary, confirmed_licensed)
+      VALUES ($1, $2, $3, $4, $5, $6, true)
+      RETURNING id, source_type, title, source_url, file_reference, rule_summary, created_at`, [
+      profileId,
+      input.sourceType,
+      input.title,
+      input.sourceUrl ?? null,
+      input.fileReference ?? null,
+      input.ruleSummary,
+    ]);
+    return result.rows[0];
+  }
+
   async function getWritingSnapshot(workspaceId, profileId, offset = 'DEFAULT') {
     const profile = await get(workspaceId, profileId);
     if (!profile || profile.status !== 'ACTIVE') return null;
     return { id: profile.id, name: profile.name, version: profile.version, rules: profile.rules, offset };
   }
 
-  return { list, get, create, update, setDefault, getWritingSnapshot };
+  return { list, get, create, update, setDefault, addCalibration, getWritingSnapshot };
 }
 
 module.exports = {

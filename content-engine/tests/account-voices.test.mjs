@@ -116,3 +116,28 @@ test('服务端注册账号声音的读取、创建、更新与默认 API', () =
   assert.match(source, /app\.post\('\/api\/v1\/account-voices\/:id\/default'/);
   assert.match(source, /accountVoiceInput\.parse\(request\.body\)/);
 });
+
+test('校准只保存授权确认后的元数据和用户规则摘要，不保存参考正文', async () => {
+  const operations = [];
+  const profile = {
+    id: 'voice-1', workspace_id: 'workspace-1', name: '把话说透', archetype_slug: 'say-it-through',
+    identity_text: '我', audience_text: '读者', reader_takeaway_text: '理解边界', status: 'ACTIVE', current_version: 1,
+    rules_json: buildInitialVoiceRules({ archetypeSlug: 'say-it-through', identityText: '我', audienceText: '读者', readerTakeawayText: '理解边界' }),
+    created_at: '2026-07-29T00:00:00.000Z', updated_at: '2026-07-29T00:00:00.000Z',
+  };
+  const query = async (sql, values) => {
+    operations.push({ sql, values });
+    if (/SELECT p\.\*/.test(sql)) return { rowCount: 1, rows: [profile] };
+    if (/INSERT INTO account_voice_calibrations/.test(sql)) return { rowCount: 1, rows: [{ id: 'calibration-1', ...values } ] };
+    return { rowCount: 1, rows: [] };
+  };
+  const store = createAccountVoiceStore({ query, transaction: async (callback) => callback({ query }) });
+
+  await store.addCalibration('workspace-1', 'voice-1', accountVoiceCalibrationInput.parse({
+    sourceType: 'LINK', title: '我的旧稿', sourceUrl: 'https://example.com/a', ruleSummary: '开头直接进入事实，不做假设提问。', confirmedLicensed: true,
+  }));
+
+  const insert = operations.find(({ sql }) => /INSERT INTO account_voice_calibrations/.test(sql));
+  assert.deepEqual(insert.values, ['voice-1', 'LINK', '我的旧稿', 'https://example.com/a', null, '开头直接进入事实，不做假设提问。']);
+  assert.doesNotMatch(insert.sql, /正文|content_body|source_body/i);
+});

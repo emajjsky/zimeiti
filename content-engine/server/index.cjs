@@ -16,7 +16,7 @@ const { runBailianCli } = require('./runner/bailian.cjs');
 const { ANALYSIS_SCOPE, createTemplateStore, prepareAnalysisInput } = require('./services/intelligence-analysis.cjs');
 const { createCreativeSkillStore } = require('./services/creativeSkills.cjs');
 const { writingBriefInput } = require('./services/writing-brief.cjs');
-const { accountVoiceInput, createAccountVoiceStore } = require('./services/accountVoices.cjs');
+const { accountVoiceInput, accountVoiceCalibrationInput, createAccountVoiceStore } = require('./services/accountVoices.cjs');
 const {
   confirmProjectPlanning,
   createBlankProject,
@@ -669,6 +669,13 @@ app.post('/api/v1/account-voices/:id/default', { preHandler: authenticate }, asy
   const workspace = await currentWorkspace(request.user.sub);
   const voice = await accountVoiceStore.setDefault(workspace.id, z.string().uuid().parse(request.params.id));
   return { voice };
+});
+
+app.post('/api/v1/account-voices/:id/calibrations', { preHandler: authenticate }, async (request, reply) => {
+  const input = accountVoiceCalibrationInput.parse(request.body);
+  const workspace = await currentWorkspace(request.user.sub);
+  const calibration = await accountVoiceStore.addCalibration(workspace.id, z.string().uuid().parse(request.params.id), input);
+  reply.code(201).send({ calibration });
 });
 
 app.get('/api/v1/creative/skills', { preHandler: authenticate }, async (request) => {
