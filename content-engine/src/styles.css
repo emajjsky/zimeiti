@@ -736,13 +736,23 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .voice-execution-grid article { display:grid; gap:5px; padding:10px 12px; border-radius:var(--radius-control); background:#f8f8f3; }
 .voice-execution-grid b { color:#536270; font-size:12px; }.voice-execution-grid span { font-size:13px; line-height:1.55; }
 .voice-empty>div { display:flex; align-items:center; gap:10px; }
-.copy-voice-state { display:grid; grid-template-columns:minmax(0,1fr) 190px auto; align-items:end; gap:14px; padding:14px 16px; border:1px solid var(--line); border-radius:var(--radius-panel); background:#fffaf0; }
-.copy-voice-state>div, .copy-voice-state label { display:grid; gap:5px; }
-.copy-voice-state span { color:var(--muted); font-size:12px; font-weight:700; }
-.copy-voice-state b { font-size:16px; }
-.copy-voice-state .text-button { align-self:center; }
+.copy-voice-state { display:grid; grid-template-columns:minmax(260px,1fr) minmax(360px,auto) auto; align-items:stretch; overflow:hidden; border:1px solid var(--ink); border-radius:var(--radius-panel); background:#fff; box-shadow:4px 4px 0 rgba(23,32,59,.07); }
+.copy-voice-summary { display:grid; grid-template-columns:7px minmax(0,1fr); gap:12px; align-items:center; min-width:0; padding:13px 16px 13px 0; background:#fff7d8; }
+.copy-voice-summary::before { content:""; align-self:stretch; background:#f0bc48; }
+.copy-voice-summary>span { grid-column:2; color:#86651d; font-size:10px; font-weight:800; }
+.copy-voice-summary>div { grid-column:2; display:grid; min-width:0; gap:3px; }
+.copy-voice-summary b { overflow:hidden; font-size:16px; text-overflow:ellipsis; white-space:nowrap; }
+.copy-voice-summary p { display:-webkit-box; max-width:58ch; margin:0; overflow:hidden; color:#536270; font-size:11px; line-height:1.45; -webkit-box-orient:vertical; -webkit-line-clamp:1; }
+.copy-voice-controls { display:flex; align-items:center; gap:10px; padding:11px 14px; border-left:1px solid var(--ink); background:#fff; }
+.copy-voice-controls label { display:grid; min-width:142px; gap:5px; }
+.copy-voice-controls label>span { color:var(--muted); font-size:10px; font-weight:800; }
+.copy-voice-controls select { width:100%; height:34px; padding:0 28px 0 9px; border:1px solid var(--line); border-radius:var(--radius-control); background:#fff; color:var(--ink); font-size:12px; font-weight:700; }
+.copy-voice-controls select:focus { border-color:var(--accent); outline:2px solid #dce6ff; outline-offset:1px; }
+.copy-voice-manage { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-width:102px; margin:11px 12px 11px 0; padding:0 11px; border:1px solid var(--ink); border-radius:var(--radius-control); background:#dff5e9; color:var(--ink); font-size:12px; font-weight:800; white-space:nowrap; transition:transform .16s ease,background-color .16s ease; }
+.copy-voice-manage:hover { background:#ccefdc; }.copy-voice-manage:active { transform:translateY(1px); }
 @keyframes voice-loading { to { background-position:-300% 0; } }
-@media (max-width:790px) { .voice-profile-grid,.voice-archetype-grid,.voice-sentences,.voice-rule-fields,.voice-diagnosis-grid,.voice-execution-grid { grid-template-columns:1fr; } .voice-sentences .voice-section-title,.voice-sentences footer { grid-column:auto; } .copy-voice-state { grid-template-columns:1fr auto; align-items:center; } .copy-voice-state label { grid-column:1/-1; } .voice-import-card,.voice-review-card { padding:18px; box-shadow:4px 4px 0 #dceeff; } }
+@media (max-width:790px) { .voice-profile-grid,.voice-archetype-grid,.voice-sentences,.voice-rule-fields,.voice-diagnosis-grid,.voice-execution-grid { grid-template-columns:1fr; } .voice-sentences .voice-section-title,.voice-sentences footer { grid-column:auto; } .copy-voice-state { grid-template-columns:minmax(0,1fr) auto; } .copy-voice-summary { grid-column:1/-1; } .copy-voice-controls { border-left:0; } .voice-import-card,.voice-review-card { padding:18px; box-shadow:4px 4px 0 #dceeff; } }
+@media (max-width:560px) { .copy-voice-state { grid-template-columns:1fr; } .copy-voice-controls { display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:12px; } .copy-voice-controls label { min-width:0; } .copy-voice-manage { min-height:36px; margin:0 12px 12px; } }
 @media (max-width:460px) { .voice-editor { padding:16px; } .voice-profile-card { box-shadow:3px 3px 0 #f4e5ac; } }
 
 .intelligence-filters { display:grid; grid-template-columns:120px minmax(140px,180px) minmax(130px,160px) 130px minmax(220px,1fr); gap:8px; margin-bottom:18px; }

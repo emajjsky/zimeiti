@@ -1,4 +1,4 @@
-import { Check, ChevronDown, CircleAlert, History, LoaderCircle, Plus, Save, X } from 'lucide-react';
+import { Check, ChevronDown, CircleAlert, History, LoaderCircle, PenLine, Plus, Save, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { webCreative } from '../../data/webApi';
 import { platformName, type ContentProject, type ContentVersion } from '../../domain/content';
@@ -208,9 +208,15 @@ export function CopyWorkspace({ project, brief, briefState, skills, accountVoice
     {error && <div className="copy-workspace-error" role="alert"><CircleAlert size={16}/><span>{error}</span>{/模型|提示词|任务策略/.test(error) && <button className="text-button" type="button" onClick={onOpenModelSettings}>去配置</button>}</div>}
 
     {strategy && <section className="copy-voice-state" aria-label="账号声音">
-      <div><span>当前账号声音</span><b>{activeVoice?.name ?? '尚未设置'}</b></div>
-      <label><span>本篇语气</span><select value={strategy.voiceOffset} onChange={(event) => changeStrategy({ voiceOffset: event.target.value as VoiceOffset })}>{voiceOffsets.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
-      <button className="text-button" type="button" onClick={onOpenVoiceSettings}>管理</button>
+      <div className="copy-voice-summary">
+        <span>当前账号声音</span>
+        <div><b>{activeVoice?.name ?? '尚未设置账号声音'}</b><p>{activeVoice?.rules.opening ?? '先在设置中导入自己的文章，提炼可继承的表达规则。'}</p></div>
+      </div>
+      <div className="copy-voice-controls">
+        <label><span>使用声音</span><select value={strategy.accountVoiceProfileId} onChange={(event) => changeStrategy({ accountVoiceProfileId: event.target.value })}><option value="">暂不使用</option>{accountVoices.map((voice) => <option key={voice.id} value={voice.id}>{voice.name}{voice.isDefault ? '（默认）' : ''}</option>)}</select></label>
+        <label><span>本篇语气</span><select value={strategy.voiceOffset} onChange={(event) => changeStrategy({ voiceOffset: event.target.value as VoiceOffset })}>{voiceOffsets.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
+      </div>
+      <button className="copy-voice-manage" type="button" onClick={onOpenVoiceSettings}><PenLine size={15}/>编辑声音</button>
     </section>}
 
     <div className="copy-workspace-layout">
