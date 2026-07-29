@@ -26,6 +26,7 @@ function summaryView(row) {
 }
 
 function actionName(actionVersionId) {
+  if (String(actionVersionId).startsWith('project-research-workflow:')) return 'PROJECT_RESEARCH_WORKFLOW';
   if (String(actionVersionId).startsWith('project-research-plan:')) return 'PROJECT_RESEARCH_PLAN';
   if (String(actionVersionId).startsWith('project-research-sources:')) return 'PROJECT_RESEARCH_SOURCES';
   if (String(actionVersionId).startsWith('source-verification:')) return 'SOURCE_VERIFICATION';
@@ -104,7 +105,7 @@ function createProjectAgentStore({ query, transaction }) {
       query(`SELECT r.*
         FROM generation_runs r
         WHERE r.workspace_id = $1 AND r.source_snapshot_json->>'projectId' = $2
-          AND (($3 = 'RESEARCH' AND (r.action_version_id LIKE 'project-research-plan:%' OR r.action_version_id LIKE 'project-research-sources:%' OR r.action_version_id LIKE 'source-verification:%'))
+          AND (($3 = 'RESEARCH' AND (r.action_version_id LIKE 'project-research-workflow:%' OR r.action_version_id LIKE 'project-research-plan:%' OR r.action_version_id LIKE 'project-research-sources:%' OR r.action_version_id LIKE 'source-verification:%'))
             OR ($3 = 'COPY' AND r.action_version_id LIKE 'project-copy-%'))
           AND ($4::text IS NULL OR r.source_snapshot_json->>'platform' = $4)
           AND r.status IN ('DRAFT', 'QUEUED', 'RUNNING')

@@ -21,6 +21,7 @@ const {
   normalizeReadResult,
   normalizeSearchResults,
   recommendSourceSelection,
+  researchSourceActions,
 } = require('./services/project-research-sources.cjs');
 const {
   SOURCE_VERIFICATION_VERSION,
@@ -28,6 +29,7 @@ const {
   buildSourceVerificationRepairPrompt,
   parseSourceVerification,
 } = require('./services/source-verification.cjs');
+const { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, buildResearchResult } = require('./services/simplified-research.cjs');
 const { createProjectAgentStore } = require('./services/project-agent.cjs');
 const { buildCopyPrompt, buildCopyRepairPrompt, mergeFactsToVerify, parseCopyOutput } = require('./services/project-copy-action.cjs');
 
@@ -43,6 +45,7 @@ async function processJob(queueJob) {
     if (queueJob.name === 'AGENT_PLAN') return await generateAgentPlan({ jobId, workspaceId, planId: payload.planId });
     if (queueJob.name === 'INTELLIGENCE_ANALYSIS') return await generateIntelligenceAnalysis({ jobId, workspaceId, runId: payload.runId });
     if (queueJob.name === 'PROJECT_RESEARCH_PLAN') return await generateProjectResearchPlan({ jobId, workspaceId, runId: payload.runId });
+    if (queueJob.name === 'PROJECT_RESEARCH_WORKFLOW') return await generateSimplifiedResearchWorkflow({ jobId, workspaceId, runId: payload.runId });
     if (queueJob.name === 'PROJECT_RESEARCH_SOURCES') return await generateProjectResearchSources({ jobId, workspaceId, runId: payload.runId });
     if (queueJob.name === 'SOURCE_VERIFICATION') return await generateSourceVerification({ jobId, workspaceId, runId: payload.runId });
     if (queueJob.name === 'CREATIVE_OUTLINE') return await generateCreativeOutline({ jobId, workspaceId, runId: payload.runId });
@@ -58,6 +61,146 @@ async function processJob(queueJob) {
     const message = error instanceof Error ? error.message : '任务失败。';
     if (queueJob.name === 'AGENT_PLAN' && payload.planId) await query('UPDATE agent_plans SET status = $1, error = $2, updated_at = now() WHERE id = $3 AND workspace_id = $4', ['FAILED', message.slice(0, 2_000), payload.planId, workspaceId]);
     await query('UPDATE jobs SET status = $1, error = $2, completed_at = now() WHERE id = $3', ['FAILED', message.slice(0, 2_000), jobId]);
+    throw error;
+  }
+}
+
+async function updateSimplifiedResearchPhase(workspaceId, runId, phase, progress) {
+  await query(`UPDATE generation_runs
+    SET source_snapshot_json = jsonb_set(source_snapshot_json, '{process}', $3::jsonb, true)
+    WHERE workspace_id = $1 AND id = $2`, [workspaceId, runId, JSON.stringify({ phase, progress })]);
+}
+
+async function runWorkflowResearchPlan(workspaceId, snapshot, route) {
+  const connectionInput = await textConnectionInput(workspaceId, route);
+  const prompt = buildResearchPlanPrompt(snapshot);
+  const first = await textRunner.runText({ provider: route.provider, model: route.model, system: prompt.system, message: prompt.message, ...connectionInput });
+  try {
+    return { output: parseResearchPlan(first.content), inputTokens: first.inputTokens ?? 0, outputTokens: first.outputTokens ?? 0 };
+  } catch (error) {
+    const validationError = error instanceof Error ? error.message : '研究计划输出不符合 JSON 契约。';
+    const repaired = await textRunner.runText({ provider: route.provider, model: route.model, system: buildResearchPlanRepairPrompt(prompt.system, validationError), message: first.content, ...connectionInput });
+    return {
+      output: parseResearchPlan(repaired.content),
+      inputTokens: (first.inputTokens ?? 0) + (repaired.inputTokens ?? 0),
+      outputTokens: (first.outputTokens ?? 0) + (repaired.outputTokens ?? 0),
+    };
+  }
+}
+
+async function captureWorkflowSources(workspaceId, plan) {
+  let actions;
+  try { actions = researchSourceActions(plan).actions; }
+  catch { return []; }
+  const captured = [];
+  for (const action of actions) {
+    if (action.action === 'ASK_USER') { captured.push(manualSourceSnapshot(action)); continue; }
+    try {
+      if (action.action === 'SEARCH_WEB') {
+        const results = normalizeSearchResults(action, await searchTavily(workspaceId, { query: action.target, category: '其他', domains: [] }));
+        captured.push(...(results.length ? results : [failedSourceSnapshot(action, new Error('网页搜索没有返回可保存的结果。'))]));
+      } else if (action.action === 'READ_LINK') {
+        captured.push(normalizeReadResult(action, await clipPublicLink(action.target)));
+      }
+    } catch (error) {
+      captured.push(failedSourceSnapshot(action, error));
+    }
+  }
+  return dedupeSourceSnapshots(captured).map((source, index) => ({ ...source, id: `source-${index + 1}` }));
+}
+
+async function verifyWorkflowClaims(workspaceId, plan, sources, route, template) {
+  const selectedIds = new Set(recommendSourceSelection(sources, 8));
+  const selectedSources = sources.filter((source) => selectedIds.has(source.id));
+  if (!route || !selectedSources.length || !Array.isArray(plan.claims) || !plan.claims.length) return null;
+  const connectionInput = await textConnectionInput(workspaceId, route);
+  const prompt = buildSourceVerificationPrompt({ claims: plan.claims, sources: selectedSources, template });
+  const first = await textRunner.runText({ provider: route.provider, model: route.model, system: prompt.system, message: prompt.message, ...connectionInput });
+  try {
+    return { output: parseSourceVerification(first.content, { claims: plan.claims, sources: selectedSources }), inputTokens: first.inputTokens ?? 0, outputTokens: first.outputTokens ?? 0 };
+  } catch (error) {
+    const validationError = error instanceof Error ? error.message : '事实核验输出不符合 JSON 契约。';
+    const repaired = await textRunner.runText({ provider: route.provider, model: route.model, system: buildSourceVerificationRepairPrompt(prompt.system, validationError), message: first.content, ...connectionInput });
+    return {
+      output: parseSourceVerification(repaired.content, { claims: plan.claims, sources: selectedSources }),
+      inputTokens: (first.inputTokens ?? 0) + (repaired.inputTokens ?? 0),
+      outputTokens: (first.outputTokens ?? 0) + (repaired.outputTokens ?? 0),
+    };
+  }
+}
+
+async function generateSimplifiedResearchWorkflow({ jobId, workspaceId, runId }) {
+  const startedAt = Date.now();
+  let route;
+  let inputTokens = 0;
+  let outputTokens = 0;
+  try {
+    const runResult = await query(`SELECT id, source_snapshot_json, input_json
+      FROM generation_runs
+      WHERE id = $1 AND workspace_id = $2 AND action_version_id = $3 AND status = 'QUEUED'`, [runId, workspaceId, SIMPLIFIED_RESEARCH_WORKFLOW_VERSION]);
+    if (!runResult.rowCount) throw new Error('研究任务当前不能执行。');
+    await query("UPDATE generation_runs SET status = 'RUNNING', started_at = now() WHERE id = $1 AND workspace_id = $2", [runId, workspaceId]);
+    const snapshot = runResult.rows[0].source_snapshot_json;
+    const input = runResult.rows[0].input_json;
+    route = input.route;
+
+    await updateSimplifiedResearchPhase(workspaceId, runId, 'PLANNING', 15);
+    const planned = await runWorkflowResearchPlan(workspaceId, snapshot, route);
+    inputTokens += planned.inputTokens;
+    outputTokens += planned.outputTokens;
+
+    await updateSimplifiedResearchPhase(workspaceId, runId, 'SOURCES', 45);
+    const sources = await captureWorkflowSources(workspaceId, planned.output);
+
+    await updateSimplifiedResearchPhase(workspaceId, runId, 'VERIFYING', 75);
+    let verification = null;
+    try {
+      verification = await verifyWorkflowClaims(workspaceId, planned.output, sources, input.verificationRoute, input.verificationTemplate);
+      inputTokens += verification?.inputTokens ?? 0;
+      outputTokens += verification?.outputTokens ?? 0;
+    } catch (error) {
+      verification = null;
+    }
+    const result = buildResearchResult({ plan: planned.output, sources, verification: verification?.output ?? null, materials: snapshot.materials });
+
+    const saved = await transaction(async (client) => {
+      const artifact = await projectAgentStore.createArtifact(client, {
+        workspaceId,
+        projectId: snapshot.projectId,
+        type: 'RESEARCH_RESULT',
+        stage: 'RESEARCH',
+        status: 'CANDIDATE',
+        actionRunId: runId,
+        title: '研究结果',
+        metadata: { action: 'PROJECT_RESEARCH_WORKFLOW', payload: result },
+      });
+      const researchResult = await client.query(`INSERT INTO project_research_results
+        (workspace_id, project_id, generation_run_id, artifact_id, output_json)
+        VALUES ($1, $2, $3, $4, $5) RETURNING id`, [workspaceId, snapshot.projectId, runId, artifact.id, JSON.stringify(result)]);
+      const message = await client.query(`INSERT INTO project_agent_messages
+        (workspace_id, project_id, action_run_id, role, content, stage, message_type, artifact_refs_json, metadata_json)
+        VALUES ($1, $2, $3, 'ASSISTANT', $4, 'RESEARCH', 'ARTIFACT', $5, $6) RETURNING id`, [
+        workspaceId, snapshot.projectId, runId, result.summary, JSON.stringify([artifact.id]), JSON.stringify({ action: 'PROJECT_RESEARCH_WORKFLOW', phase: 'COMPLETE', progress: 100 }),
+      ]);
+      await client.query('UPDATE project_artifacts SET created_by_message_id = $1 WHERE id = $2 AND workspace_id = $3', [message.rows[0].id, artifact.id, workspaceId]);
+      await projectAgentStore.upsertStageSummary(client, { workspaceId, projectId: snapshot.projectId, stage: 'RESEARCH', summary: result.summary, throughMessageId: message.rows[0].id });
+      await client.query("UPDATE generation_runs SET status = 'SUCCEEDED', output_json = $2, usage_json = $3, source_snapshot_json = jsonb_set(source_snapshot_json, '{process}', $4::jsonb, true), completed_at = now() WHERE id = $1", [runId, JSON.stringify(result), JSON.stringify({ inputTokens, outputTokens }), JSON.stringify({ phase: 'COMPLETE', progress: 100 })]);
+      await client.query("UPDATE jobs SET status = 'SUCCEEDED', result_json = $2, completed_at = now() WHERE id = $1", [jobId, JSON.stringify({ artifactId: artifact.id, researchResultId: researchResult.rows[0].id })]);
+      await client.query(`INSERT INTO api_usage_logs
+        (workspace_id, job_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens)
+        VALUES ($1, $2, $3, $4, 'PROJECT_RESEARCH_WORKFLOW', 'SUCCESS', $5, $6, $7)`, [workspaceId, jobId, route.provider, route.model, Date.now() - startedAt, inputTokens || null, outputTokens || null]);
+      return { artifactId: artifact.id, researchResultId: researchResult.rows[0].id };
+    });
+    return saved;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '研究任务失败。';
+    await transaction(async (client) => {
+      await client.query("UPDATE generation_runs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1 AND workspace_id = $3 AND status <> 'CANCELLED'", [runId, message.slice(0, 2_000), workspaceId]);
+      await client.query("UPDATE jobs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1", [jobId, message.slice(0, 2_000)]);
+      await client.query(`INSERT INTO api_usage_logs
+        (workspace_id, job_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens, error)
+        VALUES ($1, $2, $3, $4, 'PROJECT_RESEARCH_WORKFLOW', 'FAILED', $5, $6, $7, $8)`, [workspaceId, jobId, route?.provider ?? 'UNKNOWN', route?.model ?? null, Date.now() - startedAt, inputTokens || null, outputTokens || null, message.slice(0, 2_000)]);
+    });
     throw error;
   }
 }

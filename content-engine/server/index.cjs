@@ -31,6 +31,7 @@ const { saveProjectUpload, removeProjectUpload, openProjectUpload, readProjectUp
 const { PROJECT_RESEARCH_ACTION_VERSION, PROJECT_RESEARCH_SCOPE, researchRunView, researchPlanView } = require('./services/project-research.cjs');
 const { PROJECT_RESEARCH_SOURCES_VERSION, researchSourceActions } = require('./services/project-research-sources.cjs');
 const { SOURCE_VERIFICATION_SCOPE, SOURCE_VERIFICATION_VERSION, defaultSourceVerificationTemplate, validateSourceVerificationTemplate } = require('./services/source-verification.cjs');
+const { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION } = require('./services/simplified-research.cjs');
 const { OUTLINE_ACTION_VERSION, OUTLINE_SCOPE, OUTLINE_TEMPLATE_SCOPES, outlineTemplateScope, validateOutlineTemplate, defaultOutlineTemplate, outlineCandidateView } = require('./services/creative-outline.cjs');
 const { DRAFT_ACTION_VERSION, DRAFT_SCOPE, DRAFT_TEMPLATE_SCOPES, draftTemplateScope, validateDraftTemplate, defaultDraftTemplate, draftCandidateView } = require('./services/creative-draft.cjs');
 const {
@@ -134,6 +135,9 @@ const agentPrepareInput = z.object({
   }).refine((value) => value.end > value.start, '选区结束位置必须大于开始位置。').optional(),
   inputIds: z.array(z.string().uuid()).max(20).default([]),
   referenceIds: z.array(z.string().uuid()).max(20).default([]),
+});
+const simplifiedResearchStartInput = z.object({
+  request: z.string().trim().max(2_000).optional(),
 });
 app.register(cors, { origin: config.corsOrigin, credentials: false });
 app.register(jwt, { secret: config.jwtSecret });
@@ -790,6 +794,63 @@ app.get('/api/v1/creative/projects/:projectId/agent', { preHandler: authenticate
   const workspace = await currentWorkspace(request.user.sub);
   await creativeProject(workspace.id, projectId);
   return projectAgentStore.context(workspace.id, projectId, input);
+});
+
+app.post('/api/v1/creative/projects/:projectId/research/start', { preHandler: authenticate }, async (request, reply) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const input = simplifiedResearchStartInput.parse(request.body ?? {});
+  const workspace = await currentWorkspace(request.user.sub);
+  const [project, brief, policy, verificationPolicy, template, listed] = await Promise.all([
+    creativeProject(workspace.id, projectId),
+    creativeSkillStore.getBrief(workspace.id, projectId),
+    query(`SELECT p.model FROM agent_model_policies p
+      JOIN credential_vault c ON c.workspace_id = p.workspace_id AND c.provider = 'BAILIAN' AND c.status = 'READY'
+      WHERE p.workspace_id = $1 AND p.scope = $2 AND p.provider = 'BAILIAN_CLI'`, [workspace.id, PROJECT_RESEARCH_SCOPE]),
+    query(`SELECT p.model FROM agent_model_policies p
+      JOIN credential_vault c ON c.workspace_id = p.workspace_id AND c.provider = 'BAILIAN' AND c.status = 'READY'
+      WHERE p.workspace_id = $1 AND p.scope = $2 AND p.provider = 'BAILIAN_CLI'`, [workspace.id, SOURCE_VERIFICATION_SCOPE]),
+    templateStore.get(workspace.id, SOURCE_VERIFICATION_SCOPE),
+    projectMaterialStore.list(workspace.id, projectId),
+  ]);
+  if (!policy.rowCount) { const error = new Error('请先在“核心 Agent”配置可用的规划模型。'); error.statusCode = 400; throw error; }
+  const inputIds = listed.inputs.filter((item) => item.scope === 'PROJECT' || item.scope === 'RESEARCH').map((item) => item.id);
+  const referenceIds = listed.references.filter((item) => item.scope === 'PROJECT' || item.scope === 'RESEARCH').map((item) => item.id);
+  const materialRows = await projectMaterialStore.researchSnapshot(workspace.id, projectId, inputIds, referenceIds);
+  const materials = await projectResearchMaterialSnapshot(materialRows);
+  const route = { provider: 'BAILIAN_CLI', model: policy.rows[0].model };
+  const verificationRoute = verificationPolicy.rowCount ? { provider: 'BAILIAN_CLI', model: verificationPolicy.rows[0].model } : null;
+  const run = await transaction(async (client) => {
+    await client.query(`UPDATE generation_runs SET status = 'CANCELLED', completed_at = now()
+      WHERE workspace_id = $1 AND action_version_id = $2 AND status IN ('QUEUED', 'RUNNING')
+        AND source_snapshot_json->>'projectId' = $3`, [workspace.id, SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, projectId]);
+    const created = await client.query(`INSERT INTO generation_runs
+      (workspace_id, action_version_id, status, source_snapshot_json, input_json, model, prompt_version, estimated_cost)
+      VALUES ($1, $2, 'QUEUED', $3, $4, $5, '1.0.0', 'null'::jsonb) RETURNING *`, [
+      workspace.id,
+      SIMPLIFIED_RESEARCH_WORKFLOW_VERSION,
+      JSON.stringify({ projectId, project, brief, request: input.request || '根据已确认的规划开始研究。', materials, stage: 'RESEARCH', process: { phase: 'PLANNING', progress: 5 } }),
+      JSON.stringify({ route, verificationRoute, verificationTemplate: template.body }),
+      route.model,
+    ]);
+    await client.query(`INSERT INTO project_agent_messages
+      (workspace_id, project_id, action_run_id, role, content, stage, message_type, metadata_json)
+      VALUES ($1, $2, $3, 'USER', $4, 'RESEARCH', 'MESSAGE', '{}'::jsonb),
+             ($1, $2, $3, 'ASSISTANT', '正在检索研究资料。', 'RESEARCH', 'RUN_STATUS', $5)`, [
+      workspace.id, projectId, created.rows[0].id, input.request || '开始研究', JSON.stringify({ action: 'PROJECT_RESEARCH_WORKFLOW', phase: 'PLANNING', progress: 5 }),
+    ]);
+    for (const id of inputIds) await client.query('INSERT INTO project_research_materials (generation_run_id, input_id) VALUES ($1, $2)', [created.rows[0].id, id]);
+    for (const id of referenceIds) await client.query('INSERT INTO project_research_materials (generation_run_id, reference_id) VALUES ($1, $2)', [created.rows[0].id, id]);
+    const job = await client.query("INSERT INTO jobs (workspace_id, job_type, payload_json) VALUES ($1, 'PROJECT_RESEARCH_WORKFLOW', $2) RETURNING *", [workspace.id, JSON.stringify({ runId: created.rows[0].id })]);
+    return { run: created.rows[0], job: job.rows[0] };
+  });
+  try { await enqueue(run.job); }
+  catch (error) {
+    const message = error instanceof Error ? error.message : '研究任务入队失败。';
+    await query("UPDATE generation_runs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1", [run.run.id, message.slice(0, 2_000)]);
+    await query("UPDATE jobs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1", [run.job.id, message.slice(0, 2_000)]);
+    throw error;
+  }
+  reply.code(202).send({ ...runView(run.run), jobId: run.job.id });
 });
 
 app.post('/api/v1/creative/projects/:projectId/agent/prepare', { preHandler: authenticate }, async (request, reply) => {

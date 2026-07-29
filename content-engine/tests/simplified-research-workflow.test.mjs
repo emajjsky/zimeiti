@@ -52,3 +52,15 @@ test('前端领域模型识别统一研究运行和研究结果', () => {
   assert.match(domain, /'PROJECT_RESEARCH_WORKFLOW'/);
   assert.match(domain, /interface ResearchResult/);
 });
+
+test('开始研究直接入队统一任务，不再创建确认草稿', () => {
+  const server = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
+  const worker = fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8');
+  const start = server.indexOf("/research/start");
+
+  assert.ok(start >= 0);
+  assert.match(server.slice(start, start + 5_000), /'PROJECT_RESEARCH_WORKFLOW'/);
+  assert.doesNotMatch(server.slice(start, start + 5_000), /status = 'DRAFT'/);
+  assert.match(worker, /queueJob\.name === 'PROJECT_RESEARCH_WORKFLOW'/);
+  assert.match(worker, /generateSimplifiedResearchWorkflow/);
+});
