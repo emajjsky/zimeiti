@@ -85,6 +85,14 @@ const voiceRulesSchema = z.object({
   allowedPhrases: z.array(z.string().trim().min(1).max(100)).max(30),
   bannedPhrases: z.array(z.string().trim().min(1).max(100)).min(1).max(50),
   bannedStructures: z.array(z.string().trim().min(1).max(100)).min(1).max(50),
+  hookPatterns: z.array(z.string().trim().min(1).max(240)).max(8).default([]),
+  argumentPattern: z.string().trim().max(1_000).default(''),
+  evidenceStyle: z.string().trim().max(1_000).default(''),
+  paragraphPattern: z.string().trim().max(1_000).default(''),
+  languageTexture: z.string().trim().max(1_000).default(''),
+  readerRelationship: z.string().trim().max(1_000).default(''),
+  titlePatterns: z.array(z.string().trim().min(1).max(240)).max(8).default([]),
+  closingStyle: z.string().trim().max(1_000).default(''),
 });
 
 const accountVoiceInput = z.object({
@@ -124,6 +132,14 @@ function buildInitialVoiceRules({ archetypeSlug, identityText, audienceText, rea
     allowedPhrases: [],
     bannedPhrases: [...COMMON_BANNED_PHRASES],
     bannedStructures: [...COMMON_BANNED_STRUCTURES, ...archetype.avoidRules],
+    hookPatterns: [],
+    argumentPattern: '',
+    evidenceStyle: '',
+    paragraphPattern: '',
+    languageTexture: '',
+    readerRelationship: '',
+    titlePatterns: [],
+    closingStyle: '',
   };
 }
 

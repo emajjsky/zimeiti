@@ -15,6 +15,14 @@ export interface AccountVoiceRules {
   allowedPhrases: string[];
   bannedPhrases: string[];
   bannedStructures: string[];
+  hookPatterns: string[];
+  argumentPattern: string;
+  evidenceStyle: string;
+  paragraphPattern: string;
+  languageTexture: string;
+  readerRelationship: string;
+  titlePatterns: string[];
+  closingStyle: string;
 }
 
 export interface AccountVoiceProfile {
@@ -44,6 +52,11 @@ export interface AccountVoiceInput {
 export interface AccountVoiceCalibrationDraft extends AccountVoiceInput {
   editedRules: AccountVoiceRules;
   ruleSummary: string;
+  analysis: {
+    confidence: 'LOW' | 'MEDIUM' | 'HIGH';
+    voiceFingerprint: string;
+    diagnostics: { dimension: string; finding: string; evidence: string }[];
+  };
 }
 export type CreativePlatform = Exclude<Platform, 'VIDEO_CHANNEL'>;
 export type CreativePlatformSkillSelection = Record<'LAYOUT' | 'CHANNEL', string>;

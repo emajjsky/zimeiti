@@ -666,3 +666,4 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - `POST /api/v1/account-voices/calibration-drafts` 读取文章后调用 `VOICE_CALIBRATION` 路由，成功或失败均写入 `api_usage_logs`；接口响应不返回原文，数据库不保存原文。
 - `AccountVoiceSettings.tsx` 重构为低密度三屏：列表、导入链接、确认规则。导入结果只让用户命名和编辑四项规则；默认声音和链接校准元数据在保存时一并写入。
 - 模型任务策略、前端领域类型、调用记录名称和模型筛选均纳入 `VOICE_CALIBRATION`，只接受文本能力模型。
+- 二次实现将蒸馏结果扩展为“声音指纹 + 6 至 8 项样本诊断 + 执行规则”。输出缺少诊断或扩展规则时，服务端会使用同一模型执行一次结构修复，再决定是否返回结果。

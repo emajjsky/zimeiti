@@ -17,7 +17,7 @@ const { ANALYSIS_SCOPE, createTemplateStore, prepareAnalysisInput } = require('.
 const { createCreativeSkillStore } = require('./services/creativeSkills.cjs');
 const { writingBriefInput } = require('./services/writing-brief.cjs');
 const { accountVoiceInput, accountVoiceCalibrationInput, createAccountVoiceStore } = require('./services/accountVoices.cjs');
-const { accountVoiceCalibrationDraftInput, buildVoiceCalibrationPrompt, parseVoiceCalibrationDraft } = require('./services/voiceCalibration.cjs');
+const { accountVoiceCalibrationDraftInput, buildVoiceCalibrationPrompt, buildVoiceCalibrationRepairPrompt, parseVoiceCalibrationDraft } = require('./services/voiceCalibration.cjs');
 const { createTextModelRunner } = require('./services/text-model.cjs');
 const {
   confirmProjectPlanning,
@@ -690,10 +690,20 @@ app.post('/api/v1/account-voices/calibration-drafts', { preHandler: authenticate
     route = await textTaskRoute(workspace.id, 'VOICE_CALIBRATION', '账号声音提炼');
     const article = await readPublicArticle(input.sourceUrl);
     const prompt = buildVoiceCalibrationPrompt(article);
-    const result = await textRunner.runText({ provider: route.provider, model: route.model, system: prompt.system, message: prompt.message, ...await textConnectionInput(workspace.id, route) });
-    const draft = parseVoiceCalibrationDraft(result.content);
+    const connectionInput = await textConnectionInput(workspace.id, route);
+    const result = await textRunner.runText({ provider: route.provider, model: route.model, system: prompt.system, message: prompt.message, ...connectionInput });
+    let draft;
+    let inputTokens = result.inputTokens ?? 0;
+    let outputTokens = result.outputTokens ?? 0;
+    try { draft = parseVoiceCalibrationDraft(result.content); }
+    catch (validationError) {
+      const repaired = await textRunner.runText({ provider: route.provider, model: route.model, system: buildVoiceCalibrationRepairPrompt(prompt.system, validationError instanceof Error ? validationError.message : '输出结构不完整。'), message: result.content, ...connectionInput });
+      draft = parseVoiceCalibrationDraft(repaired.content);
+      inputTokens += repaired.inputTokens ?? 0;
+      outputTokens += repaired.outputTokens ?? 0;
+    }
     await query(`INSERT INTO api_usage_logs (workspace_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens)
-      VALUES ($1, $2, $3, 'VOICE_CALIBRATION', 'SUCCESS', $4, $5, $6)`, [workspace.id, route.provider, route.model, Date.now() - startedAt, result.inputTokens ?? null, result.outputTokens ?? null]);
+      VALUES ($1, $2, $3, 'VOICE_CALIBRATION', 'SUCCESS', $4, $5, $6)`, [workspace.id, route.provider, route.model, Date.now() - startedAt, inputTokens || null, outputTokens || null]);
     return { article: { title: article.title, url: article.url, source: article.source }, draft };
   } catch (error) {
     const message = error instanceof Error ? error.message : '账号声音提炼失败。';

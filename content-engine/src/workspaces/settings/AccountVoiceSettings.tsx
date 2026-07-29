@@ -14,9 +14,17 @@ const manualRules: AccountVoiceRules = {
   allowedPhrases: [],
   bannedPhrases: ['很多人会问', '今天我们就来', '建议点赞收藏', '评论区聊聊'],
   bannedStructures: ['emoji 小标题', '百科式定义开场', '强制互动结尾'],
+  hookPatterns: [],
+  argumentPattern: '',
+  evidenceStyle: '',
+  paragraphPattern: '',
+  languageTexture: '',
+  readerRelationship: '',
+  titlePatterns: [],
+  closingStyle: '',
 };
 
-type FormState = AccountVoiceInput & { editedRules: AccountVoiceRules; ruleSummary?: string };
+type FormState = AccountVoiceInput & { editedRules: AccountVoiceRules; ruleSummary?: string; analysis?: AccountVoiceCalibrationDraft['analysis'] };
 type ImportedArticle = { title: string; url: string; source: string };
 
 function formFrom(voice?: AccountVoiceProfile): FormState {
@@ -26,7 +34,7 @@ function formFrom(voice?: AccountVoiceProfile): FormState {
     identityText: voice?.identityText ?? manualRules.identityBoundary,
     audienceText: voice?.audienceText ?? manualRules.audience,
     readerTakeawayText: voice?.readerTakeawayText ?? manualRules.readerTakeaway,
-    editedRules: voice?.rules ?? manualRules,
+    editedRules: { ...manualRules, ...(voice?.rules ?? {}) },
   };
 }
 
@@ -117,7 +125,14 @@ export function AccountVoiceSettings() {
       {article && <div className="voice-source-chip"><FileText size={15}/><span>{article.source}</span><a href={article.url} target="_blank" rel="noreferrer">{article.title}</a></div>}
       <label className="voice-name-field"><span>名称</span><input value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} placeholder="例如：我的公众号表达" /></label>
       {form.ruleSummary && <p className="voice-rule-summary">{form.ruleSummary}</p>}
-      <div className="voice-rule-fields compact">{(['opening', 'reasoning', 'rhythm', 'ending'] as const).map((key) => <label key={key}><span>{{ opening: '怎么开篇', reasoning: '怎么展开', rhythm: '文字节奏', ending: '怎么收束' }[key]}</span><textarea value={form.editedRules[key]} onChange={(event) => updateRule(key, event.target.value)} /></label>)}</div>
+      {form.analysis && <section className="voice-diagnosis">
+        <header><div><span>声音指纹</span><h2>{form.analysis.voiceFingerprint}</h2></div><em className={`voice-confidence ${form.analysis.confidence.toLowerCase()}`}>{form.analysis.confidence === 'LOW' ? '单篇样本' : form.analysis.confidence === 'MEDIUM' ? '多篇样本' : '稳定样本'}</em></header>
+        <div className="voice-diagnosis-grid">{form.analysis.diagnostics.map((item) => <article key={item.dimension}><b>{item.dimension}</b><p>{item.finding}</p><small>{item.evidence}</small></article>)}</div>
+      </section>}
+      <details className="voice-execution-rules" open><summary>用于后续创作的执行规则</summary>
+        <div className="voice-rule-fields compact">{(['opening', 'reasoning', 'rhythm', 'ending'] as const).map((key) => <label key={key}><span>{{ opening: '怎么开篇', reasoning: '怎么展开', rhythm: '文字节奏', ending: '怎么收束' }[key]}</span><textarea value={form.editedRules[key]} onChange={(event) => updateRule(key, event.target.value)} /></label>)}</div>
+        <div className="voice-execution-grid"><article><b>钩子套路</b><span>{form.editedRules.hookPatterns.join('；') || '未提炼到稳定套路'}</span></article><article><b>论证方式</b><span>{form.editedRules.argumentPattern || '未提炼到稳定模式'}</span></article><article><b>证据习惯</b><span>{form.editedRules.evidenceStyle || '未提炼到稳定习惯'}</span></article><article><b>语言颗粒</b><span>{form.editedRules.languageTexture || '未提炼到稳定特征'}</span></article><article><b>标题套路</b><span>{form.editedRules.titlePatterns.join('；') || '未提炼到稳定套路'}</span></article><article><b>读者关系</b><span>{form.editedRules.readerRelationship || '未提炼到稳定关系'}</span></article></div>
+      </details>
       <div className="voice-rule-boundary"><b>自动避开</b><span>{form.editedRules.bannedPhrases.join('、')}</span></div>
       <label className="voice-license"><input type="checkbox" checked={makeDefault} onChange={(event) => setMakeDefault(event.target.checked)} /><span>保存后设为默认账号声音</span></label>
       <footer><button className="text-button" type="button" onClick={article ? () => setScreen('import') : returnToList}>返回</button><button className="button primary" type="button" disabled={saving} onClick={() => void save()}>{saving ? '保存中…' : '确认并保存'}</button></footer>
