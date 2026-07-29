@@ -59,6 +59,7 @@ export function ProjectAgent(props: ProjectAgentProps) {
 function SimplifiedResearchAgent({ projectId, refreshToken = 0, onContextChange, onArtifactAccepted, onOpenSettings }: ProjectAgentProps) {
   const [context, setContext] = useState<ProjectAgentContext | null>(null);
   const [request, setRequest] = useState('');
+  const [showResearchSupplement, setShowResearchSupplement] = useState(false);
   const [busy, setBusy] = useState<'idle' | 'loading' | 'starting' | 'accepting' | 'skipping'>('loading');
   const [error, setError] = useState('');
 
@@ -94,7 +95,7 @@ function SimplifiedResearchAgent({ projectId, refreshToken = 0, onContextChange,
     setBusy('starting'); setError('');
     try {
       await webCreative.startResearch(projectId, request.trim() ? { request: request.trim() } : {});
-      setRequest('');
+      setRequest(''); setShowResearchSupplement(false);
       await reload();
     } catch (reason) { setError(reason instanceof Error ? reason.message : '开始研究失败。'); }
     finally { setBusy('idle'); }
@@ -128,8 +129,8 @@ function SimplifiedResearchAgent({ projectId, refreshToken = 0, onContextChange,
     {busy !== 'loading' && !isRunning && !resultArtifact && <div className="simplified-research-empty"><FileCheck2 size={22}/><b>还没有研究结果</b><span>可直接开始，项目资料会自动带入。</span></div>}
     {error && <div className="simplified-research-error" role="alert"><CircleAlert size={16}/><span>{error}</span>{/(模型|核心 Agent|Key)/.test(error) && <button className="text-button" type="button" onClick={() => onOpenSettings('agent')}><Settings2 size={14}/>去配置</button>}</div>}
     {!isRunning && <footer className="simplified-research-actions">
-      <label><span>{resultArtifact ? '补充方向' : '研究重点'}</span><textarea rows={2} value={request} maxLength={2_000} placeholder="可选" onChange={(event) => setRequest(event.target.value)}/></label>
-      <div>{!resultArtifact && <button className="text-button" type="button" disabled={busy !== 'idle'} onClick={() => void skipResearch()}>无需研究，直接进入正文</button>}<button className="button primary" type="button" disabled={busy !== 'idle'} onClick={() => void startResearch()}>{busy === 'starting' ? <LoaderCircle size={16}/> : <Search size={16}/>}{resultArtifact ? '补充研究' : '开始研究'}</button></div>
+      {(!resultArtifact || showResearchSupplement) && <label><span>{resultArtifact ? '补充方向（可选）' : '研究重点（可选）'}</span><textarea rows={resultArtifact ? 1 : 2} value={request} maxLength={2_000} placeholder="不填则沿用当前项目上下文" onChange={(event) => setRequest(event.target.value)}/></label>}
+      <div>{!resultArtifact && <button className="text-button" type="button" disabled={busy !== 'idle'} onClick={() => void skipResearch()}>无需研究，直接进入正文</button>}{resultArtifact && !showResearchSupplement && <button className="text-button" type="button" disabled={busy !== 'idle'} onClick={() => setShowResearchSupplement(true)}>补充研究</button>}{(!resultArtifact || showResearchSupplement) && <button className="button primary" type="button" disabled={busy !== 'idle'} onClick={() => void startResearch()}>{busy === 'starting' ? <LoaderCircle size={16}/> : <Search size={16}/>}{showResearchSupplement ? '开始补充' : '开始研究'}</button>}</div>
     </footer>}
   </aside>;
 }

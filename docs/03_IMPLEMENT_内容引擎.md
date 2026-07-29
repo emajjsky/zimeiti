@@ -625,3 +625,11 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - `research-source-selection.mjs` 集中维护可选来源集合和切换逻辑。`creative-workspace.e2e.py` 覆盖选择恢复、零选择禁用、prepare、confirm、结果预览、确认结论和 390px 无溢出。
 - 研究计划和核验结论虽然都包含 `claims`，前端按 `artifact.type` 分支读取；E2E 明确断言计划弹窗没有核验卡、核验弹窗没有计划主张块，并生成 `research-sources-desktop.png` 与移动端截图。
 - 下一实现项是让正文 Agent 只读取已确认的 `RESEARCH_VERIFICATION`，并把 `CONFLICTING`、`NEEDS_REVIEW` 继续保留为待核验项。
+
+## 2026-07-29 实现：最小输入与自动保存
+
+- `project-planning.cjs` 新增 `planningWithDefaults()`；保存和确认时只补齐空值，不覆盖用户已有输入。
+- `PlanningWorkspace.tsx` 使用 700ms 防抖保存最小规划字段，详情字段折叠展示；确认前会等待未完成的保存。
+- `ProjectAgent.tsx` 用 `showResearchSupplement` 控制补充研究输入，已有结果时默认只保留采用动作与次级补充入口。
+- `CreateWorkspace.tsx` 在读取到空 `WritingBrief` 时立即保存默认策略；`CopyWorkspace.tsx` 为策略编辑增加防抖保存、保存态和失败重试，Agent 不再依赖手工保存。
+- 本切片没有新增模型、百炼 CLI、Tavily、Playwright 读取或发布调用。

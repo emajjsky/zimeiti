@@ -87,6 +87,7 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
 }) {
   const [skills, setSkills] = useState<CreativeSkillDefinition[]>([]);
   const [brief, setBrief] = useState<WritingBriefInput | null>(null);
+  const [briefState, setBriefState] = useState<'loading' | 'saving' | 'saved' | 'error'>('loading');
   const [briefError, setBriefError] = useState('');
   const contentVersions = useMemo(() => project?.versions.filter((version): version is ContentVersion & { platform: CreativePlatform } => version.platform !== 'VIDEO_CHANNEL') ?? [], [project?.versions]);
   const copyPlatform = activePlatform !== 'VIDEO_CHANNEL' && contentVersions.some((version) => version.platform === activePlatform) ? activePlatform : contentVersions[0]?.platform;
@@ -100,11 +101,13 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
     if (!project) return;
     let cancelled = false;
     setBrief(null);
+    setBriefState('loading');
     setBriefError('');
-    void Promise.all([webCreative.skills(), webCreative.brief(project.id)]).then(([catalog, result]) => {
+    void Promise.all([webCreative.skills(), webCreative.brief(project.id)]).then(async ([catalog, result]) => {
       if (cancelled) return;
       setSkills(catalog);
-      setBrief(result.brief ? {
+      if (result.brief) {
+        setBrief({
         objective: result.brief.objective,
         targetAudience: result.brief.targetAudience,
         coreMessage: result.brief.coreMessage,
@@ -114,9 +117,32 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
         notes: result.brief.notes,
         selectedSkills: result.brief.selectedSkills,
         platformSkills: platformSkillDefaults(result.brief.selectedPlatforms, catalog, result.brief.platformSkills),
-      } : defaultBrief(project, catalog));
+        });
+        setBriefState('saved');
+        return;
+      }
+      const defaults = defaultBrief(project, catalog);
+      setBrief(defaults);
+      setBriefState('saving');
+      const saved = await webCreative.saveBrief(project.id, defaults);
+      if (cancelled) return;
+      setBrief({
+        objective: saved.brief.objective,
+        targetAudience: saved.brief.targetAudience,
+        coreMessage: saved.brief.coreMessage,
+        sourceRequirements: saved.brief.sourceRequirements,
+        lengthTarget: saved.brief.lengthTarget,
+        selectedPlatforms: saved.brief.selectedPlatforms,
+        notes: saved.brief.notes,
+        selectedSkills: saved.brief.selectedSkills,
+        platformSkills: saved.brief.platformSkills,
+      });
+      setBriefState('saved');
     }).catch((error) => {
-      if (!cancelled) setBriefError(error instanceof Error ? error.message : '正文配置读取失败');
+      if (!cancelled) {
+        setBriefState('error');
+        setBriefError(error instanceof Error ? error.message : '正文配置保存失败');
+      }
     });
     return () => { cancelled = true; };
   }, [project?.id]);
@@ -128,6 +154,7 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
   const saveBrief = async (next: WritingBriefInput = brief as WritingBriefInput) => {
     if (!project || !next || next.selectedPlatforms.length === 0) return;
     setBrief(next);
+    setBriefState('saving');
     setBriefError('');
     try {
       const result = await webCreative.saveBrief(project.id, next);
@@ -142,7 +169,9 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
         selectedSkills: result.brief.selectedSkills,
         platformSkills: result.brief.platformSkills,
       });
+      setBriefState('saved');
     } catch (error) {
+      setBriefState('error');
       setBriefError(error instanceof Error ? error.message : '正文配置保存失败');
       throw error;
     }
@@ -169,7 +198,7 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
       <ProjectAgent projectId={project.id} stage="RESEARCH" onArtifactAccepted={(_artifact, nextProject) => { if (!nextProject) return; onProjectAccepted(nextProject); onStage('master'); }} onOpenSettings={(target) => target === 'search' ? onOpenSearchSettings() : onOpenAgentSettings()}/>
     </div>}
     {stage === 'master' && briefError && <div className="creative-stage-error"><CircleAlert size={18}/><span>{briefError}</span></div>}
-    {stage === 'master' && copyPlatform && <CopyWorkspace project={project} brief={brief} skills={skills} activePlatform={copyPlatform} onPlatform={onPlatform} onProjectChange={onProjectAccepted} onSaveBrief={saveBrief} onSaveVersion={onSaveVersion} onOpenModelSettings={onOpenModelSettings} onOpenAgentSettings={onOpenAgentSettings} />}
+    {stage === 'master' && copyPlatform && <CopyWorkspace project={project} brief={brief} briefState={briefState} skills={skills} activePlatform={copyPlatform} onPlatform={onPlatform} onProjectChange={onProjectAccepted} onSaveBrief={saveBrief} onSaveVersion={onSaveVersion} onOpenModelSettings={onOpenModelSettings} onOpenAgentSettings={onOpenAgentSettings} />}
     {stage === 'master' && !copyPlatform && <div className="creative-stage-empty"><h2>没有可写作的图文平台</h2><p>请先在规划中选择公众号、小红书、知乎或微博。</p></div>}
     {(stage === 'platform' || stage === 'visual' || stage === 'layout' || stage === 'review') && <div className="creative-stage-empty"><h2>{pendingStageNames[stage].title}</h2><p>{pendingStageNames[stage].note}</p></div>}
   </section>;

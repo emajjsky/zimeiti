@@ -525,3 +525,14 @@
 | 数据迁移 | 通过 | 实际执行 `npm run db:migrate`，并通过 PostgreSQL 查询确认 `project_research_results` 已存在，`schema_migrations` 已记录 `021_simplified_research_workflow.sql`。 |
 | 服务恢复 | 通过 | 重启 API 后 `http://127.0.0.1:8787/health` 返回正常健康状态。 |
 | 回归 | 通过 | `npm test` 202/202 通过；正文 Agent 可重新发送请求，不需要重新创建项目。 |
+
+## A38. 创作最小输入与自动保存（2026-07-29）
+
+| 验收项 | 状态 | 证据 |
+| --- | --- | --- |
+| 规划最小输入 | 通过 | 规划确认仅要求标题与至少一个目标平台；服务端自动补齐角度、目标、受众和核心表达，发布时间不再出现在规划界面。 |
+| 自动保存 | 通过 | 规划与写作策略均使用 700ms 防抖保存；状态明确区分正在保存、已自动保存和保存失败，失败可重试且不丢失本地编辑值。 |
+| 研究交互 | 通过 | 研究结果可直接采用进入正文；补充研究默认收起，用户主动打开后才显示可选输入。 |
+| 正文 Agent | 通过 | 无服务端 Brief 时首次进入正文自动持久化默认策略；保存完成后 Agent 可发送，不再显示“请先保存创作设定和写作策略”。 |
+| 回归 | 通过 | `npm test` 204/204、`npm run typecheck`、`npm run build`、`python tests/creative-workspace.e2e.py` 和 `git diff --check` 均 exit 0。 |
+| 外部调用 | 未触发 | 浏览器回归仅使用本地 Mock；未请求真实模型、Tavily、RSS、公众号或其它媒体接口。 |

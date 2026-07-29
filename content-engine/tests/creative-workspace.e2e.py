@@ -104,7 +104,7 @@ with sync_playwright() as playwright:
         **({"executable_path": chrome_path()} if chrome_path() else {}),
     )
     page = browser.new_page(viewport={"width": 1440, "height": 1000})
-    state = {"project": project(), "phase": "idle", "agent_reads": 0, "requests": [], "unexpected": [], "console_errors": []}
+    state = {"project": project(), "phase": "idle", "agent_reads": 0, "requests": [], "unexpected": [], "console_errors": [], "brief_writes": 0}
     page.on("console", lambda message: state["console_errors"].append(message.text) if message.type == "error" else None)
     page.on("pageerror", lambda error: state["console_errors"].append(str(error)))
     page.add_init_script(
@@ -173,6 +173,9 @@ with sync_playwright() as playwright:
             return respond(route, [])
         if path == f"/api/v1/creative/projects/{PROJECT_ID}/brief" and method == "GET":
             return respond(route, {"brief": None})
+        if path == f"/api/v1/creative/projects/{PROJECT_ID}/brief" and method == "PUT":
+            state["brief_writes"] += 1
+            return respond(route, {"brief": json.loads(request.post_data or "{}")})
         if path == "/api/v1/intelligence/sources" and method == "GET":
             return respond(route, [])
         if path == "/api/v1/intelligence/items" and method == "GET":
@@ -190,7 +193,7 @@ with sync_playwright() as playwright:
     page.get_by_role("button", name=re.compile(r"我的内容")).wait_for()
     page.get_by_role("button", name=re.compile(r"参考链接")).wait_for()
     page.get_by_role("button", name="开始研究", exact=True).wait_for()
-    page.get_by_placeholder("可选").fill("核验价格信息，并保留我的实际测试感受")
+    page.get_by_placeholder("不填则沿用当前项目上下文").fill("核验价格信息，并保留我的实际测试感受")
     page.get_by_role("button", name="开始研究", exact=True).click()
     page.locator(".simplified-research-running b").get_by_text("正在核验", exact=True).wait_for()
     page.get_by_text("可采用信息", exact=True).wait_for(timeout=10_000)
@@ -208,6 +211,8 @@ with sync_playwright() as playwright:
 
     page.get_by_role("button", name="采用并进入正文", exact=True).click()
     page.locator(".copy-editor").wait_for()
+    page.get_by_text("已自动保存", exact=True).wait_for()
+    assert state["brief_writes"] == 1
     assert "stage=master" in page.url
     assert not state["unexpected"], state["unexpected"]
     assert not state["console_errors"], state["console_errors"]

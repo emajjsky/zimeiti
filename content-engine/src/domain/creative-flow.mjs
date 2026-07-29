@@ -46,10 +46,6 @@ export function canOpenCreateStage(projectStage, routeStage) {
 export function validatePlanningDraft(planning) {
   const required = [
     ['title', '请填写选题标题'],
-    ['angle', '请填写创作角度'],
-    ['objective', '请填写创作目标'],
-    ['targetAudience', '请填写目标受众'],
-    ['coreMessage', '请填写核心表达'],
   ];
   const errors = required.flatMap(([field, message]) => String(planning?.[field] ?? '').trim() ? [] : [message]);
   if (!Array.isArray(planning?.targetPlatforms) || planning.targetPlatforms.length === 0) errors.push('请至少选择一个目标平台');

@@ -60,6 +60,19 @@ function planningDraft(input = {}) {
   };
 }
 
+function planningWithDefaults(input = {}) {
+  const planning = planningDraft(input);
+  const title = planning.title || '这项内容';
+  const category = planning.category || '相关领域';
+  return {
+    ...planning,
+    angle: planning.angle || `从普通读者视角解释“${title}”的变化与实际价值。`,
+    objective: planning.objective || `帮助读者清晰理解“${title}”，并形成可行动的判断。`,
+    targetAudience: planning.targetAudience || `关注${category}的普通读者。`,
+    coreMessage: planning.coreMessage || `“${title}”值得被清晰、可信地理解。`,
+  };
+}
+
 function normalizeProject(project, now) {
   const versions = Array.isArray(project?.versions) ? project.versions : [];
   const planning = planningDraft({
@@ -259,7 +272,7 @@ async function updateCreativeState(client, workspaceId, mutate, now = new Date()
 
 function saveProjectPlanning(project, input, now = new Date().toISOString()) {
   const timestamp = stableTimestamp(now, new Date().toISOString());
-  const nextPlanning = planningDraft(input);
+  const nextPlanning = planningWithDefaults(input);
   return normalizeProject({
     ...project,
     title: nextPlanning.title || project.title,
@@ -353,6 +366,7 @@ module.exports = {
   migrateLegacyCreativeState,
   normalizeProject,
   planningDraft,
+  planningWithDefaults,
   saveProjectPlanning,
   updateCreativeState,
   validatePlanningForConfirmation,

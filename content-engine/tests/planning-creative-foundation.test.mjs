@@ -165,10 +165,10 @@ test('保存规划只更新工作稿，确认规划才推进研究并建立平�
   assert.equal(confirmed.versions[0].body, '');
 });
 
-test('确认规划缺少关键字段时返回具体字段错误', () => {
+test('确认规划只在缺少标题或目标平台时阻断', () => {
   const project = createBlankProject({ originType: 'MANUAL', title: '一个想法', targetPlatforms: ['WECHAT'] }, '2026-07-28T08:00:00.000Z');
-  assert.throws(
-    () => confirmProjectPlanning(project, project.planning, '2026-07-28T08:05:00.000Z'),
-    /创作角度/,
-  );
+  const confirmed = confirmProjectPlanning(project, project.planning, '2026-07-28T08:05:00.000Z');
+  assert.equal(confirmed.stage, 'RESEARCH');
+  assert.ok(confirmed.planning.angle);
+  assert.throws(() => confirmProjectPlanning(project, { ...project.planning, title: '', targetPlatforms: [] }, '2026-07-28T08:05:00.000Z'), /选题标题/);
 });
