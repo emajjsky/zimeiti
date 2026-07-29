@@ -65,9 +65,8 @@ function resolveCopyAction(input) {
     }
     return { action };
   }
-  return input.hasBody
-    ? { needsClarification: true, question: '你希望润色、重构、扩写还是压缩当前文案？' }
-    : { needsClarification: true, question: '你希望先生成大纲，还是直接生成完整正文？' };
+  if (!input.hasBody) return { action: 'GENERATE_DRAFT' };
+  return { needsClarification: true, question: '你希望润色、重构、扩写还是压缩当前文案？' };
 }
 
 function copyTemplateScope(platform) {

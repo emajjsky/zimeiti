@@ -536,3 +536,11 @@
 | 正文 Agent | 通过 | 无服务端 Brief 时首次进入正文自动持久化默认策略；保存完成后 Agent 可发送，不再显示“请先保存创作设定和写作策略”。 |
 | 回归 | 通过 | `npm test` 204/204、`npm run typecheck`、`npm run build`、`python tests/creative-workspace.e2e.py` 和 `git diff --check` 均 exit 0。 |
 | 外部调用 | 未触发 | 浏览器回归仅使用本地 Mock；未请求真实模型、Tavily、RSS、公众号或其它媒体接口。 |
+
+## A39. 正文空白时的默认生成动作（2026-07-29）
+
+| 验收项 | 状态 | 证据 |
+| --- | --- | --- |
+| 默认意图 | 通过 | 正文为空时，用户输入“开始”或“正文”会确定性映射为 `GENERATE_DRAFT`，不再反问“先生成大纲还是完整正文”。 |
+| 大纲路径 | 保留 | 用户明确提出“大纲”时，仍按既有规则生成大纲，不改变可选的大纲工作流。 |
+| 回归 | 通过 | `node --test tests/project-copy-action.test.mjs` 13/13、`npm test` 205/205、`npm run typecheck`、`npm run build` 与 `git diff --check` 均通过。 |

@@ -35,6 +35,11 @@ test('文案请求按固定优先级确定性映射到注册动作', () => {
   assert.equal(resolveCopyAction({ request: '写一篇完整正文', hasBody: false }).action, 'GENERATE_DRAFT');
 });
 
+test('正文为空时，开始或正文默认生成完整正文而不反问', () => {
+  assert.equal(resolveCopyAction({ request: '开始', hasBody: false }).action, 'GENERATE_DRAFT');
+  assert.equal(resolveCopyAction({ request: '正文', hasBody: false }).action, 'GENERATE_DRAFT');
+});
+
 test('无法唯一判断的请求要求澄清且不创建动作', () => {
   assert.deepEqual(resolveCopyAction({ request: '处理一下', hasBody: true }), {
     needsClarification: true,

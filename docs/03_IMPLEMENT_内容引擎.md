@@ -633,3 +633,7 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - `ProjectAgent.tsx` 用 `showResearchSupplement` 控制补充研究输入，已有结果时默认只保留采用动作与次级补充入口。
 - `CreateWorkspace.tsx` 在读取到空 `WritingBrief` 时立即保存默认策略；`CopyWorkspace.tsx` 为策略编辑增加防抖保存、保存态和失败重试，Agent 不再依赖手工保存。
 - 本切片没有新增模型、百炼 CLI、Tavily、Playwright 读取或发布调用。
+
+## 2026-07-29 修复：正文空白的默认生成
+
+- `project-copy-action.cjs` 将正文为空且未能识别为其它明确动作的请求默认映射到 `GENERATE_DRAFT`；因此“开始”“正文”等自然启动语会准备完整正文候选，而不会出现多余的路径反问。用户明确要求“大纲”时仍保留大纲动作。
