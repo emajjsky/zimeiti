@@ -22,9 +22,13 @@ const MAX_REVISION_TEMPLATE_LENGTH = 12_000;
 
 const copyOutputSchema = z.object({
   title: z.string().trim().min(1).max(120),
-  body: z.string().trim().min(80).max(30_000),
+  body: z.string().trim().min(80).max(30_000).refine((value) => !/(\*\*|__|(?:^|\n)\s{0,3}#{1,6}\s+)/m.test(value), '正式文稿不得包含 Markdown 标记。'),
   changeSummary: z.string().trim().min(1).max(500),
   factsToVerify: z.array(z.string().trim().min(1).max(300)).max(20),
+});
+const copyQualityReviewSchema = z.object({
+  approved: z.boolean(),
+  issues: z.array(z.string().trim().min(1).max(500)).max(12),
 });
 
 function copyActionVersion(action) {
@@ -126,9 +130,76 @@ function parseJson(content, emptyMessage, invalidMessage) {
   catch { throw new Error(invalidMessage); }
 }
 
-function parseCopyOutput(content, action) {
+function normalizeSafetyText(value) {
+  return String(value ?? '').replace(/[\s\p{P}\p{S}]/gu, '');
+}
+
+function unresolvedClaims(researchContext) {
+  return (researchContext?.cautions ?? [])
+    .map((item) => typeof item === 'string' ? item : item?.claim)
+    .map((claim) => String(claim ?? '').trim())
+    .filter((claim) => normalizeSafetyText(claim).length >= 12);
+}
+
+function includesUnresolvedClaim(value, claims) {
+  const normalized = normalizeSafetyText(value);
+  return claims.some((claim) => {
+    const normalizedClaim = normalizeSafetyText(claim);
+    if (normalized.includes(normalizedClaim)) return true;
+    // 待复核主张常会被模型改写成一句更短的确定性表述。用足够长的连续片段
+    // 拦住这种“删掉限定词后继续当事实写”的情况，避免误伤单个通用术语。
+    const minimumPhraseLength = 7;
+    for (let index = 0; index <= normalizedClaim.length - minimumPhraseLength; index += 1) {
+      if (normalized.includes(normalizedClaim.slice(index, index + minimumPhraseLength))) return true;
+    }
+    return false;
+  });
+}
+
+function safeProjectContext(project, cautions) {
+  const planning = project?.planning ?? {};
+  const safePlanning = {
+    angle: planning.angle,
+    title: planning.title,
+    timing: planning.timing,
+    category: planning.category,
+    objective: planning.objective,
+    constraints: planning.constraints,
+    targetAudience: planning.targetAudience,
+    targetPlatforms: planning.targetPlatforms,
+  };
+  if (planning.coreMessage && !includesUnresolvedClaim(planning.coreMessage, cautions)) safePlanning.coreMessage = planning.coreMessage;
+  return {
+    id: project?.id,
+    title: project?.title,
+    planning: safePlanning,
+    ...(project?.coreViewpoint && !includesUnresolvedClaim(project.coreViewpoint, cautions) ? { coreViewpoint: project.coreViewpoint } : {}),
+  };
+}
+
+function safeWritingBrief(brief, cautions) {
+  const safe = {
+    objective: brief?.objective,
+    targetAudience: brief?.targetAudience,
+    sourceRequirements: brief?.sourceRequirements,
+    lengthTarget: brief?.lengthTarget,
+    notes: brief?.notes,
+  };
+  if (brief?.coreMessage && !includesUnresolvedClaim(brief.coreMessage, cautions)) safe.coreMessage = brief.coreMessage;
+  return safe;
+}
+
+function assertNoUnresolvedClaimInBody(body, researchContext) {
+  const claim = unresolvedClaims(researchContext).find((item) => includesUnresolvedClaim(body, [item]));
+  if (claim) throw new Error(`正式正文不得把待复核主张写成确定事实：${claim}`);
+}
+
+function parseCopyOutput(content, action, safetyContext) {
   const value = parseJson(content, '模型没有返回文案内容。', '模型返回的文案不是有效 JSON。');
-  return action === 'GENERATE_OUTLINE' ? outlineSchema.parse(value) : copyOutputSchema.parse(value);
+  if (action === 'GENERATE_OUTLINE') return outlineSchema.parse(value);
+  const output = copyOutputSchema.parse(value);
+  assertNoUnresolvedClaimInBody(output.body, safetyContext?.researchContext);
+  return output;
 }
 
 function buildCopyPrompt(snapshot) {
@@ -152,6 +223,23 @@ function buildCopyPrompt(snapshot) {
     changeSummary: '本次具体修改内容',
     factsToVerify: ['发布前仍需核验的事实'],
   };
+  const cautions = unresolvedClaims(snapshot.researchContext);
+  const cautionBoundaryRule = cautions.length
+    ? `待复核主张禁止写入区：${cautions.map((claim, index) => `${index + 1}. ${claim}`).join('；')}。这些内容不得出现在正文中，也不得换词解释、推演、举例或以“通常”“可能”“待官方确认”等方式继续展开；只能原样保留在 factsToVerify。若它是项目的重要信息缺口，就把文章改为基于已核验事实的阅读判断，不要补写技术背景。`
+    : null;
+  const platformQualityRules = snapshot.platform === 'WECHAT'
+    ? [
+      '公众号正文开篇先写一个读者熟悉的场景、疑问或反差，再交代这条新闻为何值得读；不要把新闻通稿改写成第一段，也不要用“本文将”“对于普通读者来说”等空泛开场。',
+      '正文按“发生了什么—为什么与你有关—你该如何理解或行动”推进，使用 3 至 5 个读者能看懂的小标题和短段落。不要写成百科词条、新闻通稿或教科书解释。',
+      '纯文本成稿：不得使用 Markdown 标记（例如 **、__、#）。小标题单独成行即可；每段只表达一个意思，避免连续堆砌定义和术语。',
+      '如果已核验的内容只足以确认一件新闻事件，而该事件的具体用途、能力或影响仍待复核，文章应转向“如何看懂这条新闻”的解释或判断，不能把待复核的用途扩写成正文主体，更不能据此推演具体应用效果。',
+      '结尾必须回到开篇提出的读者问题，给出一个具体、克制的理解框架；不要用“持续关注后续报道”充当结尾。',
+    ]
+    : snapshot.platform === 'XIAOHONGSHU'
+      ? ['小红书正文必须首屏给出可获得的信息或明确结论，短段落推进，避免写成长篇百科说明；纯文本成稿，不得使用 Markdown 标记。']
+      : snapshot.platform === 'ZHIHU'
+        ? ['知乎正文必须先直接回答问题，再补充论证、边界与例证；纯文本成稿，不得使用 Markdown 标记。']
+        : ['微博内容必须先给出核心信息或观点，再判断单条或串文推进；纯文本成稿，不得使用 Markdown 标记。'];
   const system = [
     '你是内容项目的文案编辑，只执行已经确认的单一动作。',
     `本次动作是 ${snapshot.action}，目标平台是 ${snapshot.platform}。`,
@@ -159,7 +247,10 @@ function buildCopyPrompt(snapshot) {
     '严格依据项目资料、当前正文、选区、内容母版、阶段摘要和 Skill 工作，不得编造数据、引语、来源或人物经历。',
     '研究上下文中的 verifiedFacts 是唯一可以作为已确认客观事实写入正文的研究结论；cautions 只能作为待确认提醒，不能改写成确定事实。',
     '不得写入未出现在 verifiedFacts 中的具体日期、单位、人数、引语、会议或产品能力。factsToVerify 与 cautions 中的内容不能作为确定事实叙述。没有 verifiedFacts 时，只能依据用户材料、当前正文或观点方法写作，禁止补充伪具体事实。',
+    ...(cautionBoundaryRule ? [cautionBoundaryRule] : []),
     '必须保留所有尚未核验的 factsToVerify；不得删掉、弱化或改写为已确认事实。',
+    ...platformQualityRules,
+    '输出前自行检查：标题与正文是否仍服务项目主题；是否有无法追溯的具体事实；是否存在空泛套话、Markdown 标记或把解释性内容写成通稿。发现任一问题就重写后再输出。',
     '只返回 JSON，不要 Markdown 代码围栏、过程说明或额外字段。',
     `严格按以下形状返回：${JSON.stringify(snapshot.action === 'GENERATE_OUTLINE' ? outlineExample : copyExample)}`,
   ].join('\n');
@@ -168,8 +259,8 @@ function buildCopyPrompt(snapshot) {
     action: snapshot.action,
     request: snapshot.request,
     platform: snapshot.platform,
-    project: snapshot.project,
-    writingBrief: snapshot.brief,
+    project: safeProjectContext(snapshot.project, cautions),
+    writingBrief: safeWritingBrief(snapshot.brief, cautions),
     currentContent: snapshot.currentContent ?? null,
     selection: snapshot.selection ?? null,
     contentMaster: snapshot.contentMaster ?? null,
@@ -190,6 +281,28 @@ function buildCopyRepairPrompt(system, validationError) {
   return `${system}\n上一次输出未通过结构校验。请只返回修正后的 JSON。校验错误：${validationError}`;
 }
 
+function parseCopyQualityReview(content) {
+  return copyQualityReviewSchema.parse(parseJson(content, '质量审稿没有返回结果。', '质量审稿返回的不是有效 JSON。'));
+}
+
+function buildCopyQualityReviewPrompt({ platform, output, researchContext }) {
+  const system = [
+    '你是内容事实与质量审稿人，不负责润色，不得使用模型已有知识补全事实。',
+    '只允许把 verifiedFacts 中直接支持的内容当作正文事实。cautions 是禁止写入区：即使正文使用“通常”“可能”“待确认”等限定语，凡是解释、推演、举例或复述其中主张，都必须拒绝。',
+    '审查正文是否存在未获证据支持的技术能力、代际判断、因果影响、数据、人物、机构、时间或应用场景；同时审查是否仍像面向读者的目标平台成稿，而非新闻通稿、百科词条或 Markdown 草稿。',
+    `目标平台是 ${platform}。`,
+    '只返回 JSON：{"approved":true,"issues":[]}。若不合格，approved 必须为 false，issues 写出可直接用于重写的具体问题。',
+  ].join('\n');
+  return {
+    system,
+    message: JSON.stringify({
+      candidate: output,
+      verifiedFacts: researchContext?.verifiedFacts ?? [],
+      cautions: researchContext?.cautions ?? [],
+    }),
+  };
+}
+
 module.exports = {
   COPY_ACTIONS,
   REVISION_TEMPLATE_SCOPES,
@@ -201,10 +314,15 @@ module.exports = {
   copyTemplateScope,
   copyPromptTemplateScope,
   mergeFactsToVerify,
+  unresolvedClaims,
+  safeProjectContext,
+  safeWritingBrief,
   applyAcceptedCopyToState,
   validateRevisionTemplate,
   defaultRevisionTemplate,
   parseCopyOutput,
   buildCopyPrompt,
   buildCopyRepairPrompt,
+  parseCopyQualityReview,
+  buildCopyQualityReviewPrompt,
 };

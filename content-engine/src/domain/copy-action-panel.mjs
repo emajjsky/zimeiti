@@ -17,6 +17,7 @@ const revisionActions = [
 
 export function copyActionRequest(action, note = '') {
   const request = {
+    GENERATE_OUTLINE: '生成大纲',
     GENERATE_DRAFT: '生成正文',
     REVISE_SELECTION: '修改选中内容',
     POLISH_EXISTING_DRAFT: '润色当前正文',
@@ -28,10 +29,10 @@ export function copyActionRequest(action, note = '') {
   return note.trim() ? `${request}：${note.trim()}` : request;
 }
 
-export function copyActionPanelState({ hasBody, hasSelection, hasCandidate }) {
+export function copyActionPanelState({ hasAcceptedCopy, hasSelection, hasCandidate }) {
   if (hasCandidate) return { primary: { action: 'REVIEW_CANDIDATE', label: actionLabels.REVIEW_CANDIDATE }, quickActions: [] };
   if (hasSelection) return { primary: { action: 'REVISE_SELECTION', label: actionLabels.REVISE_SELECTION }, quickActions: [] };
-  if (!hasBody) return { primary: { action: 'GENERATE_DRAFT', label: actionLabels.GENERATE_DRAFT }, quickActions: [] };
+  if (!hasAcceptedCopy) return { primary: { action: 'GENERATE_DRAFT', label: actionLabels.GENERATE_DRAFT }, quickActions: [] };
   return {
     primary: { action: 'POLISH_EXISTING_DRAFT', label: actionLabels.POLISH_EXISTING_DRAFT },
     quickActions: revisionActions.map((action) => ({ action, label: actionLabels[action] })),

@@ -11,7 +11,7 @@ type ProjectAgentProps = {
   platform?: CreativePlatform;
   selectedMaterials?: { inputIds: string[]; referenceIds: string[] };
   selection?: { text: string; start: number; end: number };
-  hasBody?: boolean;
+  hasAcceptedCopy?: boolean;
   blockedReason?: string;
   refreshToken?: number;
   onClearSelection?: () => void;
@@ -141,7 +141,7 @@ function researchRunLabel(phase: string | undefined) {
   return phase === 'VERIFYING' ? '正在核验' : phase === 'SOURCES' ? '正在检索' : phase === 'PLANNING' ? '正在整理' : '正在研究';
 }
 
-function CopyProjectAgent({ projectId, stage, platform, selectedMaterials, selection, hasBody = false, blockedReason, refreshToken = 0, onClearSelection, onContextChange, onArtifactOpen, onOpenSettings }: ProjectAgentProps) {
+function CopyProjectAgent({ projectId, stage, platform, selectedMaterials, selection, hasAcceptedCopy = false, blockedReason, refreshToken = 0, onClearSelection, onContextChange, onArtifactOpen, onOpenSettings }: ProjectAgentProps) {
   const [context, setContext] = useState<ProjectAgentContext | null>(null);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState<'idle' | 'loading' | 'starting' | 'cancelling'>('loading');
@@ -173,7 +173,7 @@ function CopyProjectAgent({ projectId, stage, platform, selectedMaterials, selec
   }, [runIsActive, platform, projectId, stage]);
 
   const candidate = useMemo(() => (context?.artifacts ?? []).find((artifact) => (artifact.type === 'OUTLINE' || artifact.type === 'PLATFORM_COPY') && artifact.platform === platform && artifact.status === 'CANDIDATE') ?? null, [context?.artifacts, platform]);
-  const panel = copyActionPanelState({ hasBody, hasSelection: Boolean(selection?.text), hasCandidate: Boolean(candidate) });
+  const panel = copyActionPanelState({ hasAcceptedCopy, hasSelection: Boolean(selection?.text), hasCandidate: Boolean(candidate) });
   const disabled = busy !== 'idle' || Boolean(blockedReason) || runIsActive;
 
   const openCandidate = () => { if (candidate && onArtifactOpen) onArtifactOpen(candidate); };
@@ -218,9 +218,9 @@ function CopyProjectAgent({ projectId, stage, platform, selectedMaterials, selec
     {busy !== 'loading' && activeRun && ['DRAFT', 'QUEUED', 'RUNNING'].includes(activeRun.status) && <section className="copy-action-running" aria-live="polite"><LoaderCircle size={18}/><div><b>{activeRun.status === 'RUNNING' ? '正在生成正文候选' : '正文任务已排队'}</b><span>完成后会自动打开候选审核</span></div>{['DRAFT', 'QUEUED'].includes(activeRun.status) && <button className="text-button" type="button" disabled={busy !== 'idle'} onClick={() => void cancel()}>{busy === 'cancelling' ? '取消中' : '取消'}</button>}</section>}
     {busy !== 'loading' && !candidate && !runIsActive && <div className="copy-action-body">
       {panel.quickActions.length > 0 && <div className="copy-action-quick" aria-label="快捷修改">{panel.quickActions.map((item) => <button key={item.action} type="button" className="text-button" disabled={disabled} onClick={() => void startAction(item.action)}>{item.label}</button>)}</div>}
-      {(hasBody || Boolean(selection?.text)) && <label className="copy-action-note"><span>{selection?.text ? `修改选中 ${selection.text.length} 字` : '补充要求（可选）'}</span><textarea rows={3} value={note} maxLength={2_000} placeholder={selection?.text ? '例如：语气更有说服力，保留事实' : '例如：更口语化，保留已有案例'} onChange={(event) => setNote(event.target.value)}/>{selection?.text && onClearSelection && <button className="text-button" type="button" onClick={onClearSelection}>取消选区</button>}</label>}
+      {(hasAcceptedCopy || Boolean(selection?.text)) && <label className="copy-action-note"><span>{selection?.text ? `修改选中 ${selection.text.length} 字` : '补充要求（可选）'}</span><textarea rows={3} value={note} maxLength={2_000} placeholder={selection?.text ? '例如：语气更有说服力，保留事实' : '例如：更口语化，保留已有案例'} onChange={(event) => setNote(event.target.value)}/>{selection?.text && onClearSelection && <button className="text-button" type="button" onClick={onClearSelection}>取消选区</button>}</label>}
       <button className="button primary copy-action-primary" type="button" disabled={disabled} onClick={() => panel.primary.action === 'REVIEW_CANDIDATE' ? openCandidate() : void startAction(panel.primary.action)}>{busy === 'starting' ? <LoaderCircle size={16}/> : <Check size={16}/>}{panel.primary.label}</button>
-      {!hasBody && <button className="text-button copy-action-outline" type="button" disabled={disabled} onClick={() => void startAction('GENERATE_OUTLINE')}>先生成大纲</button>}
+      {!hasAcceptedCopy && <button className="text-button copy-action-outline" type="button" disabled={disabled} onClick={() => void startAction('GENERATE_OUTLINE')}>先生成大纲</button>}
     </div>}
     {blockedReason && <div className="copy-action-blocked"><CircleAlert size={16}/><span>{blockedReason}</span></div>}
     {error && <div className="copy-action-error" role="alert"><CircleAlert size={16}/><span>{error}</span>{/(模型|提示词|核心 Agent|Key)/.test(error) && <button className="text-button" type="button" onClick={() => onOpenSettings(/核心 Agent/.test(error) ? 'agent' : 'policies')}>去配置</button>}</div>}

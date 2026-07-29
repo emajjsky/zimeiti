@@ -650,3 +650,11 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 ## 2026-07-29 修复：简化研究来源等待上限
 
 - 简化研究工作流只执行研究计划中前 2 条自动来源动作；其余动作不再在同一轮研究中串行等待。此前模型最多可返回 8 条自动动作，而 Tavily 与网页读取各自有网络超时，叠加后会让界面长期停在“正在检索”。
+
+## 2026-07-29 实现：正文事实隔离与质量审稿
+
+- `project-copy-action.cjs` 新增待复核主张归一化、项目/Brief 安全快照和正文事实边界校验。待复核主张不再从 `project.coreViewpoint`、`planning.coreMessage` 或 `WritingBrief.coreMessage` 重复进入写作上下文；原始待复核项仅以禁止写入区的形式提供给模型。
+- `parseCopyOutput()` 在 Markdown 结构校验之后继续检查正文是否复述待复核主张，防止模型删掉限定词后把同一主张写成确定性内容。
+- 新增 `buildCopyQualityReviewPrompt()` 与 `parseCopyQualityReview()`。审稿模型只接收候选、`verifiedFacts` 与 `cautions`，返回 `approved + issues`，不允许用模型已有知识补全事实。
+- `generateProjectCopyAction()` 的正文路径变为：生成/结构修复 → 质量审稿 → 基于审稿问题重写一次 → 二次审稿。二次不通过时任务失败并返回“研究事实不足，暂不生成正文”，不会创建候选、平台版本或正式稿。
+- 审稿调用复用当前 `CONTENT_WRITING` 路由并累计写入本次 `PROJECT_COPY` 的 Token 用量；不引入隐式兜底模型。

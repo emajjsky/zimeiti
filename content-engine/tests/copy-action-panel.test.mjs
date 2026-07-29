@@ -1,29 +1,40 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
-import { copyActionPanelState } from '../src/domain/copy-action-panel.mjs';
+import { copyActionPanelState, copyActionRequest } from '../src/domain/copy-action-panel.mjs';
 
 test('空正文把生成正文作为唯一主操作', () => {
-  const state = copyActionPanelState({ hasBody: false, hasSelection: false, hasCandidate: false });
+  const state = copyActionPanelState({ hasAcceptedCopy: false, hasSelection: false, hasCandidate: false });
   assert.equal(state.primary.action, 'GENERATE_DRAFT');
   assert.equal(state.primary.label, '生成正文');
   assert.deepEqual(state.quickActions, []);
 });
 
 test('已有正文提供明确修改动作，选区优先修改选中内容', () => {
-  const normal = copyActionPanelState({ hasBody: true, hasSelection: false, hasCandidate: false });
+  const normal = copyActionPanelState({ hasAcceptedCopy: true, hasSelection: false, hasCandidate: false });
   assert.deepEqual(normal.quickActions.map((item) => item.action), ['POLISH_EXISTING_DRAFT', 'EXPAND_DRAFT', 'SHORTEN_DRAFT', 'RESTRUCTURE_DRAFT']);
 
-  const selected = copyActionPanelState({ hasBody: true, hasSelection: true, hasCandidate: false });
+  const selected = copyActionPanelState({ hasAcceptedCopy: true, hasSelection: true, hasCandidate: false });
   assert.equal(selected.primary.action, 'REVISE_SELECTION');
   assert.equal(selected.primary.label, '修改选中内容');
 });
 
 test('存在候选时先审核，不再展示新的生成或修改动作', () => {
-  const state = copyActionPanelState({ hasBody: true, hasSelection: false, hasCandidate: true });
+  const state = copyActionPanelState({ hasAcceptedCopy: true, hasSelection: false, hasCandidate: true });
   assert.equal(state.primary.action, 'REVIEW_CANDIDATE');
   assert.equal(state.primary.label, '查看并采用');
   assert.deepEqual(state.quickActions, []);
+});
+
+test('未采用过正文候选时，即使有项目摘要或旧草稿也从生成正文开始', () => {
+  const state = copyActionPanelState({ hasAcceptedCopy: false, hasSelection: false, hasCandidate: false });
+  assert.equal(state.primary.action, 'GENERATE_DRAFT');
+  assert.equal(state.primary.label, '生成正文');
+  assert.deepEqual(state.quickActions, []);
+});
+
+test('次级大纲入口也能生成受控的大纲请求', () => {
+  assert.equal(copyActionRequest('GENERATE_OUTLINE'), '生成大纲');
 });
 
 test('正文 Agent 使用动作面板并在点击后直接启动任务', () => {

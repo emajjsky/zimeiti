@@ -15,4 +15,4 @@ export type CopyActionPanelState = {
 };
 
 export function copyActionRequest(action: CopyPanelAction, note?: string): string;
-export function copyActionPanelState(input: { hasBody: boolean; hasSelection: boolean; hasCandidate: boolean }): CopyActionPanelState;
+export function copyActionPanelState(input: { hasAcceptedCopy: boolean; hasSelection: boolean; hasCandidate: boolean }): CopyActionPanelState;

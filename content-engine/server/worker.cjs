@@ -31,7 +31,7 @@ const {
 } = require('./services/source-verification.cjs');
 const { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, workflowSourceActions, buildResearchResult } = require('./services/simplified-research.cjs');
 const { createProjectAgentStore } = require('./services/project-agent.cjs');
-const { buildCopyPrompt, buildCopyRepairPrompt, mergeFactsToVerify, parseCopyOutput } = require('./services/project-copy-action.cjs');
+const { buildCopyPrompt, buildCopyRepairPrompt, buildCopyQualityReviewPrompt, mergeFactsToVerify, parseCopyOutput, parseCopyQualityReview } = require('./services/project-copy-action.cjs');
 
 const connection = new IORedis(config.redisUrl, { maxRetriesPerRequest: null });
 const textRunner = createTextModelRunner();
@@ -666,11 +666,12 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
     route = input.route;
     const connectionInput = await textConnectionInput(workspaceId, route);
     const prompt = buildCopyPrompt({ ...snapshot, template: input.template.body });
+    const isOutlineAction = snapshot.action === 'GENERATE_OUTLINE';
     const first = await textRunner.runText({ provider: route.provider, model: route.model, system: prompt.system, message: prompt.message, ...connectionInput });
     inputTokens = first.inputTokens;
     outputTokens = first.outputTokens;
     let output;
-    try { output = parseCopyOutput(first.content, snapshot.action); }
+    try { output = parseCopyOutput(first.content, snapshot.action, snapshot); }
     catch (error) {
       const validationError = error instanceof Error ? error.message : '输出不符合文案 JSON 契约。';
       const repaired = await textRunner.runText({
@@ -682,7 +683,33 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
       });
       inputTokens = (inputTokens ?? 0) + (repaired.inputTokens ?? 0);
       outputTokens = (outputTokens ?? 0) + (repaired.outputTokens ?? 0);
-      output = parseCopyOutput(repaired.content, snapshot.action);
+      output = parseCopyOutput(repaired.content, snapshot.action, snapshot);
+    }
+    if (!isOutlineAction) {
+      const reviewPrompt = buildCopyQualityReviewPrompt({ platform: snapshot.platform, output, researchContext: snapshot.researchContext });
+      const reviewed = await textRunner.runText({ provider: route.provider, model: route.model, system: reviewPrompt.system, message: reviewPrompt.message, ...connectionInput });
+      inputTokens = (inputTokens ?? 0) + (reviewed.inputTokens ?? 0);
+      outputTokens = (outputTokens ?? 0) + (reviewed.outputTokens ?? 0);
+      let review = parseCopyQualityReview(reviewed.content);
+      if (!review.approved) {
+        const qualityError = `质量审稿未通过：${review.issues.join('；')}`;
+        const rewritten = await textRunner.runText({
+          provider: route.provider,
+          model: route.model,
+          system: buildCopyRepairPrompt(prompt.system, qualityError),
+          message: JSON.stringify(output),
+          ...connectionInput,
+        });
+        inputTokens = (inputTokens ?? 0) + (rewritten.inputTokens ?? 0);
+        outputTokens = (outputTokens ?? 0) + (rewritten.outputTokens ?? 0);
+        output = parseCopyOutput(rewritten.content, snapshot.action, snapshot);
+        const finalReviewPrompt = buildCopyQualityReviewPrompt({ platform: snapshot.platform, output, researchContext: snapshot.researchContext });
+        const finalReviewed = await textRunner.runText({ provider: route.provider, model: route.model, system: finalReviewPrompt.system, message: finalReviewPrompt.message, ...connectionInput });
+        inputTokens = (inputTokens ?? 0) + (finalReviewed.inputTokens ?? 0);
+        outputTokens = (outputTokens ?? 0) + (finalReviewed.outputTokens ?? 0);
+        review = parseCopyQualityReview(finalReviewed.content);
+        if (!review.approved) throw new Error(`研究事实不足，暂不生成正文。请返回资料研究补充权威来源后再生成：${review.issues.join('；')}`);
+      }
     }
     output.factsToVerify = mergeFactsToVerify(
       snapshot.project?.factChecks ?? [],
@@ -692,7 +719,7 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
     );
     const saved = await transaction(async (client) => {
       await client.query("UPDATE generation_runs SET status = 'SUCCEEDED', output_json = $2, usage_json = $3, completed_at = now() WHERE id = $1", [runId, JSON.stringify(output), JSON.stringify({ inputTokens, outputTokens })]);
-      const isOutline = snapshot.action === 'GENERATE_OUTLINE';
+      const isOutline = isOutlineAction;
       const artifact = await projectAgentStore.createArtifact(client, {
         workspaceId,
         projectId: snapshot.projectId,

@@ -6,6 +6,7 @@ import copyActionModule from '../server/services/project-copy-action.cjs';
 const {
   COPY_ACTIONS,
   buildCopyPrompt,
+  buildCopyQualityReviewPrompt,
   copyActionVersion,
   copyTemplateScope,
   defaultRevisionTemplate,
@@ -13,6 +14,7 @@ const {
   copyPromptTemplateScope,
   mergeFactsToVerify,
   parseCopyOutput,
+  parseCopyQualityReview,
   resolveCopyAction,
 } = copyActionModule;
 
@@ -111,6 +113,71 @@ test('文案提示词锁定项目主题，并把未经核验的信息排除在�
   assert.match(prompt.system, /没有 verifiedFacts 时，只能依据用户材料、当前正文或观点方法写作/);
 });
 
+test('公众号正文强制移动端文章结构，并拒绝把 Markdown 标记泄漏到正式成稿', () => {
+  const prompt = buildCopyPrompt({
+    action: 'GENERATE_DRAFT',
+    request: '生成正文',
+    platform: 'WECHAT',
+    template: '写成适合公众号阅读的文章。',
+    project: { title: '一颗卫星上天，对普通人意味着什么', coreViewpoint: '解释技术如何改变日常体验', factChecks: [] },
+    brief: { objective: '完成文章', targetAudience: '普通读者', coreMessage: '先讲清与读者的关系', sourceRequirements: '使用已核验资料', lengthTarget: '1500 字', notes: '' },
+    currentContent: { title: '', body: '', factsToVerify: [] },
+    materials: [],
+  });
+  assert.match(prompt.system, /公众号正文开篇先写一个读者熟悉的场景、疑问或反差/);
+  assert.match(prompt.system, /不要写成百科词条、新闻通稿或教科书解释/);
+  assert.match(prompt.system, /纯文本成稿：不得使用 Markdown 标记/);
+  assert.throws(() => parseCopyOutput(JSON.stringify({
+    title: '标题',
+    body: `**一、这不是公众号小标题**\n\n${'这是一段错误示例，用来确保 Markdown 标记不能泄漏到正式文稿。'.repeat(3)}`,
+    changeSummary: '生成候选',
+    factsToVerify: [],
+  }), 'GENERATE_DRAFT'), /Markdown/);
+});
+
+test('待复核主张不能作为项目核心观点注入生成上下文', () => {
+  const claim = '该卫星主要用于为飞船、空间实验室、空间站等载人航天器提供数据中继和测控服务。';
+  const prompt = buildCopyPrompt({
+    action: 'GENERATE_DRAFT',
+    request: '生成正文',
+    platform: 'WECHAT',
+    template: '写成适合公众号阅读的文章。',
+    project: { title: '我国成功发射天链三号01星', coreViewpoint: claim, factChecks: [] },
+    brief: { objective: '解释发射新闻', targetAudience: '普通读者', coreMessage: claim, sourceRequirements: '', lengthTarget: '1500 字', notes: '' },
+    currentContent: { title: '', body: '', factsToVerify: [] },
+    researchContext: { verifiedFacts: [], cautions: [{ claim, status: 'NEEDS_REVIEW' }] },
+    materials: [],
+  });
+  const message = JSON.parse(prompt.message);
+  assert.equal(message.project.coreViewpoint, undefined);
+  assert.equal(message.writingBrief.coreMessage, undefined);
+  assert.equal(message.researchContext.cautions[0].claim, claim);
+  assert.match(prompt.system, /待复核主张禁止写入区/);
+});
+
+test('公众号候选不得把待复核主张写成正文事实', () => {
+  const claim = '该卫星主要用于为飞船、空间实验室、空间站等载人航天器提供数据中继和测控服务。';
+  assert.throws(() => parseCopyOutput(JSON.stringify({
+    title: '这颗卫星上天意味着什么？',
+    body: `这是一段面向普通读者的完整公众号正文，用于解释一条航天新闻的阅读方法。\n\n这颗卫星为载人航天器提供数据中继和测控服务。\n\n${'正文还需要保持清晰、克制，并把未核验信息留在核验清单中。'.repeat(5)}`,
+    changeSummary: '生成候选',
+    factsToVerify: [claim],
+  }), 'GENERATE_DRAFT', { platform: 'WECHAT', researchContext: { cautions: [{ claim, status: 'NEEDS_REVIEW' }] } }), /待复核|正文/);
+});
+
+test('文案质量审稿只以已核验事实为准，并返回可执行的重写结论', () => {
+  const review = parseCopyQualityReview(JSON.stringify({ approved: false, issues: ['正文把待复核用途写成了确定事实'] }));
+  assert.deepEqual(review, { approved: false, issues: ['正文把待复核用途写成了确定事实'] });
+  assert.throws(() => parseCopyQualityReview(JSON.stringify({ approved: 'false', issues: [] })), /boolean|expected/i);
+  const prompt = buildCopyQualityReviewPrompt({
+    platform: 'WECHAT',
+    output: { title: '示例', body: '示例正文', changeSummary: '生成候选', factsToVerify: [] },
+    researchContext: { verifiedFacts: [{ claim: '已核验事实' }], cautions: [{ claim: '待复核主张' }] },
+  });
+  assert.match(prompt.system, /不得使用模型已有知识补全事实/);
+  assert.match(prompt.message, /待复核主张/);
+});
+
 test('017 注册八个需要确认的受控文案动作', () => {
   const migration = fs.readFileSync(new URL('../server/migrations/017_project_copy_actions.sql', import.meta.url), 'utf8');
   for (const action of COPY_ACTIONS) assert.match(migration, new RegExp(copyActionVersion(action).replace(/[.]/g, '\\.')));
@@ -154,6 +221,8 @@ test('Project Agent Worker 只创建候选产物，不直接覆盖正式正文',
   assert.match(worker, /PROJECT_COPY_ACTION/);
   assert.match(execute, /project_artifacts/);
   assert.match(execute, /platform_content_versions/);
+  assert.match(execute, /buildCopyQualityReviewPrompt/);
+  assert.match(execute, /研究事实不足，暂不生成正文/);
   assert.doesNotMatch(execute, /workspace_snapshots/);
 });
 
