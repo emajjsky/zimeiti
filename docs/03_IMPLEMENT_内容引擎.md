@@ -686,3 +686,10 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - 诊断区采用两列可阅读卡片，每张卡片将维度、结论和样本依据分区；执行规则使用三列紧凑摘要并截断超长文本，避免大段原始规则挤占首屏。
 - `styles.css` 将账号声音容器扩展至 1280px，审核卡最大宽度提升至 1120px；960px 时切换为两列执行摘要，790px 以下诊断与规则变为单列，560px 以下保存操作纵向排列。
 - 保持既有 Lucide 图标和 CSS 轻量 hover/active 反馈，不新增动画库或全局依赖。
+
+## 2026-07-30 实现：平台版本阶段推进
+
+- `applyAcceptedCopyToState()` 在首篇文案候选被采用时，将项目从 `MASTER_WRITING` 推进到 `PLATFORM_ADAPTATION`；已处于后续阶段的项目不会被修订文案拉回。
+- `CreateWorkspace.tsx` 为平台版本提供独立工作页，复用真实的渠道编辑、候选与 Agent 记录，并在正文采用后自动切换到该页。
+- `POST /creative/projects/:projectId/platform-versions/complete` 锁定工作空间快照，验证每个目标图文平台都有至少 80 字的正文，再原子推进为 `VISUAL`；前端只在该接口成功后跳转配图。
+- 平台版本页使用轻量绿色阶段头提示当前任务，不新增假进度或未实现的配图按钮。

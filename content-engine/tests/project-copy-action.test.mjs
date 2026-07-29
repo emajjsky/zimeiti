@@ -267,16 +267,18 @@ test('采用候选时更新正式版本并合并待核验事实', () => {
     updatedAt: '12:30',
   });
   assert.equal(result.project.status, 'WRITING');
+  assert.equal(result.project.stage, 'PLATFORM_ADAPTATION');
   assert.equal(result.project.versions[0].title, '新标题');
   assert.equal(result.project.versions[0].body, '新正文');
   assert.deepEqual(result.project.factChecks, ['核验原始价格', '核验发布日期']);
   assert.deepEqual(mergeFactsToVerify([' A ', '', 'B'], ['B', 'C']), ['A', 'B', 'C']);
 });
 
-test('采用候选和启用平台都锁定 workspace snapshot 且保持幂等', () => {
+test('采用候选、完成平台版本和启用平台都锁定 workspace snapshot 且保持幂等', () => {
   const server = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
   const accept = routeSlice(server, "/project-artifacts/:id/accept", "/projects/:projectId/platforms/:platform");
-  const enable = routeSlice(server, "/projects/:projectId/platforms/:platform", "/agent/skills");
+  const enable = routeSlice(server, "/projects/:projectId/platforms/:platform", "/projects/:projectId/platform-versions/complete");
+  const complete = routeSlice(server, "/projects/:projectId/platform-versions/complete", "/agent/skills");
   assert.match(accept, /FOR UPDATE/);
   assert.match(accept, /FOR UPDATE OF a(?!, v)/);
   assert.doesNotMatch(accept, /FOR UPDATE OF a, v/);
@@ -286,4 +288,7 @@ test('采用候选和启用平台都锁定 workspace snapshot 且保持幂等', 
   assert.match(enable, /FOR UPDATE/);
   assert.match(enable, /existingVersion|find\(/);
   assert.match(enable, /VIDEO_CHANNEL/);
+  assert.match(complete, /FOR UPDATE/);
+  assert.match(complete, /PLATFORM_ADAPTATION/);
+  assert.match(complete, /stage = 'VISUAL'/);
 });

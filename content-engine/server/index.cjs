@@ -1870,6 +1870,27 @@ app.post('/api/v1/creative/projects/:projectId/platforms/:platform', { preHandle
   });
 });
 
+app.post('/api/v1/creative/projects/:projectId/platform-versions/complete', { preHandler: authenticate }, async (request) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const workspace = await currentWorkspace(request.user.sub);
+  return transaction(async (client) => {
+    const snapshotResult = await client.query('SELECT state_json FROM workspace_snapshots WHERE workspace_id = $1 FOR UPDATE', [workspace.id]);
+    const state = snapshotResult.rows[0]?.state_json;
+    const project = state?.projects?.find((item) => item.id === projectId);
+    if (!project) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
+    if (!['MASTER_WRITING', 'PLATFORM_ADAPTATION'].includes(project.stage)) { const error = new Error('当前项目不在平台版本阶段。'); error.statusCode = 409; throw error; }
+    const targetPlatforms = (project.planning?.targetPlatforms ?? project.versions?.map((version) => version.platform) ?? []).filter((platform) => platform !== 'VIDEO_CHANNEL');
+    const incomplete = targetPlatforms.filter((platform) => !project.versions?.some((version) => version.platform === platform && String(version.body ?? '').trim().length >= 80));
+    if (incomplete.length) { const error = new Error(`请先完成${incomplete.map((platform) => creativePlatformNames[platform] ?? platform).join('、')}的正文。`); error.statusCode = 409; throw error; }
+    const updatedAt = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
+    project.stage = 'VISUAL';
+    project.status = 'VISUAL';
+    project.updatedAt = updatedAt;
+    await client.query('UPDATE workspace_snapshots SET state_json = $2, revision = revision + 1, updated_at = now() WHERE workspace_id = $1', [workspace.id, JSON.stringify(state)]);
+    return { project };
+  });
+});
+
 app.get('/api/v1/agent/skills', { preHandler: authenticate }, async (request) => listAvailableSkills((await currentWorkspace(request.user.sub)).id));
 
 app.get('/api/v1/agent/model-policies/:scope', { preHandler: authenticate }, async (request) => {

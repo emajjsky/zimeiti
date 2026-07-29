@@ -122,6 +122,8 @@ function applyAcceptedCopyToState(state, input) {
   version.status = 'DRAFT';
   version.updatedAt = input.updatedAt;
   project.status = 'WRITING';
+  // 首篇正式文案采用后，后续工作转入各渠道版本的确认与适配。
+  if (!project.stage || project.stage === 'MASTER_WRITING') project.stage = 'PLATFORM_ADAPTATION';
   project.factChecks = mergeFactsToVerify(project.factChecks ?? [], input.factsToVerify ?? []);
   project.updatedAt = input.updatedAt;
   return { state: nextState, project, version };

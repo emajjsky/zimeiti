@@ -93,6 +93,8 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
   const [brief, setBrief] = useState<WritingBriefInput | null>(null);
   const [briefState, setBriefState] = useState<'loading' | 'saving' | 'saved' | 'error'>('loading');
   const [briefError, setBriefError] = useState('');
+  const [platformCompletionState, setPlatformCompletionState] = useState<'idle' | 'saving' | 'error'>('idle');
+  const [platformCompletionError, setPlatformCompletionError] = useState('');
   const contentVersions = useMemo(() => project?.versions.filter((version): version is ContentVersion & { platform: CreativePlatform } => version.platform !== 'VIDEO_CHANNEL') ?? [], [project?.versions]);
   const copyPlatform = activePlatform !== 'VIDEO_CHANNEL' && contentVersions.some((version) => version.platform === activePlatform) ? activePlatform : contentVersions[0]?.platform;
 
@@ -204,6 +206,25 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
     }
   };
 
+  const completePlatformVersions = async () => {
+    if (!project) return;
+    setPlatformCompletionState('saving');
+    setPlatformCompletionError('');
+    try {
+      const result = await webCreative.completePlatformVersions(project.id);
+      onProjectAccepted(result.project);
+      onStage('visual');
+    } catch (error) {
+      setPlatformCompletionState('error');
+      setPlatformCompletionError(error instanceof Error ? error.message : '平台版本确认失败。');
+    }
+  };
+
+  const handleCopyProjectChange = (nextProject: ContentProject) => {
+    onProjectAccepted(nextProject);
+    if (stage === 'master' && nextProject.stage === 'PLATFORM_ADAPTATION') onStage('platform');
+  };
+
   if (!project) return <section className="empty-workbench"><h1>还没有内容项目</h1></section>;
 
   return <section className="creative-workspace">
@@ -225,8 +246,14 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
       <ProjectAgent projectId={project.id} stage="RESEARCH" onArtifactAccepted={(_artifact, nextProject) => { if (!nextProject) return; onProjectAccepted(nextProject); onStage('master'); }} onOpenSettings={(target) => target === 'search' ? onOpenSearchSettings() : onOpenAgentSettings()}/>
     </div>}
     {stage === 'master' && briefError && <div className="creative-stage-error"><CircleAlert size={18}/><span>{briefError}</span></div>}
-    {stage === 'master' && copyPlatform && <CopyWorkspace project={project} brief={brief} briefState={briefState} skills={skills} accountVoices={accountVoices} activePlatform={copyPlatform} onPlatform={onPlatform} onProjectChange={onProjectAccepted} onSaveBrief={saveBrief} onSaveVersion={onSaveVersion} onOpenModelSettings={onOpenModelSettings} onOpenAgentSettings={onOpenAgentSettings} onOpenVoiceSettings={onOpenVoiceSettings} />}
+    {stage === 'master' && copyPlatform && <CopyWorkspace project={project} brief={brief} briefState={briefState} skills={skills} accountVoices={accountVoices} activePlatform={copyPlatform} onPlatform={onPlatform} onProjectChange={handleCopyProjectChange} onSaveBrief={saveBrief} onSaveVersion={onSaveVersion} onOpenModelSettings={onOpenModelSettings} onOpenAgentSettings={onOpenAgentSettings} onOpenVoiceSettings={onOpenVoiceSettings} />}
     {stage === 'master' && !copyPlatform && <div className="creative-stage-empty"><h2>没有可写作的图文平台</h2><p>请先在规划中选择公众号、小红书、知乎或微博。</p></div>}
-    {(stage === 'platform' || stage === 'visual' || stage === 'layout' || stage === 'review') && <div className="creative-stage-empty"><h2>{pendingStageNames[stage].title}</h2><p>{pendingStageNames[stage].note}</p></div>}
+    {stage === 'platform' && copyPlatform && <section className="platform-versions-workspace">
+      <header className="platform-versions-head"><div><span>平台版本</span><h2>逐个确认各渠道的成稿</h2><p>每个目标平台都保留独立正文、标题和渠道规则；完成后再统一进入配图。</p></div><button className="button primary" type="button" disabled={platformCompletionState === 'saving'} onClick={() => void completePlatformVersions()}>{platformCompletionState === 'saving' ? '正在确认…' : '确认版本，进入配图'}</button></header>
+      {platformCompletionError && <div className="creative-stage-error"><CircleAlert size={18}/><span>{platformCompletionError}</span></div>}
+      <CopyWorkspace project={project} brief={brief} briefState={briefState} skills={skills} accountVoices={accountVoices} activePlatform={copyPlatform} onPlatform={onPlatform} onProjectChange={handleCopyProjectChange} onSaveBrief={saveBrief} onSaveVersion={onSaveVersion} onOpenModelSettings={onOpenModelSettings} onOpenAgentSettings={onOpenAgentSettings} onOpenVoiceSettings={onOpenVoiceSettings} />
+    </section>}
+    {stage === 'platform' && !copyPlatform && <div className="creative-stage-empty"><h2>没有可制作的平台版本</h2><p>请返回正文阶段，先选择至少一个图文平台。</p></div>}
+    {(stage === 'visual' || stage === 'layout' || stage === 'review') && <div className="creative-stage-empty"><h2>{pendingStageNames[stage].title}</h2><p>{pendingStageNames[stage].note}</p></div>}
   </section>;
 }
