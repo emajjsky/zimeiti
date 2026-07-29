@@ -5,6 +5,7 @@ import {
   buildVoiceCalibrationRepairPrompt,
   buildVoiceCalibrationPrompt,
   parseVoiceCalibrationDraft,
+  voiceCalibrationErrorMessage,
 } from '../server/services/voiceCalibration.cjs';
 
 const article = {
@@ -82,4 +83,61 @@ test('蒸馏结果必须是可保存的结构化账号声音草案', () => {
   assert.equal(draft.editedRules.bannedPhrases[0], '很多人会问');
   assert.equal(draft.analysis.diagnostics.length, 6);
   assert.match(draft.editedRules.argumentPattern, /核心判断/);
+});
+
+test('蒸馏结果缺少读者关系规则时，使用同维度样本诊断补足', () => {
+  const draft = parseVoiceCalibrationDraft(JSON.stringify({
+    name: '我的旧文表达',
+    archetypeSlug: 'say-it-through',
+    identityText: '只使用用户已提供或可验证的材料。',
+    audienceText: '希望快速理解复杂问题的普通读者。',
+    readerTakeawayText: '读完知道判断依据和适用边界。',
+    editedRules: {
+      opening: '从具体观察进入，不用空泛背景铺陈。', reasoning: '按事实、判断和边界逐层展开。', rhythm: '短中句交替，一段只推进一个意思。', ending: '回到判断并自然收束。',
+      identityBoundary: '不虚构账号作者的经历、身份或立场。', audience: '希望快速理解复杂问题的普通读者。', readerTakeaway: '读完知道判断依据和适用边界。',
+      allowedPhrases: [], bannedPhrases: ['很多人会问'], bannedStructures: ['emoji 小标题'],
+      argumentPattern: '以核心判断为轴，按现象、原因和边界递进。', evidenceStyle: '使用具体细节支撑观点，不堆砌术语。', paragraphPattern: '每段只推进一个意思，转折时独立成段。', languageTexture: '表达克制直接，少用夸张形容词。',
+      closingStyle: '回到核心判断，留下观察边界。',
+    },
+    ruleSummary: '从具体观察进入，以判断和证据逐层推进。',
+    analysis: {
+      confidence: 'LOW', voiceFingerprint: '从具体现象切入的克制型判断写法。',
+      diagnostics: [
+        { dimension: '标题', finding: '标题直接点出对象和问题。', evidence: '标题先交代讨论对象，再给出读者需要解决的问题。' },
+        { dimension: '开篇钩子', finding: '开头快速落到具体情境。', evidence: '前两段没有背景铺陈，而是先给出可感知的观察。' },
+        { dimension: '论证推进', finding: '观点与原因逐层推进。', evidence: '每一节都围绕一个理由展开后，再回到核心判断。' },
+        { dimension: '证据方式', finding: '细节紧跟解释出现。', evidence: '具体细节后面紧接判断说明，而非单独罗列信息。' },
+        { dimension: '段落节奏', finding: '转折位置会独立成段。', evidence: '出现转折时留出停顿，让读者重新进入下一层论证。' },
+        { dimension: '读者关系', finding: '像与读者一起推理。', evidence: '文中持续解释判断依据，不替读者预设结论或情绪。' },
+      ],
+    },
+  }));
+
+  assert.match(draft.editedRules.readerRelationship, /一起推理/);
+  assert.equal(draft.editedRules.hookPatterns.length, 2);
+  assert.equal(draft.editedRules.titlePatterns.length, 2);
+});
+
+test('蒸馏诊断维度允许带描述后缀并归一为标准标签', () => {
+  const base = {
+    name: '我的旧文表达', archetypeSlug: 'say-it-through', identityText: '只使用用户已提供或可验证的材料。', audienceText: '希望快速理解复杂问题的普通读者。', readerTakeawayText: '读完知道判断依据和适用边界。',
+    editedRules: { opening: '从具体观察进入，不用空泛背景铺陈。', reasoning: '按事实、判断和边界逐层展开。', rhythm: '短中句交替，一段只推进一个意思。', ending: '回到判断并自然收束。', identityBoundary: '不虚构账号作者的经历、身份或立场。', audience: '希望快速理解复杂问题的普通读者。', readerTakeaway: '读完知道判断依据和适用边界。', allowedPhrases: [], bannedPhrases: ['很多人会问'], bannedStructures: ['emoji 小标题'], hookPatterns: ['从熟悉场景进入问题', '先抛出具体判断再解释'], argumentPattern: '以核心判断为轴，按现象、原因和边界递进。', evidenceStyle: '使用具体细节支撑观点，不堆砌术语。', paragraphPattern: '每段只推进一个意思，转折时独立成段。', languageTexture: '表达克制直接，少用夸张形容词。', readerRelationship: '像与读者一起推理，不替读者预设结论。', titlePatterns: ['明确对象加判断', '现象加原因'], closingStyle: '回到核心判断，留下观察边界。' },
+    ruleSummary: '从具体观察进入，以判断和证据逐层推进。',
+    analysis: { confidence: 'LOW', voiceFingerprint: '从具体现象切入的克制型判断写法。', diagnostics: [
+      { dimension: '标题套路', finding: '标题直接点出对象和问题。', evidence: '标题先交代讨论对象，再给出读者需要解决的问题。' },
+      { dimension: '开篇钩子（场景）', finding: '开头快速落到具体情境。', evidence: '前两段没有背景铺陈，而是先给出可感知的观察。' },
+      { dimension: '论证推进方式', finding: '观点与原因逐层推进。', evidence: '每一节都围绕一个理由展开后，再回到核心判断。' },
+      { dimension: '证据方式', finding: '细节紧跟解释出现。', evidence: '具体细节后面紧接判断说明，而非单独罗列信息。' },
+      { dimension: '段落节奏', finding: '转折位置会独立成段。', evidence: '出现转折时留出停顿，让读者重新进入下一层论证。' },
+      { dimension: '读者关系', finding: '像与读者一起推理。', evidence: '文中持续解释判断依据，不替读者预设结论或情绪。' },
+    ] },
+  };
+  const draft = parseVoiceCalibrationDraft(JSON.stringify(base));
+  assert.equal(draft.analysis.diagnostics[0].dimension, '标题');
+  assert.equal(draft.analysis.diagnostics[1].dimension, '开篇钩子');
+  assert.equal(draft.analysis.diagnostics[2].dimension, '论证推进');
+});
+
+test('蒸馏结构仍无法修复时返回可行动的用户提示', () => {
+  assert.equal(voiceCalibrationErrorMessage({ issues: [{ path: ['analysis'] }] }), '模型返回的账号声音结构不完整，已尝试修复，请重新提炼。');
 });

@@ -17,7 +17,7 @@ const { ANALYSIS_SCOPE, createTemplateStore, prepareAnalysisInput } = require('.
 const { createCreativeSkillStore } = require('./services/creativeSkills.cjs');
 const { writingBriefInput } = require('./services/writing-brief.cjs');
 const { accountVoiceInput, accountVoiceCalibrationInput, createAccountVoiceStore } = require('./services/accountVoices.cjs');
-const { accountVoiceCalibrationDraftInput, buildVoiceCalibrationPrompt, buildVoiceCalibrationRepairPrompt, parseVoiceCalibrationDraft } = require('./services/voiceCalibration.cjs');
+const { accountVoiceCalibrationDraftInput, buildVoiceCalibrationPrompt, buildVoiceCalibrationRepairPrompt, parseVoiceCalibrationDraft, voiceCalibrationErrorMessage } = require('./services/voiceCalibration.cjs');
 const { createTextModelRunner } = require('./services/text-model.cjs');
 const {
   confirmProjectPlanning,
@@ -706,10 +706,11 @@ app.post('/api/v1/account-voices/calibration-drafts', { preHandler: authenticate
       VALUES ($1, $2, $3, 'VOICE_CALIBRATION', 'SUCCESS', $4, $5, $6)`, [workspace.id, route.provider, route.model, Date.now() - startedAt, inputTokens || null, outputTokens || null]);
     return { article: { title: article.title, url: article.url, source: article.source }, draft };
   } catch (error) {
-    const message = error instanceof Error ? error.message : '账号声音提炼失败。';
+    const message = voiceCalibrationErrorMessage(error);
     await query(`INSERT INTO api_usage_logs (workspace_id, provider, model, operation, status, duration_ms, error)
       VALUES ($1, $2, $3, 'VOICE_CALIBRATION', 'FAILED', $4, $5)`, [workspace.id, route?.provider ?? 'UNKNOWN', route?.model ?? null, Date.now() - startedAt, message.slice(0, 2_000)]);
-    throw error;
+    if (error instanceof Error && message === error.message) throw error;
+    throw new Error(message);
   }
 });
 
