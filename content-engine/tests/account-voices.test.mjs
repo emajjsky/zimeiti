@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
-import { VOICE_ARCHETYPES, buildInitialVoiceRules, createAccountVoiceStore } from '../server/services/accountVoices.cjs';
+import {
+  VOICE_ARCHETYPES,
+  accountVoiceCalibrationInput,
+  accountVoiceInput,
+  buildInitialVoiceRules,
+  createAccountVoiceStore,
+} from '../server/services/accountVoices.cjs';
 
 test('账号声音原型提供具体写法与禁区，而不是泛化风格标签', () => {
   assert.deepEqual(VOICE_ARCHETYPES.map((item) => item.slug), [
@@ -70,4 +76,43 @@ test('账号声音迁移保留版本、默认绑定和简报偏移字段', () =>
   assert.match(migration, /CREATE TABLE account_voice_calibrations/);
   assert.match(migration, /ADD COLUMN account_voice_profile_id uuid/);
   assert.match(migration, /voice_offset text NOT NULL DEFAULT 'DEFAULT'/);
+});
+
+test('账号声音输入拒绝泛化原型和未授权校准材料', () => {
+  assert.throws(() => accountVoiceInput.parse({
+    name: '我的风格', archetypeSlug: 'plain-fresh', identityText: '我', audienceText: '读者', readerTakeawayText: '有收获',
+  }), /Invalid option/);
+  assert.throws(() => accountVoiceCalibrationInput.parse({
+    sourceType: 'LINK', title: '参考稿', sourceUrl: 'https://example.com/a', ruleSummary: '保留短句', confirmedLicensed: false,
+  }), /使用权确认/);
+});
+
+test('只能把当前工作空间的启用声音设为默认', async () => {
+  const operations = [];
+  const activeProfile = {
+    id: 'voice-1', workspace_id: 'workspace-1', name: '把话说透', archetype_slug: 'say-it-through',
+    identity_text: '我', audience_text: '读者', reader_takeaway_text: '理解边界', status: 'ACTIVE', current_version: 1,
+    rules_json: buildInitialVoiceRules({ archetypeSlug: 'say-it-through', identityText: '我', audienceText: '读者', readerTakeawayText: '理解边界' }),
+    created_at: '2026-07-29T00:00:00.000Z', updated_at: '2026-07-29T00:00:00.000Z',
+  };
+  const query = async (sql, values) => {
+    operations.push({ sql, values });
+    if (/SELECT p\.\*/.test(sql)) return { rowCount: 1, rows: [activeProfile] };
+    return { rowCount: 1, rows: [] };
+  };
+  const store = createAccountVoiceStore({ query, transaction: async (callback) => callback({ query }) });
+
+  const result = await store.setDefault('workspace-1', 'voice-1');
+
+  assert.equal(result.id, 'voice-1');
+  assert.equal(operations.filter(({ sql }) => /INSERT INTO account_voice_defaults/.test(sql)).length, 1);
+});
+
+test('服务端注册账号声音的读取、创建、更新与默认 API', () => {
+  const source = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
+  assert.match(source, /app\.get\('\/api\/v1\/account-voices'/);
+  assert.match(source, /app\.post\('\/api\/v1\/account-voices'/);
+  assert.match(source, /app\.put\('\/api\/v1\/account-voices\/:id'/);
+  assert.match(source, /app\.post\('\/api\/v1\/account-voices\/:id\/default'/);
+  assert.match(source, /accountVoiceInput\.parse\(request\.body\)/);
 });

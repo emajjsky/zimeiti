@@ -16,6 +16,7 @@ const { runBailianCli } = require('./runner/bailian.cjs');
 const { ANALYSIS_SCOPE, createTemplateStore, prepareAnalysisInput } = require('./services/intelligence-analysis.cjs');
 const { createCreativeSkillStore } = require('./services/creativeSkills.cjs');
 const { writingBriefInput } = require('./services/writing-brief.cjs');
+const { accountVoiceInput, createAccountVoiceStore } = require('./services/accountVoices.cjs');
 const {
   confirmProjectPlanning,
   createBlankProject,
@@ -92,6 +93,7 @@ const templateStore = createTemplateStore({ query }, {
   [REVISION_TEMPLATE_SCOPES.WEIBO]: { defaultTemplate: () => defaultRevisionTemplate('WEIBO'), validateTemplate: validateRevisionTemplate },
 });
 const creativeSkillStore = createCreativeSkillStore({ query, transaction });
+const accountVoiceStore = createAccountVoiceStore({ query, transaction });
 const projectMaterialStore = createProjectMaterialStore({ query });
 const projectAgentStore = createProjectAgentStore({ query, transaction });
 const projectScope = z.enum(['PROJECT', 'RESEARCH', 'WRITING', 'IMAGING']);
@@ -635,6 +637,38 @@ app.post('/api/v1/creative/projects/:projectId/planning/complete', { preHandler:
     });
   });
   return { project };
+});
+
+app.get('/api/v1/account-voices', { preHandler: authenticate }, async (request) => {
+  const workspace = await currentWorkspace(request.user.sub);
+  return { voices: await accountVoiceStore.list(workspace.id) };
+});
+
+app.post('/api/v1/account-voices', { preHandler: authenticate }, async (request, reply) => {
+  const input = accountVoiceInput.parse(request.body);
+  const workspace = await currentWorkspace(request.user.sub);
+  const voice = await accountVoiceStore.create(workspace.id, input);
+  reply.code(201).send({ voice });
+});
+
+app.get('/api/v1/account-voices/:id', { preHandler: authenticate }, async (request) => {
+  const workspace = await currentWorkspace(request.user.sub);
+  const voice = await accountVoiceStore.get(workspace.id, z.string().uuid().parse(request.params.id));
+  if (!voice) { const error = new Error('未找到账号声音。'); error.statusCode = 404; throw error; }
+  return { voice };
+});
+
+app.put('/api/v1/account-voices/:id', { preHandler: authenticate }, async (request) => {
+  const input = accountVoiceInput.parse(request.body);
+  const workspace = await currentWorkspace(request.user.sub);
+  const voice = await accountVoiceStore.update(workspace.id, z.string().uuid().parse(request.params.id), input);
+  return { voice };
+});
+
+app.post('/api/v1/account-voices/:id/default', { preHandler: authenticate }, async (request) => {
+  const workspace = await currentWorkspace(request.user.sub);
+  const voice = await accountVoiceStore.setDefault(workspace.id, z.string().uuid().parse(request.params.id));
+  return { voice };
 });
 
 app.get('/api/v1/creative/skills', { preHandler: authenticate }, async (request) => {

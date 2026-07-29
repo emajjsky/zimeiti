@@ -1,3 +1,5 @@
+const { z } = require('zod');
+
 const VOICE_ARCHETYPES = [
   {
     slug: 'say-it-through',
@@ -69,6 +71,44 @@ const VOICE_ARCHETYPES = [
 
 const COMMON_BANNED_PHRASES = ['很多人会问', '今天我们就来', '今天带你', '简单来说', '这意味着', '建议点赞收藏', '评论区聊聊'];
 const COMMON_BANNED_STRUCTURES = ['emoji 小标题', '百科式定义开场', '强制互动结尾'];
+const VOICE_OFFSETS = ['DEFAULT', 'MORE_RESTRAINED', 'SHARPER', 'MORE_PERSONAL', 'MORE_NARRATIVE'];
+const voiceArchetypeSlugs = VOICE_ARCHETYPES.map((item) => item.slug);
+
+const voiceRulesSchema = z.object({
+  opening: z.string().trim().min(1).max(1_000),
+  reasoning: z.string().trim().min(1).max(1_000),
+  rhythm: z.string().trim().min(1).max(1_000),
+  ending: z.string().trim().min(1).max(1_000),
+  identityBoundary: z.string().trim().min(1).max(1_000),
+  audience: z.string().trim().min(1).max(600),
+  readerTakeaway: z.string().trim().min(1).max(600),
+  allowedPhrases: z.array(z.string().trim().min(1).max(100)).max(30),
+  bannedPhrases: z.array(z.string().trim().min(1).max(100)).min(1).max(50),
+  bannedStructures: z.array(z.string().trim().min(1).max(100)).min(1).max(50),
+});
+
+const accountVoiceInput = z.object({
+  name: z.string().trim().min(1).max(80),
+  archetypeSlug: z.enum(voiceArchetypeSlugs),
+  identityText: z.string().trim().min(1).max(600),
+  audienceText: z.string().trim().min(1).max(600),
+  readerTakeawayText: z.string().trim().min(1).max(600),
+  editedRules: voiceRulesSchema.optional(),
+});
+
+const accountVoiceCalibrationInput = z.object({
+  sourceType: z.enum(['LINK', 'FILE', 'TEXT']),
+  title: z.string().trim().min(1).max(200),
+  sourceUrl: z.string().url().optional(),
+  fileReference: z.string().trim().min(1).max(300).optional(),
+  ruleSummary: z.string().trim().max(4_000).default(''),
+  confirmedLicensed: z.boolean().refine((value) => value, '请完成表达参考使用权确认。'),
+}).superRefine((value, context) => {
+  if (value.sourceType === 'LINK' && !value.sourceUrl) context.addIssue({ code: 'custom', path: ['sourceUrl'], message: '请提供参考链接。' });
+  if (value.sourceType === 'FILE' && !value.fileReference) context.addIssue({ code: 'custom', path: ['fileReference'], message: '请提供已上传的文件标识。' });
+  if (value.sourceType !== 'LINK' && value.sourceUrl) context.addIssue({ code: 'custom', path: ['sourceUrl'], message: '该类型不能填写链接。' });
+  if (value.sourceType !== 'FILE' && value.fileReference) context.addIssue({ code: 'custom', path: ['fileReference'], message: '该类型不能填写文件标识。' });
+});
 
 function buildInitialVoiceRules({ archetypeSlug, identityText, audienceText, readerTakeawayText }) {
   const archetype = VOICE_ARCHETYPES.find((item) => item.slug === archetypeSlug);
@@ -167,13 +207,32 @@ function createAccountVoiceStore({ query, transaction }) {
     });
   }
 
+  async function setDefault(workspaceId, profileId) {
+    const profile = await get(workspaceId, profileId);
+    if (!profile || profile.status !== 'ACTIVE') throw new Error('只能将当前工作空间中启用的账号声音设为默认。');
+    await query(`INSERT INTO account_voice_defaults (workspace_id, profile_id)
+      VALUES ($1, $2)
+      ON CONFLICT (workspace_id) DO UPDATE SET profile_id = excluded.profile_id, updated_at = now()`, [workspaceId, profileId]);
+    return profile;
+  }
+
   async function getWritingSnapshot(workspaceId, profileId, offset = 'DEFAULT') {
     const profile = await get(workspaceId, profileId);
     if (!profile || profile.status !== 'ACTIVE') return null;
     return { id: profile.id, name: profile.name, version: profile.version, rules: profile.rules, offset };
   }
 
-  return { list, get, create, update, getWritingSnapshot };
+  return { list, get, create, update, setDefault, getWritingSnapshot };
 }
 
-module.exports = { VOICE_ARCHETYPES, COMMON_BANNED_PHRASES, COMMON_BANNED_STRUCTURES, buildInitialVoiceRules, createAccountVoiceStore };
+module.exports = {
+  VOICE_ARCHETYPES,
+  VOICE_OFFSETS,
+  COMMON_BANNED_PHRASES,
+  COMMON_BANNED_STRUCTURES,
+  voiceRulesSchema,
+  accountVoiceInput,
+  accountVoiceCalibrationInput,
+  buildInitialVoiceRules,
+  createAccountVoiceStore,
+};
