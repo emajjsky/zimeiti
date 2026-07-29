@@ -1,5 +1,5 @@
 const DIMENSIONS = ['SUBJECT', 'CONTENT_TYPE', 'VOICE', 'LAYOUT', 'CHANNEL'];
-const WRITING_DIMENSIONS = ['SUBJECT', 'CONTENT_TYPE', 'VOICE', 'CHANNEL'];
+const WRITING_DIMENSIONS = ['SUBJECT', 'CONTENT_TYPE', 'CHANNEL'];
 const PLATFORM_NAMES = { WECHAT: '公众号', XIAOHONGSHU: '小红书', ZHIHU: '知乎', WEIBO: '微博' };
 
 function skillView(row) {
@@ -31,13 +31,15 @@ function briefView(row) {
     lengthTarget: row.length_target,
     selectedPlatforms: row.selected_platforms_json ?? [],
     notes: row.notes,
+    accountVoiceProfileId: row.account_voice_profile_id ?? '',
+    voiceOffset: row.voice_offset ?? 'DEFAULT',
     selectedSkills: row.selected_versions_json ?? {},
     platformSkills: row.platform_versions_json ?? {},
     updatedAt: row.updated_at,
   };
 }
 
-function createCreativeSkillStore({ query, transaction }) {
+function createCreativeSkillStore({ query, transaction, accountVoiceStore = null }) {
   async function list(workspaceId) {
     const result = await query(`SELECT d.id, d.dimension, d.slug, d.name, d.description, d.sort_order,
       v.id AS version_id, v.version, v.instructions_md, v.rules_json
@@ -67,7 +69,7 @@ function createCreativeSkillStore({ query, transaction }) {
     if (!brief) return null;
     const platformSelection = brief.platformSkills[platform];
     if (!platformSelection?.CHANNEL) throw new Error(`请先配置${PLATFORM_NAMES[platform] ?? '当前平台'}写作规则。`);
-    const requested = [brief.selectedSkills.SUBJECT, brief.selectedSkills.CONTENT_TYPE, brief.selectedSkills.VOICE, platformSelection.CHANNEL];
+    const requested = [brief.selectedSkills.SUBJECT, brief.selectedSkills.CONTENT_TYPE, platformSelection.CHANNEL];
     const result = await query(`SELECT d.id, d.dimension, d.slug, d.name, d.description, d.sort_order,
       v.id AS version_id, v.version, v.instructions_md, v.rules_json
       FROM creative_skill_versions v
@@ -77,7 +79,10 @@ function createCreativeSkillStore({ query, transaction }) {
     const byVersion = new Map(result.rows.map((row) => [row.version_id, skillView(row)]));
     const skills = requested.map((id) => byVersion.get(id)).filter(Boolean);
     if (skills.length !== WRITING_DIMENSIONS.length) throw new Error('项目绑定的写作策略已不可用，请重新保存写作策略。');
-    return { brief, skills };
+    if (!brief.accountVoiceProfileId) throw new Error('请先在设置中创建并选择账号声音后再生成正文。');
+    const accountVoice = await accountVoiceStore?.getWritingSnapshot(workspaceId, brief.accountVoiceProfileId, brief.voiceOffset);
+    if (!accountVoice) throw new Error('当前账号声音不可用，请在设置中重新选择。');
+    return { brief, skills, accountVoice };
   }
 
   async function saveBrief(workspaceId, projectId, input) {
@@ -115,18 +120,19 @@ function createCreativeSkillStore({ query, transaction }) {
         RETURNING id`, [workspaceId, projectId, JSON.stringify(input.selectedSkills), JSON.stringify(input.platformSkills)]);
       const result = await client.query(`INSERT INTO writing_briefs
         (workspace_id, project_id, composition_id, objective, target_audience, core_message,
-         source_requirements, length_target, selected_platforms_json, notes)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         source_requirements, length_target, selected_platforms_json, notes, account_voice_profile_id, voice_offset)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         ON CONFLICT (workspace_id, project_id) DO UPDATE SET
           composition_id = excluded.composition_id, objective = excluded.objective,
           target_audience = excluded.target_audience, core_message = excluded.core_message,
           source_requirements = excluded.source_requirements, length_target = excluded.length_target,
           selected_platforms_json = excluded.selected_platforms_json, notes = excluded.notes,
+          account_voice_profile_id = excluded.account_voice_profile_id, voice_offset = excluded.voice_offset,
           updated_at = now()
         RETURNING *`, [workspaceId, projectId, composition.rows[0].id, input.objective,
         input.targetAudience, input.coreMessage, input.sourceRequirements, input.lengthTarget,
-        JSON.stringify(input.selectedPlatforms), input.notes]);
-      return briefView({ ...result.rows[0], selected_versions_json: input.selectedSkills, platform_versions_json: input.platformSkills });
+        JSON.stringify(input.selectedPlatforms), input.notes, input.accountVoiceProfileId || null, input.voiceOffset]);
+      return briefView({ ...result.rows[0], account_voice_profile_id: input.accountVoiceProfileId || null, voice_offset: input.voiceOffset, selected_versions_json: input.selectedSkills, platform_versions_json: input.platformSkills });
     });
   }
 

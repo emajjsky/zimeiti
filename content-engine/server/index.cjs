@@ -92,8 +92,8 @@ const templateStore = createTemplateStore({ query }, {
   [REVISION_TEMPLATE_SCOPES.ZHIHU]: { defaultTemplate: () => defaultRevisionTemplate('ZHIHU'), validateTemplate: validateRevisionTemplate },
   [REVISION_TEMPLATE_SCOPES.WEIBO]: { defaultTemplate: () => defaultRevisionTemplate('WEIBO'), validateTemplate: validateRevisionTemplate },
 });
-const creativeSkillStore = createCreativeSkillStore({ query, transaction });
 const accountVoiceStore = createAccountVoiceStore({ query, transaction });
+const creativeSkillStore = createCreativeSkillStore({ query, transaction, accountVoiceStore });
 const projectMaterialStore = createProjectMaterialStore({ query });
 const projectAgentStore = createProjectAgentStore({ query, transaction });
 const projectScope = z.enum(['PROJECT', 'RESEARCH', 'WRITING', 'IMAGING']);
