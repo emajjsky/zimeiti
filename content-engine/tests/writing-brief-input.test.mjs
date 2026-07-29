@@ -35,3 +35,9 @@ test('已选平台仍必须配置独立渠道规则', () => {
     /公众号写作规则/,
   );
 });
+
+test('写作简报保存账号声音和本篇语气，而不是泛化语言风格', () => {
+  const result = writingBriefInput.parse({ ...brief, accountVoiceProfileId: '715a27a6-38d7-4bcf-ab68-4765fbb0f697', voiceOffset: 'SHARPER' });
+  assert.equal(result.accountVoiceProfileId, '715a27a6-38d7-4bcf-ab68-4765fbb0f697');
+  assert.equal(result.voiceOffset, 'SHARPER');
+});

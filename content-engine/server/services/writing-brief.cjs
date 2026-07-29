@@ -15,6 +15,8 @@ const writingBriefInput = z.object({
   lengthTarget: z.string().max(120),
   selectedPlatforms: z.array(creativePlatform).min(1).max(4),
   notes: z.string().max(4_000),
+  accountVoiceProfileId: z.string().uuid().or(z.literal('')).default(''),
+  voiceOffset: z.enum(['DEFAULT', 'MORE_RESTRAINED', 'SHARPER', 'MORE_PERSONAL', 'MORE_NARRATIVE']).default('DEFAULT'),
   selectedSkills: z.object({
     SUBJECT: z.string().min(1).max(160),
     CONTENT_TYPE: z.string().min(1).max(160),
