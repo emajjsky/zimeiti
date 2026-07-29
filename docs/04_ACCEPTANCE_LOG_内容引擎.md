@@ -516,3 +516,12 @@
 | 外部调用 | 未触发 | 自动化使用 Mock，没有请求真实百炼、Tavily、RSS 或媒体接口。 |
 | 用户验收入口 | 可验收 | 先在“设置 → 模型与 API → 任务策略”配置“事实核验”，再打开创作项目的研究来源，选择来源并依次点击“准备事实核验”“确认调用”“确认研究结论”。 |
 | 下一切片 | 待实现 | 已确认研究结论进入正文 Agent；只有 `VERIFIED` 和经用户确认可用的 `SINGLE_SOURCE` 内容可作为事实，冲突与待复核项继续阻断。 |
+
+## A37. 正文 Agent 研究结果迁移修复（2026-07-29）
+
+| 验收项 | 状态 | 证据 |
+| --- | --- | --- |
+| 根因 | 已修复 | 正文 Agent 读取已采用研究结果时依赖 `project_research_results`；运行数据库未应用 `021_simplified_research_workflow.sql`，因此 PostgreSQL 返回表不存在。 |
+| 数据迁移 | 通过 | 实际执行 `npm run db:migrate`，并通过 PostgreSQL 查询确认 `project_research_results` 已存在，`schema_migrations` 已记录 `021_simplified_research_workflow.sql`。 |
+| 服务恢复 | 通过 | 重启 API 后 `http://127.0.0.1:8787/health` 返回正常健康状态。 |
+| 回归 | 通过 | `npm test` 202/202 通过；正文 Agent 可重新发送请求，不需要重新创建项目。 |
