@@ -64,3 +64,13 @@ test('开始研究直接入队统一任务，不再创建确认草稿', () => {
   assert.match(worker, /queueJob\.name === 'PROJECT_RESEARCH_WORKFLOW'/);
   assert.match(worker, /generateSimplifiedResearchWorkflow/);
 });
+
+test('采用或跳过研究都会推进正文，正文上下文只读取已确认事实', () => {
+  const server = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
+
+  assert.match(server, /research-results\/:artifactId\/accept/);
+  assert.match(server, /research\/skip/);
+  assert.match(server, /stage: 'MASTER_WRITING'/);
+  assert.match(server, /researchContext/);
+  assert.match(server, /verifiedFacts/);
+});

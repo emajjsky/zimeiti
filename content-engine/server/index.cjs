@@ -853,6 +853,90 @@ app.post('/api/v1/creative/projects/:projectId/research/start', { preHandler: au
   reply.code(202).send({ ...runView(run.run), jobId: run.job.id });
 });
 
+function advanceProjectToMasterWriting(state, projectId, now = new Date().toISOString()) {
+  let project;
+  const projects = (state.projects ?? []).map((item) => {
+    if (item.id !== projectId) return item;
+    project = {
+      ...item,
+      stage: 'MASTER_WRITING',
+      status: 'WRITING',
+      updatedAt: now,
+    };
+    return project;
+  });
+  if (!project) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
+  return { ...state, projects };
+}
+
+app.post('/api/v1/creative/research-results/:artifactId/accept', { preHandler: authenticate }, async (request) => {
+  const artifactId = z.string().uuid().parse(request.params.artifactId);
+  const workspace = await currentWorkspace(request.user.sub);
+  return transaction(async (client) => {
+    const result = await client.query(`SELECT a.*, r.id AS research_result_id, r.output_json
+      FROM project_artifacts a
+      JOIN project_research_results r ON r.artifact_id = a.id
+      WHERE a.id = $1 AND a.workspace_id = $2
+        AND a.artifact_type = 'RESEARCH_RESULT' AND a.status = 'CANDIDATE'
+      FOR UPDATE OF a, r`, [artifactId, workspace.id]);
+    if (!result.rowCount) { const error = new Error('这份研究结果当前不能采用。'); error.statusCode = 409; throw error; }
+    const candidate = result.rows[0];
+    const now = new Date().toISOString();
+    await client.query(`UPDATE project_artifacts SET status = 'REJECTED', updated_at = now()
+      WHERE workspace_id = $1 AND project_id = $2 AND artifact_type = 'RESEARCH_RESULT'
+        AND status = 'ACCEPTED' AND id <> $3`, [workspace.id, candidate.project_id, candidate.id]);
+    const accepted = await client.query(`UPDATE project_artifacts
+      SET status = 'ACCEPTED', accepted_at = now(), updated_at = now()
+      WHERE id = $1 AND workspace_id = $2 RETURNING *`, [candidate.id, workspace.id]);
+    await client.query('UPDATE project_research_results SET accepted_at = now() WHERE id = $1', [candidate.research_result_id]);
+    const message = await client.query(`INSERT INTO project_agent_messages
+      (workspace_id, project_id, role, content, stage, message_type, artifact_refs_json, metadata_json)
+      VALUES ($1, $2, 'ASSISTANT', '研究结果已采用，已进入正文创作。', 'RESEARCH', 'SYSTEM_EVENT', $3, $4)
+      RETURNING id`, [
+      workspace.id,
+      candidate.project_id,
+      JSON.stringify([candidate.id]),
+      JSON.stringify({ action: 'RESEARCH_RESULT_ACCEPTED' }),
+    ]);
+    const state = await updateCreativeState(client, workspace.id, (current) => advanceProjectToMasterWriting(current, candidate.project_id, now), now);
+    const project = state.projects.find((item) => item.id === candidate.project_id);
+    await projectAgentStore.upsertStageSummary(client, {
+      workspaceId: workspace.id,
+      projectId: candidate.project_id,
+      stage: 'RESEARCH',
+      summary: candidate.output_json.summary,
+      throughMessageId: message.rows[0].id,
+    });
+    return {
+      artifact: artifactView({ ...accepted.rows[0], payload_json: candidate.output_json, version_number: 1 }),
+      project,
+    };
+  });
+});
+
+app.post('/api/v1/creative/projects/:projectId/research/skip', { preHandler: authenticate }, async (request) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const workspace = await currentWorkspace(request.user.sub);
+  await creativeProject(workspace.id, projectId);
+  return transaction(async (client) => {
+    const now = new Date().toISOString();
+    const state = await updateCreativeState(client, workspace.id, (current) => advanceProjectToMasterWriting(current, projectId, now), now);
+    const project = state.projects.find((item) => item.id === projectId);
+    const message = await client.query(`INSERT INTO project_agent_messages
+      (workspace_id, project_id, role, content, stage, message_type, metadata_json)
+      VALUES ($1, $2, 'ASSISTANT', '已跳过研究，直接进入正文创作。', 'RESEARCH', 'SYSTEM_EVENT', $3)
+      RETURNING id`, [workspace.id, projectId, JSON.stringify({ action: 'RESEARCH_SKIPPED' })]);
+    await projectAgentStore.upsertStageSummary(client, {
+      workspaceId: workspace.id,
+      projectId,
+      stage: 'RESEARCH',
+      summary: '本次跳过研究，正文将仅基于项目规划和用户提供的资料创作。',
+      throughMessageId: message.rows[0].id,
+    });
+    return { project };
+  });
+});
+
 app.post('/api/v1/creative/projects/:projectId/agent/prepare', { preHandler: authenticate }, async (request, reply) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = agentPrepareInput.parse(request.body);
@@ -896,7 +980,7 @@ app.post('/api/v1/creative/projects/:projectId/agent/prepare', { preHandler: aut
   }
 
   if (!input.platform) throw new Error('文案阶段必须指定目标平台。');
-  const [project, context, materialRows, summaries, masterResult, acceptedVersion] = await Promise.all([
+  const [project, context, materialRows, summaries, masterResult, acceptedVersion, acceptedResearch] = await Promise.all([
     creativeProject(workspace.id, projectId),
     creativeSkillStore.getContext(workspace.id, projectId, input.platform),
     projectMaterialStore.researchSnapshot(workspace.id, projectId, input.inputIds, input.referenceIds),
@@ -910,6 +994,11 @@ app.post('/api/v1/creative/projects/:projectId/agent/prepare', { preHandler: aut
       JOIN project_artifacts a ON a.id = v.artifact_id AND a.status = 'ACCEPTED'
       WHERE v.workspace_id = $1 AND v.project_id = $2 AND v.platform = $3
       ORDER BY v.version_number DESC LIMIT 1`, [workspace.id, projectId, input.platform]),
+    query(`SELECT r.output_json
+      FROM project_research_results r
+      JOIN project_artifacts a ON a.id = r.artifact_id AND a.status = 'ACCEPTED'
+      WHERE r.workspace_id = $1 AND r.project_id = $2
+      ORDER BY r.accepted_at DESC NULLS LAST, r.created_at DESC LIMIT 1`, [workspace.id, projectId]),
   ]);
   if (!context) throw new Error('请先保存创作设定和写作策略。');
   if (!context.brief.selectedPlatforms.includes(input.platform)) throw new Error('目标平台不在已保存的创作设定中。');
@@ -933,6 +1022,14 @@ app.post('/api/v1/creative/projects/:projectId/agent/prepare', { preHandler: aut
   ]);
   const materials = await projectResearchMaterialSnapshot(materialRows);
   const master = masterResult.rows[0];
+  const acceptedResearchResult = acceptedResearch.rows[0]?.output_json ?? null;
+  const researchContext = acceptedResearchResult ? {
+    verifiedFacts: acceptedResearchResult.facts ?? [],
+    cautions: acceptedResearchResult.cautions ?? [],
+    creativeReferences: acceptedResearchResult.materialContext?.creativeReferences ?? [],
+    userContent: acceptedResearchResult.materialContext?.userContent ?? [],
+    visualAssets: acceptedResearchResult.materialContext?.visualAssets ?? [],
+  } : null;
   const sourceSnapshot = {
     projectId,
     project,
@@ -955,6 +1052,7 @@ app.post('/api/v1/creative/projects/:projectId/agent/prepare', { preHandler: aut
     } : null,
     summaries: summaries.rows,
     materials,
+    researchContext,
   };
   const runInput = { template: { id: template.id, version: template.version, body: template.body }, route: { provider: route.provider, connectionId: route.connectionId ?? null, model: route.model } };
   const run = await transaction(async (client) => {

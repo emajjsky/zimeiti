@@ -157,6 +157,7 @@ function buildCopyPrompt(snapshot) {
     '你是内容项目的文案编辑，只执行已经确认的单一动作。',
     `本次动作是 ${snapshot.action}，目标平台是 ${snapshot.platform}。`,
     '严格依据项目资料、当前正文、选区、内容母版、阶段摘要和 Skill 工作，不得编造数据、引语、来源或人物经历。',
+    '研究上下文中的 verifiedFacts 是唯一可以作为已确认客观事实写入正文的研究结论；cautions 只能作为待确认提醒，不能改写成确定事实。',
     '必须保留所有尚未核验的 factsToVerify；不得删掉、弱化或改写为已确认事实。',
     '只返回 JSON，不要 Markdown 代码围栏、过程说明或额外字段。',
     `严格按以下形状返回：${JSON.stringify(snapshot.action === 'GENERATE_OUTLINE' ? outlineExample : copyExample)}`,
@@ -179,6 +180,7 @@ function buildCopyPrompt(snapshot) {
       instructions: skill.version?.instructions,
     })),
     materials: snapshot.materials ?? [],
+    researchContext: snapshot.researchContext ?? null,
   });
   return { system, message };
 }
