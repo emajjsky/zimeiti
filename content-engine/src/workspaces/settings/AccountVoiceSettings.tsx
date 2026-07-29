@@ -1,4 +1,4 @@
-import { Check, ChevronLeft, CircleAlert, FileText, Link2, PenLine, Plus, Sparkles } from 'lucide-react';
+import { Check, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, FileText, Link2, PenLine, Plus, Sparkles } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { webAccountVoices } from '../../data/webApi';
 import type { AccountVoiceCalibrationDraft, AccountVoiceInput, AccountVoiceProfile, AccountVoiceRules } from '../../domain/creative';
@@ -47,6 +47,7 @@ export function AccountVoiceSettings() {
   const [sourceUrl, setSourceUrl] = useState('');
   const [confirmedLicensed, setConfirmedLicensed] = useState(false);
   const [makeDefault, setMakeDefault] = useState(true);
+  const [rulesExpanded, setRulesExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -61,13 +62,13 @@ export function AccountVoiceSettings() {
 
   const returnToList = () => { setScreen('list'); setEditing(null); setArticle(null); setError(''); };
   const beginImport = () => {
-    setEditing(null); setForm(formFrom()); setArticle(null); setSourceUrl(''); setConfirmedLicensed(false); setMakeDefault(true); setError(''); setScreen('import');
+    setEditing(null); setForm(formFrom()); setArticle(null); setSourceUrl(''); setConfirmedLicensed(false); setMakeDefault(true); setRulesExpanded(false); setError(''); setScreen('import');
   };
   const beginManual = () => {
-    setEditing(null); setForm(formFrom()); setArticle(null); setMakeDefault(true); setError(''); setScreen('review');
+    setEditing(null); setForm(formFrom()); setArticle(null); setMakeDefault(true); setRulesExpanded(false); setError(''); setScreen('review');
   };
   const beginEdit = (voice: AccountVoiceProfile) => {
-    setEditing(voice); setForm(formFrom(voice)); setArticle(null); setMakeDefault(Boolean(voice.isDefault)); setError(''); setScreen('review');
+    setEditing(voice); setForm(formFrom(voice)); setArticle(null); setMakeDefault(Boolean(voice.isDefault)); setRulesExpanded(false); setError(''); setScreen('review');
   };
   const distill = async () => {
     if (!sourceUrl.trim()) { setError('请粘贴文章链接。'); return; }
@@ -122,17 +123,24 @@ export function AccountVoiceSettings() {
     <header className="settings-section-header"><div><button type="button" className="text-button" onClick={returnToList}><ChevronLeft size={16}/>账号声音</button><h1>{editing ? '编辑表达规则' : '确认表达规则'}</h1></div></header>
     {error && <p className="voice-error" role="alert"><CircleAlert size={16}/>{error}</p>}
     <section className="voice-review-card">
+      <header className="voice-review-header">
+        <div className="voice-review-intro">
+          <span>{article ? '已提炼表达规则' : '手动设定表达规则'}</span>
+          <h2>{form.analysis?.voiceFingerprint ?? '先定义这套表达的核心判断'}</h2>
+          {form.ruleSummary && <p>{form.ruleSummary}</p>}
+        </div>
+        <label className="voice-name-field"><span>规则名称</span><input value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} placeholder="例如：我的公众号表达" /></label>
+      </header>
       {article && <div className="voice-source-chip"><FileText size={15}/><span>{article.source}</span><a href={article.url} target="_blank" rel="noreferrer">{article.title}</a></div>}
-      <label className="voice-name-field"><span>名称</span><input value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} placeholder="例如：我的公众号表达" /></label>
-      {form.ruleSummary && <p className="voice-rule-summary">{form.ruleSummary}</p>}
       {form.analysis && <section className="voice-diagnosis">
-        <header><div><span>声音指纹</span><h2>{form.analysis.voiceFingerprint}</h2></div><em className={`voice-confidence ${form.analysis.confidence.toLowerCase()}`}>{form.analysis.confidence === 'LOW' ? '单篇样本' : form.analysis.confidence === 'MEDIUM' ? '多篇样本' : '稳定样本'}</em></header>
+        <header><div><span>样本诊断</span><p>这些观察会转化为后续创作的默认写法。</p></div><em className={`voice-confidence ${form.analysis.confidence.toLowerCase()}`}>{form.analysis.confidence === 'LOW' ? '单篇样本' : form.analysis.confidence === 'MEDIUM' ? '多篇样本' : '稳定样本'}</em></header>
         <div className="voice-diagnosis-grid">{form.analysis.diagnostics.map((item) => <article key={item.dimension}><b>{item.dimension}</b><p>{item.finding}</p><small>{item.evidence}</small></article>)}</div>
       </section>}
-      <details className="voice-execution-rules" open><summary>用于后续创作的执行规则</summary>
-        <div className="voice-rule-fields compact">{(['opening', 'reasoning', 'rhythm', 'ending'] as const).map((key) => <label key={key}><span>{{ opening: '怎么开篇', reasoning: '怎么展开', rhythm: '文字节奏', ending: '怎么收束' }[key]}</span><textarea value={form.editedRules[key]} onChange={(event) => updateRule(key, event.target.value)} /></label>)}</div>
+      <section className="voice-execution-rules">
+        <header><div><span>创作执行规则</span><p>文案、标题与排版 Agent 会继承这些偏好。</p></div><button className="voice-rules-toggle" type="button" aria-expanded={rulesExpanded} onClick={() => setRulesExpanded((expanded) => !expanded)}>{rulesExpanded ? <>收起编辑 <ChevronUp size={15}/></> : <>编辑规则 <ChevronDown size={15}/></>}</button></header>
         <div className="voice-execution-grid"><article><b>钩子套路</b><span>{form.editedRules.hookPatterns.join('；') || '未提炼到稳定套路'}</span></article><article><b>论证方式</b><span>{form.editedRules.argumentPattern || '未提炼到稳定模式'}</span></article><article><b>证据习惯</b><span>{form.editedRules.evidenceStyle || '未提炼到稳定习惯'}</span></article><article><b>语言颗粒</b><span>{form.editedRules.languageTexture || '未提炼到稳定特征'}</span></article><article><b>标题套路</b><span>{form.editedRules.titlePatterns.join('；') || '未提炼到稳定套路'}</span></article><article><b>读者关系</b><span>{form.editedRules.readerRelationship || '未提炼到稳定关系'}</span></article></div>
-      </details>
+        {rulesExpanded && <div className="voice-rule-fields compact">{(['opening', 'reasoning', 'rhythm', 'ending'] as const).map((key) => <label key={key}><span>{{ opening: '怎么开篇', reasoning: '怎么展开', rhythm: '文字节奏', ending: '怎么收束' }[key]}</span><textarea value={form.editedRules[key]} onChange={(event) => updateRule(key, event.target.value)} /></label>)}</div>}
+      </section>
       <div className="voice-rule-boundary"><b>自动避开</b><span>{form.editedRules.bannedPhrases.join('、')}</span></div>
       <label className="voice-license"><input type="checkbox" checked={makeDefault} onChange={(event) => setMakeDefault(event.target.checked)} /><span>保存后设为默认账号声音</span></label>
       <footer><button className="text-button" type="button" onClick={article ? () => setScreen('import') : returnToList}>返回</button><button className="button primary" type="button" disabled={saving} onClick={() => void save()}>{saving ? '保存中…' : '确认并保存'}</button></footer>
