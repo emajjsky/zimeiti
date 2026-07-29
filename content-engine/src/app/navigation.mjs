@@ -34,6 +34,7 @@ export const settingsTabs = [
   { id: 'models', label: '模型与 API' },
   { id: 'feishu', label: '飞书 Base' },
   { id: 'accounts', label: '账号授权' },
+  { id: 'voices', label: '账号声音' },
 ];
 
 export function discoverIntent(discoverSection = 'inbox', searchPreset = null) {

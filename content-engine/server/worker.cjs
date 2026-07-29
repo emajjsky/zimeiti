@@ -31,7 +31,7 @@ const {
 } = require('./services/source-verification.cjs');
 const { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, workflowSourceActions, buildResearchResult } = require('./services/simplified-research.cjs');
 const { createProjectAgentStore } = require('./services/project-agent.cjs');
-const { buildCopyPrompt, buildCopyRepairPrompt, buildCopyQualityReviewPrompt, mergeFactsToVerify, parseCopyOutput, parseCopyQualityReview } = require('./services/project-copy-action.cjs');
+const { buildCopyPrompt, buildCopyRepairPrompt, buildCopyQualityReviewPrompt, detectVoiceViolations, mergeFactsToVerify, parseCopyOutput, parseCopyQualityReview } = require('./services/project-copy-action.cjs');
 
 const connection = new IORedis(config.redisUrl, { maxRetriesPerRequest: null });
 const textRunner = createTextModelRunner();
@@ -686,6 +686,21 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
       output = parseCopyOutput(repaired.content, snapshot.action, snapshot);
     }
     if (!isOutlineAction) {
+      const voiceIssues = detectVoiceViolations(output.body, snapshot.accountVoice?.rules);
+      if (voiceIssues.length) {
+        const rewritten = await textRunner.runText({
+          provider: route.provider,
+          model: route.model,
+          system: buildCopyRepairPrompt(prompt.system, voiceIssues.map((issue) => issue.message).join('；')),
+          message: JSON.stringify(output),
+          ...connectionInput,
+        });
+        inputTokens = (inputTokens ?? 0) + (rewritten.inputTokens ?? 0);
+        outputTokens = (outputTokens ?? 0) + (rewritten.outputTokens ?? 0);
+        output = parseCopyOutput(rewritten.content, snapshot.action, snapshot);
+        const remainingVoiceIssues = detectVoiceViolations(output.body, snapshot.accountVoice?.rules);
+        if (remainingVoiceIssues.length) throw new Error(`账号声音检查未通过：${remainingVoiceIssues.map((issue) => issue.message).join('；')}`);
+      }
       const reviewPrompt = buildCopyQualityReviewPrompt({ platform: snapshot.platform, output, researchContext: snapshot.researchContext });
       const reviewed = await textRunner.runText({ provider: route.provider, model: route.model, system: reviewPrompt.system, message: reviewPrompt.message, ...connectionInput });
       inputTokens = (inputTokens ?? 0) + (reviewed.inputTokens ?? 0);
@@ -703,6 +718,8 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
         inputTokens = (inputTokens ?? 0) + (rewritten.inputTokens ?? 0);
         outputTokens = (outputTokens ?? 0) + (rewritten.outputTokens ?? 0);
         output = parseCopyOutput(rewritten.content, snapshot.action, snapshot);
+        const finalVoiceIssues = detectVoiceViolations(output.body, snapshot.accountVoice?.rules);
+        if (finalVoiceIssues.length) throw new Error(`账号声音检查未通过：${finalVoiceIssues.map((issue) => issue.message).join('；')}`);
         const finalReviewPrompt = buildCopyQualityReviewPrompt({ platform: snapshot.platform, output, researchContext: snapshot.researchContext });
         const finalReviewed = await textRunner.runText({ provider: route.provider, model: route.model, system: finalReviewPrompt.system, message: finalReviewPrompt.message, ...connectionInput });
         inputTokens = (inputTokens ?? 0) + (finalReviewed.inputTokens ?? 0);

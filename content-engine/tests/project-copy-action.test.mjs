@@ -7,6 +7,7 @@ const {
   COPY_ACTIONS,
   buildCopyPrompt,
   buildCopyQualityReviewPrompt,
+  detectVoiceViolations,
   copyActionVersion,
   copyTemplateScope,
   defaultRevisionTemplate,
@@ -17,6 +18,27 @@ const {
   parseCopyQualityReview,
   resolveCopyAction,
 } = copyActionModule;
+
+test('账号声音规则检测明确的 AI 套话、emoji 标题和强制互动', () => {
+  const issues = detectVoiceViolations('很多人会问：这意味着什么？\n\n✨ 总结\n\n建议点赞收藏，评论区聊聊。', {
+    bannedPhrases: ['很多人会问'],
+    bannedStructures: ['emoji 小标题', '强制互动结尾'],
+  });
+  assert.deepEqual(issues.map((item) => item.code), ['BANNED_PHRASE', 'EMOJI_HEADING', 'FORCED_CTA']);
+});
+
+test('文案提示词携带账号声音规则与本篇语气，但不携带校准原文', () => {
+  const prompt = buildCopyPrompt({
+    action: 'GENERATE_DRAFT', request: '生成正文', platform: 'WECHAT', template: '写成文章。',
+    project: { title: '标题', coreViewpoint: '观点', factChecks: [] },
+    brief: { objective: '完成文章', targetAudience: '读者', coreMessage: '观点', sourceRequirements: '', lengthTarget: '1200 字', notes: '' },
+    currentContent: { title: '', body: '', factsToVerify: [] }, skills: [], materials: [],
+    accountVoice: { name: '把话说透', version: 2, offset: 'SHARPER', rules: { opening: '先给判断', bannedPhrases: ['很多人会问'] }, calibrationFullText: '不应出现的原文' },
+  });
+  assert.match(prompt.message, /把话说透/);
+  assert.match(prompt.message, /SHARPER/);
+  assert.doesNotMatch(prompt.message, /不应出现的原文/);
+});
 
 function routeSlice(source, start, end) {
   const from = source.indexOf(start);

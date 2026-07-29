@@ -20,7 +20,7 @@ const writingBriefInput = z.object({
   selectedSkills: z.object({
     SUBJECT: z.string().min(1).max(160),
     CONTENT_TYPE: z.string().min(1).max(160),
-    VOICE: z.string().min(1).max(160),
+    VOICE: z.string().max(160).default(''),
     LAYOUT: z.string().max(160).default(''),
     CHANNEL: z.string().max(160).default(''),
   }),

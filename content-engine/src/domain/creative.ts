@@ -2,6 +2,44 @@ import type { Platform } from './content';
 
 export type CreativeSkillDimension = 'SUBJECT' | 'CONTENT_TYPE' | 'VOICE' | 'LAYOUT' | 'CHANNEL';
 export type CreativeSkillSelection = Record<CreativeSkillDimension, string>;
+export type VoiceOffset = 'DEFAULT' | 'MORE_RESTRAINED' | 'SHARPER' | 'MORE_PERSONAL' | 'MORE_NARRATIVE';
+
+export interface AccountVoiceRules {
+  opening: string;
+  reasoning: string;
+  rhythm: string;
+  ending: string;
+  identityBoundary: string;
+  audience: string;
+  readerTakeaway: string;
+  allowedPhrases: string[];
+  bannedPhrases: string[];
+  bannedStructures: string[];
+}
+
+export interface AccountVoiceProfile {
+  id: string;
+  name: string;
+  archetypeSlug: string;
+  identityText: string;
+  audienceText: string;
+  readerTakeawayText: string;
+  status: 'ACTIVE' | 'ARCHIVED';
+  version: number;
+  rules: AccountVoiceRules;
+  createdAt: string;
+  updatedAt: string;
+  isDefault?: boolean;
+}
+
+export interface AccountVoiceInput {
+  name: string;
+  archetypeSlug: string;
+  identityText: string;
+  audienceText: string;
+  readerTakeawayText: string;
+  editedRules?: AccountVoiceRules;
+}
 export type CreativePlatform = Exclude<Platform, 'VIDEO_CHANNEL'>;
 export type CreativePlatformSkillSelection = Record<'LAYOUT' | 'CHANNEL', string>;
 export type CreativePlatformSkillMap = Partial<Record<CreativePlatform, CreativePlatformSkillSelection>>;
@@ -198,6 +236,8 @@ export interface WritingBrief {
   notes: string;
   selectedSkills: CreativeSkillSelection;
   platformSkills: CreativePlatformSkillMap;
+  accountVoiceProfileId: string;
+  voiceOffset: VoiceOffset;
   updatedAt: string;
 }
 

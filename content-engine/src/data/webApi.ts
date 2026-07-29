@@ -1,7 +1,7 @@
 import type { LocalState } from './localRepository';
 import type { ApiUsageLog, ApiUsageSummary, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelTaskPolicy } from '../domain/integrations';
 import type { ContentProject, IntelligenceAnalysis, Platform, ProjectOriginType, ProjectPlanning } from '../domain/content';
-import type { CreativeDraftCandidate, CreativeDraftPreparation, CreativeDraftRun, CreativeOutlineCandidate, CreativeOutlinePreparation, CreativeOutlineRun, CreativePlatform, CreativeSkillDefinition, ProjectAgentContext, ProjectAgentHistory, ProjectAgentPrepareInput, ProjectAgentPrepareResult, ProjectAgentRun, ProjectArtifact, ProjectInput, ProjectInputPayload, ProjectReference, ProjectReferenceMetadata, ProjectResearchContext, ProjectResearchRun, WritingBrief, WritingBriefInput } from '../domain/creative';
+import type { AccountVoiceInput, AccountVoiceProfile, CreativeDraftCandidate, CreativeDraftPreparation, CreativeDraftRun, CreativeOutlineCandidate, CreativeOutlinePreparation, CreativeOutlineRun, CreativePlatform, CreativeSkillDefinition, ProjectAgentContext, ProjectAgentHistory, ProjectAgentPrepareInput, ProjectAgentPrepareResult, ProjectAgentRun, ProjectArtifact, ProjectInput, ProjectInputPayload, ProjectReference, ProjectReferenceMetadata, ProjectResearchContext, ProjectResearchRun, WritingBrief, WritingBriefInput } from '../domain/creative';
 
 const tokenKey = 'content-engine-web-session-v1';
 const apiBase = import.meta.env.VITE_API_BASE ?? '/api/v1';
@@ -38,6 +38,14 @@ export const webAuth = {
 export const webState = {
   async load() { return request<{ state: LocalState; revision: number; updatedAt: string }>('/workspace/state'); },
   async save(state: LocalState) { return request<{ revision: number; updatedAt: string }>('/workspace/state', { method: 'PUT', body: JSON.stringify({ state }) }); },
+};
+
+export const webAccountVoices = {
+  list: () => request<{ voices: AccountVoiceProfile[] }>('/account-voices'),
+  create: (input: AccountVoiceInput) => request<{ voice: AccountVoiceProfile }>('/account-voices', { method: 'POST', body: JSON.stringify(input) }),
+  update: (id: string, input: AccountVoiceInput) => request<{ voice: AccountVoiceProfile }>(`/account-voices/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(input) }),
+  makeDefault: (id: string) => request<{ voice: AccountVoiceProfile }>(`/account-voices/${encodeURIComponent(id)}/default`, { method: 'POST', body: '{}' }),
+  addCalibration: (id: string, input: { sourceType: 'LINK' | 'FILE' | 'TEXT'; title: string; sourceUrl?: string; fileReference?: string; ruleSummary: string; confirmedLicensed: boolean }) => request<{ calibration: { id: string; title: string; rule_summary: string; created_at: string } }>(`/account-voices/${encodeURIComponent(id)}/calibrations`, { method: 'POST', body: JSON.stringify(input) }),
 };
 
 export type CreateProjectInput = {

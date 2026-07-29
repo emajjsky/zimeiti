@@ -14,6 +14,7 @@ export type DiscoverSection = 'inbox' | 'search' | 'import';
 export type SettingsSection =
   | 'workspace'
   | 'sources'
+  | 'voices'
   | 'models'
   | 'feishu'
   | 'accounts';

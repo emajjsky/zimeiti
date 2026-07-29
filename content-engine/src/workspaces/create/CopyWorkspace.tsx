@@ -2,15 +2,22 @@ import { Check, ChevronDown, CircleAlert, History, LoaderCircle, Plus, Save, X }
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { webCreative } from '../../data/webApi';
 import { platformName, type ContentProject, type ContentVersion } from '../../domain/content';
-import type { CreativePlatform, CreativeSkillDefinition, CreativeSkillDimension, ProjectAgentContext, ProjectArtifact, WritingBriefInput } from '../../domain/creative';
+import type { AccountVoiceProfile, CreativePlatform, CreativeSkillDefinition, CreativeSkillDimension, ProjectAgentContext, ProjectArtifact, VoiceOffset, WritingBriefInput } from '../../domain/creative';
 import { CopyCandidateDialog } from './CopyCandidateDialog';
 import { ProjectAgent } from './ProjectAgent';
 
 const platformOrder: CreativePlatform[] = ['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO'];
-const sharedDimensions: { id: 'SUBJECT' | 'CONTENT_TYPE' | 'VOICE'; label: string }[] = [
+const sharedDimensions: { id: 'SUBJECT' | 'CONTENT_TYPE'; label: string }[] = [
   { id: 'SUBJECT', label: '题材' },
   { id: 'CONTENT_TYPE', label: '内容类型' },
-  { id: 'VOICE', label: '语言风格' },
+];
+// 题材、内容类型；语言风格已迁移为账号声音，不再作为用户可选 Skill。
+const voiceOffsets: { id: VoiceOffset; label: string }[] = [
+  { id: 'DEFAULT', label: '默认' },
+  { id: 'MORE_RESTRAINED', label: '更克制' },
+  { id: 'SHARPER', label: '更锋利' },
+  { id: 'MORE_PERSONAL', label: '更个人化' },
+  { id: 'MORE_NARRATIVE', label: '更叙述' },
 ];
 const platformDimensions: { id: 'LAYOUT' | 'CHANNEL'; label: string }[] = [
   { id: 'LAYOUT', label: '内容结构' },
@@ -46,11 +53,12 @@ function artifactStatus(status: ProjectArtifact['status']) {
   return status === 'ACCEPTED' ? '已采用' : status === 'REJECTED' ? '已废弃' : '待审核';
 }
 
-export function CopyWorkspace({ project, brief, briefState, skills, activePlatform, onPlatform, onProjectChange, onSaveBrief, onSaveVersion, onOpenModelSettings, onOpenAgentSettings }: {
+export function CopyWorkspace({ project, brief, briefState, skills, accountVoices, activePlatform, onPlatform, onProjectChange, onSaveBrief, onSaveVersion, onOpenModelSettings, onOpenAgentSettings, onOpenVoiceSettings }: {
   project: ContentProject;
   brief: WritingBriefInput | null;
   briefState: 'loading' | 'saving' | 'saved' | 'error';
   skills: CreativeSkillDefinition[];
+  accountVoices: AccountVoiceProfile[];
   activePlatform: CreativePlatform;
   onPlatform: (platform: CreativePlatform) => void;
   onProjectChange: (project: ContentProject) => void;
@@ -58,6 +66,7 @@ export function CopyWorkspace({ project, brief, briefState, skills, activePlatfo
   onSaveVersion: (projectId: string, versionId: string, patch: Pick<ContentVersion, 'title' | 'body'>) => void;
   onOpenModelSettings: () => void;
   onOpenAgentSettings: () => void;
+  onOpenVoiceSettings: () => void;
 }) {
   const versions = useMemo(() => project.versions.filter((version): version is ContentVersion & { platform: CreativePlatform } => version.platform !== 'VIDEO_CHANNEL'), [project.versions]);
   const activeVersion = versions.find((version) => version.platform === activePlatform) ?? versions[0];
@@ -104,7 +113,7 @@ export function CopyWorkspace({ project, brief, briefState, skills, activePlatfo
     resize(titleRef.current, 54); resize(bodyRef.current, 420);
   }, [draft.body, draft.title]);
 
-  const skillGroups = useMemo(() => new Map<CreativeSkillDimension, CreativeSkillDefinition[]>(['SUBJECT', 'CONTENT_TYPE', 'VOICE', 'LAYOUT', 'CHANNEL'].map((dimension) => [dimension as CreativeSkillDimension, skills.filter((skill) => skill.dimension === dimension)])), [skills]);
+  const skillGroups = useMemo(() => new Map<CreativeSkillDimension, CreativeSkillDefinition[]>(['SUBJECT', 'CONTENT_TYPE', 'LAYOUT', 'CHANNEL'].map((dimension) => [dimension as CreativeSkillDimension, skills.filter((skill) => skill.dimension === dimension)])), [skills]);
   const missingPlatforms = platformOrder.filter((platform) => !versions.some((version) => version.platform === platform));
   const artifacts = (agentContext?.artifacts ?? []).filter((artifact) => artifact.type === 'OUTLINE' || artifact.type === 'PLATFORM_COPY');
   const hasAcceptedCopy = (agentContext?.artifacts ?? []).some((artifact) => artifact.type === 'PLATFORM_COPY' && artifact.platform === activeVersion?.platform && artifact.status === 'ACCEPTED');
@@ -186,6 +195,7 @@ export function CopyWorkspace({ project, brief, briefState, skills, activePlatfo
 
   if (!activeVersion) return <section className="empty-workbench"><h1>还没有图文平台版本</h1></section>;
   const platformStrategy = strategy?.platformSkills[activeVersion.platform];
+  const activeVoice = accountVoices.find((voice) => voice.id === strategy?.accountVoiceProfileId);
 
   return <section className="copy-workspace">
     <header className="copy-platform-bar">
@@ -196,6 +206,12 @@ export function CopyWorkspace({ project, brief, briefState, skills, activePlatfo
     {strategy && <section className="copy-strategy" aria-labelledby="copy-strategy-title"><header><div><h2 id="copy-strategy-title">写作策略</h2><span>{platformName[activeVersion.platform]}</span></div><div className={`copy-strategy-state ${strategyState}`}>{strategyState === 'saving' && '正在保存创作设定'}{strategyState === 'dirty' && '准备自动保存'}{strategyState === 'saved' && '已自动保存'}{strategyState === 'error' && <><span>保存失败</span><button className="text-button" type="button" onClick={() => void saveStrategy()}>重试保存</button></>}</div></header><div className="copy-strategy-fields">{sharedDimensions.map(({ id, label }) => <label key={id}><span>{label}</span><select value={strategy.selectedSkills[id]} onChange={(event) => changeStrategy({ selectedSkills: { ...strategy.selectedSkills, [id]: event.target.value } })}>{(skillGroups.get(id) ?? []).map((skill) => <option key={skill.version.id} value={skill.version.id}>{skill.name}</option>)}</select></label>)}{platformDimensions.map(({ id, label }) => <label key={id}><span>{label}</span><select value={platformStrategy?.[id] ?? ''} onChange={(event) => changeStrategy({ platformSkills: { ...strategy.platformSkills, [activeVersion.platform]: { ...(platformStrategy ?? platformSkills(activeVersion.platform, skills)), [id]: event.target.value } } })}>{(skillGroups.get(id) ?? []).map((skill) => <option key={skill.version.id} value={skill.version.id}>{skill.name}</option>)}</select></label>)}<label><span>目标篇幅</span><input value={strategy.lengthTarget} onChange={(event) => changeStrategy({ lengthTarget: event.target.value })}/></label></div></section>}
 
     {error && <div className="copy-workspace-error" role="alert"><CircleAlert size={16}/><span>{error}</span>{/模型|提示词|任务策略/.test(error) && <button className="text-button" type="button" onClick={onOpenModelSettings}>去配置</button>}</div>}
+
+    {strategy && <section className="copy-voice-state" aria-label="账号声音">
+      <div><span>当前账号声音</span><b>{activeVoice?.name ?? '尚未设置'}</b></div>
+      <label><span>本篇语气</span><select value={strategy.voiceOffset} onChange={(event) => changeStrategy({ voiceOffset: event.target.value as VoiceOffset })}>{voiceOffsets.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
+      <button className="text-button" type="button" onClick={onOpenVoiceSettings}>管理</button>
+    </section>}
 
     <div className="copy-workspace-layout">
       <section className="copy-editor">

@@ -1075,6 +1075,7 @@ app.post('/api/v1/creative/projects/:projectId/agent/prepare', { preHandler: aut
     projectId,
     project,
     brief: context.brief,
+    accountVoice: context.accountVoice,
     skills: context.skills,
     platform: input.platform,
     stage: 'COPY',
@@ -1475,7 +1476,7 @@ app.post('/api/v1/creative/projects/:projectId/outline/prepare', { preHandler: a
   if (!context.brief.selectedPlatforms.includes(input.platform)) throw new Error('目标平台不在已保存的创作设定中。');
   const platformVersion = project.versions?.find((version) => version.platform === input.platform);
   if (!platformVersion) throw new Error('项目没有对应的图文平台版本。');
-  const sourceSnapshot = { project, brief: context.brief, skills: context.skills, platform: input.platform };
+  const sourceSnapshot = { project, brief: context.brief, accountVoice: context.accountVoice, skills: context.skills, platform: input.platform };
   const runInput = { template: { id: template.id, version: template.version, body: template.body }, route: { provider: route.provider, connectionId: route.connectionId ?? null, model: route.model } };
   const run = await query(`INSERT INTO generation_runs
     (workspace_id, action_version_id, status, source_snapshot_json, input_json, model, prompt_version, estimated_cost)

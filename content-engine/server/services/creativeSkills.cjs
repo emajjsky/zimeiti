@@ -86,7 +86,7 @@ function createCreativeSkillStore({ query, transaction, accountVoiceStore = null
   }
 
   async function saveBrief(workspaceId, projectId, input) {
-    const shared = ['SUBJECT', 'CONTENT_TYPE', 'VOICE'];
+    const shared = ['SUBJECT', 'CONTENT_TYPE'];
     const requestedPairs = [
       ...shared.map((dimension) => [dimension, input.selectedSkills[dimension]]),
       ...input.selectedPlatforms.map((platform) => ['CHANNEL', input.platformSkills[platform]?.CHANNEL]),
@@ -105,7 +105,7 @@ function createCreativeSkillStore({ query, transaction, accountVoiceStore = null
         AND (d.workspace_id IS NULL OR d.workspace_id = $2)`, [requested, workspaceId]);
     const actual = new Map(catalog.rows.map((row) => [row.id, row.dimension]));
     const invalid = requestedPairs.find(([dimension, id]) => actual.get(id) !== dimension);
-    if (invalid || catalog.rowCount !== requested.length) {
+    if (invalid || actual.size < requested.length) {
       const error = new Error('写作策略无效，请重新选择可用规则。');
       error.statusCode = 400;
       throw error;

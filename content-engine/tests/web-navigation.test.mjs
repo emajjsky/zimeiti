@@ -2,6 +2,14 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
+test('账号声音设置入口独立于模型配置', async () => {
+  const settings = await readFile(new URL('../src/workspaces/settings/AccountVoiceSettings.tsx', import.meta.url), 'utf8');
+  assert.ok(navigation.settingsTabs.some((item) => item.id === 'voices' && item.label === '账号声音'));
+  assert.match(settings, /把话说透/);
+  assert.match(settings, /代表作校准/);
+  assert.doesNotMatch(settings, /提示词正文|模仿作者/);
+});
+
 const navigation = await import('../src/app/navigation.mjs').catch(() => null);
 
 test('一级导航移除独立规划，只保留七个工作入口', () => {
@@ -123,7 +131,7 @@ test('发现工作区只提供三个采集入口', () => {
 });
 
 test('设置工作区统一管理五类配置', () => {
-  assert.deepEqual(navigation.settingsTabs, [
+  assert.deepEqual(navigation.settingsTabs.slice(0, 5), [
     { id: 'workspace', label: '工作空间' },
     { id: 'sources', label: '资讯来源' },
     { id: 'models', label: '模型与 API' },

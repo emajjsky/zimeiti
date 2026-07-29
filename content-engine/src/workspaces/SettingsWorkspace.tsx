@@ -6,6 +6,7 @@ export function SettingsWorkspace({
   onSectionChange,
   workspace,
   sources,
+  voices,
   models,
   feishu,
   accounts,
@@ -14,11 +15,12 @@ export function SettingsWorkspace({
   onSectionChange: (section: SettingsSection) => void;
   workspace: ReactNode;
   sources: ReactNode;
+  voices: ReactNode;
   models: ReactNode;
   feishu: ReactNode;
   accounts: ReactNode;
 }) {
-  const panels: Record<SettingsSection, ReactNode> = { workspace, sources, models, feishu, accounts };
+  const panels: Record<SettingsSection, ReactNode> = { workspace, sources, voices, models, feishu, accounts };
 
   return (
     <section className="settings-workspace">

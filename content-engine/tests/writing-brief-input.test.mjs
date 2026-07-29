@@ -2,6 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { writingBriefInput } from '../server/services/writing-brief.cjs';
 
+test('账号声音替代语言风格 Skill，历史 VOICE 字段允许为空', () => {
+  const result = writingBriefInput.parse({
+    objective: '', targetAudience: '', coreMessage: '', sourceRequirements: '', lengthTarget: '', selectedPlatforms: ['WECHAT'], notes: '',
+    selectedSkills: { SUBJECT: 'subject', CONTENT_TYPE: 'content', VOICE: '', LAYOUT: '', CHANNEL: '' },
+    platformSkills: { WECHAT: { LAYOUT: 'layout', CHANNEL: 'channel' } },
+  });
+  assert.equal(result.selectedSkills.VOICE, '');
+});
+
 const brief = {
   objective: '解释如何判断 AI 工具价值',
   targetAudience: '普通创作者',

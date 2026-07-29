@@ -2,6 +2,16 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 
+test('文案策略继承账号声音与本篇语气，不再让用户选择语言风格', () => {
+  const copy = fs.readFileSync(new URL('../src/workspaces/create/CopyWorkspace.tsx', import.meta.url), 'utf8');
+  const workspace = fs.readFileSync(new URL('../src/workspaces/create/CreateWorkspace.tsx', import.meta.url), 'utf8');
+  assert.match(copy, /当前账号声音/);
+  assert.match(copy, /本篇语气/);
+  assert.match(copy, /MORE_RESTRAINED/);
+  assert.doesNotMatch(copy, /\{ id: 'VOICE', label: '语言风格' \}/);
+  assert.match(workspace, /webAccountVoices\.list/);
+});
+
 test('文案工作区支持四平台且只使用通用 Project Agent', () => {
   const copy = fs.readFileSync(new URL('../src/workspaces/create/CopyWorkspace.tsx', import.meta.url), 'utf8');
   const workspace = fs.readFileSync(new URL('../src/workspaces/create/CreateWorkspace.tsx', import.meta.url), 'utf8');

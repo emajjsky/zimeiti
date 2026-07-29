@@ -1,10 +1,10 @@
 import { ArrowLeft, CircleAlert } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import type { CreateStageRoute } from '../../app/navigation.mjs';
-import { webCreative } from '../../data/webApi';
+import { webAccountVoices, webCreative } from '../../data/webApi';
 import { canOpenCreateStage, creativeStages, stageRouteForProjectStage } from '../../domain/creative-flow.mjs';
 import { projectStageName, type ContentProject, type ContentVersion, type Platform } from '../../domain/content';
-import type { CreativePlatform, CreativePlatformSkillMap, CreativeSkillDefinition, CreativeSkillDimension, CreativeSkillSelection, WritingBriefInput } from '../../domain/creative';
+import type { AccountVoiceProfile, CreativePlatform, CreativePlatformSkillMap, CreativeSkillDefinition, CreativeSkillDimension, CreativeSkillSelection, WritingBriefInput } from '../../domain/creative';
 import { CopyWorkspace } from './CopyWorkspace';
 import { PlanningWorkspace } from './PlanningWorkspace';
 import { ProjectAgent } from './ProjectAgent';
@@ -43,7 +43,7 @@ function platformSkillDefaults(platforms: Platform[], skills: CreativeSkillDefin
   }, { ...current });
 }
 
-function defaultBrief(project: ContentProject, skills: CreativeSkillDefinition[]): WritingBriefInput {
+function defaultBrief(project: ContentProject, skills: CreativeSkillDefinition[], accountVoiceProfileId = ''): WritingBriefInput {
   const contentVersions = project.versions.filter((version): version is ContentVersion & { platform: CreativePlatform } => version.platform !== 'VIDEO_CHANNEL');
   const primaryPlatform = contentVersions[0]?.platform ?? 'WECHAT';
   const lengthTarget = primaryPlatform === 'XIAOHONGSHU' ? '6-8 页图文' : primaryPlatform === 'WEIBO' ? '300-1000 字或 3-8 条串文' : primaryPlatform === 'ZHIHU' ? '1500-3000 字' : '1500-2500 字';
@@ -59,9 +59,11 @@ function defaultBrief(project: ContentProject, skills: CreativeSkillDefinition[]
       ...emptySelection,
       SUBJECT: firstVersion(skills, 'SUBJECT', subjectSlug(project)),
       CONTENT_TYPE: firstVersion(skills, 'CONTENT_TYPE', 'education'),
-      VOICE: firstVersion(skills, 'VOICE', 'plain-fresh'),
+      VOICE: '',
     },
     platformSkills: platformSkillDefaults(contentVersions.map((version) => version.platform), skills),
+    accountVoiceProfileId,
+    voiceOffset: 'DEFAULT',
   };
 }
 
@@ -72,7 +74,7 @@ const pendingStageNames: Record<Exclude<CreateStageRoute, 'planning' | 'research
   review: { title: '审核尚未开始', note: '全部内容资产就绪后再做发布前检查。' },
 };
 
-export function CreateWorkspace({ project, stage, onStage, onExitProject, activePlatform, onPlatform, onSaveVersion, onProjectAccepted, onOpenModelSettings, onOpenAgentSettings, onOpenSearchSettings }: {
+export function CreateWorkspace({ project, stage, onStage, onExitProject, activePlatform, onPlatform, onSaveVersion, onProjectAccepted, onOpenModelSettings, onOpenAgentSettings, onOpenSearchSettings, onOpenVoiceSettings }: {
   project: ContentProject | undefined;
   stage: CreateStageRoute;
   onStage: (stage: CreateStageRoute) => void;
@@ -84,8 +86,10 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
   onOpenModelSettings: () => void;
   onOpenAgentSettings: () => void;
   onOpenSearchSettings: () => void;
+  onOpenVoiceSettings: () => void;
 }) {
   const [skills, setSkills] = useState<CreativeSkillDefinition[]>([]);
+  const [accountVoices, setAccountVoices] = useState<AccountVoiceProfile[]>([]);
   const [brief, setBrief] = useState<WritingBriefInput | null>(null);
   const [briefState, setBriefState] = useState<'loading' | 'saving' | 'saved' | 'error'>('loading');
   const [briefError, setBriefError] = useState('');
@@ -103,9 +107,26 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
     setBrief(null);
     setBriefState('loading');
     setBriefError('');
-    void Promise.all([webCreative.skills(), webCreative.brief(project.id)]).then(async ([catalog, result]) => {
+    void Promise.all([webCreative.skills(), webCreative.brief(project.id), webAccountVoices.list()]).then(async ([catalog, result, accountVoices]) => {
       if (cancelled) return;
       setSkills(catalog);
+      setAccountVoices(accountVoices.voices);
+      const defaultVoiceId = accountVoices.voices.find((voice) => voice.isDefault)?.id ?? '';
+      if (result.brief && !result.brief.accountVoiceProfileId && defaultVoiceId) {
+        result.brief = (await webCreative.saveBrief(project.id, {
+          objective: result.brief.objective,
+          targetAudience: result.brief.targetAudience,
+          coreMessage: result.brief.coreMessage,
+          sourceRequirements: result.brief.sourceRequirements,
+          lengthTarget: result.brief.lengthTarget,
+          selectedPlatforms: result.brief.selectedPlatforms,
+          notes: result.brief.notes,
+          selectedSkills: result.brief.selectedSkills,
+          platformSkills: platformSkillDefaults(result.brief.selectedPlatforms, catalog, result.brief.platformSkills),
+          accountVoiceProfileId: defaultVoiceId,
+          voiceOffset: result.brief.voiceOffset ?? 'DEFAULT',
+        })).brief;
+      }
       if (result.brief) {
         setBrief({
         objective: result.brief.objective,
@@ -115,13 +136,15 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
         lengthTarget: result.brief.lengthTarget,
         selectedPlatforms: result.brief.selectedPlatforms,
         notes: result.brief.notes,
+        accountVoiceProfileId: result.brief.accountVoiceProfileId,
+        voiceOffset: result.brief.voiceOffset,
         selectedSkills: result.brief.selectedSkills,
         platformSkills: platformSkillDefaults(result.brief.selectedPlatforms, catalog, result.brief.platformSkills),
         });
         setBriefState('saved');
         return;
       }
-      const defaults = defaultBrief(project, catalog);
+      const defaults = defaultBrief(project, catalog, accountVoices.voices.find((voice) => voice.isDefault)?.id ?? '');
       setBrief(defaults);
       setBriefState('saving');
       const saved = await webCreative.saveBrief(project.id, defaults);
@@ -134,6 +157,8 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
         lengthTarget: saved.brief.lengthTarget,
         selectedPlatforms: saved.brief.selectedPlatforms,
         notes: saved.brief.notes,
+        accountVoiceProfileId: saved.brief.accountVoiceProfileId,
+        voiceOffset: saved.brief.voiceOffset,
         selectedSkills: saved.brief.selectedSkills,
         platformSkills: saved.brief.platformSkills,
       });
@@ -166,6 +191,8 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
         lengthTarget: result.brief.lengthTarget,
         selectedPlatforms: result.brief.selectedPlatforms,
         notes: result.brief.notes,
+        accountVoiceProfileId: result.brief.accountVoiceProfileId,
+        voiceOffset: result.brief.voiceOffset,
         selectedSkills: result.brief.selectedSkills,
         platformSkills: result.brief.platformSkills,
       });
@@ -198,7 +225,7 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
       <ProjectAgent projectId={project.id} stage="RESEARCH" onArtifactAccepted={(_artifact, nextProject) => { if (!nextProject) return; onProjectAccepted(nextProject); onStage('master'); }} onOpenSettings={(target) => target === 'search' ? onOpenSearchSettings() : onOpenAgentSettings()}/>
     </div>}
     {stage === 'master' && briefError && <div className="creative-stage-error"><CircleAlert size={18}/><span>{briefError}</span></div>}
-    {stage === 'master' && copyPlatform && <CopyWorkspace project={project} brief={brief} briefState={briefState} skills={skills} activePlatform={copyPlatform} onPlatform={onPlatform} onProjectChange={onProjectAccepted} onSaveBrief={saveBrief} onSaveVersion={onSaveVersion} onOpenModelSettings={onOpenModelSettings} onOpenAgentSettings={onOpenAgentSettings} />}
+    {stage === 'master' && copyPlatform && <CopyWorkspace project={project} brief={brief} briefState={briefState} skills={skills} accountVoices={accountVoices} activePlatform={copyPlatform} onPlatform={onPlatform} onProjectChange={onProjectAccepted} onSaveBrief={saveBrief} onSaveVersion={onSaveVersion} onOpenModelSettings={onOpenModelSettings} onOpenAgentSettings={onOpenAgentSettings} onOpenVoiceSettings={onOpenVoiceSettings} />}
     {stage === 'master' && !copyPlatform && <div className="creative-stage-empty"><h2>没有可写作的图文平台</h2><p>请先在规划中选择公众号、小红书、知乎或微博。</p></div>}
     {(stage === 'platform' || stage === 'visual' || stage === 'layout' || stage === 'review') && <div className="creative-stage-empty"><h2>{pendingStageNames[stage].title}</h2><p>{pendingStageNames[stage].note}</p></div>}
   </section>;

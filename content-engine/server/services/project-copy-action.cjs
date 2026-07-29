@@ -89,6 +89,23 @@ function mergeFactsToVerify(...groups) {
   return [...new Set(groups.flat().map((fact) => String(fact ?? '').trim()).filter(Boolean))];
 }
 
+function detectVoiceViolations(body, rules = {}) {
+  const text = String(body ?? '');
+  const issues = [];
+  const bannedPhrases = [...new Set([...(rules.bannedPhrases ?? []), '很多人会问', '今天我们就来', '简单来说', '这意味着', '建议点赞收藏', '评论区聊聊'])];
+  for (const phrase of bannedPhrases) {
+    const index = text.indexOf(phrase);
+    if (index !== -1) issues.push({ code: 'BANNED_PHRASE', excerpt: phrase, message: `避免使用套话：${phrase}` });
+  }
+  if (/^\s*[\p{Extended_Pictographic}\u2600-\u27BF][^\n]{0,28}$/mu.test(text)) {
+    issues.push({ code: 'EMOJI_HEADING', excerpt: text.match(/^\s*[^\n]+/m)?.[0] ?? '', message: '不要用 emoji 作为单独小标题。' });
+  }
+  if (/(建议点赞收藏|评论区聊聊|记得关注|转发给|点赞收藏)/.test(text)) {
+    issues.push({ code: 'FORCED_CTA', excerpt: text.match(/(建议点赞收藏|评论区聊聊|记得关注|转发给|点赞收藏)/)?.[0] ?? '', message: '结尾不要强制索要点赞、收藏、评论或转发。' });
+  }
+  return issues.filter((item, index, entries) => index === entries.findIndex((other) => other.code === item.code));
+}
+
 function applyAcceptedCopyToState(state, input) {
   const nextState = {
     ...state,
@@ -261,6 +278,12 @@ function buildCopyPrompt(snapshot) {
     platform: snapshot.platform,
     project: safeProjectContext(snapshot.project, cautions),
     writingBrief: safeWritingBrief(snapshot.brief, cautions),
+    accountVoice: snapshot.accountVoice ? {
+      name: snapshot.accountVoice.name,
+      version: snapshot.accountVoice.version,
+      offset: snapshot.accountVoice.offset,
+      rules: snapshot.accountVoice.rules,
+    } : null,
     currentContent: snapshot.currentContent ?? null,
     selection: snapshot.selection ?? null,
     contentMaster: snapshot.contentMaster ?? null,
@@ -314,6 +337,7 @@ module.exports = {
   copyTemplateScope,
   copyPromptTemplateScope,
   mergeFactsToVerify,
+  detectVoiceViolations,
   unresolvedClaims,
   safeProjectContext,
   safeWritingBrief,
