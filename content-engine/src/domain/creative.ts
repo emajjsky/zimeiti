@@ -48,7 +48,7 @@ export type ProjectAgentStage = 'RESEARCH' | 'COPY' | 'VISUAL' | 'LAYOUT' | 'REV
 export type ProjectAgentMessageType = 'MESSAGE' | 'CONFIRMATION' | 'RUN_STATUS' | 'ARTIFACT' | 'SYSTEM_EVENT';
 export type ProjectAgentHistory = 'CURRENT' | 'ALL';
 export type CopyAction = 'GENERATE_OUTLINE' | 'GENERATE_DRAFT' | 'POLISH_EXISTING_DRAFT' | 'RESTRUCTURE_DRAFT' | 'EXPAND_DRAFT' | 'SHORTEN_DRAFT' | 'REVISE_SELECTION' | 'ADAPT_PLATFORM';
-export type ProjectArtifactType = 'RESEARCH_PLAN' | 'RESEARCH_SOURCES' | 'RESEARCH_VERIFICATION' | 'OUTLINE' | 'CONTENT_MASTER' | 'PLATFORM_COPY';
+export type ProjectArtifactType = 'RESEARCH_PLAN' | 'RESEARCH_SOURCES' | 'RESEARCH_VERIFICATION' | 'RESEARCH_RESULT' | 'OUTLINE' | 'CONTENT_MASTER' | 'PLATFORM_COPY';
 export type ProjectArtifactStatus = 'CANDIDATE' | 'ACCEPTED' | 'REJECTED';
 
 export interface ProjectAgentMessage {
@@ -74,7 +74,7 @@ export interface ProjectStageSummary {
 
 export interface ProjectAgentRun {
   id: string;
-  action: CopyAction | 'PROJECT_RESEARCH_PLAN' | 'PROJECT_RESEARCH_SOURCES' | 'SOURCE_VERIFICATION';
+  action: CopyAction | 'PROJECT_RESEARCH_PLAN' | 'PROJECT_RESEARCH_SOURCES' | 'SOURCE_VERIFICATION' | 'PROJECT_RESEARCH_WORKFLOW';
   status: ProjectResearchRunStatus;
   request: string;
   confirmation: {
@@ -85,9 +85,26 @@ export interface ProjectAgentRun {
     writeScope: string;
     sourceCounts?: { search: number; read: number; askUser: number; automatic: number };
     tools?: string[];
+    phase?: 'PLANNING' | 'SOURCES' | 'VERIFYING' | 'COMPLETE';
+    progress?: number;
   };
   error?: string;
   createdAt: string;
+}
+
+export interface ResearchResult {
+  summary: string;
+  facts: { claim: string; status: 'VERIFIED' | 'SINGLE_SOURCE'; explanation: string; evidence: unknown[] }[];
+  cautions: { claim: string; status: 'SINGLE_SOURCE' | 'CONFLICTING' | 'NEEDS_REVIEW'; explanation: string; evidence: unknown[] }[];
+  angles: string[];
+  sources: { id: string; title: string; url: string | null; source: string }[];
+  materialContext: {
+    userContent: { id: string; title: string; body: string | null; kind: string }[];
+    creativeReferences: { id: string; title: string; role: string }[];
+    visualAssets: { id: string; title: string; role: string }[];
+    verificationCandidates: { id: string; title: string; role: string }[];
+  };
+  process: { phase: 'COMPLETE'; sourceCount: number };
 }
 
 export interface ProjectArtifact {

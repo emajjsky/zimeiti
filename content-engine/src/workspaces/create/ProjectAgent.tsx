@@ -25,6 +25,7 @@ const actionNames = {
   PROJECT_RESEARCH_PLAN: '生成研究计划',
   PROJECT_RESEARCH_SOURCES: '查找研究来源',
   SOURCE_VERIFICATION: '核验研究事实',
+  PROJECT_RESEARCH_WORKFLOW: '开始研究',
   GENERATE_OUTLINE: '生成大纲',
   GENERATE_DRAFT: '生成正文',
   POLISH_EXISTING_DRAFT: '润色文案',
