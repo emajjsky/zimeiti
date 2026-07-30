@@ -729,3 +729,9 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - `candidateQualityReview()` 将质量审稿映射为 `PASSED` 或 `NEEDS_REVIEW`，仅在候选已具备合法结构时写入产物元数据。
 - Worker 保留初次审稿和一次自动改写；二次审稿未通过不再抛出“研究事实不足”错误，而是保存 `qualityReview`、候选版本及运行结果为成功。
 - `CopyCandidateDialog` 和 Agent 的产物预览都会在正文前显示精简的人工确认问题，待核验清单继续独立显示。
+
+## 2026-07-30 Fix: candidate review prioritizes reading
+
+- 候选弹窗统一将审稿问题和 `factsToVerify` 去重为折叠的 `发布前核验` 区块，默认只展示待处理数量。
+- `candidate-copy-preview` 使用固定的最小阅读高度与内部滚动；完整文稿和段落差异分别在各自阅读面板内滚动。
+- 候选采用动作统一命名为“采用到正文”，避免误解为已通过发布审核。

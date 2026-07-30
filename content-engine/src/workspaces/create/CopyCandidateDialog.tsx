@@ -40,6 +40,10 @@ function qualityIssues(value: unknown) {
   return review.status === 'NEEDS_REVIEW' ? strings(review.issues) : [];
 }
 
+function uniqueStrings(...groups: string[][]) {
+  return [...new Set(groups.flat().map((item) => item.trim()).filter(Boolean))];
+}
+
 export function CopyCandidateDialog({ artifact, current, busy, onAccept, onReject, onClose }: {
   artifact: ProjectArtifact;
   current: { title: string; body: string };
@@ -54,13 +58,15 @@ export function CopyCandidateDialog({ artifact, current, busy, onAccept, onRejec
   const changeSummary = typeof artifact.payload.changeSummary === 'string' ? artifact.payload.changeSummary : typeof artifact.payload.summary === 'string' ? artifact.payload.summary : '';
   const facts = strings(artifact.payload.factsToVerify);
   const reviewIssues = qualityIssues(artifact.payload.qualityReview);
+  const verificationItems = uniqueStrings(reviewIssues, facts);
   const sections = records(artifact.payload.sections);
   const [selectedTitle, setSelectedTitle] = useState(titleOptions[0] ?? '');
   const [previewMode, setPreviewMode] = useState<'document' | 'diff'>('document');
+  const [verificationOpen, setVerificationOpen] = useState(false);
   const diff = useMemo(() => paragraphDiff(current.body, candidateBody), [candidateBody, current.body]);
   const canChange = artifact.status === 'CANDIDATE';
 
-  useEffect(() => { setPreviewMode('document'); }, [artifact.id]);
+  useEffect(() => { setPreviewMode('document'); setVerificationOpen(false); }, [artifact.id]);
 
   useEffect(() => {
     const previous = document.body.style.overflow;
@@ -76,15 +82,14 @@ export function CopyCandidateDialog({ artifact, current, busy, onAccept, onRejec
       <div className="copy-candidate-body">
         {titleOptions.length > 0 ? <fieldset disabled={!canChange}><legend>标题方案</legend>{titleOptions.map((title) => <label key={title}><input type="radio" name={`candidate-title-${artifact.id}`} checked={selectedTitle === title} onChange={() => setSelectedTitle(title)}/><span>{title}</span></label>)}</fieldset> : <section className="candidate-title"><span>标题</span><h3>{candidateTitle}</h3></section>}
         {changeSummary && <p className="candidate-change-summary">{changeSummary}</p>}
-        {reviewIssues.length > 0 && <section className="candidate-review-alert" role="alert"><b>需要人工确认</b><ul>{reviewIssues.map((issue) => <li key={issue}>{issue}</li>)}</ul></section>}
+        {verificationItems.length > 0 && <section className="candidate-verification"><header><div><b>发布前核验</b><span>{verificationItems.length} 项待处理</span></div><button type="button" aria-expanded={verificationOpen} onClick={() => setVerificationOpen((current) => !current)}>{verificationOpen ? '收起' : '查看核验项'}</button></header>{verificationOpen && <ul>{verificationItems.map((item) => <li key={item}>{item}</li>)}</ul>}</section>}
         {artifact.type === 'OUTLINE' && sections.length > 0 && <ol className="candidate-outline">{sections.map((section, index) => <li key={`${String(section.heading)}-${index}`}><b>{String(section.heading ?? '')}</b>{typeof section.purpose === 'string' && <p>{section.purpose}</p>}{strings(section.keyPoints).length > 0 && <ul>{strings(section.keyPoints).map((point) => <li key={point}>{point}</li>)}</ul>}</li>)}</ol>}
         {artifact.type === 'PLATFORM_COPY' && <section className="candidate-copy-preview" aria-label="候选正文预览">
           <div className="candidate-preview-switch" role="tablist" aria-label="候选预览方式"><button type="button" role="tab" aria-selected={previewMode === 'document'} className={previewMode === 'document' ? 'active' : ''} onClick={() => setPreviewMode('document')}>完整文稿</button><button type="button" role="tab" aria-selected={previewMode === 'diff'} className={previewMode === 'diff' ? 'active' : ''} onClick={() => setPreviewMode('diff')}>段落差异</button></div>
           {previewMode === 'document' ? <article className="candidate-full-copy" role="tabpanel">{paragraphs(candidateBody).length ? paragraphs(candidateBody).map((paragraph, index) => <p key={`${index}-${paragraph.slice(0, 24)}`}>{paragraph}</p>) : <p className="candidate-copy-empty">候选正文为空</p>}</article> : <section className="candidate-diff" role="tabpanel" aria-label="候选与当前正文差异"><header><div><b>段落差异</b><small>新增、删除和保留</small></div></header><div>{diff.length ? diff.map((line, index) => <p key={`${line.kind}-${index}`} className={line.kind}>{line.text}</p>) : <p className="unchanged">正文暂无内容</p>}</div></section>}
         </section>}
-        {facts.length > 0 && <section className="candidate-facts"><b>待核验</b><ul>{facts.map((fact) => <li key={fact}>{fact}</li>)}</ul></section>}
       </div>
-      <footer>{canChange ? <><button className="button danger" type="button" disabled={busy !== 'idle'} onClick={onReject}>{busy === 'rejecting' ? <LoaderCircle size={16}/> : <Trash2 size={16}/>}废弃候选</button><button className="button primary" type="button" disabled={busy !== 'idle' || (artifact.type === 'OUTLINE' && !selectedTitle)} onClick={() => onAccept(artifact.type === 'OUTLINE' ? selectedTitle : undefined)}>{busy === 'accepting' ? <LoaderCircle size={16}/> : <Check size={16}/>}采用为当前版本</button></> : <button className="button primary" type="button" onClick={onClose}>关闭</button>}</footer>
+      <footer>{canChange ? <><button className="button danger" type="button" disabled={busy !== 'idle'} onClick={onReject}>{busy === 'rejecting' ? <LoaderCircle size={16}/> : <Trash2 size={16}/>}废弃候选</button><button className="button primary" type="button" disabled={busy !== 'idle' || (artifact.type === 'OUTLINE' && !selectedTitle)} onClick={() => onAccept(artifact.type === 'OUTLINE' ? selectedTitle : undefined)}>{busy === 'accepting' ? <LoaderCircle size={16}/> : <Check size={16}/>}采用到正文</button></> : <button className="button primary" type="button" onClick={onClose}>关闭</button>}</footer>
     </section>
   </div>;
 }

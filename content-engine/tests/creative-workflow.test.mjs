@@ -23,9 +23,12 @@ test('文案工作区支持四平台且只使用通用 Project Agent', () => {
   assert.match(copy, /CopyCandidateDialog/);
   assert.match(dialog, /完整文稿/);
   assert.match(dialog, /段落差异/);
-  assert.match(dialog, /需要人工确认/);
+  assert.match(dialog, /发布前核验/);
+  assert.match(dialog, /查看核验项/);
   assert.match(dialog, /qualityReview/);
   assert.match(dialog, /previewMode/);
+  assert.match(dialog, /useState\(false\)/);
+  assert.doesNotMatch(dialog, /candidate-facts/);
   assert.doesNotMatch(workspace, /creative-agent-panel/);
   assert.doesNotMatch(workspace, /prepareOutline|prepareDraft/);
 });
@@ -44,7 +47,7 @@ test('文案工作区支持启用缺失平台、正文选区和明确采用候�
   assert.match(agent, /修改选中.*字/);
   assert.match(agent, /blockedReason/);
   assert.match(dialog, /added[\s\S]*removed[\s\S]*unchanged/);
-  assert.match(dialog, /采用为当前版本/);
+  assert.match(dialog, /采用到正文/);
   assert.match(dialog, /废弃候选/);
   assert.match(api, /enableProjectPlatform/);
   assert.match(api, /rejectArtifact/);
@@ -56,6 +59,8 @@ test('文案工作区样式在桌面和移动端保持无横向溢出布局', ()
   assert.match(styles, /\.copy-workspace/);
   assert.match(styles, /@media \(max-width:1024px\)[\s\S]*\.copy-workspace-layout/);
   assert.match(styles, /@media \(max-width:460px\)[\s\S]*\.copy-platform-tabs/);
+  assert.match(styles, /candidate-copy-preview[\s\S]*min-height:min\(54dvh,560px\)/);
+  assert.match(styles, /candidate-full-copy[\s\S]*overflow-y:auto/);
 });
 
 test('创作流程将用户输入收敛为自动保存的最小界面', () => {
