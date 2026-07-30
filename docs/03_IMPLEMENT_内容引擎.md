@@ -748,3 +748,11 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - `PLATFORM_ADAPTATION` 项目状态映射回 `master`。旧 `stage=platform` 地址自动回到创作页，避免刷新后进入重复页面。
 - `CopyWorkspace` 顶部新增“补充研究”入口，并在 `PLATFORM_ADAPTATION` 状态内联渲染确认操作，调用已有 `completePlatformVersions()` 后进入配图。
 - 主稿与平台版本继续分开持久化，前端只通过同一编辑器的平台切换展示，因此不会丢失公众号、小红书、知乎和微博的渠道规则差异。
+
+## 2026-07-30 实现：图文交付后半段
+
+- 项目快照新增 `delivery`：保存选中的视觉素材、各渠道发布稿和审核确认记录。它随 `ContentProject` 返回并在刷新后恢复。
+- `PUT /creative/projects/:projectId/visual` 保存封面与素材选择；`POST /visual/complete` 将项目推进至 `LAYOUT`。
+- `POST /layout/generate` 以项目当前正文和已选素材生成渠道发布稿。公众号、知乎为 HTML，小红书、微博为 Markdown；`POST /layout/complete` 才进入审核。
+- `POST /review/complete` 只接受项目当前待核验项的人工确认，并将项目推进为 `COMPLETED/SCHEDULED`。前端使用浏览器 Blob 下载对应 HTML 或 Markdown，未把私有素材文件错误地伪造成公开 URL。
+- `VisualWorkspace`、`LayoutWorkspace`、`ReviewWorkspace` 取代三个旧占位页。服务端保留阶段校验，前端按钮不能绕过当前项目阶段。

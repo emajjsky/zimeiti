@@ -6,9 +6,12 @@ import { canOpenCreateStage, creativeStages, stageRouteForProjectStage } from '.
 import { projectStageName, type ContentProject, type ContentVersion, type Platform } from '../../domain/content';
 import type { AccountVoiceProfile, CreativePlatform, CreativePlatformSkillMap, CreativeSkillDefinition, CreativeSkillDimension, CreativeSkillSelection, WritingBriefInput } from '../../domain/creative';
 import { CopyWorkspace } from './CopyWorkspace';
+import { LayoutWorkspace } from './LayoutWorkspace';
 import { PlanningWorkspace } from './PlanningWorkspace';
 import { ProjectAgent } from './ProjectAgent';
 import { ProjectMaterials } from './ProjectMaterials';
+import { ReviewWorkspace } from './ReviewWorkspace';
+import { VisualWorkspace } from './VisualWorkspace';
 
 const emptySelection: CreativeSkillSelection = { SUBJECT: '', CONTENT_TYPE: '', VOICE: '', LAYOUT: '', CHANNEL: '' };
 
@@ -66,12 +69,6 @@ function defaultBrief(project: ContentProject, skills: CreativeSkillDefinition[]
     voiceOffset: 'DEFAULT',
   };
 }
-
-const pendingStageNames: Record<Exclude<CreateStageRoute, 'planning' | 'research' | 'master' | 'platform'>, { title: string; note: string }> = {
-  visual: { title: '配图尚未开始', note: '正文确认后再生成封面和正文配图。' },
-  layout: { title: '排版尚未开始', note: '文案与图片确认后再进入排版。' },
-  review: { title: '审核尚未开始', note: '全部内容资产就绪后再做发布前检查。' },
-};
 
 export function CreateWorkspace({ project, stage, onStage, onExitProject, activePlatform, onPlatform, onSaveVersion, onProjectAccepted, onOpenModelSettings, onOpenAgentSettings, onOpenSearchSettings, onOpenVoiceSettings }: {
   project: ContentProject | undefined;
@@ -240,6 +237,8 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
     {stage === 'master' && briefError && <div className="creative-stage-error"><CircleAlert size={18}/><span>{briefError}</span></div>}
     {stage === 'master' && copyPlatform && <CopyWorkspace project={project} brief={brief} briefState={briefState} skills={skills} accountVoices={accountVoices} activePlatform={copyPlatform} onPlatform={onPlatform} onProjectChange={handleCopyProjectChange} onSaveBrief={saveBrief} onSaveVersion={onSaveVersion} onOpenResearch={() => onStage('research')} onCompletePlatforms={completePlatformVersions} onOpenModelSettings={onOpenModelSettings} onOpenAgentSettings={onOpenAgentSettings} onOpenVoiceSettings={onOpenVoiceSettings} />}
     {stage === 'master' && !copyPlatform && <div className="creative-stage-empty"><h2>没有可写作的图文平台</h2><p>请先在规划中选择公众号、小红书、知乎或微博。</p></div>}
-    {(stage === 'visual' || stage === 'layout' || stage === 'review') && <div className="creative-stage-empty"><h2>{pendingStageNames[stage].title}</h2><p>{pendingStageNames[stage].note}</p></div>}
+    {stage === 'visual' && <VisualWorkspace project={project} onProjectChange={onProjectAccepted} onOpenMaterials={() => onStage('research')} onComplete={() => onStage('layout')}/>}
+    {stage === 'layout' && copyPlatform && <LayoutWorkspace project={project} activePlatform={copyPlatform} onPlatform={onPlatform} onProjectChange={onProjectAccepted} onComplete={() => onStage('review')}/>}
+    {stage === 'review' && copyPlatform && <ReviewWorkspace project={project} activePlatform={copyPlatform} onPlatform={onPlatform} onProjectChange={onProjectAccepted}/>}
   </section>;
 }

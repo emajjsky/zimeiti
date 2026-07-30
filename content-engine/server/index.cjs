@@ -1887,6 +1887,159 @@ app.post('/api/v1/creative/projects/:projectId/platform-versions/complete', { pr
   });
 });
 
+function deliveryOf(project) {
+  const delivery = project?.delivery && typeof project.delivery === 'object' ? project.delivery : {};
+  return {
+    visual: delivery.visual ?? null,
+    layouts: delivery.layouts && typeof delivery.layouts === 'object' ? delivery.layouts : {},
+    review: delivery.review ?? null,
+  };
+}
+
+function escapeDeliveryHtml(value) {
+  return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function documentForPlatform(project, platform, visual, now) {
+  const version = (project.versions ?? []).find((item) => item.platform === platform);
+  const title = String(version?.title || project.title || '未命名内容').trim();
+  const paragraphs = String(version?.body ?? '').split(/\n\s*\n|\r?\n/).map((item) => item.trim()).filter(Boolean);
+  const assets = visual?.assets ?? [];
+  const assetBlocks = assets.map((asset) => asset.url
+    ? `<figure><img src="${escapeDeliveryHtml(asset.url)}" alt="${escapeDeliveryHtml(asset.title)}"/><figcaption>${escapeDeliveryHtml(asset.title)}</figcaption></figure>`
+    : `<p>【配图素材：${escapeDeliveryHtml(asset.title)}】</p>`).join('\n');
+  if (platform === 'XIAOHONGSHU' || platform === 'WEIBO') {
+    const content = [`# ${title}`, ...paragraphs, ...assets.map((asset) => `【配图素材：${asset.title}】`)].join('\n\n');
+    return { platform, format: 'MARKDOWN', content, generatedAt: now };
+  }
+  const content = `<article>\n<h1>${escapeDeliveryHtml(title)}</h1>\n${paragraphs.map((item) => `<p>${escapeDeliveryHtml(item)}</p>`).join('\n')}\n${assetBlocks}\n</article>`;
+  return { platform, format: 'HTML', content, generatedAt: now };
+}
+
+app.get('/api/v1/creative/projects/:projectId/delivery', { preHandler: authenticate }, async (request) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const workspace = await currentWorkspace(request.user.sub);
+  return { delivery: deliveryOf(await creativeProject(workspace.id, projectId)) };
+});
+
+app.put('/api/v1/creative/projects/:projectId/visual', { preHandler: authenticate }, async (request) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const input = z.object({ coverReferenceId: z.string().uuid().nullable(), assetReferenceIds: z.array(z.string().uuid()).max(12) }).parse(request.body);
+  const workspace = await currentWorkspace(request.user.sub);
+  return transaction(async (client) => {
+    const listed = await projectMaterialStore.list(workspace.id, projectId);
+    const requested = [...new Set(input.assetReferenceIds)];
+    if (input.coverReferenceId && !requested.includes(input.coverReferenceId)) requested.unshift(input.coverReferenceId);
+    const references = listed.references.filter((item) => requested.includes(item.id));
+    if (references.length !== requested.length) { const error = new Error('存在不属于当前项目的素材。'); error.statusCode = 400; throw error; }
+    const invalid = references.find((item) => item.role !== 'VISUAL' && !item.mimeType?.startsWith('image/'));
+    if (invalid) { const error = new Error(`“${invalid.title}”不是可用的视觉素材。`); error.statusCode = 400; throw error; }
+    const now = new Date().toISOString();
+    let project;
+    await updateCreativeState(client, workspace.id, (state) => {
+      const index = state.projects.findIndex((item) => item.id === projectId);
+      if (index < 0) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
+      const current = state.projects[index];
+      if (current.stage !== 'VISUAL') { const error = new Error('当前项目不在配图阶段。'); error.statusCode = 409; throw error; }
+      project = {
+        ...current,
+        delivery: {
+          ...deliveryOf(current),
+          visual: {
+            coverReferenceId: input.coverReferenceId,
+            assetReferenceIds: requested,
+            assets: references.map((item) => ({ referenceId: item.id, title: item.title, role: item.id === input.coverReferenceId ? 'COVER' : 'BODY', url: item.url ?? null })),
+            updatedAt: now,
+          },
+        },
+        updatedAt: now,
+      };
+      const projects = [...state.projects]; projects[index] = project;
+      return { ...state, projects };
+    }, now);
+    return { project };
+  });
+});
+
+app.post('/api/v1/creative/projects/:projectId/visual/complete', { preHandler: authenticate }, async (request) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const workspace = await currentWorkspace(request.user.sub);
+  return transaction(async (client) => {
+    const now = new Date().toISOString(); let project;
+    await updateCreativeState(client, workspace.id, (state) => {
+      const index = state.projects.findIndex((item) => item.id === projectId);
+      if (index < 0) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
+      const current = state.projects[index];
+      if (current.stage !== 'VISUAL') { const error = new Error('当前项目不在配图阶段。'); error.statusCode = 409; throw error; }
+      project = { ...current, stage: 'LAYOUT', status: 'VISUAL', updatedAt: now };
+      const projects = [...state.projects]; projects[index] = project;
+      return { ...state, projects };
+    }, now);
+    return { project };
+  });
+});
+
+app.post('/api/v1/creative/projects/:projectId/layout/generate', { preHandler: authenticate }, async (request) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const workspace = await currentWorkspace(request.user.sub);
+  return transaction(async (client) => {
+    const now = new Date().toISOString(); let project;
+    await updateCreativeState(client, workspace.id, (state) => {
+      const index = state.projects.findIndex((item) => item.id === projectId);
+      if (index < 0) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
+      const current = state.projects[index];
+      if (current.stage !== 'LAYOUT') { const error = new Error('当前项目不在排版阶段。'); error.statusCode = 409; throw error; }
+      const delivery = deliveryOf(current);
+      const layouts = Object.fromEntries((current.versions ?? []).filter((item) => item.platform !== 'VIDEO_CHANNEL' && String(item.body ?? '').trim()).map((item) => [item.platform, documentForPlatform(current, item.platform, delivery.visual, now)]));
+      project = { ...current, delivery: { ...delivery, layouts }, updatedAt: now };
+      const projects = [...state.projects]; projects[index] = project;
+      return { ...state, projects };
+    }, now);
+    return { project, delivery: deliveryOf(project) };
+  });
+});
+
+app.post('/api/v1/creative/projects/:projectId/layout/complete', { preHandler: authenticate }, async (request) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const workspace = await currentWorkspace(request.user.sub);
+  return transaction(async (client) => {
+    const now = new Date().toISOString(); let project;
+    await updateCreativeState(client, workspace.id, (state) => {
+      const index = state.projects.findIndex((item) => item.id === projectId);
+      if (index < 0) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
+      const current = state.projects[index]; const delivery = deliveryOf(current);
+      if (current.stage !== 'LAYOUT') { const error = new Error('当前项目不在排版阶段。'); error.statusCode = 409; throw error; }
+      if (!Object.keys(delivery.layouts).length) { const error = new Error('请先生成排版预览。'); error.statusCode = 409; throw error; }
+      project = { ...current, stage: 'REVIEW', status: 'REVIEW', updatedAt: now };
+      const projects = [...state.projects]; projects[index] = project;
+      return { ...state, projects };
+    }, now);
+    return { project };
+  });
+});
+
+app.post('/api/v1/creative/projects/:projectId/review/complete', { preHandler: authenticate }, async (request) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const input = z.object({ acknowledgedFactChecks: z.array(z.string().min(1).max(2_000)).max(100) }).parse(request.body);
+  const workspace = await currentWorkspace(request.user.sub);
+  return transaction(async (client) => {
+    const now = new Date().toISOString(); let project;
+    await updateCreativeState(client, workspace.id, (state) => {
+      const index = state.projects.findIndex((item) => item.id === projectId);
+      if (index < 0) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
+      const current = state.projects[index]; const delivery = deliveryOf(current);
+      if (!['REVIEW', 'COMPLETED'].includes(current.stage)) { const error = new Error('当前项目不在审核阶段。'); error.statusCode = 409; throw error; }
+      const required = [...new Set(current.factChecks ?? [])];
+      const confirmed = new Set(input.acknowledgedFactChecks);
+      if (required.some((item) => !confirmed.has(item))) { const error = new Error('请先确认所有需要人工核对的事实。'); error.statusCode = 409; throw error; }
+      project = { ...current, stage: 'COMPLETED', status: 'SCHEDULED', delivery: { ...delivery, review: { acknowledgedFactChecks: required, completedAt: now } }, updatedAt: now };
+      const projects = [...state.projects]; projects[index] = project;
+      return { ...state, projects };
+    }, now);
+    return { project, delivery: deliveryOf(project) };
+  });
+});
+
 app.get('/api/v1/agent/skills', { preHandler: authenticate }, async (request) => listAvailableSkills((await currentWorkspace(request.user.sub)).id));
 
 app.get('/api/v1/agent/model-policies/:scope', { preHandler: authenticate }, async (request) => {

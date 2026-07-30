@@ -124,6 +124,26 @@ export interface ProjectPlanning {
   constraints: string;
 }
 
+export interface CreativeVisualAsset {
+  referenceId: string;
+  title: string;
+  role: 'COVER' | 'BODY';
+  url?: string | null;
+}
+
+export interface CreativeLayoutDocument {
+  platform: Exclude<Platform, 'VIDEO_CHANNEL'>;
+  format: 'HTML' | 'MARKDOWN';
+  content: string;
+  generatedAt: string;
+}
+
+export interface CreativeDelivery {
+  visual: { coverReferenceId: string | null; assetReferenceIds: string[]; assets: CreativeVisualAsset[]; updatedAt: string } | null;
+  layouts: Partial<Record<Exclude<Platform, 'VIDEO_CHANNEL'>, CreativeLayoutDocument>>;
+  review: { acknowledgedFactChecks: string[]; completedAt: string } | null;
+}
+
 export interface ContentProject {
   id: string;
   title: string;
@@ -139,6 +159,7 @@ export interface ContentProject {
   factChecks: string[];
   versions: ContentVersion[];
   sourceSnapshot: Record<string, unknown>;
+  delivery?: CreativeDelivery;
   createdAt: string;
   updatedAt: string;
 }

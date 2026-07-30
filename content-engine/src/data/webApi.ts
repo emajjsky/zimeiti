@@ -1,6 +1,6 @@
 import type { LocalState } from './localRepository';
 import type { ApiUsageLog, ApiUsageSummary, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelTaskPolicy } from '../domain/integrations';
-import type { ContentProject, IntelligenceAnalysis, Platform, ProjectOriginType, ProjectPlanning } from '../domain/content';
+import type { ContentProject, CreativeDelivery, IntelligenceAnalysis, Platform, ProjectOriginType, ProjectPlanning } from '../domain/content';
 import type { AccountVoiceCalibrationDraft, AccountVoiceInput, AccountVoiceProfile, CreativeDraftCandidate, CreativeDraftPreparation, CreativeDraftRun, CreativeOutlineCandidate, CreativeOutlinePreparation, CreativeOutlineRun, CreativePlatform, CreativeSkillDefinition, ProjectAgentContext, ProjectAgentHistory, ProjectAgentPrepareInput, ProjectAgentPrepareResult, ProjectAgentRun, ProjectArtifact, ProjectInput, ProjectInputPayload, ProjectReference, ProjectReferenceMetadata, ProjectResearchContext, ProjectResearchRun, WritingBrief, WritingBriefInput } from '../domain/creative';
 
 const tokenKey = 'content-engine-web-session-v1';
@@ -115,6 +115,12 @@ export const webCreative = {
   rejectArtifact: (artifactId: string) => request<{ id: string; status: 'REJECTED' }>(`/creative/project-artifacts/${encodeURIComponent(artifactId)}/reject`, { method: 'POST', body: '{}' }),
   enableProjectPlatform: (projectId: string, platform: CreativePlatform) => request<{ project: ContentProject; platform: CreativePlatform; created: boolean }>(`/creative/projects/${encodeURIComponent(projectId)}/platforms/${encodeURIComponent(platform)}`, { method: 'POST', body: '{}' }),
   completePlatformVersions: (projectId: string) => request<{ project: ContentProject }>(`/creative/projects/${encodeURIComponent(projectId)}/platform-versions/complete`, { method: 'POST', body: '{}' }),
+  delivery: (projectId: string) => request<{ delivery: CreativeDelivery }>(`/creative/projects/${encodeURIComponent(projectId)}/delivery`),
+  saveVisual: (projectId: string, input: { coverReferenceId: string | null; assetReferenceIds: string[] }) => request<{ project: ContentProject }>(`/creative/projects/${encodeURIComponent(projectId)}/visual`, { method: 'PUT', body: JSON.stringify(input) }),
+  completeVisual: (projectId: string) => request<{ project: ContentProject }>(`/creative/projects/${encodeURIComponent(projectId)}/visual/complete`, { method: 'POST', body: '{}' }),
+  generateLayout: (projectId: string) => request<{ project: ContentProject; delivery: CreativeDelivery }>(`/creative/projects/${encodeURIComponent(projectId)}/layout/generate`, { method: 'POST', body: '{}' }),
+  completeLayout: (projectId: string) => request<{ project: ContentProject }>(`/creative/projects/${encodeURIComponent(projectId)}/layout/complete`, { method: 'POST', body: '{}' }),
+  completeReview: (projectId: string, acknowledgedFactChecks: string[]) => request<{ project: ContentProject; delivery: CreativeDelivery }>(`/creative/projects/${encodeURIComponent(projectId)}/review/complete`, { method: 'POST', body: JSON.stringify({ acknowledgedFactChecks }) }),
   prepareOutline: (projectId: string, platform: CreativePlatform) => request<CreativeOutlinePreparation>(`/creative/projects/${encodeURIComponent(projectId)}/outline/prepare`, { method: 'POST', body: JSON.stringify({ platform }) }),
   confirmOutline: (runId: string) => request<{ id: string; status: 'QUEUED'; jobId: string }>(`/creative/outline-runs/${encodeURIComponent(runId)}/confirm`, { method: 'POST', body: '{}' }),
   cancelOutline: (runId: string) => request<{ id: string; status: 'CANCELLED' }>(`/creative/outline-runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST', body: '{}' }),
