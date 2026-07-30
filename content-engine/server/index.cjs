@@ -89,6 +89,8 @@ const visualPlanItemInput = z.object({
   focus: z.string().trim().min(1).max(500),
   avoidConcepts: z.array(z.string().trim().min(1).max(100)).max(12).default([]),
   searchQueries: z.array(z.string().trim().min(2).max(120)).min(1).max(5),
+  generationMode: z.enum(['ILLUSTRATION', 'INFOGRAPHIC']),
+  informationPoints: z.array(z.string().trim().min(1).max(160)).min(1).max(5),
   prompt: z.string().trim().min(4).max(2_000),
   negativePrompt: z.string().trim().max(1_000).default(''),
   size: z.enum(['1:1', '3:4', '4:3', '9:16', '16:9']),

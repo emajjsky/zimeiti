@@ -1,4 +1,4 @@
-export const VISUAL_PLAN_VERSION = 2;
+export const VISUAL_PLAN_VERSION = 3;
 
 const platformLabels = {
   WECHAT: '公众号',
@@ -138,11 +138,44 @@ function visualTypeFor(section, role, platform) {
   return 'SCENE';
 }
 
-function promptFor({ platform, title, focus, role, purpose, visualType, avoidConcepts }) {
+function defaultGenerationMode(role, visualType) {
+  return role === 'CARD' || ['DATA_CHART', 'QUOTE_CARD', 'INFO_CARD'].includes(visualType) ? 'INFOGRAPHIC' : 'ILLUSTRATION';
+}
+
+function informationPointsFor(section, focus, purpose) {
+  const clauses = clean(section).split(/[。！？；]/).map(clean).filter((item) => item.length >= 6).map((item) => item.slice(0, 72));
+  const focusPoints = clean(focus).split(/[、，]/).map(clean).filter(Boolean).map((item) => `重点理解：${item}`);
+  return unique([...clauses, ...focusPoints, clean(purpose)]).slice(0, 5);
+}
+
+function infographicStyle(platform) {
+  if (platform === 'XIAOHONGSHU') return '3:4 竖版高密度知识卡片，适配手机阅读，标题醒目，信息模块自上而下，重点色块清晰，四周留出安全边距';
+  if (platform === 'WEIBO') return '1:1 方形信息图，标题与核心结论在缩略图状态仍清晰可读，信息不超过四组';
+  if (platform === 'ZHIHU') return '4:3 横版知识图解，理性克制，先结论后解释，适合正文阅读';
+  return '公众号正文横版信息图，中文编辑设计感，标题、核心结论与信息点层级清楚，留白充足，适合手机长文阅读';
+}
+
+export function buildVisualGenerationSpec(item, context, mode = item.generationMode ?? defaultGenerationMode(item.role, item.visualType)) {
+  const platform = context.platform;
+  const title = clean(context.title) || '未命名内容';
   const platformLabel = platformLabels[platform] ?? '图文平台';
-  const roleLabel = role === 'COVER' ? '封面' : role === 'CARD' ? '图文卡片' : role === 'MAIN' ? '主图' : '正文插图';
-  const avoid = avoidConcepts.length ? `不要重复表现：${avoidConcepts.join('、')}。` : '';
-  return `为${platformLabel}内容《${title}》制作一张${roleLabel}。视觉类型：${visualTypeLabels[visualType]}。核心画面：${focus}。表达目的：${purpose}。${visualStyle(platform, role)}。${avoid}画面真实、准确、干净，光线自然，细节清晰；只生成视觉素材，不在图片内生成文字、Logo、二维码或水印。涉及新闻事件时采用概念视觉，不伪造新闻现场，不虚构具体机构标识。`;
+  const roleLabel = item.role === 'COVER' ? '封面' : item.role === 'CARD' ? '图文卡片' : item.role === 'MAIN' ? '主图' : '正文插图';
+  const avoid = item.avoidConcepts.length ? `不要重复表现：${item.avoidConcepts.join('、')}。` : '';
+  if (mode === 'INFOGRAPHIC') {
+    const headline = item.role === 'COVER' || item.role === 'MAIN' ? title : clean(item.focus).replace(/、/g, '与');
+    const points = (item.informationPoints?.length ? item.informationPoints : informationPointsFor(item.purpose, item.focus, item.purpose)).slice(0, 5);
+    const pointText = points.map((point, index) => `${index + 1}. ${point}`).join('；');
+    return {
+      generationMode: mode,
+      prompt: `为${platformLabel}内容《${title}》制作一张${roleLabel}图文信息图。视觉类型：${visualTypeLabels[item.visualType]}。请在图片内准确生成简体中文，并严格使用以下文案：主标题：${headline}；核心结论：${item.purpose}；信息点：${pointText}。版式要求：${infographicStyle(platform)}；主标题最大，核心结论次之，信息点使用 3 至 5 个独立模块，阅读顺序明确，字号清晰，留白充足。${avoid}不得自行添加数据、机构、人物引语或未经正文支持的结论；涉及新闻事件时不伪造新闻现场，不虚构具体机构标识。`,
+      negativePrompt: unique(['错别字', '乱码', '拼写错误', '文字变形', '信息拥挤', '层级混乱', '水印', 'Logo', '二维码', '低清晰度', ...item.avoidConcepts]).join('、'),
+    };
+  }
+  return {
+    generationMode: mode,
+    prompt: `为${platformLabel}内容《${title}》制作一张${roleLabel}。视觉类型：${visualTypeLabels[item.visualType]}。核心画面：${item.focus}。表达目的：${item.purpose}。${visualStyle(platform, item.role)}。${avoid}画面真实、准确、干净，光线自然，细节清晰；只生成视觉素材，不在图片内生成文字、Logo、二维码或水印。涉及新闻事件时采用概念视觉，不伪造新闻现场，不虚构具体机构标识。`,
+    negativePrompt: unique(['文字', '水印', 'Logo', '二维码', '低清晰度', '错误标识', '畸形结构', '夸张光效', ...item.avoidConcepts]).join('、'),
+  };
 }
 
 function searchQueriesFor({ title, focus, category, role, visualType }) {
@@ -209,14 +242,15 @@ export function buildVisualPlan(input, platform, options = {}) {
   const coverFocus = unique([subject, ...conceptsFrom(coreMessage), ...termsFrom(coreMessage, 2)]).slice(0, 3).join('、') || subject;
   const coverType = visualTypeFor(title, coverRole, platform);
   const coverQueries = searchQueriesFor({ title, focus: coverFocus, category, role: coverRole, visualType: coverType });
-  plan.push({
+  const coverPurposePoints = informationPointsFor(coreMessage || title, coverFocus, coverPurpose);
+  const coverItem = {
     id: `${platform.toLowerCase()}-cover`, role: coverRole,
     title: coverRole === 'MAIN' ? '微博主图' : '文章封面', placement: '发布首图', purpose: coverPurpose,
     visualType: coverType, focus: coverFocus, avoidConcepts: [], searchQueries: coverQueries,
-    prompt: promptFor({ platform, title, focus: coverFocus, role: coverRole, purpose: coverPurpose, visualType: coverType, avoidConcepts: [] }),
-    negativePrompt: '文字、水印、Logo、二维码、低清晰度、错误标识、畸形结构、夸张光效',
+    generationMode: defaultGenerationMode(coverRole, coverType), informationPoints: coverPurposePoints,
     size: sizeFor(platform, coverRole), assetReferenceId: null,
-  });
+  };
+  plan.push({ ...coverItem, ...buildVisualGenerationSpec(coverItem, { platform, title }) });
 
   const candidates = bodyCandidates(body, subject, coreMessage);
   const usedConcepts = new Set();
@@ -237,20 +271,28 @@ export function buildVisualPlan(input, platform, options = {}) {
     if (searchQueries[0]) usedPrimaryQueries.add(searchQueries[0]);
     const placement = platform === 'XIAOHONGSHU' ? `第 ${index + 1} 页` : `正文第 ${index} 个核心段落后`;
     const purpose = platform === 'XIAOHONGSHU' ? `把“${focus}”拆成一页可快速理解的视觉信息` : `解释“${focus}”，帮助读者理解这一段内容`;
-    plan.push({
+    const informationPoints = informationPointsFor(section, focus, purpose);
+    const item = {
       id: `${platform.toLowerCase()}-${role.toLowerCase()}-${index}`, role,
       title: platform === 'XIAOHONGSHU' ? `图文卡片 ${index}` : `正文插图 ${index}`,
       placement, purpose, visualType, focus, avoidConcepts, searchQueries,
-      prompt: promptFor({ platform, title, focus, role, purpose, visualType, avoidConcepts }),
-      negativePrompt: unique(['文字', '水印', 'Logo', '二维码', '低清晰度', '错误标识', '畸形结构', '夸张光效', ...avoidConcepts]).join('、'),
+      generationMode: defaultGenerationMode(role, visualType), informationPoints,
       size: sizeFor(platform, role), assetReferenceId: null,
-    });
+    };
+    plan.push({ ...item, ...buildVisualGenerationSpec(item, { platform, title }) });
   }
   return plan;
 }
 
 export function mergeVisualPlan(generated, persisted, legacyAssetIds = [], legacyCoverId = null, persistedVersion = 0) {
   if (Array.isArray(persisted) && persistedVersion >= VISUAL_PLAN_VERSION) return persisted;
+  if (Array.isArray(persisted) && persistedVersion >= 2) {
+    const persistedById = new Map(persisted.map((item) => [item.id, item]));
+    return generated.map((item) => {
+      const previous = persistedById.get(item.id);
+      return previous ? { ...item, size: previous.size ?? item.size, assetReferenceId: previous.assetReferenceId ?? null } : item;
+    });
+  }
   const persistedCoverId = Array.isArray(persisted)
     ? persisted.find((item) => item.role === 'COVER' || item.role === 'MAIN')?.assetReferenceId
     : null;

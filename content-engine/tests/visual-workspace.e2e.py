@@ -15,6 +15,9 @@ PROJECT_ID = "visual-project-1"
 NOW = "2026-07-30T08:00:00.000Z"
 COVER_ID = "11111111-1111-4111-8111-111111111111"
 BODY_ID = "22222222-2222-4222-8222-222222222222"
+GENERATED_ID = "33333333-3333-4333-8333-333333333333"
+ONE_PIXEL_GIF = "R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="
+GENERATED_SVG = """<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675"><rect width="1200" height="675" fill="#dceeff"/><rect x="70" y="70" width="1060" height="535" rx="16" fill="#fff" stroke="#17203b" stroke-width="6"/><text x="110" y="165" font-family="sans-serif" font-size="54" font-weight="700" fill="#17203b">天链三号 01 星</text><text x="110" y="235" font-family="sans-serif" font-size="28" fill="#40506f">中继卫星如何提升测控与数据传输</text><rect x="110" y="300" width="280" height="190" rx="12" fill="#ffd9e3"/><rect x="460" y="300" width="280" height="190" rx="12" fill="#fff1c7"/><rect x="810" y="300" width="280" height="190" rx="12" fill="#ccefdc"/></svg>"""
 SESSION = {
     "accessToken": "mock-access-token",
     "user": {"id": "user-1", "email": "creator@example.com", "display_name": "验收用户"},
@@ -88,7 +91,10 @@ def project():
 with sync_playwright() as playwright:
     browser = playwright.chromium.launch(headless=True, **({"executable_path": chrome_path()} if chrome_path() else {}))
     page = browser.new_page(viewport={"width": 1440, "height": 1000})
-    state = {"project": project(), "searches": [], "visual_writes": 0, "unexpected": [], "console_errors": []}
+    state = {"project": project(), "searches": [], "visual_writes": 0, "generations": 0, "unexpected": [], "console_errors": [], "references": [
+        {"id": COVER_ID, "title": "旧封面", "url": f"data:image/gif;base64,{ONE_PIXEL_GIF}", "role": "VISUAL", "scope": "IMAGING", "platforms": ["WECHAT"], "sourceType": "LINK", "mimeType": "image/gif", "notes": "", "createdAt": NOW, "updatedAt": NOW},
+        {"id": BODY_ID, "title": "旧正文火箭图", "url": f"data:image/gif;base64,{ONE_PIXEL_GIF}", "role": "VISUAL", "scope": "IMAGING", "platforms": ["WECHAT"], "sourceType": "LINK", "mimeType": "image/gif", "notes": "", "createdAt": NOW, "updatedAt": NOW},
+    ]}
     page.on("console", lambda message: state["console_errors"].append(message.text) if message.type == "error" else None)
     page.on("pageerror", lambda error: state["console_errors"].append(str(error)))
     page.add_init_script("window.localStorage.setItem('content-engine-web-session-v1', " + json.dumps(json.dumps(SESSION, ensure_ascii=False)) + ");")
@@ -110,10 +116,14 @@ with sync_playwright() as playwright:
         if path in ("/api/v1/settings/account-voices", "/api/v1/account-voices"):
             return respond(route, {"voices": []})
         if path == f"/api/v1/creative/projects/{PROJECT_ID}/materials":
-            return respond(route, {"inputs": [], "references": [
-                {"id": COVER_ID, "title": "旧封面", "url": "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=", "role": "VISUAL", "scope": "IMAGING", "platforms": ["WECHAT"], "sourceType": "LINK", "mimeType": "image/gif", "notes": "", "createdAt": NOW, "updatedAt": NOW},
-                {"id": BODY_ID, "title": "旧正文火箭图", "url": "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=", "role": "VISUAL", "scope": "IMAGING", "platforms": ["WECHAT"], "sourceType": "LINK", "mimeType": "image/gif", "notes": "", "createdAt": NOW, "updatedAt": NOW},
-            ]})
+            return respond(route, {"inputs": [], "references": state["references"]})
+        if path == f"/api/v1/creative/projects/{PROJECT_ID}/visual/generate" and method == "POST":
+            state["generations"] += 1
+            reference = {"id": GENERATED_ID, "title": "AI 图文信息图", "url": None, "role": "VISUAL", "scope": "IMAGING", "platforms": ["WECHAT"], "sourceType": "FILE", "mimeType": "image/svg+xml", "notes": "AI 生图", "createdAt": NOW, "updatedAt": NOW}
+            state["references"] = [reference, *[item for item in state["references"] if item["id"] != GENERATED_ID]]
+            return respond(route, {"reference": reference}, status=201)
+        if path == f"/api/v1/creative/project-files/{GENERATED_ID}/content" and method == "GET":
+            return route.fulfill(status=200, content_type="image/svg+xml", body=GENERATED_SVG)
         if path == "/api/v1/creative/image-search":
             query = request.url.split("q=", 1)[-1]
             state["searches"].append(query)
@@ -167,26 +177,47 @@ with sync_playwright() as playwright:
     page.get_by_role("button", name=re.compile(r"正文插图 3")).wait_for()
     assert page.locator(".visual-plan-state", has_text="待选图").count() >= 2, "旧版正文错误绑定没有在升级时清空"
     page.get_by_role("button", name=re.compile(r"天链三号01星")).first.wait_for()
+    assert not state["searches"], "进入配图页或刷新时不应自动产生图片检索请求"
+    page.locator(".visual-query-chips button").first.click()
     page.get_by_text("Satellite launch", exact=True).wait_for()
-    assert state["searches"], "进入配图页后没有自动搜索第一组关键词"
+    assert len(state["searches"]) == 1, "点击推荐关键词后应只执行一次图片检索"
     page.get_by_role("button", name=re.compile(r"正文插图 1")).click()
     page.get_by_text(re.compile(r"概念示意图|场景图|数据图")).first.wait_for()
-    assert len(state["searches"]) >= 2 and state["searches"][0] != state["searches"][-1], "封面与正文仍在自动搜索同一个关键词"
+    assert len(state["searches"]) == 1, "切换配图项时不应自动产生新的图片检索请求"
     for _ in range(20):
         if state["visual_writes"]:
             break
         page.wait_for_timeout(100)
     assert state["visual_writes"] >= 1, "自动生成的配图方案没有保存"
-    assert state["project"]["delivery"]["platforms"]["WECHAT"]["visual"]["planVersion"] == 2
+    assert state["project"]["delivery"]["platforms"]["WECHAT"]["visual"]["planVersion"] == 3
     assert all(item["assetReferenceId"] is None for item in state["project"]["delivery"]["platforms"]["WECHAT"]["visual"]["plan"][1:])
     page.get_by_role("button", name=re.compile(r"文章封面")).click()
     page.get_by_role("button", name="AI 生图", exact=True).click()
-    prompt = page.locator(".visual-prompt-field textarea").input_value()
+    page.get_by_role("button", name="图文信息图", exact=True).click()
+    page.locator(".visual-generate-controls select").select_option("3:4")
+    portrait_preview = page.locator(".visual-generated-preview").bounding_box()
+    assert portrait_preview and abs(portrait_preview["width"] / portrait_preview["height"] - 0.75) <= 0.04, f"3:4 预览比例错误: {portrait_preview}"
+    page.locator(".visual-generate-controls select").select_option("16:9")
+    page.get_by_text("高级设置", exact=True).click()
+    prompt = page.locator(".visual-prompt-field textarea").first.input_value()
     assert len(prompt) > 100 and "公众号" in prompt and "天链三号01星" in prompt
+    assert "主标题：" in prompt and "信息点：" in prompt and "不在图片内生成文字" not in prompt
     assert page.locator(".visual-generate-controls select").input_value() == "16:9"
+    page.get_by_role("button", name="生成这一张", exact=True).click()
+    page.locator(".visual-generated-preview img").wait_for()
+    preview = page.locator(".visual-generated-preview").bounding_box()
+    assert preview and preview["width"] >= 420 and preview["height"] >= 240, f"生成结果预览尺寸不足: {preview}"
+    assert state["generations"] == 1
+    page.wait_for_timeout(900)
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    page.get_by_role("button", name="AI 生图", exact=True).click()
+    page.locator(".visual-generated-preview img").wait_for()
+    page.screenshot(path=ARTIFACTS / "visual-generated-preview.png", full_page=True)
     page.get_by_role("button", name=re.compile(r"正文插图 2")).click()
-    body_prompt = page.locator(".visual-prompt-field textarea").input_value()
-    page.locator(".visual-prompt-field textarea").fill(body_prompt + " 保持主体在画面中心。")
+    page.get_by_text("高级设置", exact=True).click()
+    body_prompt = page.locator(".visual-prompt-field textarea").first.input_value()
+    page.locator(".visual-prompt-field textarea").first.fill(body_prompt + " 保持主体在画面中心。")
     page.wait_for_timeout(1200)
     assert "正文插图 2" in page.locator(".visual-task-head h3").inner_text(), "自动保存后当前配图项被重置"
     assert_no_overflow(page, "1440px 配图工作台")

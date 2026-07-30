@@ -1,9 +1,9 @@
 import { Check, Image, LoaderCircle, Minus, Plus, RefreshCw, Save, Search, Sparkles, Trash2, Upload } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { webCreative } from '../../data/webApi';
-import { platformName, type ContentProject, type CreativeVisualPlanItem, type CreativeVisualSize } from '../../domain/content';
+import { platformName, type ContentProject, type CreativeVisualGenerationMode, type CreativeVisualPlanItem, type CreativeVisualSize } from '../../domain/content';
 import type { CreativePlatform, ProjectReference } from '../../domain/creative';
-import { buildVisualPlan, mergeVisualPlan, resizeVisualPlan, visualPlanCountRange, VISUAL_PLAN_VERSION } from '../../domain/visual-plan.mjs';
+import { buildVisualGenerationSpec, buildVisualPlan, mergeVisualPlan, resizeVisualPlan, visualPlanCountRange, VISUAL_PLAN_VERSION } from '../../domain/visual-plan.mjs';
 
 type ImageSearchResult = { id: string; title: string; thumbnailUrl: string; imageUrl: string; sourceUrl: string; license: string; attribution: string };
 type SourceView = 'search' | 'generate' | 'library';
@@ -152,13 +152,6 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
     }
   };
 
-  useEffect(() => {
-    if (sourceView !== 'search' || !activeItem) return;
-    const query = activeItem.searchQueries[0] ?? '';
-    setSearchResults([]);
-    void runSearch(query);
-  }, [activeItem?.id, sourceView]);
-
   const selectPlanItem = (item: CreativeVisualPlanItem) => {
     setActiveItemId(item.id);
     setSearchQuery(item.searchQueries[0] ?? '');
@@ -169,6 +162,11 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
   const updateActiveItem = (patch: Partial<CreativeVisualPlanItem>) => {
     if (!activeItem) return;
     setPlan((current) => current.map((item) => item.id === activeItem.id ? { ...item, ...patch } : item));
+  };
+
+  const changeGenerationMode = (mode: CreativeVisualGenerationMode) => {
+    if (!activeItem || activeItem.generationMode === mode) return;
+    updateActiveItem(buildVisualGenerationSpec(activeItem, { platform: activePlatform, title: planInput.title }, mode));
   };
 
   const assignAsset = (reference: ProjectReference) => {
@@ -299,7 +297,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
       {activeItem && <main className="visual-task-panel">
         <header className="visual-task-head">
           <div><span>{roleName(activeItem.role)} / {visualTypeName(activeItem.visualType)} / {activeItem.placement}</span><h3>{activeItem.title}</h3><p>{activeItem.purpose}</p></div>
-          {assignedAsset && <div className="visual-assigned-asset">{assetSrc(assignedAsset) ? <img src={assetSrc(assignedAsset)} alt=""/> : <Image size={18}/>}<span><b>已绑定</b><small>{assignedAsset.title}</small></span><button type="button" title="移除当前配图" onClick={() => updateActiveItem({ assetReferenceId: null })}><Trash2 size={15}/></button></div>}
+          {assignedAsset && <div className="visual-assigned-asset"><Check size={17}/><span><b>已绑定</b><small>{assignedAsset.title}</small></span><button type="button" title="移除当前配图" onClick={() => updateActiveItem({ assetReferenceId: null })}><Trash2 size={15}/></button></div>}
         </header>
 
         <nav className="visual-source-tabs" aria-label="当前配图获取方式">
@@ -315,7 +313,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
             <button className="button primary" type="submit" disabled={searchBusy || searchQuery.trim().length < 2}>{searchBusy ? <LoaderCircle size={16}/> : <Search size={16}/>}搜索</button>
           </form>
           {searchBusy && !searchResults.length && <div className="visual-result-state"><LoaderCircle size={18}/>正在搜索公开许可图片</div>}
-          {!searchBusy && searchResults.length === 0 && !error && <div className="visual-result-state">当前关键词没有结果，可切换上方关键词</div>}
+          {!searchBusy && searchResults.length === 0 && !error && <div className="visual-result-state">选择推荐词或输入关键词后搜索</div>}
           {searchResults.length > 0 && <div className="visual-search-grid">{searchResults.map((result) => <article className="visual-search-card" key={result.id}>
             <img src={result.thumbnailUrl} alt=""/><div><b>{result.title}</b><small>{result.license}</small></div>
             <footer><a href={result.sourceUrl} target="_blank" rel="noreferrer">查看来源</a><button className="button" type="button" disabled={importingId !== null} onClick={() => void importResult(result)}>{importingId === result.id ? <LoaderCircle size={15}/> : <Check size={15}/>}用于此处</button></footer>
@@ -323,12 +321,29 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
         </section>}
 
         {sourceView === 'generate' && <section className="visual-source-workspace visual-generate-workspace">
-          <label className="visual-prompt-field"><span>生图提示词</span><textarea value={activeItem.prompt} onChange={(event) => updateActiveItem({ prompt: event.target.value })}/></label>
-          <div className="visual-generate-controls">
-            <label><span>推荐比例</span><select value={activeItem.size} onChange={(event) => updateActiveItem({ size: event.target.value as CreativeVisualSize })}><option value="1:1">1:1 方图</option><option value="3:4">3:4 竖图</option><option value="4:3">4:3 横图</option><option value="9:16">9:16 竖版</option><option value="16:9">16:9 横版</option></select></label>
-            <button className="button primary" type="button" disabled={generateBusy || activeItem.prompt.trim().length < 4} onClick={() => void generate()}>{generateBusy ? <LoaderCircle size={16}/> : <Sparkles size={16}/>}生成这一张</button>
+          <div className="visual-generate-layout">
+            <div className={`visual-generated-preview${assignedAsset && assetSrc(assignedAsset) ? ' has-image' : ''}`} data-size={activeItem.size} style={{ aspectRatio: activeItem.size.replace(':', ' / ') }}>
+              {assignedAsset && assetSrc(assignedAsset) ? <img src={assetSrc(assignedAsset)} alt={`${activeItem.title}预览`}/> : <div><Image size={28}/><span>尚未生成图片</span></div>}
+            </div>
+            <div className="visual-generate-sidebar">
+              <div className="visual-generation-modes" role="group" aria-label="图片生成模式">
+                <button type="button" className={activeItem.generationMode === 'ILLUSTRATION' ? 'active' : ''} onClick={() => changeGenerationMode('ILLUSTRATION')}>视觉插图</button>
+                <button type="button" className={activeItem.generationMode === 'INFOGRAPHIC' ? 'active' : ''} onClick={() => changeGenerationMode('INFOGRAPHIC')}>图文信息图</button>
+              </div>
+              <div className="visual-generate-controls">
+                <label><span>图片比例</span><select value={activeItem.size} onChange={(event) => updateActiveItem({ size: event.target.value as CreativeVisualSize })}><option value="1:1">1:1 方图</option><option value="3:4">3:4 竖图</option><option value="4:3">4:3 横图</option><option value="9:16">9:16 竖版</option><option value="16:9">16:9 横版</option></select></label>
+                <button className="button primary" type="button" disabled={generateBusy || activeItem.prompt.trim().length < 4} onClick={() => void generate()}>{generateBusy ? <LoaderCircle size={16}/> : <Sparkles size={16}/>}生成这一张</button>
+              </div>
+              <details className="visual-generation-details">
+                <summary>高级设置</summary>
+                <div>
+                  <label className="visual-prompt-field"><span>生图提示词</span><textarea value={activeItem.prompt} onChange={(event) => updateActiveItem({ prompt: event.target.value })}/></label>
+                  <label className="visual-prompt-field compact"><span>负面提示词</span><textarea value={activeItem.negativePrompt} onChange={(event) => updateActiveItem({ negativePrompt: event.target.value })}/></label>
+                </div>
+              </details>
+              <button className="text-button visual-model-link" type="button" onClick={onOpenModelSettings}>文生图模型设置</button>
+            </div>
           </div>
-          <button className="text-button visual-model-link" type="button" onClick={onOpenModelSettings}>文生图模型设置</button>
         </section>}
 
         {sourceView === 'library' && <section className="visual-source-workspace">

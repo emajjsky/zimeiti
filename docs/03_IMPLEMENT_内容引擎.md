@@ -1,5 +1,15 @@
 # 内容引擎技术实施方案
 
+## 2026-07-30 实现：图文信息图模式与大图预览
+
+- `VISUAL_PLAN_VERSION` 升级为 3，`CreativeVisualPlanItem` 增加 `generationMode` 与 `informationPoints`。`buildVisualGenerationSpec()` 统一生成两种模式的提示词和负面约束，前端切换模式时复用同一规则，不复制字符串模板。
+- `INFO_CARD / QUOTE_CARD / DATA_CHART / CARD` 默认选择 `INFOGRAPHIC`；其它类型默认选择 `ILLUSTRATION`。信息图从对应正文段落、视觉焦点和表达目的归纳 3 至 5 条短信息，提示词包含主标题、核心结论、信息点、渠道比例与阅读层级。
+- v2 方案升级时按稳定配图项 ID 保留 `size` 和 `assetReferenceId`，同时使用 v3 规则替换旧的“禁止图片文字”提示词；v1 及更早错误方案继续只迁移封面，避免恢复已知的正文误绑定。
+- `VisualWorkspace.tsx` 删除监听 `activeItem/sourceView` 的自动搜索 Effect。推荐词点击与搜索表单提交是仅有的检索入口。
+- AI 生图区改为大图预览与操作侧栏。当前素材通过网络 URL 或鉴权 Blob URL 显示，生成后沿用 `assignAsset()` 绑定并由 650ms 自动保存；刷新后材料接口与私有文件接口恢复预览。
+- 提示词和负面词放在原生 `details` 高级设置内。模式、比例和“生成这一张”保持直接可见；页面沿用深蓝边线、钴蓝和马卡龙实色，不增加装饰动画或说明卡片。
+- 服务端 `visualPlanItemInput` 校验生成模式与信息点，实际生图接口保持不变，仍读取百炼 CLI `TEXT_TO_IMAGE` 策略并记录调用日志。
+
 ## 2026-07-30 实现：自动配图方案与任务式执行
 
 - `src/domain/visual-plan.mjs` 导出 `VISUAL_PLAN_VERSION = 2`。规划器使用项目选题提取稳定主题，不再把渠道标题中的长钩子句作为搜索词；正文候选优先选择包含原理、关系、数据、应用和场景信息的段落及子句。

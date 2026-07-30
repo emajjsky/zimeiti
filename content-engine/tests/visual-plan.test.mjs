@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildVisualPlan, mergeVisualPlan, resizeVisualPlan, visualPlanCountRange, VISUAL_PLAN_VERSION } from '../src/domain/visual-plan.mjs';
+import { buildVisualGenerationSpec, buildVisualPlan, mergeVisualPlan, resizeVisualPlan, visualPlanCountRange, VISUAL_PLAN_VERSION } from '../src/domain/visual-plan.mjs';
 
 const article = {
   title: '我国成功发射天链三号01星',
@@ -44,6 +44,39 @@ test('不同平台采用不同的默认配图数量与比例', () => {
   assert.equal(weibo[0].size, '1:1');
 });
 
+test('小红书内容页默认生成带中文信息层级的图文信息图', () => {
+  const plan = buildVisualPlan(article, 'XIAOHONGSHU');
+  const card = plan.find((item) => item.role === 'CARD');
+  assert.ok(card);
+  assert.equal(card.generationMode, 'INFOGRAPHIC');
+  assert.ok(card.informationPoints.length >= 3 && card.informationPoints.length <= 5);
+  assert.match(card.prompt, /主标题：/);
+  assert.match(card.prompt, /核心结论：/);
+  assert.match(card.prompt, /信息点：/);
+  assert.doesNotMatch(card.prompt, /不在图片内生成文字/);
+  assert.ok(!card.negativePrompt.split('、').includes('文字'));
+  assert.match(card.negativePrompt, /错别字/);
+  assert.match(card.negativePrompt, /乱码/);
+});
+
+test('视觉插图与图文信息图切换时生成各自正确的提示词约束', () => {
+  const item = {
+    id: 'scene-1', role: 'BODY', title: '正文插图 1', placement: '正文第一段后', purpose: '解释普通人的实际使用场景',
+    visualType: 'SCENE', focus: '普通人使用AI工具', avoidConcepts: [], searchQueries: ['AI 工具 使用场景'],
+    informationPoints: ['先确认任务目标', '再选择合适工具', '最后人工检查结果'], prompt: '', negativePrompt: '',
+    generationMode: 'ILLUSTRATION', size: '4:3', assetReferenceId: null,
+  };
+  const illustration = buildVisualGenerationSpec(item, { platform: 'WECHAT', title: '普通人怎样使用AI工具' }, 'ILLUSTRATION');
+  assert.match(illustration.prompt, /不在图片内生成文字/);
+  assert.ok(illustration.negativePrompt.split('、').includes('文字'));
+
+  const infographic = buildVisualGenerationSpec(item, { platform: 'WECHAT', title: '普通人怎样使用AI工具' }, 'INFOGRAPHIC');
+  assert.match(infographic.prompt, /主标题：普通人使用AI工具/);
+  assert.match(infographic.prompt, /先确认任务目标/);
+  assert.doesNotMatch(infographic.prompt, /不在图片内生成文字/);
+  assert.ok(!infographic.negativePrompt.split('、').includes('文字'));
+});
+
 test('没有旧方案时只迁移历史封面，正文素材留在项目素材库', () => {
   const generated = buildVisualPlan(article, 'WECHAT');
   const merged = mergeVisualPlan(generated, null, ['body-id', 'cover-id'], 'cover-id');
@@ -58,10 +91,26 @@ test('旧版方案自动升级搜索词并清空正文错误绑定', () => {
     searchQueries: ['天链三号01星 发射'],
     assetReferenceId: index === 0 ? 'cover-id' : `body-${index}`,
   }));
-  const upgraded = mergeVisualPlan(generated, oldPlan, [], null, VISUAL_PLAN_VERSION - 1);
+  const upgraded = mergeVisualPlan(generated, oldPlan, [], null, VISUAL_PLAN_VERSION - 2);
   assert.equal(upgraded[0].assetReferenceId, 'cover-id');
   assert.ok(upgraded.slice(1).every((item) => item.assetReferenceId === null));
   assert.equal(new Set(upgraded.map((item) => item.searchQueries[0])).size, upgraded.length);
+});
+
+test('第二版方案升级图文模式时保留已有图片绑定并替换旧提示词', () => {
+  const generated = buildVisualPlan(article, 'XIAOHONGSHU');
+  const oldPlan = generated.map((item, index) => ({
+    ...item,
+    generationMode: undefined,
+    informationPoints: undefined,
+    prompt: '只生成视觉素材，不在图片内生成文字',
+    negativePrompt: '文字、水印',
+    assetReferenceId: `asset-${index}`,
+  }));
+  const upgraded = mergeVisualPlan(generated, oldPlan, [], null, 2);
+  assert.deepEqual(upgraded.map((item) => item.assetReferenceId), oldPlan.map((item) => item.assetReferenceId));
+  assert.equal(upgraded[1].generationMode, 'INFOGRAPHIC');
+  assert.doesNotMatch(upgraded[1].prompt, /不在图片内生成文字/);
 });
 
 test('当前版本方案保留用户已经编辑的内容和绑定', () => {
