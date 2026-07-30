@@ -91,7 +91,7 @@ def project():
 with sync_playwright() as playwright:
     browser = playwright.chromium.launch(headless=True, **({"executable_path": chrome_path()} if chrome_path() else {}))
     page = browser.new_page(viewport={"width": 1440, "height": 1000})
-    state = {"project": project(), "searches": [], "visual_writes": 0, "generations": 0, "unexpected": [], "console_errors": [], "references": [
+    state = {"project": project(), "searches": [], "visual_writes": 0, "generations": 0, "generation_payloads": [], "unexpected": [], "console_errors": [], "references": [
         {"id": COVER_ID, "title": "旧封面", "url": f"data:image/gif;base64,{ONE_PIXEL_GIF}", "role": "VISUAL", "scope": "IMAGING", "platforms": ["WECHAT"], "sourceType": "LINK", "mimeType": "image/gif", "notes": "", "createdAt": NOW, "updatedAt": NOW},
         {"id": BODY_ID, "title": "旧正文火箭图", "url": f"data:image/gif;base64,{ONE_PIXEL_GIF}", "role": "VISUAL", "scope": "IMAGING", "platforms": ["WECHAT"], "sourceType": "LINK", "mimeType": "image/gif", "notes": "", "createdAt": NOW, "updatedAt": NOW},
     ]}
@@ -119,6 +119,7 @@ with sync_playwright() as playwright:
             return respond(route, {"inputs": [], "references": state["references"]})
         if path == f"/api/v1/creative/projects/{PROJECT_ID}/visual/generate" and method == "POST":
             state["generations"] += 1
+            state["generation_payloads"].append(json.loads(request.post_data or "{}"))
             reference = {"id": GENERATED_ID, "title": "AI 图文信息图", "url": None, "role": "VISUAL", "scope": "IMAGING", "platforms": ["WECHAT"], "sourceType": "FILE", "mimeType": "image/svg+xml", "notes": "AI 生图", "createdAt": NOW, "updatedAt": NOW}
             state["references"] = [reference, *[item for item in state["references"] if item["id"] != GENERATED_ID]]
             return respond(route, {"reference": reference}, status=201)
@@ -136,6 +137,7 @@ with sync_playwright() as playwright:
             state["visual_writes"] += 1
             state["project"]["delivery"]["platforms"]["WECHAT"]["visual"] = {
                 "planVersion": payload["planVersion"],
+                "styleProfile": payload["styleProfile"],
                 "coverReferenceId": payload["coverReferenceId"], "assetReferenceIds": payload["assetReferenceIds"],
                 "assets": [], "plan": payload["plan"], "updatedAt": NOW,
             }
@@ -189,10 +191,19 @@ with sync_playwright() as playwright:
             break
         page.wait_for_timeout(100)
     assert state["visual_writes"] >= 1, "自动生成的配图方案没有保存"
-    assert state["project"]["delivery"]["platforms"]["WECHAT"]["visual"]["planVersion"] == 3
+    assert state["project"]["delivery"]["platforms"]["WECHAT"]["visual"]["planVersion"] == 4
     assert all(item["assetReferenceId"] is None for item in state["project"]["delivery"]["platforms"]["WECHAT"]["visual"]["plan"][1:])
     page.get_by_role("button", name=re.compile(r"文章封面")).click()
     page.get_by_role("button", name="AI 生图", exact=True).click()
+    page.get_by_label("项目默认风格").select_option("RETRO_POP")
+    page.get_by_label("视觉结构", exact=True).select_option("MIND_MAP")
+    assert page.get_by_label("版式模板", exact=True).input_value() == "RADIAL_BRANCH"
+    assert page.get_by_label("单图风格", exact=True).input_value() == "INHERIT"
+    page.get_by_text("查看策划", exact=True).click()
+    assert page.locator(".visual-director-blocks textarea").count() >= 2
+    page.get_by_role("button", name="添加参考图", exact=True).click()
+    page.get_by_role("button", name=re.compile(r"旧正文火箭图")).click()
+    page.get_by_label("参考方式", exact=True).select_option("COLOR_LAYOUT")
     page.get_by_role("button", name="图文信息图", exact=True).click()
     page.locator(".visual-generate-controls select").select_option("3:4")
     portrait_preview = page.locator(".visual-generated-preview").bounding_box()
@@ -201,6 +212,7 @@ with sync_playwright() as playwright:
     page.get_by_text("高级设置", exact=True).click()
     prompt = page.locator(".visual-prompt-field textarea").first.input_value()
     assert len(prompt) > 100 and "公众号" in prompt and "天链三号01星" in prompt
+    assert "思维导图" in prompt and "波普怀旧" in prompt and "参考图只用于参考色彩、排版" in prompt
     assert "主标题：" in prompt and "信息点：" in prompt and "不在图片内生成文字" not in prompt
     assert page.locator(".visual-generate-controls select").input_value() == "16:9"
     page.get_by_role("button", name="生成这一张", exact=True).click()
@@ -208,11 +220,14 @@ with sync_playwright() as playwright:
     preview = page.locator(".visual-generated-preview").bounding_box()
     assert preview and preview["width"] >= 420 and preview["height"] >= 240, f"生成结果预览尺寸不足: {preview}"
     assert state["generations"] == 1
+    assert state["generation_payloads"][0]["referenceImageIds"] == [BODY_ID]
     page.wait_for_timeout(900)
     page.reload()
     page.wait_for_load_state("networkidle")
     page.get_by_role("button", name="AI 生图", exact=True).click()
     page.locator(".visual-generated-preview img").wait_for()
+    assert page.get_by_label("项目默认风格").input_value() == "RETRO_POP"
+    assert page.get_by_label("视觉结构", exact=True).input_value() == "MIND_MAP"
     page.screenshot(path=ARTIFACTS / "visual-generated-preview.png", full_page=True)
     page.get_by_role("button", name=re.compile(r"正文插图 2")).click()
     page.get_by_text("高级设置", exact=True).click()

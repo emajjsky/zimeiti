@@ -1,5 +1,14 @@
 # 内容引擎技术实施方案
 
+## 2026-07-30 实现：视觉导演 v4
+
+- `visual-plan.mjs` 将 `VISUAL_PLAN_VERSION` 升级为 4，新增 `visualStylePresets()`、`visualTemplatesFor()` 和 `updateVisualPlanItem()`。视觉类型、模板、风格、结构内容或参考图变化时统一重编译提示词，避免前端拼接业务字符串。
+- `CreativeVisualPlanItem` 新增 `stylePreset / templatePreset / sourceExcerpt / contentBlocks / references`。`CreativeVisualDelivery.styleProfile` 保存当前平台项目默认风格，`INHERIT` 项跟随项目，显式预设保持独立。
+- `mergeVisualPlan()` 对 v3 方案执行无损升级：保留 `purpose / focus / avoidConcepts / searchQueries / informationPoints / size / assetReferenceId`，补齐视觉导演字段并替换旧提示词。v2 与 v1 继续使用既有迁移边界。
+- `VisualWorkspace.tsx` 保留左侧图片位和右侧任务结构，新增项目风格、视觉结构、版式模板、单图风格、策划内容和参考图控制。结构化修改使用 650ms 自动保存；手工修改高级提示词不会被非结构操作覆盖。
+- `POST /visual/generate` 接受最多三条 `referenceImageIds`，通过项目素材快照验证归属和图片 MIME。有参考图时执行 `bailian image edit` 并逐个追加 `--image`；无参考图时继续执行 `bailian image generate`。调用日志按实际路径记录 `IMAGE_TO_IMAGE` 或 `TEXT_TO_IMAGE`。
+- UI 视觉参数保持 `DESIGN_VARIANCE 4 / MOTION_INTENSITY 2 / VISUAL_DENSITY 6`。主控制使用紧凑下拉，策划和提示词分层折叠；桌面双栏与移动单栏均无横向溢出。
+
 ## 2026-07-30 实现：图文信息图模式与大图预览
 
 - `VISUAL_PLAN_VERSION` 升级为 3，`CreativeVisualPlanItem` 增加 `generationMode` 与 `informationPoints`。`buildVisualGenerationSpec()` 统一生成两种模式的提示词和负面约束，前端切换模式时复用同一规则，不复制字符串模板。

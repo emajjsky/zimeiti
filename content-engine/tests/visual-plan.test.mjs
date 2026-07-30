@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildVisualGenerationSpec, buildVisualPlan, mergeVisualPlan, resizeVisualPlan, visualPlanCountRange, VISUAL_PLAN_VERSION } from '../src/domain/visual-plan.mjs';
+import { buildVisualGenerationSpec, buildVisualPlan, mergeVisualPlan, resizeVisualPlan, updateVisualPlanItem, visualPlanCountRange, visualStylePresets, visualTemplatesFor, VISUAL_PLAN_VERSION } from '../src/domain/visual-plan.mjs';
 
 const article = {
   title: '我国成功发射天链三号01星',
@@ -91,7 +91,7 @@ test('旧版方案自动升级搜索词并清空正文错误绑定', () => {
     searchQueries: ['天链三号01星 发射'],
     assetReferenceId: index === 0 ? 'cover-id' : `body-${index}`,
   }));
-  const upgraded = mergeVisualPlan(generated, oldPlan, [], null, VISUAL_PLAN_VERSION - 2);
+  const upgraded = mergeVisualPlan(generated, oldPlan, [], null, 1);
   assert.equal(upgraded[0].assetReferenceId, 'cover-id');
   assert.ok(upgraded.slice(1).every((item) => item.assetReferenceId === null));
   assert.equal(new Set(upgraded.map((item) => item.searchQueries[0])).size, upgraded.length);
@@ -158,4 +158,85 @@ test('调整配图数量时保留现有项和素材绑定，新项目保持未�
   assert.equal(reduced.length, 3);
   assert.deepEqual(reduced.map((item) => item.assetReferenceId), ['asset-0', 'asset-1', 'asset-2']);
   assert.ok(reduced.every((item) => !['asset-3', 'asset-4', 'asset-5'].includes(item.assetReferenceId)));
+});
+
+test('视觉导演按正文表达任务选择思维导图、流程图、时间线和对比图', () => {
+  const plan = buildVisualPlan({
+    title: '普通人建立个人知识库的完整方法',
+    category: '知识管理',
+    coreMessage: '知识库由信息收集、分类体系、加工流程和复盘机制组成',
+    body: [
+      '知识库的组成可以分为信息入口、主题分类、长期项目和输出成果，这些模块共同构成个人知识体系。',
+      '实际操作分为四个步骤：先收集资料，再清洗去重，然后建立关联，最后形成文章或视频。',
+      '2023 年以手工收藏为主，2024 年开始使用自动化，2025 年引入智能分析，2026 年形成稳定工作流。',
+      '传统方案依赖文件夹，新方案使用双向链接；前者简单但容易失联，后者维护成本更高但关系清楚。',
+    ].join('\n\n'),
+  }, 'WECHAT', { bodyItemCount: 4 });
+  assert.deepEqual(plan.slice(1).map((item) => item.visualType), ['MIND_MAP', 'FLOWCHART', 'TIMELINE', 'COMPARISON']);
+  assert.ok(plan.slice(1).every((item) => item.sourceExcerpt.length > 20));
+  assert.ok(plan.slice(1).every((item) => item.contentBlocks.length >= 2));
+  assert.match(plan[1].prompt, /思维导图/);
+  assert.match(plan[2].prompt, /流程图/);
+});
+
+test('项目风格默认继承且单张图片可以独立覆盖', () => {
+  const styles = visualStylePresets();
+  assert.ok(styles.some((item) => item.id === 'FRESH_EDITORIAL'));
+  assert.ok(styles.some((item) => item.id === 'RETRO_POP'));
+  const [item] = buildVisualPlan(article, 'WECHAT');
+  assert.equal(item.stylePreset, 'INHERIT');
+  assert.ok(visualTemplatesFor('MIND_MAP').some((item) => item.id === 'RADIAL_BRANCH'));
+
+  const inherited = updateVisualPlanItem(item, { visualType: 'MIND_MAP', templatePreset: 'RADIAL_BRANCH' }, { platform: 'WECHAT', title: article.title }, { preset: 'RETRO_POP' });
+  assert.equal(inherited.stylePreset, 'INHERIT');
+  assert.match(inherited.prompt, /波普怀旧/);
+  assert.match(inherited.prompt, /放射分支/);
+
+  const overridden = updateVisualPlanItem(inherited, { stylePreset: 'TECH_MEDIA' }, { platform: 'WECHAT', title: article.title }, { preset: 'RETRO_POP' });
+  assert.match(overridden.prompt, /科技媒体/);
+  assert.doesNotMatch(overridden.prompt, /波普怀旧/);
+});
+
+test('视觉提示词包含结构内容和参考图用途但不暴露项目文件名', () => {
+  const [item] = buildVisualPlan(article, 'WECHAT');
+  const updated = updateVisualPlanItem(item, {
+    visualType: 'COMPARISON',
+    templatePreset: 'SPLIT_COMPARE',
+    contentBlocks: [
+      { label: '传统方式', detail: '手工整理，启动快但容易遗漏' },
+      { label: '智能方式', detail: '自动归类，需要人工复核' },
+    ],
+    references: [{ referenceId: '11111111-1111-4111-8111-111111111111', uses: ['COLOR', 'LAYOUT'] }],
+  }, { platform: 'WECHAT', title: article.title }, { preset: 'FRESH_EDITORIAL' });
+  assert.match(updated.prompt, /传统方式：手工整理/);
+  assert.match(updated.prompt, /参考图只用于参考色彩、排版/);
+  assert.doesNotMatch(updated.prompt, /11111111/);
+});
+
+test('第三版方案升级视觉导演字段时保留用户内容和最终图片绑定', () => {
+  const generated = buildVisualPlan(article, 'WECHAT');
+  const oldPlan = generated.map((item, index) => ({
+    id: item.id,
+    role: item.role,
+    title: item.title,
+    placement: item.placement,
+    purpose: `旧版目的 ${index}`,
+    visualType: index ? 'CONCEPT_DIAGRAM' : item.visualType,
+    focus: item.focus,
+    avoidConcepts: item.avoidConcepts,
+    searchQueries: item.searchQueries,
+    generationMode: item.generationMode,
+    informationPoints: [`旧版信息 ${index}`],
+    prompt: '旧提示词',
+    negativePrompt: '旧负面提示词',
+    size: item.size,
+    assetReferenceId: `asset-${index}`,
+  }));
+  const upgraded = mergeVisualPlan(generated, oldPlan, [], null, 3);
+  assert.equal(VISUAL_PLAN_VERSION, 4);
+  assert.deepEqual(upgraded.map((item) => item.assetReferenceId), oldPlan.map((item) => item.assetReferenceId));
+  assert.deepEqual(upgraded.map((item) => item.purpose), oldPlan.map((item) => item.purpose));
+  assert.deepEqual(upgraded.map((item) => item.informationPoints), oldPlan.map((item) => item.informationPoints));
+  assert.ok(upgraded.every((item) => item.stylePreset === 'INHERIT' && Array.isArray(item.references) && item.templatePreset));
+  assert.ok(upgraded.every((item) => item.prompt !== '旧提示词'));
 });

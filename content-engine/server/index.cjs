@@ -75,23 +75,31 @@ const projectPlanningInput = z.object({
 });
 const visualGenerationInput = z.object({
   platform: creativePlatform,
-  prompt: z.string().trim().min(4).max(2_000),
+  prompt: z.string().trim().min(4).max(8_000),
   size: z.enum(['1:1', '3:4', '4:3', '9:16', '16:9']).default('3:4'),
   negativePrompt: z.string().trim().max(1_000).optional(),
+  referenceImageIds: z.array(z.string().uuid()).max(3).default([]),
 });
+const visualStylePreset = z.enum(['FRESH_EDITORIAL', 'RETRO_POP', 'MINIMAL_KNOWLEDGE', 'TECH_MEDIA', 'DOCUMENTARY']);
+const visualReferenceUse = z.enum(['COLOR', 'COMPOSITION', 'LAYOUT', 'TEXTURE', 'SUBJECT']);
 const visualPlanItemInput = z.object({
   id: z.string().trim().min(1).max(100),
   role: z.enum(['COVER', 'BODY', 'CARD', 'MAIN']),
   title: z.string().trim().min(1).max(120),
   placement: z.string().trim().min(1).max(200),
   purpose: z.string().trim().min(1).max(500),
-  visualType: z.enum(['NEWS_PHOTO', 'CONCEPT_DIAGRAM', 'SCENE', 'DATA_CHART', 'QUOTE_CARD', 'INFO_CARD']),
+  visualType: z.enum(['NEWS_PHOTO', 'HERO_VISUAL', 'CONCEPT_DIAGRAM', 'SCENE', 'MIND_MAP', 'FLOWCHART', 'TIMELINE', 'COMPARISON', 'DATA_CHART', 'QUOTE_CARD', 'INFO_CARD', 'CHECKLIST_CARD']),
   focus: z.string().trim().min(1).max(500),
   avoidConcepts: z.array(z.string().trim().min(1).max(100)).max(12).default([]),
   searchQueries: z.array(z.string().trim().min(2).max(120)).min(1).max(5),
   generationMode: z.enum(['ILLUSTRATION', 'INFOGRAPHIC']),
   informationPoints: z.array(z.string().trim().min(1).max(160)).min(1).max(5),
-  prompt: z.string().trim().min(4).max(2_000),
+  stylePreset: z.enum(['INHERIT', 'FRESH_EDITORIAL', 'RETRO_POP', 'MINIMAL_KNOWLEDGE', 'TECH_MEDIA', 'DOCUMENTARY']),
+  templatePreset: z.string().trim().min(1).max(80),
+  sourceExcerpt: z.string().trim().max(4_000).default(''),
+  contentBlocks: z.array(z.object({ label: z.string().trim().min(1).max(80), detail: z.string().trim().min(1).max(300) })).min(1).max(8),
+  references: z.array(z.object({ referenceId: z.string().uuid(), uses: z.array(visualReferenceUse).min(1).max(5) })).max(3).default([]),
+  prompt: z.string().trim().min(4).max(8_000),
   negativePrompt: z.string().trim().max(1_000).default(''),
   size: z.enum(['1:1', '3:4', '4:3', '9:16', '16:9']),
   assetReferenceId: z.string().uuid().nullable(),
@@ -853,16 +861,29 @@ app.post('/api/v1/creative/projects/:projectId/visual/generate', { preHandler: a
   const input = visualGenerationInput.parse(request.body);
   const workspace = await currentWorkspace(request.user.sub);
   await creativeProject(workspace.id, projectId);
-  const policy = await query("SELECT provider, model FROM agent_model_policies WHERE workspace_id = $1 AND scope = 'TEXT_TO_IMAGE'", [workspace.id]);
-  if (!policy.rowCount) { const error = new Error('请先在“模型与 API”中为文生图选择模型。'); error.statusCode = 400; throw error; }
+  const operation = input.referenceImageIds.length ? 'IMAGE_TO_IMAGE' : 'TEXT_TO_IMAGE';
+  let policy = await query('SELECT provider, model FROM agent_model_policies WHERE workspace_id = $1 AND scope = $2', [workspace.id, operation]);
+  if (!policy.rowCount && operation === 'IMAGE_TO_IMAGE') policy = await query("SELECT provider, model FROM agent_model_policies WHERE workspace_id = $1 AND scope = 'TEXT_TO_IMAGE'", [workspace.id]);
+  if (!policy.rowCount) { const error = new Error(`请先在“模型与 API”中为${operation === 'IMAGE_TO_IMAGE' ? '图生图' : '文生图'}选择模型。`); error.statusCode = 400; throw error; }
   if (policy.rows[0].provider !== 'BAILIAN_CLI') { const error = new Error('当前版本的 AI 生图仅支持已配置的百炼 CLI 文生图模型。'); error.statusCode = 400; throw error; }
   const model = policy.rows[0].model;
   const apiKey = await credentialSecret(workspace.id, 'BAILIAN');
+  const snapshot = input.referenceImageIds.length
+    ? await projectMaterialStore.researchSnapshot(workspace.id, projectId, [], input.referenceImageIds)
+    : { references: [] };
+  const referenceImages = snapshot.references.map((item) => {
+    if (!item.mime_type?.startsWith('image/') && !/\.(?:png|jpe?g|webp|gif)$/i.test(item.url ?? item.original_filename ?? '')) {
+      const error = new Error(`“${item.title}”不是可用的参考图片。`); error.statusCode = 400; throw error;
+    }
+    return item.storage_key ? path.join(config.uploadRoot, item.storage_key) : item.url;
+  }).filter(Boolean);
   const jobFolder = path.join(config.uploadRoot, workspace.id, createHash('sha256').update(projectId).digest('hex').slice(0, 20), 'generated', randomUUID());
   const startedAt = Date.now();
   try {
     await fs.mkdir(jobFolder, { recursive: true });
-    const args = ['image', 'generate', '--prompt', input.prompt, '--model', model, '--size', input.size, '--n', '1', '--out-dir', jobFolder, '--out-prefix', 'visual', '--output', 'json', '--quiet'];
+    const command = input.referenceImageIds.length ? 'edit' : 'generate';
+    const args = ['image', command, '--prompt', input.prompt, '--model', model, '--size', input.size, '--n', '1', '--out-dir', jobFolder, '--out-prefix', 'visual', '--output', 'json', '--quiet'];
+    for (const image of referenceImages) args.push('--image', image);
     if (input.negativePrompt) args.push('--negative-prompt', input.negativePrompt);
     await runBailianCli(args, apiKey, 180_000);
     const files = await fs.readdir(jobFolder, { withFileTypes: true });
@@ -872,17 +893,17 @@ app.post('/api/v1/creative/projects/:projectId/visual/generate', { preHandler: a
     const content = await fs.readFile(absolutePath);
     const reference = await projectMaterialStore.createReference(workspace.id, projectId, {
       sourceType: 'FILE', role: 'VISUAL', title: `AI 配图 · ${input.prompt.slice(0, 38)}`,
-      notes: `AI 生图｜模型：${model}｜比例：${input.size}`, scope: 'IMAGING', platforms: [input.platform],
+      notes: `AI 生图｜模型：${model}｜比例：${input.size}${referenceImages.length ? `｜参考图：${referenceImages.length} 张` : ''}`, scope: 'IMAGING', platforms: [input.platform],
       storageKey: path.relative(config.uploadRoot, absolutePath).split(path.sep).join('/'), originalFilename: image.name,
       mimeType: generatedImageMime(image.name), sizeBytes: content.length, sha256: createHash('sha256').update(content).digest('hex'),
     });
     await query(`INSERT INTO api_usage_logs (workspace_id, provider, model, operation, status, duration_ms)
-      VALUES ($1, 'BAILIAN_CLI', $2, 'TEXT_TO_IMAGE', 'SUCCESS', $3)`, [workspace.id, model, Date.now() - startedAt]);
+      VALUES ($1, 'BAILIAN_CLI', $2, $3, 'SUCCESS', $4)`, [workspace.id, model, operation, Date.now() - startedAt]);
     reply.code(201).send({ reference });
   } catch (error) {
     await fs.rm(jobFolder, { recursive: true, force: true }).catch(() => {});
     await query(`INSERT INTO api_usage_logs (workspace_id, provider, model, operation, status, duration_ms, error)
-      VALUES ($1, 'BAILIAN_CLI', $2, 'TEXT_TO_IMAGE', 'ERROR', $3, $4)`, [workspace.id, model, Date.now() - startedAt, (error instanceof Error ? error.message : '图片生成失败').slice(0, 2_000)]);
+      VALUES ($1, 'BAILIAN_CLI', $2, $3, 'ERROR', $4, $5)`, [workspace.id, model, operation, Date.now() - startedAt, (error instanceof Error ? error.message : '图片生成失败').slice(0, 2_000)]);
     throw error;
   }
 });
@@ -2076,6 +2097,7 @@ app.put('/api/v1/creative/projects/:projectId/visual', { preHandler: authenticat
   const input = z.object({
     platform: creativePlatform,
     planVersion: z.number().int().min(1).max(100),
+    styleProfile: z.object({ preset: visualStylePreset }).default({ preset: 'FRESH_EDITORIAL' }),
     coverReferenceId: z.string().uuid().nullable(),
     assetReferenceIds: z.array(z.string().uuid()).max(12),
     plan: z.array(visualPlanItemInput).max(10).default([]),
@@ -2129,6 +2151,7 @@ app.put('/api/v1/creative/projects/:projectId/visual', { preHandler: authenticat
           ...delivery,
           platforms: { ...delivery.platforms, [input.platform]: { ...currentPlatform, visual: {
             planVersion: input.planVersion,
+            styleProfile: input.styleProfile,
             coverReferenceId: input.coverReferenceId,
             assetReferenceIds: requested,
             assets: [...plannedAssets, ...unplannedAssets],

@@ -136,8 +136,19 @@ export interface CreativeVisualAsset {
 
 export type CreativeVisualPlanRole = 'COVER' | 'BODY' | 'CARD' | 'MAIN';
 export type CreativeVisualSize = '1:1' | '3:4' | '4:3' | '9:16' | '16:9';
-export type CreativeVisualType = 'NEWS_PHOTO' | 'CONCEPT_DIAGRAM' | 'SCENE' | 'DATA_CHART' | 'QUOTE_CARD' | 'INFO_CARD';
+export type CreativeVisualType = 'NEWS_PHOTO' | 'HERO_VISUAL' | 'CONCEPT_DIAGRAM' | 'SCENE' | 'MIND_MAP' | 'FLOWCHART' | 'TIMELINE' | 'COMPARISON' | 'DATA_CHART' | 'QUOTE_CARD' | 'INFO_CARD' | 'CHECKLIST_CARD';
 export type CreativeVisualGenerationMode = 'ILLUSTRATION' | 'INFOGRAPHIC';
+export type CreativeVisualStylePreset = 'FRESH_EDITORIAL' | 'RETRO_POP' | 'MINIMAL_KNOWLEDGE' | 'TECH_MEDIA' | 'DOCUMENTARY';
+export type CreativeVisualReferenceUse = 'COLOR' | 'COMPOSITION' | 'LAYOUT' | 'TEXTURE' | 'SUBJECT';
+
+export interface CreativeVisualStyleProfile {
+  preset: CreativeVisualStylePreset;
+}
+
+export interface CreativeVisualReference {
+  referenceId: string;
+  uses: CreativeVisualReferenceUse[];
+}
 
 export interface CreativeVisualPlanItem {
   id: string;
@@ -151,6 +162,11 @@ export interface CreativeVisualPlanItem {
   searchQueries: string[];
   generationMode: CreativeVisualGenerationMode;
   informationPoints: string[];
+  stylePreset: 'INHERIT' | CreativeVisualStylePreset;
+  templatePreset: string;
+  sourceExcerpt: string;
+  contentBlocks: { label: string; detail: string }[];
+  references: CreativeVisualReference[];
   prompt: string;
   negativePrompt: string;
   size: CreativeVisualSize;
@@ -159,6 +175,7 @@ export interface CreativeVisualPlanItem {
 
 export interface CreativeVisualDelivery {
   planVersion?: number;
+  styleProfile?: CreativeVisualStyleProfile;
   coverReferenceId: string | null;
   assetReferenceIds: string[];
   assets: CreativeVisualAsset[];
