@@ -10,7 +10,7 @@ const config = require('./config.cjs');
 const { query, transaction } = require('./db.cjs');
 const { encrypt, decrypt, hashPassword, verifyPassword } = require('./crypto.cjs');
 const { clipPublicLink, readPublicArticle } = require('./services/public-web.cjs');
-const { searchTavily } = require('./services/tavily.cjs');
+const { searchTavily, searchTavilyImages } = require('./services/tavily.cjs');
 const { listSources, createSources, updateSource, removeSource, listItems, refreshWorkspaceRss } = require('./services/intelligenceRepository.cjs');
 const { enqueue } = require('./queue.cjs');
 const { listAvailableSkills } = require('./agent/skillRegistry.cjs');
@@ -78,6 +78,18 @@ const visualGenerationInput = z.object({
   prompt: z.string().trim().min(4).max(2_000),
   size: z.enum(['1:1', '3:4', '4:3', '9:16', '16:9']).default('3:4'),
   negativePrompt: z.string().trim().max(1_000).optional(),
+});
+const visualPlanItemInput = z.object({
+  id: z.string().trim().min(1).max(100),
+  role: z.enum(['COVER', 'BODY', 'CARD', 'MAIN']),
+  title: z.string().trim().min(1).max(120),
+  placement: z.string().trim().min(1).max(200),
+  purpose: z.string().trim().min(1).max(500),
+  searchQueries: z.array(z.string().trim().min(2).max(120)).min(1).max(5),
+  prompt: z.string().trim().min(4).max(2_000),
+  negativePrompt: z.string().trim().max(1_000).default(''),
+  size: z.enum(['1:1', '3:4', '4:3', '9:16', '16:9']),
+  assetReferenceId: z.string().uuid().nullable(),
 });
 const createProjectInput = z.object({
   originType: z.enum(['MANUAL', 'DRAFT', 'IMPORT']).default('MANUAL'),
@@ -779,17 +791,16 @@ function plainMetadata(value, maxLength = 300) {
   return String(value ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, maxLength);
 }
 
-app.get('/api/v1/creative/image-search', { preHandler: authenticate }, async (request) => {
-  const input = z.object({ q: z.string().trim().min(2).max(120) }).parse(request.query);
+async function searchWikimediaImages(queryText) {
   const params = new URLSearchParams({
     action: 'query', format: 'json', formatversion: '2', generator: 'search', gsrnamespace: '6',
-    gsrsearch: input.q, gsrlimit: '12', prop: 'imageinfo', iiprop: 'url|extmetadata', iiurlwidth: '640', origin: '*',
+    gsrsearch: queryText, gsrlimit: '12', prop: 'imageinfo', iiprop: 'url|extmetadata', iiurlwidth: '640', origin: '*',
   });
   let response;
   try {
-    response = await fetch(`https://commons.wikimedia.org/w/api.php?${params}`, { signal: AbortSignal.timeout(15_000) });
+    response = await fetch(`https://commons.wikimedia.org/w/api.php?${params}`, { signal: AbortSignal.timeout(12_000) });
   } catch (error) {
-    throw new Error(`图片搜索服务暂时不可用：${error instanceof Error ? error.message : '网络错误'}`);
+    throw new Error(`开放图库连接失败（${error instanceof Error ? error.message : '网络错误'}）`);
   }
   if (!response.ok) throw new Error(`图片搜索服务返回 HTTP ${response.status}`);
   const payload = await response.json();
@@ -805,7 +816,26 @@ app.get('/api/v1/creative/image-search', { preHandler: authenticate }, async (re
       license, attribution,
     }];
   });
-  return { provider: 'Wikimedia Commons', results };
+  if (!results.length) throw new Error('开放图库没有匹配图片');
+  return results;
+}
+
+app.get('/api/v1/creative/image-search', { preHandler: authenticate }, async (request) => {
+  const input = z.object({ q: z.string().trim().min(2).max(120) }).parse(request.query);
+  const workspace = await currentWorkspace(request.user.sub);
+  const searches = [
+    searchTavilyImages(workspace.id, input.q).then((results) => {
+      if (!results.length) throw new Error('未配置 Tavily 或没有网页候选图');
+      return { provider: 'Tavily 图片搜索', results };
+    }),
+    searchWikimediaImages(input.q).then((results) => ({ provider: 'Wikimedia Commons', results })),
+  ];
+  try {
+    return await Promise.any(searches);
+  } catch (error) {
+    const messages = error instanceof AggregateError ? error.errors.map((item) => item instanceof Error ? item.message : String(item)) : [error instanceof Error ? error.message : '未知错误'];
+    throw new Error(`图片搜索暂时不可用：${messages.join('；')}。`);
+  }
 });
 
 function generatedImageMime(filename) {
@@ -2008,14 +2038,25 @@ function documentForPlatform(project, platform, visual, now) {
   const title = String(version?.title || project.title || '未命名内容').trim();
   const paragraphs = String(version?.body ?? '').split(/\n\s*\n|\r?\n/).map((item) => item.trim()).filter(Boolean);
   const assets = visual?.assets ?? [];
-  const assetBlocks = assets.map((asset) => asset.url
-    ? `<figure><img src="${escapeDeliveryHtml(asset.url)}" alt="${escapeDeliveryHtml(asset.title)}"/><figcaption>${escapeDeliveryHtml(asset.title)}</figcaption></figure>`
-    : `<p>【配图素材：${escapeDeliveryHtml(asset.title)}】</p>`).join('\n');
+  const coverAsset = assets.find((asset) => asset.role === 'COVER');
+  const bodyAssets = assets.filter((asset) => asset.referenceId !== coverAsset?.referenceId);
+  const assetBlock = (asset) => asset.url
+    ? `<figure data-placement="${escapeDeliveryHtml(asset.placement ?? '')}"><img src="${escapeDeliveryHtml(asset.url)}" alt="${escapeDeliveryHtml(asset.title)}"/><figcaption>${escapeDeliveryHtml(asset.title)}</figcaption></figure>`
+    : `<p>【配图素材：${escapeDeliveryHtml(asset.title)}】</p>`;
   if (platform === 'XIAOHONGSHU' || platform === 'WEIBO') {
-    const content = [`# ${title}`, ...paragraphs, ...assets.map((asset) => `【配图素材：${asset.title}】`)].join('\n\n');
+    const content = [`# ${title}`, ...(coverAsset ? [`【首图：${coverAsset.title}】`] : []), ...paragraphs, ...bodyAssets.map((asset) => `【${asset.placement || '配图'}：${asset.title}】`)].join('\n\n');
     return { platform, format: 'MARKDOWN', content, generatedAt: now };
   }
-  const content = `<article>\n<h1>${escapeDeliveryHtml(title)}</h1>\n${paragraphs.map((item) => `<p>${escapeDeliveryHtml(item)}</p>`).join('\n')}\n${assetBlocks}\n</article>`;
+  const interval = Math.max(1, Math.ceil(paragraphs.length / Math.max(1, bodyAssets.length)));
+  const articleBlocks = paragraphs.flatMap((item, index) => {
+    const blocks = [`<p>${escapeDeliveryHtml(item)}</p>`];
+    const asset = bodyAssets[Math.floor(index / interval)];
+    if (asset && (index + 1) % interval === 0) blocks.push(assetBlock(asset));
+    return blocks;
+  });
+  const used = new Set(bodyAssets.slice(0, Math.floor(paragraphs.length / interval)).map((asset) => asset.referenceId));
+  const remaining = bodyAssets.filter((asset) => !used.has(asset.referenceId)).map(assetBlock);
+  const content = `<article>\n<h1>${escapeDeliveryHtml(title)}</h1>\n${coverAsset ? assetBlock(coverAsset) : ''}\n${[...articleBlocks, ...remaining].join('\n')}\n</article>`;
   return { platform, format: 'HTML', content, generatedAt: now };
 }
 
@@ -2027,11 +2068,16 @@ app.get('/api/v1/creative/projects/:projectId/delivery', { preHandler: authentic
 
 app.put('/api/v1/creative/projects/:projectId/visual', { preHandler: authenticate }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
-  const input = z.object({ platform: creativePlatform, coverReferenceId: z.string().uuid().nullable(), assetReferenceIds: z.array(z.string().uuid()).max(12) }).parse(request.body);
+  const input = z.object({
+    platform: creativePlatform,
+    coverReferenceId: z.string().uuid().nullable(),
+    assetReferenceIds: z.array(z.string().uuid()).max(12),
+    plan: z.array(visualPlanItemInput).max(10).default([]),
+  }).parse(request.body);
   const workspace = await currentWorkspace(request.user.sub);
   return transaction(async (client) => {
     const listed = await projectMaterialStore.list(workspace.id, projectId);
-    const requested = [...new Set(input.assetReferenceIds)];
+    const requested = [...new Set([...input.assetReferenceIds, ...input.plan.map((item) => item.assetReferenceId).filter(Boolean)])];
     if (input.coverReferenceId && !requested.includes(input.coverReferenceId)) requested.unshift(input.coverReferenceId);
     const references = listed.references.filter((item) => requested.includes(item.id));
     if (references.length !== requested.length) { const error = new Error('存在不属于当前项目的素材。'); error.statusCode = 400; throw error; }
@@ -2044,6 +2090,24 @@ app.put('/api/v1/creative/projects/:projectId/visual', { preHandler: authenticat
       if (index < 0) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
       const current = state.projects[index];
       const delivery = deliveryOf(current); const currentPlatform = platformDelivery(delivery, input.platform);
+      const referenceById = new Map(references.map((item) => [item.id, item]));
+      const plannedAssets = input.plan.flatMap((item) => {
+        const reference = item.assetReferenceId ? referenceById.get(item.assetReferenceId) : null;
+        if (!reference) return [];
+        return [{
+          referenceId: reference.id,
+          title: reference.title,
+          role: item.role === 'COVER' || item.role === 'MAIN' ? 'COVER' : 'BODY',
+          url: reference.url ?? null,
+          planItemId: item.id,
+          placement: item.placement,
+          purpose: item.purpose,
+        }];
+      });
+      const plannedIds = new Set(plannedAssets.map((item) => item.referenceId));
+      const unplannedAssets = references.filter((item) => !plannedIds.has(item.id)).map((item) => ({
+        referenceId: item.id, title: item.title, role: item.id === input.coverReferenceId ? 'COVER' : 'BODY', url: item.url ?? null,
+      }));
       project = {
         ...current,
         delivery: {
@@ -2051,7 +2115,8 @@ app.put('/api/v1/creative/projects/:projectId/visual', { preHandler: authenticat
           platforms: { ...delivery.platforms, [input.platform]: { ...currentPlatform, visual: {
             coverReferenceId: input.coverReferenceId,
             assetReferenceIds: requested,
-            assets: references.map((item) => ({ referenceId: item.id, title: item.title, role: item.id === input.coverReferenceId ? 'COVER' : 'BODY', url: item.url ?? null })),
+            assets: [...plannedAssets, ...unplannedAssets],
+            plan: input.plan,
             updatedAt: now,
           } } },
         },

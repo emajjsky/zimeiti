@@ -129,6 +129,33 @@ export interface CreativeVisualAsset {
   title: string;
   role: 'COVER' | 'BODY';
   url?: string | null;
+  planItemId?: string;
+  placement?: string;
+  purpose?: string;
+}
+
+export type CreativeVisualPlanRole = 'COVER' | 'BODY' | 'CARD' | 'MAIN';
+export type CreativeVisualSize = '1:1' | '3:4' | '4:3' | '9:16' | '16:9';
+
+export interface CreativeVisualPlanItem {
+  id: string;
+  role: CreativeVisualPlanRole;
+  title: string;
+  placement: string;
+  purpose: string;
+  searchQueries: string[];
+  prompt: string;
+  negativePrompt: string;
+  size: CreativeVisualSize;
+  assetReferenceId: string | null;
+}
+
+export interface CreativeVisualDelivery {
+  coverReferenceId: string | null;
+  assetReferenceIds: string[];
+  assets: CreativeVisualAsset[];
+  plan?: CreativeVisualPlanItem[];
+  updatedAt: string;
 }
 
 export interface CreativeLayoutDocument {
@@ -142,7 +169,7 @@ export type CreativeDeliveryStage = 'COPY' | 'VISUAL' | 'LAYOUT' | 'REVIEW' | 'R
 
 export interface PlatformCreativeDelivery {
   stage: CreativeDeliveryStage;
-  visual: { coverReferenceId: string | null; assetReferenceIds: string[]; assets: CreativeVisualAsset[]; updatedAt: string } | null;
+  visual: CreativeVisualDelivery | null;
   layout?: CreativeLayoutDocument;
   review: { acknowledgedFactChecks: string[]; completedAt: string } | null;
 }

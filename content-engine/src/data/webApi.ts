@@ -1,6 +1,6 @@
 import type { LocalState } from './localRepository';
 import type { ApiUsageLog, ApiUsageSummary, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelTaskPolicy } from '../domain/integrations';
-import type { ContentProject, CreativeDelivery, IntelligenceAnalysis, Platform, ProjectOriginType, ProjectPlanning } from '../domain/content';
+import type { ContentProject, CreativeDelivery, CreativeVisualPlanItem, IntelligenceAnalysis, Platform, ProjectOriginType, ProjectPlanning } from '../domain/content';
 import type { AccountVoiceCalibrationDraft, AccountVoiceInput, AccountVoiceProfile, CreativeDraftCandidate, CreativeDraftPreparation, CreativeDraftRun, CreativeOutlineCandidate, CreativeOutlinePreparation, CreativeOutlineRun, CreativePlatform, CreativeSkillDefinition, ProjectAgentContext, ProjectAgentHistory, ProjectAgentPrepareInput, ProjectAgentPrepareResult, ProjectAgentRun, ProjectArtifact, ProjectInput, ProjectInputPayload, ProjectReference, ProjectReferenceMetadata, ProjectResearchContext, ProjectResearchRun, WritingBrief, WritingBriefInput } from '../domain/creative';
 
 const tokenKey = 'content-engine-web-session-v1';
@@ -118,7 +118,7 @@ export const webCreative = {
   enableProjectPlatform: (projectId: string, platform: CreativePlatform) => request<{ project: ContentProject; platform: CreativePlatform; created: boolean }>(`/creative/projects/${encodeURIComponent(projectId)}/platforms/${encodeURIComponent(platform)}`, { method: 'POST', body: '{}' }),
   completePlatformVersions: (projectId: string, platform: CreativePlatform) => request<{ project: ContentProject }>(`/creative/projects/${encodeURIComponent(projectId)}/platform-versions/complete`, { method: 'POST', body: JSON.stringify({ platform }) }),
   delivery: (projectId: string) => request<{ delivery: CreativeDelivery }>(`/creative/projects/${encodeURIComponent(projectId)}/delivery`),
-  saveVisual: (projectId: string, input: { platform: CreativePlatform; coverReferenceId: string | null; assetReferenceIds: string[] }) => request<{ project: ContentProject }>(`/creative/projects/${encodeURIComponent(projectId)}/visual`, { method: 'PUT', body: JSON.stringify(input) }),
+  saveVisual: (projectId: string, input: { platform: CreativePlatform; coverReferenceId: string | null; assetReferenceIds: string[]; plan: CreativeVisualPlanItem[] }) => request<{ project: ContentProject }>(`/creative/projects/${encodeURIComponent(projectId)}/visual`, { method: 'PUT', body: JSON.stringify(input) }),
   completeVisual: (projectId: string, platform: CreativePlatform) => request<{ project: ContentProject }>(`/creative/projects/${encodeURIComponent(projectId)}/visual/complete`, { method: 'POST', body: JSON.stringify({ platform }) }),
   generateLayout: (projectId: string, platform: CreativePlatform) => request<{ project: ContentProject; delivery: CreativeDelivery }>(`/creative/projects/${encodeURIComponent(projectId)}/layout/generate`, { method: 'POST', body: JSON.stringify({ platform }) }),
   completeLayout: (projectId: string, platform: CreativePlatform) => request<{ project: ContentProject }>(`/creative/projects/${encodeURIComponent(projectId)}/layout/complete`, { method: 'POST', body: JSON.stringify({ platform }) }),

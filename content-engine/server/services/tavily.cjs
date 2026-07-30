@@ -30,6 +30,50 @@ async function searchTavily(workspaceId, input) {
   });
 }
 
+async function searchTavilyImages(workspaceId, queryText) {
+  const row = await query('SELECT encrypted_secret FROM credential_vault WHERE workspace_id = $1 AND provider = $2', [workspaceId, 'TAVILY']);
+  if (!row.rowCount) return [];
+  const apiKey = decrypt(row.rows[0].encrypted_secret);
+  const normalized = typeof queryText === 'string' ? queryText.trim() : '';
+  if (normalized.length < 2 || normalized.length > 120) return [];
+  let response;
+  try {
+    response = await fetch('https://api.tavily.com/search', {
+      method: 'POST',
+      signal: AbortSignal.timeout(12_000),
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: normalized,
+        topic: 'general',
+        search_depth: 'basic',
+        max_results: 5,
+        include_images: true,
+        include_image_descriptions: true,
+      }),
+    });
+  } catch (error) {
+    throw new Error(`Tavily 图片搜索无法连接：${error instanceof Error ? error.message : '网络错误'}`);
+  }
+  if (response.status === 401) throw new Error('Tavily Key 无效或未开通图片搜索权限。');
+  if (response.status === 429) throw new Error('Tavily 图片搜索额度或频率已达上限。');
+  if (!response.ok) throw new Error(`Tavily 图片搜索返回 HTTP ${response.status}`);
+  const payload = await response.json();
+  return (Array.isArray(payload?.images) ? payload.images : []).flatMap((image, index) => {
+    const url = typeof image === 'string' ? image : String(image?.url ?? '');
+    if (!/^https?:\/\//i.test(url)) return [];
+    const description = typeof image === 'object' ? String(image?.description ?? '').trim() : '';
+    return [{
+      id: `tavily-${index}-${crypto.createHash('sha256').update(url).digest('hex').slice(0, 12)}`,
+      title: description || `网页候选图 ${index + 1}`,
+      thumbnailUrl: url,
+      imageUrl: url,
+      sourceUrl: url,
+      license: '使用前确认版权与授权',
+      attribution: 'Tavily 网页图片检索',
+    }];
+  }).slice(0, 12);
+}
+
 function tavilyResultToItem(result, input, id = crypto.randomUUID()) {
   const url = new URL(String(result?.url ?? ''));
   const title = String(result?.title ?? '').trim();
@@ -40,4 +84,4 @@ function tavilyResultToItem(result, input, id = crypto.randomUUID()) {
   return { id, title, summary, url: url.toString(), source: sourceName(url), category: classification.category, keywords: classification.keywords, publishedAt: result?.published_date || new Date().toISOString(), relevanceScore: Number.isFinite(relevanceScore) ? relevanceScore : undefined, heat: 0, trust: '待核验', captureMethod: 'SEARCH', language: /[\u3400-\u9fff]/.test(`${title} ${summary}`) ? 'zh' : 'en' };
 }
 
-module.exports = { searchTavily, tavilyResultToItem };
+module.exports = { searchTavily, searchTavilyImages, tavilyResultToItem };

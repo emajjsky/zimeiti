@@ -1,18 +1,25 @@
-import { Check, Image, LoaderCircle, Save, Search, Sparkles, Upload } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { Check, Image, LoaderCircle, RefreshCw, Save, Search, Sparkles, Trash2, Upload } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { webCreative } from '../../data/webApi';
-import { platformName, type ContentProject } from '../../domain/content';
+import { platformName, type ContentProject, type CreativeVisualPlanItem, type CreativeVisualSize } from '../../domain/content';
 import type { CreativePlatform, ProjectReference } from '../../domain/creative';
+import { buildVisualPlan, mergeVisualPlan } from '../../domain/visual-plan.mjs';
 
 type ImageSearchResult = { id: string; title: string; thumbnailUrl: string; imageUrl: string; sourceUrl: string; license: string; attribution: string };
-type ImageSize = '1:1' | '3:4' | '4:3' | '9:16' | '16:9';
+type SourceView = 'search' | 'generate' | 'library';
 
 function usableVisualReference(item: ProjectReference) {
   return item.role === 'VISUAL' || item.mimeType?.startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(item.url ?? '');
 }
 
-function defaultImageSize(platform: CreativePlatform): ImageSize {
-  return platform === 'XIAOHONGSHU' ? '3:4' : platform === 'WEIBO' ? '1:1' : '16:9';
+function visualPayload(platform: CreativePlatform, plan: CreativeVisualPlanItem[]) {
+  const assetReferenceIds = [...new Set(plan.map((item) => item.assetReferenceId).filter((id): id is string => Boolean(id)))];
+  const coverReferenceId = plan.find((item) => item.role === 'COVER' || item.role === 'MAIN')?.assetReferenceId ?? assetReferenceIds[0] ?? null;
+  return { platform, coverReferenceId, assetReferenceIds, plan };
+}
+
+function roleName(role: CreativeVisualPlanItem['role']) {
+  return ({ COVER: '封面', BODY: '正文图', CARD: '图文卡片', MAIN: '主图' } as const)[role];
 }
 
 export function VisualWorkspace({ project, activePlatform, onProjectChange, onOpenModelSettings }: {
@@ -22,24 +29,51 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
   onOpenModelSettings: () => void;
 }) {
   const currentDelivery = project.delivery?.platforms?.[activePlatform];
+  const version = project.versions.find((item) => item.platform === activePlatform);
+  const generatedPlan = useMemo(() => buildVisualPlan({
+    title: version?.title || project.title,
+    body: version?.body || '',
+    category: project.planning.category,
+    coreMessage: project.planning.coreMessage || project.coreViewpoint,
+  }, activePlatform), [activePlatform, project.coreViewpoint, project.planning.category, project.planning.coreMessage, project.title, version?.body, version?.title]);
+  const [plan, setPlan] = useState<CreativeVisualPlanItem[]>([]);
+  const [activeItemId, setActiveItemId] = useState('');
   const [references, setReferences] = useState<ProjectReference[]>([]);
-  const [selected, setSelected] = useState<string[]>(currentDelivery?.visual?.assetReferenceIds ?? []);
-  const [cover, setCover] = useState<string | null>(currentDelivery?.visual?.coverReferenceId ?? null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<'save' | 'complete' | null>(null);
+  const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
   const [error, setError] = useState('');
-  const [sourceView, setSourceView] = useState<'library' | 'search' | 'generate'>('library');
+  const [sourceView, setSourceView] = useState<SourceView>('search');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<ImageSearchResult[]>([]);
   const [searchBusy, setSearchBusy] = useState(false);
   const [importingId, setImportingId] = useState<string | null>(null);
-  const [imagePrompt, setImagePrompt] = useState('');
-  const [negativePrompt, setNegativePrompt] = useState('');
-  const [imageSize, setImageSize] = useState<ImageSize>(() => defaultImageSize(activePlatform));
   const [generateBusy, setGenerateBusy] = useState(false);
   const [fileUrls, setFileUrls] = useState<Record<string, string>>({});
+  const lastSavedSignature = useRef('');
+  const saveRevision = useRef(0);
+  const searchRevision = useRef(0);
+  const hydratedProjectKey = useRef('');
   const assets = useMemo(() => references.filter(usableVisualReference), [references]);
-  const hasCopy = project.versions.some((item) => item.platform === activePlatform && String(item.body ?? '').trim().length >= 80);
+  const activeItem = plan.find((item) => item.id === activeItemId) ?? plan[0];
+  const assignedAsset = activeItem?.assetReferenceId ? assets.find((item) => item.id === activeItem.assetReferenceId) : undefined;
+  const completedCount = plan.filter((item) => item.assetReferenceId).length;
+  const hasCopy = String(version?.body ?? '').trim().length >= 80;
+
+  useEffect(() => {
+    const next = mergeVisualPlan(generatedPlan, currentDelivery?.visual?.plan, currentDelivery?.visual?.assetReferenceIds ?? [], currentDelivery?.visual?.coverReferenceId ?? null);
+    const projectKey = `${project.id}:${activePlatform}`;
+    const switchedProject = hydratedProjectKey.current !== projectKey;
+    setPlan((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
+    setActiveItemId((current) => !switchedProject && next.some((item) => item.id === current) ? current : next[0]?.id ?? '');
+    if (switchedProject) {
+      setSearchQuery(next[0]?.searchQueries[0] ?? '');
+      setSearchResults([]);
+      setSourceView('search');
+    }
+    hydratedProjectKey.current = projectKey;
+    lastSavedSignature.current = currentDelivery?.visual?.plan?.length ? JSON.stringify(next) : '';
+  }, [activePlatform, currentDelivery?.visual?.updatedAt, generatedPlan, project.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -52,12 +86,6 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
   }, [project.id]);
 
   useEffect(() => {
-    setSelected(currentDelivery?.visual?.assetReferenceIds ?? []);
-    setCover(currentDelivery?.visual?.coverReferenceId ?? null);
-    setImageSize(defaultImageSize(activePlatform));
-  }, [activePlatform, currentDelivery?.visual?.assetReferenceIds, currentDelivery?.visual?.coverReferenceId]);
-
-  useEffect(() => {
     let cancelled = false;
     const localAssets = assets.filter((asset) => asset.sourceType === 'FILE' && !fileUrls[asset.id]);
     if (!localAssets.length) return;
@@ -67,50 +95,69 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
     })).then((items) => {
       if (cancelled) { items.forEach(([, url]) => URL.revokeObjectURL(url)); return; }
       setFileUrls((current) => ({ ...current, ...Object.fromEntries(items) }));
-    }).catch(() => { /* 素材卡保留为无预览状态，错误不阻塞选图。 */ });
+    }).catch(() => { /* 素材仍可绑定，预览失败不阻塞工作流。 */ });
     return () => { cancelled = true; };
   }, [assets, fileUrls]);
 
-  const addSelected = (reference: ProjectReference) => {
+  useEffect(() => {
+    if (!plan.length) return;
+    const signature = JSON.stringify(plan);
+    if (signature === lastSavedSignature.current) return;
+    const revision = ++saveRevision.current;
+    setSaveState('saving');
+    const timer = window.setTimeout(() => {
+      void webCreative.saveVisual(project.id, visualPayload(activePlatform, plan)).then((result) => {
+        if (revision !== saveRevision.current) return;
+        lastSavedSignature.current = signature;
+        setSaveState('saved');
+        onProjectChange(result.project);
+      }).catch((reason) => {
+        if (revision !== saveRevision.current) return;
+        setSaveState('error');
+        setError(reason instanceof Error ? reason.message : '配图方案自动保存失败。');
+      });
+    }, 650);
+    return () => window.clearTimeout(timer);
+  }, [activePlatform, onProjectChange, plan, project.id]);
+
+  const runSearch = async (query: string) => {
+    const normalized = query.trim();
+    if (normalized.length < 2) return;
+    const revision = ++searchRevision.current;
+    setSearchQuery(normalized);
+    setSearchBusy(true);
+    setError('');
+    try {
+      const result = await webCreative.searchImages(normalized);
+      if (revision === searchRevision.current) setSearchResults(result.results);
+    } catch (reason) {
+      if (revision === searchRevision.current) setError(reason instanceof Error ? reason.message : '搜索图片失败。');
+    } finally {
+      if (revision === searchRevision.current) setSearchBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (sourceView !== 'search' || !activeItem) return;
+    const query = activeItem.searchQueries[0] ?? '';
+    setSearchResults([]);
+    void runSearch(query);
+  }, [activeItem?.id, sourceView]);
+
+  const selectPlanItem = (item: CreativeVisualPlanItem) => {
+    setActiveItemId(item.id);
+    setSearchQuery(item.searchQueries[0] ?? '');
+    setSearchResults([]);
+  };
+
+  const updateActiveItem = (patch: Partial<CreativeVisualPlanItem>) => {
+    if (!activeItem) return;
+    setPlan((current) => current.map((item) => item.id === activeItem.id ? { ...item, ...patch } : item));
+  };
+
+  const assignAsset = (reference: ProjectReference) => {
     setReferences((current) => current.some((item) => item.id === reference.id) ? current : [reference, ...current]);
-    setSelected((current) => current.includes(reference.id) ? current : [...current, reference.id]);
-    setCover((current) => current ?? reference.id);
-  };
-
-  const toggle = (id: string) => {
-    setSelected((current) => {
-      const next = current.includes(id) ? current.filter((item) => item !== id) : [...current, id];
-      if (!next.includes(cover ?? '')) setCover(next[0] ?? null);
-      return next;
-    });
-  };
-
-  const save = async () => {
-    setBusy('save'); setError('');
-    try {
-      const result = await webCreative.saveVisual(project.id, { platform: activePlatform, coverReferenceId: selected.includes(cover ?? '') ? cover : selected[0] ?? null, assetReferenceIds: selected });
-      onProjectChange(result.project);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : '保存配图失败。'); }
-    finally { setBusy(null); }
-  };
-
-  const complete = async () => {
-    if (!hasCopy) { setError('先完成当前渠道正文，再确认配图进入排版。'); return; }
-    setBusy('complete'); setError('');
-    try {
-      const saved = await webCreative.saveVisual(project.id, { platform: activePlatform, coverReferenceId: selected.includes(cover ?? '') ? cover : selected[0] ?? null, assetReferenceIds: selected });
-      const result = await webCreative.completeVisual(project.id, activePlatform);
-      onProjectChange(result.project ?? saved.project);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : '确认配图失败。'); }
-    finally { setBusy(null); }
-  };
-
-  const search = async () => {
-    if (searchQuery.trim().length < 2) return;
-    setSearchBusy(true); setError('');
-    try { setSearchResults((await webCreative.searchImages(searchQuery.trim())).results); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : '搜索图片失败。'); }
-    finally { setSearchBusy(false); }
+    updateActiveItem({ assetReferenceId: reference.id });
   };
 
   const importResult = async (result: ImageSearchResult) => {
@@ -120,53 +167,123 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
         title: result.title, url: result.imageUrl, role: 'VISUAL', scope: 'IMAGING', platforms: [activePlatform],
         notes: `Wikimedia Commons｜许可：${result.license}｜署名：${result.attribution}｜来源：${result.sourceUrl}`,
       });
-      addSelected(reference); setSourceView('library');
+      assignAsset(reference);
     } catch (reason) { setError(reason instanceof Error ? reason.message : '导入图片失败。'); }
     finally { setImportingId(null); }
   };
 
   const generate = async () => {
-    if (imagePrompt.trim().length < 4) return;
+    if (!activeItem || activeItem.prompt.trim().length < 4) return;
     setGenerateBusy(true); setError('');
     try {
-      const { reference } = await webCreative.generateImage(project.id, { platform: activePlatform, prompt: imagePrompt.trim(), size: imageSize, negativePrompt: negativePrompt.trim() || undefined });
-      addSelected(reference); setImagePrompt(''); setNegativePrompt(''); setSourceView('library');
+      const { reference } = await webCreative.generateImage(project.id, {
+        platform: activePlatform, prompt: activeItem.prompt.trim(), size: activeItem.size,
+        negativePrompt: activeItem.negativePrompt.trim() || undefined,
+      });
+      assignAsset(reference);
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'AI 生图失败。'); }
     finally { setGenerateBusy(false); }
   };
 
+  const save = async () => {
+    setBusy('save'); setError('');
+    try {
+      const result = await webCreative.saveVisual(project.id, visualPayload(activePlatform, plan));
+      lastSavedSignature.current = JSON.stringify(plan);
+      setSaveState('saved');
+      onProjectChange(result.project);
+    } catch (reason) { setSaveState('error'); setError(reason instanceof Error ? reason.message : '保存配图方案失败。'); }
+    finally { setBusy(null); }
+  };
+
+  const complete = async () => {
+    if (!hasCopy) { setError('请先完成当前渠道正文，再确认配图进入排版。'); return; }
+    setBusy('complete'); setError('');
+    try {
+      await webCreative.saveVisual(project.id, visualPayload(activePlatform, plan));
+      const result = await webCreative.completeVisual(project.id, activePlatform);
+      lastSavedSignature.current = JSON.stringify(plan);
+      onProjectChange(result.project);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : '确认配图失败。'); }
+    finally { setBusy(null); }
+  };
+
+  const regenerate = () => {
+    const next = generatedPlan.map((item, index) => ({ ...item, assetReferenceId: plan[index]?.assetReferenceId ?? null }));
+    setPlan(next);
+    setActiveItemId(next[0]?.id ?? '');
+    setSearchQuery(next[0]?.searchQueries[0] ?? '');
+    setSearchResults([]);
+  };
+
+  const assetSrc = (asset: ProjectReference | undefined) => asset?.url ?? (asset ? fileUrls[asset.id] : undefined);
+
   return <section className="visual-workspace">
-    <header className="delivery-workspace-head">
-      <div><h2>{activePlatform === 'XIAOHONGSHU' ? '图文卡片素材' : `${platformName[activePlatform]}配图`}</h2><p>{hasCopy ? '选图后可确认进入排版，仍可随时返回正文修改。' : '正文还未完成，也可以先准备并保存配图。'}</p></div>
-      <button className="button" type="button" onClick={() => setSourceView('library')}><Upload size={16}/>项目素材</button>
+    <header className="delivery-workspace-head visual-workspace-head">
+      <div><h2>{platformName[activePlatform]}配图</h2><p>已规划 {plan.length} 张，完成 {completedCount} 张</p></div>
+      <button className="button" type="button" onClick={regenerate}><RefreshCw size={15}/>重新规划</button>
     </header>
     {error && <div className="delivery-error" role="alert">{error}</div>}
-    <nav className="visual-source-tabs" aria-label="配图获取方式">
-      <button type="button" className={sourceView === 'library' ? 'active' : ''} onClick={() => setSourceView('library')}><Image size={15}/>项目素材</button>
-      <button type="button" className={sourceView === 'search' ? 'active' : ''} onClick={() => setSourceView('search')}><Search size={15}/>搜图</button>
-      <button type="button" className={sourceView === 'generate' ? 'active' : ''} onClick={() => setSourceView('generate')}><Sparkles size={15}/>AI 生图</button>
-    </nav>
-    {sourceView === 'search' && <section className="visual-search-workspace">
-      <form className="visual-search-form" onSubmit={(event) => { event.preventDefault(); void search(); }}><input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="输入要找的画面，例如：城市夜景、古籍书页"/><button className="button primary" type="submit" disabled={searchBusy || searchQuery.trim().length < 2}>{searchBusy ? <LoaderCircle size={16}/> : <Search size={16}/>}搜索</button></form>
-      {searchResults.length > 0 && <div className="visual-search-grid">{searchResults.map((result) => <article className="visual-search-card" key={result.id}><img src={result.thumbnailUrl} alt=""/><div><b>{result.title}</b><small>{result.license}</small></div><footer><a href={result.sourceUrl} target="_blank" rel="noreferrer">来源</a><button className="button" type="button" disabled={importingId !== null} onClick={() => void importResult(result)}>{importingId === result.id ? <LoaderCircle size={15}/> : <Check size={15}/>}选用</button></footer></article>)}</div>}
-    </section>}
-    {sourceView === 'generate' && <section className="visual-generate-workspace">
-      <label className="visual-prompt-field"><span>画面描述</span><textarea value={imagePrompt} onChange={(event) => setImagePrompt(event.target.value)} placeholder="描述主体、场景、风格和需要留白的位置"/></label>
-      <div className="visual-generate-controls"><label><span>比例</span><select value={imageSize} onChange={(event) => setImageSize(event.target.value as ImageSize)}><option value="1:1">1:1 方图</option><option value="3:4">3:4 竖图</option><option value="4:3">4:3 横图</option><option value="9:16">9:16 竖版</option><option value="16:9">16:9 横版</option></select></label><label><span>避免出现</span><input value={negativePrompt} onChange={(event) => setNegativePrompt(event.target.value)} placeholder="可选"/></label><button className="button primary" type="button" disabled={generateBusy || imagePrompt.trim().length < 4} onClick={() => void generate()}>{generateBusy ? <LoaderCircle size={16}/> : <Sparkles size={16}/>}生成图片</button></div>
-      <button className="text-button visual-model-link" type="button" onClick={onOpenModelSettings}>文生图模型设置</button>
-    </section>}
-    {sourceView === 'library' && (loading ? <div className="delivery-loading"><LoaderCircle size={18}/>读取素材</div> : assets.length ? <div className="visual-asset-grid">
-      {assets.map((asset) => {
-        const checked = selected.includes(asset.id); const isCover = cover === asset.id && checked;
-        const src = asset.url ?? fileUrls[asset.id];
-        return <article className={`visual-asset-card${checked ? ' selected' : ''}`} key={asset.id}>
-          <button className="visual-asset-main" type="button" onClick={() => toggle(asset.id)} aria-pressed={checked}>
-            {src ? <img src={src} alt=""/> : <span className="visual-asset-icon"><Image size={22}/></span>}<span><b>{asset.title}</b><small>{asset.sourceType === 'FILE' ? '项目图片' : '网络图片'}</small></span>
-          </button>
-          {checked && <button className={`visual-cover-toggle${isCover ? ' active' : ''}`} type="button" onClick={() => setCover(asset.id)}>{isCover ? <><Check size={14}/>封面</> : '设为封面'}</button>}
-        </article>;
-      })}
-    </div> : <section className="delivery-empty"><Image size={24}/><b>还没有可用图片</b><p>可搜索公开许可图片，或直接生成项目配图。</p></section>)}
-    <footer className="delivery-workspace-footer"><span>{selected.length ? `已选 ${selected.length} 张${cover ? '，已设封面' : ''}` : '可先保存为空，之后再补图'}</span><div><button className="button" type="button" disabled={busy !== null} onClick={() => void save()}>{busy === 'save' ? <LoaderCircle size={16}/> : <Save size={16}/>}保存</button><button className="button primary" type="button" disabled={busy !== null || !hasCopy} onClick={() => void complete()}>{busy === 'complete' ? <LoaderCircle size={16}/> : null}确认素材，进入排版</button></div></footer>
+
+    <div className="visual-plan-layout">
+      <aside className="visual-plan-panel">
+        <header><b>配图方案</b><span>{saveState === 'saving' ? '自动保存中' : saveState === 'error' ? '保存失败' : '已自动保存'}</span></header>
+        <div className="visual-plan-list">{plan.map((item, index) => {
+          const asset = item.assetReferenceId ? assets.find((candidate) => candidate.id === item.assetReferenceId) : undefined;
+          const src = assetSrc(asset);
+          return <button type="button" className={`visual-plan-item${item.id === activeItem?.id ? ' active' : ''}`} key={item.id} onClick={() => selectPlanItem(item)}>
+            <span className="visual-plan-number">{String(index + 1).padStart(2, '0')}</span>
+            <span className="visual-plan-thumb">{src ? <img src={src} alt=""/> : <Image size={18}/>}</span>
+            <span className="visual-plan-copy"><b>{item.title}</b><small>{item.placement}</small></span>
+            <span className={`visual-plan-state${item.assetReferenceId ? ' done' : ''}`}>{item.assetReferenceId ? '已选图' : '待配图'}</span>
+          </button>;
+        })}</div>
+      </aside>
+
+      {activeItem && <main className="visual-task-panel">
+        <header className="visual-task-head">
+          <div><span>{roleName(activeItem.role)} · {activeItem.placement}</span><h3>{activeItem.title}</h3><p>{activeItem.purpose}</p></div>
+          {assignedAsset && <div className="visual-assigned-asset">{assetSrc(assignedAsset) ? <img src={assetSrc(assignedAsset)} alt=""/> : <Image size={18}/>}<span><b>已绑定</b><small>{assignedAsset.title}</small></span><button type="button" title="移除当前配图" onClick={() => updateActiveItem({ assetReferenceId: null })}><Trash2 size={15}/></button></div>}
+        </header>
+
+        <nav className="visual-source-tabs" aria-label="当前配图获取方式">
+          <button type="button" className={sourceView === 'search' ? 'active' : ''} onClick={() => setSourceView('search')}><Search size={15}/>搜图</button>
+          <button type="button" className={sourceView === 'generate' ? 'active' : ''} onClick={() => setSourceView('generate')}><Sparkles size={15}/>AI 生图</button>
+          <button type="button" className={sourceView === 'library' ? 'active' : ''} onClick={() => setSourceView('library')}><Upload size={15}/>项目素材</button>
+        </nav>
+
+        {sourceView === 'search' && <section className="visual-source-workspace">
+          <div className="visual-query-chips">{activeItem.searchQueries.map((query) => <button type="button" className={query === searchQuery ? 'active' : ''} key={query} onClick={() => void runSearch(query)}>{query}</button>)}</div>
+          <form className="visual-search-form" onSubmit={(event) => { event.preventDefault(); void runSearch(searchQuery); }}>
+            <label><span>搜索词</span><input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} /></label>
+            <button className="button primary" type="submit" disabled={searchBusy || searchQuery.trim().length < 2}>{searchBusy ? <LoaderCircle size={16}/> : <Search size={16}/>}搜索</button>
+          </form>
+          {searchBusy && !searchResults.length && <div className="visual-result-state"><LoaderCircle size={18}/>正在搜索公开许可图片</div>}
+          {!searchBusy && searchResults.length === 0 && !error && <div className="visual-result-state">当前关键词没有结果，可切换上方关键词</div>}
+          {searchResults.length > 0 && <div className="visual-search-grid">{searchResults.map((result) => <article className="visual-search-card" key={result.id}>
+            <img src={result.thumbnailUrl} alt=""/><div><b>{result.title}</b><small>{result.license}</small></div>
+            <footer><a href={result.sourceUrl} target="_blank" rel="noreferrer">查看来源</a><button className="button" type="button" disabled={importingId !== null} onClick={() => void importResult(result)}>{importingId === result.id ? <LoaderCircle size={15}/> : <Check size={15}/>}用于此处</button></footer>
+          </article>)}</div>}
+        </section>}
+
+        {sourceView === 'generate' && <section className="visual-source-workspace visual-generate-workspace">
+          <label className="visual-prompt-field"><span>生图提示词</span><textarea value={activeItem.prompt} onChange={(event) => updateActiveItem({ prompt: event.target.value })}/></label>
+          <div className="visual-generate-controls">
+            <label><span>推荐比例</span><select value={activeItem.size} onChange={(event) => updateActiveItem({ size: event.target.value as CreativeVisualSize })}><option value="1:1">1:1 方图</option><option value="3:4">3:4 竖图</option><option value="4:3">4:3 横图</option><option value="9:16">9:16 竖版</option><option value="16:9">16:9 横版</option></select></label>
+            <button className="button primary" type="button" disabled={generateBusy || activeItem.prompt.trim().length < 4} onClick={() => void generate()}>{generateBusy ? <LoaderCircle size={16}/> : <Sparkles size={16}/>}生成这一张</button>
+          </div>
+          <button className="text-button visual-model-link" type="button" onClick={onOpenModelSettings}>文生图模型设置</button>
+        </section>}
+
+        {sourceView === 'library' && <section className="visual-source-workspace">
+          {loading ? <div className="visual-result-state"><LoaderCircle size={18}/>读取项目素材</div> : assets.length ? <div className="visual-library-grid">{assets.map((asset) => {
+            const src = assetSrc(asset); const checked = activeItem.assetReferenceId === asset.id;
+            return <article className={`visual-library-card${checked ? ' selected' : ''}`} key={asset.id}>{src ? <img src={src} alt=""/> : <span><Image size={20}/></span>}<div><b>{asset.title}</b><small>{asset.sourceType === 'FILE' ? '项目文件' : '网络图片'}</small></div><button className="button" type="button" onClick={() => assignAsset(asset)}>{checked ? <><Check size={14}/>已用于此处</> : '用于此处'}</button></article>;
+          })}</div> : <div className="visual-result-state"><Image size={20}/>还没有图片素材</div>}
+        </section>}
+      </main>}
+    </div>
+
+    <footer className="delivery-workspace-footer"><span>{saveState === 'saving' ? '正在自动保存配图方案' : completedCount ? `已完成 ${completedCount}/${plan.length} 张配图` : '方案已生成，可从第一张开始选图'}</span><div><button className="button" type="button" disabled={busy !== null} onClick={() => void save()}>{busy === 'save' ? <LoaderCircle size={16}/> : <Save size={16}/>}保存</button><button className="button primary" type="button" disabled={busy !== null || !hasCopy} onClick={() => void complete()}>{busy === 'complete' ? <LoaderCircle size={16}/> : null}确认素材，进入排版</button></div></footer>
   </section>;
 }
