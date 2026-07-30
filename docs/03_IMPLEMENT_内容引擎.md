@@ -1,5 +1,13 @@
 # 内容引擎技术实施方案
 
+## 2026-07-30 实现：WritingBrief 平台恢复
+
+- 新增 `src/domain/writing-brief-platforms.mjs`，集中实现图文平台过滤、去重与恢复优先级。对应 `.d.mts` 为 React/TypeScript 提供明确契约，Node 单测直接执行真实领域函数。
+- `CreateWorkspace.tsx` 在 `planning` 阶段不请求或创建 Brief；进入创作后，已有空 Brief 从项目版本或规划目标恢复，无 Brief 则使用同一平台规则生成默认值。
+- 默认账号声音自动绑定与手工/自动保存都先执行平台规范化，并通过 `platformSkillDefaults()` 补齐渠道规则和目标篇幅。保存入口不再以空平台直接返回。
+- 新增 `server/services/http-errors.cjs`。Fastify 全局错误处理器识别 `ZodError` 并返回稳定中文信息，普通业务错误仍保留原提示。
+- 测试包含初始化阶段与平台恢复 5 项、HTTP 错误收敛 2 项，并使用真实数据库项目验证 Brief 自动写入四个平台、刷新恢复及浏览器零控制台错误。
+
 ## 2026-07-30 实现：视觉导演 v4
 
 - `visual-plan.mjs` 将 `VISUAL_PLAN_VERSION` 升级为 4，新增 `visualStylePresets()`、`visualTemplatesFor()` 和 `updateVisualPlanItem()`。视觉类型、模板、风格、结构内容或参考图变化时统一重编译提示词，避免前端拼接业务字符串。

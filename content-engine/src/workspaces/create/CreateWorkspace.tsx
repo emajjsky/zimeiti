@@ -5,6 +5,7 @@ import { webAccountVoices, webCreative } from '../../data/webApi';
 import { canOpenCreateStage, creativeStages, stageRouteForProjectStage } from '../../domain/creative-flow.mjs';
 import { projectStageName, type ContentProject, type ContentVersion, type Platform } from '../../domain/content';
 import type { AccountVoiceProfile, CreativePlatform, CreativePlatformSkillMap, CreativeSkillDefinition, CreativeSkillDimension, CreativeSkillSelection, WritingBriefInput } from '../../domain/creative';
+import { resolveWritingBriefPlatforms, shouldInitializeWritingBrief } from '../../domain/writing-brief-platforms.mjs';
 import { CopyWorkspace } from './CopyWorkspace';
 import { LayoutWorkspace } from './LayoutWorkspace';
 import { PlanningWorkspace } from './PlanningWorkspace';
@@ -62,7 +63,12 @@ function platformSkillDefaults(platforms: Platform[], skills: CreativeSkillDefin
 
 function defaultBrief(project: ContentProject, skills: CreativeSkillDefinition[], accountVoiceProfileId = ''): WritingBriefInput {
   const contentVersions = project.versions.filter((version): version is ContentVersion & { platform: CreativePlatform } => version.platform !== 'VIDEO_CHANNEL');
-  const primaryPlatform = contentVersions[0]?.platform ?? 'WECHAT';
+  const selectedPlatforms = resolveWritingBriefPlatforms({
+    selectedPlatforms: [],
+    versionPlatforms: contentVersions.map((version) => version.platform),
+    plannedPlatforms: project.planning.targetPlatforms,
+  });
+  const primaryPlatform = selectedPlatforms[0];
   const lengthTarget = primaryPlatform === 'XIAOHONGSHU' ? '6-8 页图文' : primaryPlatform === 'WEIBO' ? '300-1000 字或 3-8 条串文' : primaryPlatform === 'ZHIHU' ? '1500-3000 字' : '1500-2500 字';
   return {
     objective: project.planning.objective || `围绕“${project.title}”形成一篇可发布的内容`,
@@ -70,7 +76,7 @@ function defaultBrief(project: ContentProject, skills: CreativeSkillDefinition[]
     coreMessage: project.planning.coreMessage || project.coreViewpoint,
     sourceRequirements: project.planning.sourceRequirements || project.factChecks.join('；'),
     lengthTarget,
-    selectedPlatforms: contentVersions.map((version) => version.platform),
+    selectedPlatforms,
     notes: project.planning.constraints,
     selectedSkills: {
       ...emptySelection,
@@ -78,7 +84,7 @@ function defaultBrief(project: ContentProject, skills: CreativeSkillDefinition[]
       CONTENT_TYPE: firstVersion(skills, 'CONTENT_TYPE', 'education'),
       VOICE: '',
     },
-    platformSkills: platformSkillDefaults(contentVersions.map((version) => version.platform), skills),
+    platformSkills: platformSkillDefaults(selectedPlatforms, skills),
     accountVoiceProfileId,
     voiceOffset: 'DEFAULT',
   };
@@ -115,7 +121,7 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
   }, [onStage, project?.stage, stage]);
 
   useEffect(() => {
-    if (!project) return;
+    if (!project || !shouldInitializeWritingBrief(stage)) return;
     let cancelled = false;
     setBrief(null);
     setBriefState('loading');
@@ -125,17 +131,23 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
       setSkills(catalog);
       setAccountVoices(accountVoices.voices);
       const defaultVoiceId = accountVoices.voices.find((voice) => voice.isDefault)?.id ?? '';
-      if (result.brief && !result.brief.accountVoiceProfileId && defaultVoiceId) {
+      const recoveredPlatforms = resolveWritingBriefPlatforms({
+        selectedPlatforms: result.brief?.selectedPlatforms,
+        versionPlatforms: project.versions.map((version) => version.platform),
+        plannedPlatforms: project.planning.targetPlatforms,
+        activePlatform,
+      });
+      if (result.brief && (result.brief.selectedPlatforms.length === 0 || (!result.brief.accountVoiceProfileId && defaultVoiceId))) {
         result.brief = (await webCreative.saveBrief(project.id, {
           objective: result.brief.objective,
           targetAudience: result.brief.targetAudience,
           coreMessage: result.brief.coreMessage,
           sourceRequirements: result.brief.sourceRequirements,
           lengthTarget: result.brief.lengthTarget,
-          selectedPlatforms: result.brief.selectedPlatforms,
+          selectedPlatforms: recoveredPlatforms,
           notes: result.brief.notes,
           selectedSkills: result.brief.selectedSkills,
-          platformSkills: platformSkillDefaults(result.brief.selectedPlatforms, catalog, result.brief.platformSkills),
+          platformSkills: platformSkillDefaults(recoveredPlatforms, catalog, result.brief.platformSkills),
           accountVoiceProfileId: defaultVoiceId,
           voiceOffset: result.brief.voiceOffset ?? 'DEFAULT',
         })).brief;
@@ -183,7 +195,7 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
       }
     });
     return () => { cancelled = true; };
-  }, [project?.id]);
+  }, [project?.id, stage]);
 
   useEffect(() => {
     if (contentVersions.length && !contentVersions.some((version) => version.platform === activePlatform)) onPlatform(contentVersions[0].platform);
@@ -194,12 +206,23 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
   }, [copyPlatform, currentChannelDelivery?.stage, project?.id]);
 
   const saveBrief = async (next: WritingBriefInput = brief as WritingBriefInput) => {
-    if (!project || !next || next.selectedPlatforms.length === 0) return;
-    setBrief(next);
+    if (!project || !next) return;
+    const selectedPlatforms = resolveWritingBriefPlatforms({
+      selectedPlatforms: next.selectedPlatforms,
+      versionPlatforms: project.versions.map((version) => version.platform),
+      plannedPlatforms: project.planning.targetPlatforms,
+      activePlatform,
+    });
+    const normalized = {
+      ...next,
+      selectedPlatforms,
+      platformSkills: platformSkillDefaults(selectedPlatforms, skills, next.platformSkills),
+    };
+    setBrief(normalized);
     setBriefState('saving');
     setBriefError('');
     try {
-      const result = await webCreative.saveBrief(project.id, next);
+      const result = await webCreative.saveBrief(project.id, normalized);
       setBrief({
         objective: result.brief.objective,
         targetAudience: result.brief.targetAudience,
