@@ -735,3 +735,9 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - 候选弹窗统一将审稿问题和 `factsToVerify` 去重为折叠的 `发布前核验` 区块，默认只展示待处理数量。
 - `candidate-copy-preview` 使用固定的最小阅读高度与内部滚动；完整文稿和段落差异分别在各自阅读面板内滚动。
 - 候选采用动作统一命名为“采用到正文”，避免误解为已通过发布审核。
+
+## 2026-07-30 Fix: separate project and candidate fact checks
+
+- Worker 不再把 `project.factChecks`、当前版本和内容母版的历史核验项并入 `output.factsToVerify`；候选版本仅持久化模型输出及受控继承的直接关联项。
+- 候选采用接口不再从任务快照重新回填三类历史核验项，只将 `candidate.facts_to_verify_json` 合并入现有项目核验池。
+- 文案提示词明确要求 `factsToVerify` 仅列本稿直接涉及的待核验事实，禁止回填无关历史项。

@@ -52,6 +52,9 @@ test('文案工作区支持启用缺失平台、正文选区和明确采用候�
   assert.match(api, /enableProjectPlatform/);
   assert.match(api, /rejectArtifact/);
   assert.match(server, /project-artifacts\/:id\/reject/);
+  const accept = server.slice(server.indexOf("app.post('/api/v1/creative/project-artifacts/:id/accept'"), server.indexOf("app.post('/api/v1/creative/project-artifacts/:id/reject'"));
+  assert.match(accept, /const candidateFacts = mergeFactsToVerify\(candidate\.facts_to_verify_json \?\? \[\]\)/);
+  assert.doesNotMatch(accept, /candidate\.source_snapshot_json\?\.project\?\.factChecks/);
 });
 
 test('文案工作区样式在桌面和移动端保持无横向溢出布局', () => {

@@ -1764,12 +1764,8 @@ app.post('/api/v1/creative/project-artifacts/:id/accept', { preHandler: authenti
         JOIN project_artifacts a ON a.id = m.artifact_id AND a.status = 'ACCEPTED'
         WHERE m.workspace_id = $1 AND m.project_id = $2 ORDER BY m.version_number DESC LIMIT 1`, [workspace.id, candidate.project_id]);
       let master = latestMaster.rows[0];
-      const candidateFacts = mergeFactsToVerify(
-        candidate.source_snapshot_json?.project?.factChecks ?? [],
-        candidate.source_snapshot_json?.currentContent?.factsToVerify ?? [],
-        candidate.source_snapshot_json?.contentMaster?.factsToVerify ?? [],
-        candidate.facts_to_verify_json ?? [],
-      );
+      // 项目核验池已在快照中保留；采用候选时仅追加候选正文直接关联的项。
+      const candidateFacts = mergeFactsToVerify(candidate.facts_to_verify_json ?? []);
       if (!master) {
         const masterArtifact = await projectAgentStore.createArtifact(client, {
           workspaceId: workspace.id,

@@ -287,7 +287,7 @@ function buildCopyPrompt(snapshot) {
     '研究上下文中的 verifiedFacts 是唯一可以作为已确认客观事实写入正文的研究结论；cautions 不能改写成确定事实。修改已有正文时，只有系统列出的原稿已有主张可原样保留为待核验内容。',
     '不得写入未出现在 verifiedFacts 中的具体日期、单位、人数、引语、会议或产品能力。factsToVerify 与 cautions 中的内容不能被包装为确定事实。没有 verifiedFacts 时，只能依据用户材料、当前正文或观点方法写作，禁止补充伪具体事实。',
     ...(cautionBoundaryRule ? [cautionBoundaryRule] : []),
-    '必须保留所有尚未核验的 factsToVerify；不得删掉、弱化或改写为已确认事实。',
+    'factsToVerify 只列本次候选正文仍直接涉及的待核验事实；不得回填项目历史核验池中的无关条目。保留的待核验事实不得被删掉、弱化或改写为已确认事实。',
     ...platformQualityRules,
     '输出前自行检查：标题与正文是否仍服务项目主题；是否有无法追溯的具体事实；是否存在空泛套话、Markdown 标记或把解释性内容写成通稿。发现任一问题就重写后再输出。',
     '只返回 JSON，不要 Markdown 代码围栏、过程说明或额外字段。',

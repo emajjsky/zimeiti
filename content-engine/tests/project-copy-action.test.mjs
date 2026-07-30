@@ -272,6 +272,8 @@ test('Project Agent Worker 始终创建候选产物，质量风险仅随候选�
   assert.match(execute, /platform_content_versions/);
   assert.match(execute, /buildCopyQualityReviewPrompt/);
   assert.match(execute, /candidateQualityReview\(review\)/);
+  assert.match(execute, /candidateFactsToVerify/);
+  assert.doesNotMatch(execute, /snapshot\.project\?\.factChecks[\s\S]*output\.factsToVerify/);
   assert.doesNotMatch(execute, /review\.approved\) throw new Error/);
   assert.doesNotMatch(execute, /workspace_snapshots/);
 });

@@ -730,12 +730,9 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
       qualityReview = candidateQualityReview(review);
       output.qualityReview = qualityReview;
     }
-    output.factsToVerify = mergeFactsToVerify(
-      snapshot.project?.factChecks ?? [],
-      snapshot.currentContent?.factsToVerify ?? [],
-      snapshot.contentMaster?.factsToVerify ?? [],
-      output.factsToVerify ?? [],
-    );
+    // 项目历史核验池不属于本次候选，候选版本只保存正文直接涉及的核验项。
+    const candidateFactsToVerify = mergeFactsToVerify(output.factsToVerify ?? []);
+    output.factsToVerify = candidateFactsToVerify;
     const saved = await transaction(async (client) => {
       await client.query("UPDATE generation_runs SET status = 'SUCCEEDED', output_json = $2, usage_json = $3, completed_at = now() WHERE id = $1", [runId, JSON.stringify(output), JSON.stringify({ inputTokens, outputTokens })]);
       const isOutline = isOutlineAction;
