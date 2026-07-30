@@ -155,9 +155,7 @@ test('创作主流程不再把视频列为必经步骤', () => {
     creativeStages.map(({ id, label }) => ({ id, label })),
     [
       { id: 'planning', label: '规划' },
-      { id: 'research', label: '研究' },
-      { id: 'master', label: '正文' },
-      { id: 'platform', label: '平台版本' },
+      { id: 'master', label: '创作' },
       { id: 'visual', label: '配图' },
       { id: 'layout', label: '排版' },
       { id: 'review', label: '审核' },

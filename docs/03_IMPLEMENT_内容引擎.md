@@ -741,3 +741,10 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - Worker 不再把 `project.factChecks`、当前版本和内容母版的历史核验项并入 `output.factsToVerify`；候选版本仅持久化模型输出及受控继承的直接关联项。
 - 候选采用接口不再从任务快照重新回填三类历史核验项，只将 `candidate.facts_to_verify_json` 合并入现有项目核验池。
 - 文案提示词明确要求 `factsToVerify` 仅列本稿直接涉及的待核验事实，禁止回填无关历史项。
+
+## 2026-07-30 实现收口：研究按需，创作页合并
+
+- `creativeStages` 仅渲染 `planning`、`master`、`visual`、`layout`、`review` 五个用户步骤；`research` 和旧 `platform` 路由仅保留兼容与按需入口。
+- `PLATFORM_ADAPTATION` 项目状态映射回 `master`。旧 `stage=platform` 地址自动回到创作页，避免刷新后进入重复页面。
+- `CopyWorkspace` 顶部新增“补充研究”入口，并在 `PLATFORM_ADAPTATION` 状态内联渲染确认操作，调用已有 `completePlatformVersions()` 后进入配图。
+- 主稿与平台版本继续分开持久化，前端只通过同一编辑器的平台切换展示，因此不会丢失公众号、小红书、知乎和微博的渠道规则差异。

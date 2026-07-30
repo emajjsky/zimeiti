@@ -80,3 +80,14 @@ test('创作流程将用户输入收敛为自动保存的最小界面', () => {
   assert.match(copy, /setTimeout\(.*700/s);
   assert.match(copy, /正在保存创作设定/);
 });
+
+test('主稿与渠道版本收敛在同一个创作页面，研究和渠道适配均为按需操作', () => {
+  const workspace = fs.readFileSync(new URL('../src/workspaces/create/CreateWorkspace.tsx', import.meta.url), 'utf8');
+  const copy = fs.readFileSync(new URL('../src/workspaces/create/CopyWorkspace.tsx', import.meta.url), 'utf8');
+  assert.match(workspace, /onStage\('master'\)/);
+  assert.match(workspace, /stage === 'platform'.*onStage\('master'\)/s);
+  assert.doesNotMatch(workspace, /platform-versions-workspace/);
+  assert.match(copy, /补充研究/);
+  assert.match(copy, /渠道适配/);
+  assert.match(copy, /确认创作，进入配图/);
+});

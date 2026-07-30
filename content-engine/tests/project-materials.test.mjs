@@ -63,12 +63,15 @@ test('项目资料 API 提供完整 CRUD、鉴权下载和 50MB 限制', () => {
   assert.match(source, /fileSize: 50 \* 1024 \* 1024/);
 });
 
-test('创作页将资料与研究拆为独立步骤，篇幅只在写作策略出现', () => {
+test('研究是创作中的按需入口，篇幅只在写作策略出现', () => {
   const copy = fs.readFileSync(new URL('../src/workspaces/create/CopyWorkspace.tsx', import.meta.url), 'utf8');
   const materials = fs.readFileSync(new URL('../src/workspaces/create/ProjectMaterials.tsx', import.meta.url), 'utf8');
-  assert.deepEqual(creativeStages.slice(0, 3).map(({ id }) => id), ['planning', 'research', 'master']);
+  const workspace = fs.readFileSync(new URL('../src/workspaces/create/CreateWorkspace.tsx', import.meta.url), 'utf8');
+  assert.deepEqual(creativeStages.slice(0, 2).map(({ id }) => id), ['planning', 'master']);
   assert.equal(planningFieldNames.some((name) => /篇幅/.test(name)), false);
   assert.match(copy, /目标篇幅/);
+  assert.match(copy, /补充研究/);
+  assert.match(workspace, /onOpenResearch=\{\(\) => onStage\('research'\)\}/);
   assert.match(materials, /我的内容[\s\S]*参考链接[\s\S]*素材文件/);
   assert.match(materials, /webCreative\.createInput[\s\S]*webCreative\.createReference[\s\S]*webCreative\.uploadFile/);
   assert.match(materials, /!inputItem[\s\S]*正文/);

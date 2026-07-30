@@ -6,13 +6,11 @@ const flow = await import('../src/domain/creative-flow.mjs').catch(() => null);
 const require = createRequire(import.meta.url);
 const { confirmProjectPlanning } = require('../server/services/project-planning.cjs');
 
-test('创作工作台固定为规划到审核的七步链路', () => {
+test('创作工作台固定为规划到审核的五步链路，研究按需进入', () => {
   assert.ok(flow, '创作流程模型尚未实现');
   assert.deepEqual(flow.creativeStages.map(({ id, label }) => [id, label]), [
     ['planning', '规划'],
-    ['research', '研究'],
-    ['master', '正文'],
-    ['platform', '平台版本'],
+    ['master', '创作'],
     ['visual', '配图'],
     ['layout', '排版'],
     ['review', '审核'],
@@ -25,7 +23,7 @@ test('项目只解锁当前阶段及已经经过的创作步骤', () => {
   assert.equal(flow.canOpenCreateStage('PLANNING', 'research'), false);
   assert.equal(flow.canOpenCreateStage('MASTER_WRITING', 'research'), true);
   assert.equal(flow.canOpenCreateStage('MASTER_WRITING', 'master'), true);
-  assert.equal(flow.canOpenCreateStage('MASTER_WRITING', 'platform'), false);
+  assert.equal(flow.canOpenCreateStage('MASTER_WRITING', 'platform'), true);
   assert.equal(flow.canOpenCreateStage('COMPLETED', 'review'), true);
 });
 
@@ -34,6 +32,7 @@ test('项目阶段映射为刷新后应恢复的创作步骤', () => {
   assert.equal(flow.stageRouteForProjectStage('PLANNING'), 'planning');
   assert.equal(flow.stageRouteForProjectStage('RESEARCH'), 'research');
   assert.equal(flow.stageRouteForProjectStage('MASTER_WRITING'), 'master');
+  assert.equal(flow.stageRouteForProjectStage('PLATFORM_ADAPTATION'), 'master');
   assert.equal(flow.stageRouteForProjectStage('COMPLETED'), 'review');
 });
 

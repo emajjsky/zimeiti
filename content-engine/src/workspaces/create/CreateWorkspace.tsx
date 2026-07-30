@@ -67,8 +67,7 @@ function defaultBrief(project: ContentProject, skills: CreativeSkillDefinition[]
   };
 }
 
-const pendingStageNames: Record<Exclude<CreateStageRoute, 'planning' | 'research' | 'master'>, { title: string; note: string }> = {
-  platform: { title: '平台版本尚未开始', note: '先确认正文，再按发布渠道分别改写。' },
+const pendingStageNames: Record<Exclude<CreateStageRoute, 'planning' | 'research' | 'master' | 'platform'>, { title: string; note: string }> = {
   visual: { title: '配图尚未开始', note: '正文确认后再生成封面和正文配图。' },
   layout: { title: '排版尚未开始', note: '文案与图片确认后再进入排版。' },
   review: { title: '审核尚未开始', note: '全部内容资产就绪后再做发布前检查。' },
@@ -93,13 +92,12 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
   const [brief, setBrief] = useState<WritingBriefInput | null>(null);
   const [briefState, setBriefState] = useState<'loading' | 'saving' | 'saved' | 'error'>('loading');
   const [briefError, setBriefError] = useState('');
-  const [platformCompletionState, setPlatformCompletionState] = useState<'idle' | 'saving' | 'error'>('idle');
-  const [platformCompletionError, setPlatformCompletionError] = useState('');
   const contentVersions = useMemo(() => project?.versions.filter((version): version is ContentVersion & { platform: CreativePlatform } => version.platform !== 'VIDEO_CHANNEL') ?? [], [project?.versions]);
   const copyPlatform = activePlatform !== 'VIDEO_CHANNEL' && contentVersions.some((version) => version.platform === activePlatform) ? activePlatform : contentVersions[0]?.platform;
 
   useEffect(() => {
     if (!project) return;
+    if (stage === 'platform') { onStage('master'); return; }
     if (!canOpenCreateStage(project.stage, stage)) onStage(stageRouteForProjectStage(project.stage));
   }, [onStage, project?.stage, stage]);
 
@@ -208,21 +206,15 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
 
   const completePlatformVersions = async () => {
     if (!project) return;
-    setPlatformCompletionState('saving');
-    setPlatformCompletionError('');
     try {
       const result = await webCreative.completePlatformVersions(project.id);
       onProjectAccepted(result.project);
       onStage('visual');
-    } catch (error) {
-      setPlatformCompletionState('error');
-      setPlatformCompletionError(error instanceof Error ? error.message : '平台版本确认失败。');
-    }
+    } catch (error) { throw error; }
   };
 
   const handleCopyProjectChange = (nextProject: ContentProject) => {
     onProjectAccepted(nextProject);
-    if (stage === 'master' && nextProject.stage === 'PLATFORM_ADAPTATION') onStage('platform');
   };
 
   if (!project) return <section className="empty-workbench"><h1>还没有内容项目</h1></section>;
@@ -240,20 +232,14 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
       })}
     </nav>
 
-    {stage === 'planning' && <PlanningWorkspace project={project} onProjectChange={onProjectAccepted} onComplete={(next) => { onProjectAccepted(next); onStage('research'); }} />}
+    {stage === 'planning' && <PlanningWorkspace project={project} onProjectChange={onProjectAccepted} onComplete={(next) => { onProjectAccepted(next); onStage('master'); }} />}
     {stage === 'research' && <div className="project-research-layout">
       <ProjectMaterials project={project} platforms={contentVersions.map((version) => version.platform)}/>
       <ProjectAgent projectId={project.id} stage="RESEARCH" onArtifactAccepted={(_artifact, nextProject) => { if (!nextProject) return; onProjectAccepted(nextProject); onStage('master'); }} onOpenSettings={(target) => target === 'search' ? onOpenSearchSettings() : onOpenAgentSettings()}/>
     </div>}
     {stage === 'master' && briefError && <div className="creative-stage-error"><CircleAlert size={18}/><span>{briefError}</span></div>}
-    {stage === 'master' && copyPlatform && <CopyWorkspace project={project} brief={brief} briefState={briefState} skills={skills} accountVoices={accountVoices} activePlatform={copyPlatform} onPlatform={onPlatform} onProjectChange={handleCopyProjectChange} onSaveBrief={saveBrief} onSaveVersion={onSaveVersion} onOpenModelSettings={onOpenModelSettings} onOpenAgentSettings={onOpenAgentSettings} onOpenVoiceSettings={onOpenVoiceSettings} />}
+    {stage === 'master' && copyPlatform && <CopyWorkspace project={project} brief={brief} briefState={briefState} skills={skills} accountVoices={accountVoices} activePlatform={copyPlatform} onPlatform={onPlatform} onProjectChange={handleCopyProjectChange} onSaveBrief={saveBrief} onSaveVersion={onSaveVersion} onOpenResearch={() => onStage('research')} onCompletePlatforms={completePlatformVersions} onOpenModelSettings={onOpenModelSettings} onOpenAgentSettings={onOpenAgentSettings} onOpenVoiceSettings={onOpenVoiceSettings} />}
     {stage === 'master' && !copyPlatform && <div className="creative-stage-empty"><h2>没有可写作的图文平台</h2><p>请先在规划中选择公众号、小红书、知乎或微博。</p></div>}
-    {stage === 'platform' && copyPlatform && <section className="platform-versions-workspace">
-      <header className="platform-versions-head"><div><span>平台版本</span><h2>逐个确认各渠道的成稿</h2><p>每个目标平台都保留独立正文、标题和渠道规则；完成后再统一进入配图。</p></div><button className="button primary" type="button" disabled={platformCompletionState === 'saving'} onClick={() => void completePlatformVersions()}>{platformCompletionState === 'saving' ? '正在确认…' : '确认版本，进入配图'}</button></header>
-      {platformCompletionError && <div className="creative-stage-error"><CircleAlert size={18}/><span>{platformCompletionError}</span></div>}
-      <CopyWorkspace project={project} brief={brief} briefState={briefState} skills={skills} accountVoices={accountVoices} activePlatform={copyPlatform} onPlatform={onPlatform} onProjectChange={handleCopyProjectChange} onSaveBrief={saveBrief} onSaveVersion={onSaveVersion} onOpenModelSettings={onOpenModelSettings} onOpenAgentSettings={onOpenAgentSettings} onOpenVoiceSettings={onOpenVoiceSettings} />
-    </section>}
-    {stage === 'platform' && !copyPlatform && <div className="creative-stage-empty"><h2>没有可制作的平台版本</h2><p>请返回正文阶段，先选择至少一个图文平台。</p></div>}
     {(stage === 'visual' || stage === 'layout' || stage === 'review') && <div className="creative-stage-empty"><h2>{pendingStageNames[stage].title}</h2><p>{pendingStageNames[stage].note}</p></div>}
   </section>;
 }
