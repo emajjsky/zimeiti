@@ -1,5 +1,13 @@
 # 内容引擎技术实施方案
 
+## 2026-07-30 实现：创作内页导航与配图能力
+
+- `CreateWorkspace.tsx` 新增渠道工作台导航。平台与步骤在一个固定区域内切换，`channelView` 只控制当前页面，不再用交付阶段条件卸载 `CopyWorkspace`、`VisualWorkspace`、`LayoutWorkspace` 或 `ReviewWorkspace`。
+- `VisualWorkspace.tsx` 重构为“项目素材 / 搜图 / AI 生图”三个来源区域。项目文件通过带鉴权的下载接口读取为 Blob URL 预览；网络图片和私有文件使用同一素材选择、封面和保存逻辑。
+- `GET /creative/image-search?q=` 请求 Wikimedia Commons API，仅返回带缩略图、原图、来源页、许可和署名的结果。选择后才创建项目视觉参考。
+- `POST /creative/projects/:projectId/visual/generate` 读取 `TEXT_TO_IMAGE` 的百炼 CLI 策略，执行 `image generate`，把输出文件保存到私有上传目录并创建 `FILE/VISUAL/IMAGING` 参考记录；成功与失败均写入 `api_usage_logs`。
+- `PUT /visual` 允许提前保存视觉选择；`POST /visual/complete` 仍保留正文与阶段约束，确保只有可交付的渠道进入排版。
+
 > 版本：Web-only v1.0
 > 更新：2026-07-28
 > 适用阶段：P0-P2

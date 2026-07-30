@@ -2,7 +2,9 @@ const Fastify = require('fastify');
 const cors = require('@fastify/cors');
 const jwt = require('@fastify/jwt');
 const multipart = require('@fastify/multipart');
-const { randomUUID } = require('node:crypto');
+const { randomUUID, createHash } = require('node:crypto');
+const fs = require('node:fs/promises');
+const path = require('node:path');
 const { z } = require('zod');
 const config = require('./config.cjs');
 const { query, transaction } = require('./db.cjs');
@@ -70,6 +72,12 @@ const projectPlanningInput = z.object({
   plannedPublishAt: z.string().trim().max(80).optional(),
   sourceRequirements: z.string().max(8_000),
   constraints: z.string().max(8_000),
+});
+const visualGenerationInput = z.object({
+  platform: creativePlatform,
+  prompt: z.string().trim().min(4).max(2_000),
+  size: z.enum(['1:1', '3:4', '4:3', '9:16', '16:9']).default('3:4'),
+  negativePrompt: z.string().trim().max(1_000).optional(),
 });
 const createProjectInput = z.object({
   originType: z.enum(['MANUAL', 'DRAFT', 'IMPORT']).default('MANUAL'),
@@ -765,6 +773,83 @@ app.delete('/api/v1/creative/project-inputs/:id', { preHandler: authenticate }, 
   const workspace = await currentWorkspace(request.user.sub);
   await projectMaterialStore.removeInput(workspace.id, id);
   reply.code(204).send();
+});
+
+function plainMetadata(value, maxLength = 300) {
+  return String(value ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, maxLength);
+}
+
+app.get('/api/v1/creative/image-search', { preHandler: authenticate }, async (request) => {
+  const input = z.object({ q: z.string().trim().min(2).max(120) }).parse(request.query);
+  const params = new URLSearchParams({
+    action: 'query', format: 'json', formatversion: '2', generator: 'search', gsrnamespace: '6',
+    gsrsearch: input.q, gsrlimit: '12', prop: 'imageinfo', iiprop: 'url|extmetadata', iiurlwidth: '640', origin: '*',
+  });
+  let response;
+  try {
+    response = await fetch(`https://commons.wikimedia.org/w/api.php?${params}`, { signal: AbortSignal.timeout(15_000) });
+  } catch (error) {
+    throw new Error(`图片搜索服务暂时不可用：${error instanceof Error ? error.message : '网络错误'}`);
+  }
+  if (!response.ok) throw new Error(`图片搜索服务返回 HTTP ${response.status}`);
+  const payload = await response.json();
+  const results = (payload?.query?.pages ?? []).flatMap((page) => {
+    const info = page?.imageinfo?.[0];
+    if (!info?.url || !info?.thumburl) return [];
+    const metadata = info.extmetadata ?? {};
+    const license = plainMetadata(metadata.LicenseShortName?.value || metadata.UsageTerms?.value || '请查看来源页');
+    const attribution = plainMetadata(metadata.Artist?.value || metadata.Credit?.value || 'Wikimedia Commons');
+    return [{
+      id: String(page.pageid), title: String(page.title || 'Wikimedia Commons 图片').replace(/^File:/i, ''),
+      thumbnailUrl: info.thumburl, imageUrl: info.url, sourceUrl: info.descriptionurl || `https://commons.wikimedia.org/?curid=${page.pageid}`,
+      license, attribution,
+    }];
+  });
+  return { provider: 'Wikimedia Commons', results };
+});
+
+function generatedImageMime(filename) {
+  const extension = path.extname(filename).toLowerCase();
+  return extension === '.jpg' || extension === '.jpeg' ? 'image/jpeg' : extension === '.webp' ? 'image/webp' : 'image/png';
+}
+
+app.post('/api/v1/creative/projects/:projectId/visual/generate', { preHandler: authenticate }, async (request, reply) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const input = visualGenerationInput.parse(request.body);
+  const workspace = await currentWorkspace(request.user.sub);
+  await creativeProject(workspace.id, projectId);
+  const policy = await query("SELECT provider, model FROM agent_model_policies WHERE workspace_id = $1 AND scope = 'TEXT_TO_IMAGE'", [workspace.id]);
+  if (!policy.rowCount) { const error = new Error('请先在“模型与 API”中为文生图选择模型。'); error.statusCode = 400; throw error; }
+  if (policy.rows[0].provider !== 'BAILIAN_CLI') { const error = new Error('当前版本的 AI 生图仅支持已配置的百炼 CLI 文生图模型。'); error.statusCode = 400; throw error; }
+  const model = policy.rows[0].model;
+  const apiKey = await credentialSecret(workspace.id, 'BAILIAN');
+  const jobFolder = path.join(config.uploadRoot, workspace.id, createHash('sha256').update(projectId).digest('hex').slice(0, 20), 'generated', randomUUID());
+  const startedAt = Date.now();
+  try {
+    await fs.mkdir(jobFolder, { recursive: true });
+    const args = ['image', 'generate', '--prompt', input.prompt, '--model', model, '--size', input.size, '--n', '1', '--out-dir', jobFolder, '--out-prefix', 'visual', '--output', 'json', '--quiet'];
+    if (input.negativePrompt) args.push('--negative-prompt', input.negativePrompt);
+    await runBailianCli(args, apiKey, 180_000);
+    const files = await fs.readdir(jobFolder, { withFileTypes: true });
+    const image = files.find((entry) => entry.isFile() && /\.(png|jpe?g|webp)$/i.test(entry.name));
+    if (!image) throw new Error('模型未返回可保存的图片文件。');
+    const absolutePath = path.join(jobFolder, image.name);
+    const content = await fs.readFile(absolutePath);
+    const reference = await projectMaterialStore.createReference(workspace.id, projectId, {
+      sourceType: 'FILE', role: 'VISUAL', title: `AI 配图 · ${input.prompt.slice(0, 38)}`,
+      notes: `AI 生图｜模型：${model}｜比例：${input.size}`, scope: 'IMAGING', platforms: [input.platform],
+      storageKey: path.relative(config.uploadRoot, absolutePath).split(path.sep).join('/'), originalFilename: image.name,
+      mimeType: generatedImageMime(image.name), sizeBytes: content.length, sha256: createHash('sha256').update(content).digest('hex'),
+    });
+    await query(`INSERT INTO api_usage_logs (workspace_id, provider, model, operation, status, duration_ms)
+      VALUES ($1, 'BAILIAN_CLI', $2, 'TEXT_TO_IMAGE', 'SUCCESS', $3)`, [workspace.id, model, Date.now() - startedAt]);
+    reply.code(201).send({ reference });
+  } catch (error) {
+    await fs.rm(jobFolder, { recursive: true, force: true }).catch(() => {});
+    await query(`INSERT INTO api_usage_logs (workspace_id, provider, model, operation, status, duration_ms, error)
+      VALUES ($1, 'BAILIAN_CLI', $2, 'TEXT_TO_IMAGE', 'ERROR', $3, $4)`, [workspace.id, model, Date.now() - startedAt, (error instanceof Error ? error.message : '图片生成失败').slice(0, 2_000)]);
+    throw error;
+  }
 });
 
 app.post('/api/v1/creative/projects/:projectId/references', { preHandler: authenticate }, async (request, reply) => {
@@ -1959,7 +2044,6 @@ app.put('/api/v1/creative/projects/:projectId/visual', { preHandler: authenticat
       if (index < 0) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
       const current = state.projects[index];
       const delivery = deliveryOf(current); const currentPlatform = platformDelivery(delivery, input.platform);
-      if (currentPlatform.stage !== 'VISUAL') { const error = new Error('当前渠道不在配图阶段。'); error.statusCode = 409; throw error; }
       project = {
         ...current,
         delivery: {
