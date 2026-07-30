@@ -212,14 +212,22 @@ function isRevisionAction(action) {
   return action !== 'GENERATE_OUTLINE' && action !== 'GENERATE_DRAFT';
 }
 
-function assertNoUnresolvedClaimInBody(output, action, safetyContext) {
-  const claim = unresolvedClaims(safetyContext?.researchContext).find((item) => includesUnresolvedClaim(output.body, [item]));
+function preservedExistingCautions(action, safetyContext) {
+  if (!isRevisionAction(action)) return [];
   const existingBody = safetyContext?.currentContent?.body ?? '';
-  const preservedFromExistingDraft = isRevisionAction(action)
-    && includesUnresolvedClaim(existingBody, [claim])
-    && includesUnresolvedClaim(output.factsToVerify.join('\n'), [claim]);
-  if (claim && preservedFromExistingDraft) return;
-  if (claim) throw new Error(`正式正文不得把待复核主张写成确定事实：${claim}`);
+  return unresolvedClaims(safetyContext?.researchContext)
+    .filter((claim) => includesUnresolvedClaim(existingBody, [claim]));
+}
+
+function assertNoUnresolvedClaimInBody(output, action, safetyContext) {
+  const allowed = new Set(preservedExistingCautions(action, safetyContext));
+  const claimsInBody = unresolvedClaims(safetyContext?.researchContext)
+    .filter((claim) => includesUnresolvedClaim(output.body, [claim]));
+  for (const claim of claimsInBody) {
+    if (!allowed.has(claim)) throw new Error(`正式正文不得把待复核主张写成确定事实：${claim}`);
+    // 原稿已有的待核验事实属于可继承元数据，不能依赖模型每次准确回传。
+    output.factsToVerify = mergeFactsToVerify(output.factsToVerify, [claim]);
+  }
 }
 
 function parseCopyOutput(content, action, safetyContext) {
@@ -252,9 +260,10 @@ function buildCopyPrompt(snapshot) {
     factsToVerify: ['发布前仍需核验的事实'],
   };
   const cautions = unresolvedClaims(snapshot.researchContext);
+  const preservedCautions = preservedExistingCautions(snapshot.action, snapshot);
   const cautionBoundaryRule = cautions.length
     ? isRevisionAction(snapshot.action)
-      ? `待复核主张：${cautions.map((claim, index) => `${index + 1}. ${claim}`).join('；')}。若某项已经出现在当前正文中，可在重构后保留原有表述，但必须原样列入 factsToVerify，且不得新增、扩写、推演、举例或把它包装成已确认结论。未出现在当前正文中的待复核主张仍不得写入正文。`
+      ? `待复核主张：${cautions.map((claim, index) => `${index + 1}. ${claim}`).join('；')}。本次原稿允许保留的主张：${preservedCautions.length ? preservedCautions.join('；') : '无'}。仅这些原稿已有主张可被保留，系统会自动写入 factsToVerify；不得新增、扩写、推演、举例或把它包装成已确认结论。其余待复核主张仍不得写入正文。`
       : `待复核主张禁止写入区：${cautions.map((claim, index) => `${index + 1}. ${claim}`).join('；')}。这些内容不得出现在正文中，也不得换词解释、推演、举例或以“通常”“可能”“待官方确认”等方式继续展开；只能原样保留在 factsToVerify。若它是项目的重要信息缺口，就把文章改为基于已核验事实的阅读判断，不要补写技术背景。`
     : null;
   const platformQualityRules = snapshot.platform === 'WECHAT'
@@ -275,8 +284,8 @@ function buildCopyPrompt(snapshot) {
     `本次动作是 ${snapshot.action}，目标平台是 ${snapshot.platform}。`,
     '项目标题、核心观点和目标平台是硬主题边界：文章主体必须服务项目主题、核心观点与平台表达规则。不得用研究资料中的单条事件替换项目主题；与主题不一致的资料只能作为背景，或不使用。',
     '严格依据项目资料、当前正文、选区、内容母版、阶段摘要和 Skill 工作，不得编造数据、引语、来源或人物经历。',
-    '研究上下文中的 verifiedFacts 是唯一可以作为已确认客观事实写入正文的研究结论；cautions 只能作为待确认提醒，不能改写成确定事实。',
-    '不得写入未出现在 verifiedFacts 中的具体日期、单位、人数、引语、会议或产品能力。factsToVerify 与 cautions 中的内容不能作为确定事实叙述。没有 verifiedFacts 时，只能依据用户材料、当前正文或观点方法写作，禁止补充伪具体事实。',
+    '研究上下文中的 verifiedFacts 是唯一可以作为已确认客观事实写入正文的研究结论；cautions 不能改写成确定事实。修改已有正文时，只有系统列出的原稿已有主张可原样保留为待核验内容。',
+    '不得写入未出现在 verifiedFacts 中的具体日期、单位、人数、引语、会议或产品能力。factsToVerify 与 cautions 中的内容不能被包装为确定事实。没有 verifiedFacts 时，只能依据用户材料、当前正文或观点方法写作，禁止补充伪具体事实。',
     ...(cautionBoundaryRule ? [cautionBoundaryRule] : []),
     '必须保留所有尚未核验的 factsToVerify；不得删掉、弱化或改写为已确认事实。',
     ...platformQualityRules,
@@ -321,10 +330,11 @@ function parseCopyQualityReview(content) {
   return copyQualityReviewSchema.parse(parseJson(content, '质量审稿没有返回结果。', '质量审稿返回的不是有效 JSON。'));
 }
 
-function buildCopyQualityReviewPrompt({ platform, output, researchContext }) {
+function buildCopyQualityReviewPrompt({ action, platform, output, researchContext, currentContent }) {
+  const allowedExistingCautions = preservedExistingCautions(action, { currentContent, researchContext });
   const system = [
     '你是内容事实与质量审稿人，不负责润色，不得使用模型已有知识补全事实。',
-    '只允许把 verifiedFacts 中直接支持的内容当作正文事实。cautions 是禁止写入区：即使正文使用“通常”“可能”“待确认”等限定语，凡是解释、推演、举例或复述其中主张，都必须拒绝。',
+    '只允许把 verifiedFacts 中直接支持的内容当作正文事实。cautions 默认是禁止写入区：即使正文使用“通常”“可能”“待确认”等限定语，凡是解释、推演、举例或复述其中主张，都必须拒绝。唯一例外是 allowedExistingCautions：它们来自本次修改前的原稿，可保留但必须同时列在 candidate.factsToVerify；仍不得新增、扩写、推演或包装成确认结论。',
     '审查正文是否存在未获证据支持的技术能力、代际判断、因果影响、数据、人物、机构、时间或应用场景；同时审查是否仍像面向读者的目标平台成稿，而非新闻通稿、百科词条或 Markdown 草稿。',
     `目标平台是 ${platform}。`,
     '只返回 JSON：{"approved":true,"issues":[]}。若不合格，approved 必须为 false，issues 写出可直接用于重写的具体问题。',
@@ -335,6 +345,7 @@ function buildCopyQualityReviewPrompt({ platform, output, researchContext }) {
       candidate: output,
       verifiedFacts: researchContext?.verifiedFacts ?? [],
       cautions: researchContext?.cautions ?? [],
+      allowedExistingCautions,
     }),
   };
 }

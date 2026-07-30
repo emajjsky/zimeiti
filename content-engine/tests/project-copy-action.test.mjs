@@ -193,31 +193,35 @@ test('公众号候选不得把待复核主张写成正文事实', () => {
   }), 'GENERATE_DRAFT', { platform: 'WECHAT', researchContext: { cautions: [{ claim, status: 'NEEDS_REVIEW' }] } }), /待复核|正文/);
 });
 
-test('重构已有正文可保留既有待复核事实，但必须继续列入核验清单', () => {
+test('重构已有正文自动继承待复核事实，且拒绝新增待复核事实', () => {
   const claim = '该卫星主要用于为飞船、空间实验室、空间站等载人航天器提供数据中继和测控服务。';
   const body = `这是一篇正在重构的公众号文章，原稿已提到该卫星为载人航天器提供数据中继和测控服务。\n\n${'重构只改善结构与表达，不新增未经核验的用途、数据或影响推演。'.repeat(5)}`;
-  const output = JSON.stringify({ title: '这颗卫星上天意味着什么？', body, changeSummary: '重组原有叙事结构。', factsToVerify: [claim] });
-  assert.doesNotThrow(() => parseCopyOutput(output, 'RESTRUCTURE_DRAFT', {
+  const output = parseCopyOutput(JSON.stringify({ title: '这颗卫星上天意味着什么？', body, changeSummary: '重组原有叙事结构。', factsToVerify: [] }), 'RESTRUCTURE_DRAFT', {
     currentContent: { body },
     researchContext: { cautions: [{ claim, status: 'NEEDS_REVIEW' }] },
-  }));
+  });
+  assert.deepEqual(output.factsToVerify, [claim]);
   assert.throws(() => parseCopyOutput(JSON.stringify({ title: '标题', body, changeSummary: '错误示例', factsToVerify: [] }), 'RESTRUCTURE_DRAFT', {
-    currentContent: { body },
+    currentContent: { body: '不包含这条主张的原稿。' },
     researchContext: { cautions: [{ claim, status: 'NEEDS_REVIEW' }] },
   }), /待复核|正文/);
 });
 
 test('文案质量审稿只以已核验事实为准，并返回可执行的重写结论', () => {
+  const retainedClaim = '该卫星主要用于为飞船、空间实验室、空间站等载人航天器提供数据中继和测控服务。';
   const review = parseCopyQualityReview(JSON.stringify({ approved: false, issues: ['正文把待复核用途写成了确定事实'] }));
   assert.deepEqual(review, { approved: false, issues: ['正文把待复核用途写成了确定事实'] });
   assert.throws(() => parseCopyQualityReview(JSON.stringify({ approved: 'false', issues: [] })), /boolean|expected/i);
   const prompt = buildCopyQualityReviewPrompt({
+    action: 'RESTRUCTURE_DRAFT',
     platform: 'WECHAT',
     output: { title: '示例', body: '示例正文', changeSummary: '生成候选', factsToVerify: [] },
-    researchContext: { verifiedFacts: [{ claim: '已核验事实' }], cautions: [{ claim: '待复核主张' }] },
+    currentContent: { body: `原稿中已有：${retainedClaim}` },
+    researchContext: { verifiedFacts: [{ claim: '已核验事实' }], cautions: [{ claim: retainedClaim }] },
   });
   assert.match(prompt.system, /不得使用模型已有知识补全事实/);
-  assert.match(prompt.message, /待复核主张/);
+  const reviewInput = JSON.parse(prompt.message);
+  assert.deepEqual(reviewInput.allowedExistingCautions, [retainedClaim]);
 });
 
 test('017 注册八个需要确认的受控文案动作', () => {

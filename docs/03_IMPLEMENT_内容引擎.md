@@ -715,4 +715,11 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - `parseCopyOutput()` now distinguishes generation from revision actions. A revision can retain a claim already present in the current draft only when the candidate also retains that claim in `factsToVerify`.
 - Revision prompts state that this exception is preservation, not verification: the model cannot introduce, expand, infer from, or present the claim as confirmed.
 - New regression coverage accepts a compliant `RESTRUCTURE_DRAFT` candidate and rejects the same candidate when its verification list is empty.
+
+## 2026-07-30 Fix: unify preserved-caution handling across the copy pipeline
+
+- `preservedExistingCautions()` derives the only revision exception from the frozen current body and research cautions.
+- `parseCopyOutput()` automatically appends a permitted inherited claim to `factsToVerify`; a claim not present in the frozen original still fails validation.
+- `buildCopyQualityReviewPrompt()` now receives the action and frozen current content, passes `allowedExistingCautions` to the reviewer, and makes preservation conditional on the candidate verification list.
+- Both initial and second quality-review calls in `worker.cjs` pass the identical frozen context.
 - 完整文稿按自然段连续渲染在弹窗可滚动主体内；原有 LCS 段落差异计算不变，移动端仍沿用全屏弹窗与固定操作栏。

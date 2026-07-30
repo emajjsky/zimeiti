@@ -701,7 +701,7 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
         const remainingVoiceIssues = detectVoiceViolations(output.body, snapshot.accountVoice?.rules);
         if (snapshot.accountVoice && remainingVoiceIssues.length) throw new Error(`账号声音检查未通过：${remainingVoiceIssues.map((issue) => issue.message).join('；')}`);
       }
-      const reviewPrompt = buildCopyQualityReviewPrompt({ platform: snapshot.platform, output, researchContext: snapshot.researchContext });
+      const reviewPrompt = buildCopyQualityReviewPrompt({ action: snapshot.action, platform: snapshot.platform, output, researchContext: snapshot.researchContext, currentContent: snapshot.currentContent });
       const reviewed = await textRunner.runText({ provider: route.provider, model: route.model, system: reviewPrompt.system, message: reviewPrompt.message, ...connectionInput });
       inputTokens = (inputTokens ?? 0) + (reviewed.inputTokens ?? 0);
       outputTokens = (outputTokens ?? 0) + (reviewed.outputTokens ?? 0);
@@ -720,7 +720,7 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
         output = parseCopyOutput(rewritten.content, snapshot.action, snapshot);
         const finalVoiceIssues = detectVoiceViolations(output.body, snapshot.accountVoice?.rules);
         if (snapshot.accountVoice && finalVoiceIssues.length) throw new Error(`账号声音检查未通过：${finalVoiceIssues.map((issue) => issue.message).join('；')}`);
-        const finalReviewPrompt = buildCopyQualityReviewPrompt({ platform: snapshot.platform, output, researchContext: snapshot.researchContext });
+        const finalReviewPrompt = buildCopyQualityReviewPrompt({ action: snapshot.action, platform: snapshot.platform, output, researchContext: snapshot.researchContext, currentContent: snapshot.currentContent });
         const finalReviewed = await textRunner.runText({ provider: route.provider, model: route.model, system: finalReviewPrompt.system, message: finalReviewPrompt.message, ...connectionInput });
         inputTokens = (inputTokens ?? 0) + (finalReviewed.inputTokens ?? 0);
         outputTokens = (outputTokens ?? 0) + (finalReviewed.outputTokens ?? 0);
