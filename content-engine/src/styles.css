@@ -418,6 +418,21 @@
 .creative-stage-nav button:hover:not(:disabled){background:#f1f5fb;color:var(--ink)}
 .creative-stage-nav button:active:not(:disabled){transform:translateY(1px)}
 .creative-stage-nav button.active{background:var(--ink);color:#fff}
+.channel-workbench-nav{display:flex;min-height:52px;align-items:center;justify-content:space-between;gap:14px;padding:7px 8px;overflow:hidden}
+.channel-platform-tabs,.channel-step-tabs{display:flex;min-width:0;align-items:center;overflow-x:auto;scrollbar-width:none}
+.channel-platform-tabs::-webkit-scrollbar,.channel-step-tabs::-webkit-scrollbar{display:none}
+.channel-platform-tabs{flex:1 1 auto;gap:4px;padding:0;border-bottom:0}
+.channel-platform-tabs button{display:flex;flex:0 0 auto;min-width:104px;min-height:36px;align-items:center;gap:7px;padding:0 10px;border:1px solid transparent;border-radius:6px;background:transparent;text-align:left}
+.channel-platform-tabs button+button{border-left:1px solid transparent}
+.channel-platform-tabs button b{font-size:12px;white-space:nowrap}
+.channel-platform-tabs button small{color:#7a8497;font-size:10px;white-space:nowrap}
+.channel-platform-tabs button.active{border-color:#a9c4e8;background:#dceeff;color:var(--ink)}
+.channel-platform-tabs button.active small{color:#3d608e}
+.channel-step-tabs{flex:0 0 auto;gap:2px;padding:3px;border:1px solid var(--line);border-radius:6px;background:#f3f5f8}
+.channel-step-tabs button{flex:0 0 auto;min-width:66px;min-height:30px;padding:0 11px;border:0;border-radius:4px;background:transparent}
+.channel-step-tabs button.active{background:var(--ink);color:#fff}
+@media (max-width:900px){.channel-workbench-nav{display:grid;gap:7px;min-height:0;padding:8px}.channel-platform-tabs,.channel-step-tabs{width:100%}.channel-step-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));box-sizing:border-box}.channel-step-tabs button{min-width:0}.channel-platform-tabs button{min-width:98px}}
+@media (max-width:520px){.channel-platform-tabs{gap:2px}.channel-platform-tabs button{flex:1 1 0;min-width:0;gap:4px;padding:0 5px}.channel-platform-tabs button b{font-size:11px}.channel-platform-tabs button small{font-size:9px}}
 .creative-stage-nav button:disabled{cursor:not-allowed;background:#f6f7f9;color:#a2aab8}
 .planning-workspace{min-width:0}
 .planning-card{display:grid;overflow:hidden;border:1px solid var(--ink);border-radius:14px;background:#fff;box-shadow:6px 6px 0 rgba(39,95,232,.1)}

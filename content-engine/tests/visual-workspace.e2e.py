@@ -56,13 +56,18 @@ def project():
         "planning": {
             "title": "我国成功发射天链三号01星", "category": "科技", "angle": "解释中继卫星的作用",
             "objective": "让普通读者理解这次发射", "targetAudience": "关注科技新闻的普通读者",
-            "coreMessage": "新一代中继卫星将提升航天器测控与数据传输能力", "targetPlatforms": ["WECHAT"],
+            "coreMessage": "新一代中继卫星将提升航天器测控与数据传输能力", "targetPlatforms": ["WECHAT", "XIAOHONGSHU", "ZHIHU", "WEIBO"],
             "timing": "TODAY", "sourceRequirements": "使用公开资料", "constraints": "不夸大技术能力",
         },
         "planningVersion": 1,
         "coreViewpoint": "中继卫星是航天器与地面之间的重要通信桥梁。",
         "factChecks": [],
-        "versions": [{"id": "version-1", "platform": "WECHAT", "title": "我国成功发射天链三号01星", "body": body, "status": "PREFLIGHT_PASSED", "updatedAt": NOW}],
+        "versions": [
+            {"id": "version-1", "platform": "WECHAT", "title": "我国成功发射天链三号01星", "body": body, "status": "PREFLIGHT_PASSED", "updatedAt": NOW},
+            {"id": "version-2", "platform": "XIAOHONGSHU", "title": "天链三号01星有什么用", "body": body, "status": "DRAFT", "updatedAt": NOW},
+            {"id": "version-3", "platform": "ZHIHU", "title": "如何理解天链三号01星", "body": body, "status": "DRAFT", "updatedAt": NOW},
+            {"id": "version-4", "platform": "WEIBO", "title": "天链三号01星发射", "body": body, "status": "DRAFT", "updatedAt": NOW},
+        ],
         "sourceSnapshot": {},
         "delivery": {"platforms": {"WECHAT": {"stage": "VISUAL", "visual": {
             "planVersion": 1,
@@ -134,6 +139,13 @@ with sync_playwright() as playwright:
     page.goto(f"{BASE_URL}/?view=create&project={PROJECT_ID}&stage=master&platform=WECHAT")
     page.wait_for_load_state("networkidle")
     page.get_by_role("heading", name="公众号配图", exact=True).wait_for()
+    channel_nav = page.locator(".channel-workbench-nav").bounding_box()
+    platform_nav = page.locator(".channel-platform-tabs").bounding_box()
+    step_nav = page.locator(".channel-step-tabs").bounding_box()
+    channel_nav_style = page.locator(".channel-workbench-nav").evaluate("element => { const style = getComputedStyle(element); const platform = getComputedStyle(element.querySelector('.channel-platform-tabs')); const button = getComputedStyle(element.querySelector('.channel-platform-tabs button')); return { display: style.display, minHeight: style.minHeight, height: style.height, padding: style.padding, gap: style.gap, alignItems: style.alignItems, platformHeight: platform.height, platformPadding: platform.padding, buttonHeight: button.height, buttonMinHeight: button.minHeight, buttonPadding: button.padding } }")
+    assert channel_nav and channel_nav["height"] <= 64, f"桌面渠道导航过高: {channel_nav}, platform={platform_nav}, steps={step_nav}, style={channel_nav_style}"
+    assert platform_nav and step_nav and abs(platform_nav["y"] - step_nav["y"]) <= 4, "渠道与步骤导航没有在同一行"
+    assert page.locator(".channel-platform-tabs button").count() == 4
     page.get_by_text("封面 1 张，正文插图 2 张", exact=True).wait_for()
     page.get_by_role("button", name=re.compile(r"文章封面")).wait_for()
     page.get_by_role("button", name=re.compile(r"正文插图 1")).wait_for()
@@ -183,6 +195,9 @@ with sync_playwright() as playwright:
     page.set_viewport_size({"width": 390, "height": 844})
     page.wait_for_timeout(150)
     assert_no_overflow(page, "390px 配图工作台")
+    mobile_channel_nav = page.locator(".channel-workbench-nav").bounding_box()
+    assert mobile_channel_nav and mobile_channel_nav["height"] <= 104, f"移动端渠道导航过高: {mobile_channel_nav}"
+    assert page.locator(".channel-platform-tabs").evaluate("element => element.scrollWidth <= element.clientWidth"), "390px 渠道栏仍需横向滚动"
     page.screenshot(path=ARTIFACTS / "visual-workspace-mobile.png", full_page=True)
     assert not state["unexpected"], state["unexpected"]
     assert not state["console_errors"], state["console_errors"]
