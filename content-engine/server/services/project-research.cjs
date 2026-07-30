@@ -51,7 +51,17 @@ function buildResearchPlanPrompt({ project, brief, request, materials }) {
   ].join('\n');
   const message = JSON.stringify({
     request,
-    project: { title: project.title, coreViewpoint: project.coreViewpoint, factChecks: project.factChecks ?? [] },
+    project: {
+      title: project.title,
+      coreViewpoint: project.coreViewpoint,
+      factChecks: project.factChecks ?? [],
+      originalSource: project.sourceSnapshot?.intelligence ? {
+        title: project.sourceSnapshot.intelligence.title ?? '',
+        source: project.sourceSnapshot.intelligence.source ?? '',
+        url: project.sourceSnapshot.intelligence.url ?? null,
+        summary: project.sourceSnapshot.intelligence.summary ?? '',
+      } : null,
+    },
     writingBrief: brief ? {
       objective: brief.objective,
       targetAudience: brief.targetAudience,

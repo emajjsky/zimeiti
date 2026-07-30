@@ -47,6 +47,15 @@ function workflowSourceActions(plan) {
   });
 }
 
+function workflowSourceActionsForProject(plan, project) {
+  const actions = workflowSourceActions(plan);
+  const origin = project?.sourceSnapshot?.intelligence;
+  const url = typeof origin?.url === 'string' && /^https?:\/\//i.test(origin.url) ? origin.url : '';
+  if (!url) return actions;
+  if (actions.some((action) => action?.action === 'READ_LINK' && action.target === url)) return actions;
+  return [{ action: 'READ_LINK', purpose: '读取项目原始资讯', target: url }, ...actions].slice(0, WORKFLOW_MAX_AUTOMATIC_SOURCE_ACTIONS);
+}
+
 function buildResearchResult({ plan = {}, sources = [], verification = null, materials = [], allowSingleSource = false }) {
   const claims = Array.isArray(verification?.claims) ? verification.claims : (Array.isArray(plan.claims) ? plan.claims.map((item) => ({ claim: item.claim, status: 'NEEDS_REVIEW', explanation: '尚未完成事实核验。', evidence: [] })) : []);
   const usableStatuses = allowSingleSource ? new Set(['VERIFIED', 'SINGLE_SOURCE']) : new Set(['VERIFIED']);
@@ -65,4 +74,4 @@ function buildResearchResult({ plan = {}, sources = [], verification = null, mat
   });
 }
 
-module.exports = { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, WORKFLOW_MAX_AUTOMATIC_SOURCE_ACTIONS, researchResultSchema, classifyMaterials, workflowSourceActions, buildResearchResult };
+module.exports = { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, WORKFLOW_MAX_AUTOMATIC_SOURCE_ACTIONS, researchResultSchema, classifyMaterials, workflowSourceActions, workflowSourceActionsForProject, buildResearchResult };

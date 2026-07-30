@@ -29,7 +29,7 @@ const {
   buildSourceVerificationRepairPrompt,
   parseSourceVerification,
 } = require('./services/source-verification.cjs');
-const { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, workflowSourceActions, buildResearchResult } = require('./services/simplified-research.cjs');
+const { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, workflowSourceActionsForProject, buildResearchResult } = require('./services/simplified-research.cjs');
 const { createProjectAgentStore } = require('./services/project-agent.cjs');
 const { buildCopyPrompt, buildCopyRepairPrompt, buildCopyQualityReviewPrompt, candidateQualityReview, detectVoiceViolations, mergeFactsToVerify, parseCopyOutput, parseCopyQualityReview } = require('./services/project-copy-action.cjs');
 
@@ -88,9 +88,9 @@ async function runWorkflowResearchPlan(workspaceId, snapshot, route) {
   }
 }
 
-async function captureWorkflowSources(workspaceId, plan) {
+async function captureWorkflowSources(workspaceId, plan, project) {
   let actions;
-  try { actions = researchSourceActions({ ...plan, nextActions: workflowSourceActions(plan) }).actions; }
+  try { actions = researchSourceActions({ ...plan, nextActions: workflowSourceActionsForProject(plan, project) }).actions; }
   catch { return []; }
   const captured = [];
   for (const action of actions) {
@@ -150,7 +150,7 @@ async function generateSimplifiedResearchWorkflow({ jobId, workspaceId, runId })
     outputTokens += planned.outputTokens;
 
     await updateSimplifiedResearchPhase(workspaceId, runId, 'SOURCES', 45);
-    const sources = await captureWorkflowSources(workspaceId, planned.output);
+    const sources = await captureWorkflowSources(workspaceId, planned.output, snapshot.project);
 
     await updateSimplifiedResearchPhase(workspaceId, runId, 'VERIFYING', 75);
     let verification = null;

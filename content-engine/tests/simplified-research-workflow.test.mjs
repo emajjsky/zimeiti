@@ -3,9 +3,33 @@ import fs from 'node:fs';
 import test from 'node:test';
 
 let buildResearchResult;
+let workflowSourceActionsForProject;
 try {
-  ({ buildResearchResult } = await import('../server/services/simplified-research.cjs'));
+  ({ buildResearchResult, workflowSourceActionsForProject } = await import('../server/services/simplified-research.cjs'));
 } catch {}
+
+test('研究工作流优先读取项目原始资讯链接，再执行补充检索', () => {
+  assert.equal(typeof workflowSourceActionsForProject, 'function');
+  const actions = workflowSourceActionsForProject({
+    nextActions: [
+      { action: 'SEARCH_WEB', purpose: '补充官方来源', target: '宇树科技 IPO 官方公告' },
+      { action: 'SEARCH_WEB', purpose: '寻找媒体交叉报道', target: '宇树科技 上市进展' },
+    ],
+  }, {
+    sourceSnapshot: {
+      intelligence: {
+        title: '宇树科技上市新进展',
+        source: 'IT之家',
+        url: 'https://www.ithome.com/0/983/890.htm',
+      },
+    },
+  });
+
+  assert.equal(actions[0].action, 'READ_LINK');
+  assert.equal(actions[0].target, 'https://www.ithome.com/0/983/890.htm');
+  assert.equal(actions.filter((item) => item.target === actions[0].target).length, 1);
+  assert.equal(actions.filter((item) => ['SEARCH_WEB', 'READ_LINK'].includes(item.action)).length, 2);
+});
 
 test('研究结果只把已核验事实交给正文，并保留用户草稿', () => {
   assert.equal(typeof buildResearchResult, 'function');

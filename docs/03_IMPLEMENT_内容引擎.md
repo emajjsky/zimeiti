@@ -1,5 +1,13 @@
 # 内容引擎技术实施方案
 
+## 2026-07-30 实现：研究优先读取项目原始资讯
+
+- `simplified-research.cjs` 新增 `workflowSourceActionsForProject()`：从 `project.sourceSnapshot.intelligence.url` 生成首个 `READ_LINK`，去重后与计划内补充搜索共同限制在自动来源上限内。
+- `project-research.cjs` 将原始资讯标题、来源、URL 和摘要注入研究计划消息；模型可以基于原文提出核验主张，而不是只看到项目标题。
+- `worker.cjs` 的简化研究工作流把项目快照传入来源捕获；原始链接读取失败时保留失败来源状态，不伪造核验结果。
+- 研究结果仍只把 `VERIFIED` 主张传给正文上下文；`SINGLE_SOURCE`、冲突和无证据主张继续留在待复核区。
+- 新增来源动作回归测试，验证原始链接优先、重复链接不重复读取、自动来源数量受限。
+
 ## 2026-07-30 实现：WritingBrief 平台恢复
 
 - 新增 `src/domain/writing-brief-platforms.mjs`，集中实现图文平台过滤、去重与恢复优先级。对应 `.d.mts` 为 React/TypeScript 提供明确契约，Node 单测直接执行真实领域函数。
