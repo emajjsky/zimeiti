@@ -699,7 +699,7 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
         outputTokens = (outputTokens ?? 0) + (rewritten.outputTokens ?? 0);
         output = parseCopyOutput(rewritten.content, snapshot.action, snapshot);
         const remainingVoiceIssues = detectVoiceViolations(output.body, snapshot.accountVoice?.rules);
-        if (remainingVoiceIssues.length) throw new Error(`账号声音检查未通过：${remainingVoiceIssues.map((issue) => issue.message).join('；')}`);
+        if (snapshot.accountVoice && remainingVoiceIssues.length) throw new Error(`账号声音检查未通过：${remainingVoiceIssues.map((issue) => issue.message).join('；')}`);
       }
       const reviewPrompt = buildCopyQualityReviewPrompt({ platform: snapshot.platform, output, researchContext: snapshot.researchContext });
       const reviewed = await textRunner.runText({ provider: route.provider, model: route.model, system: reviewPrompt.system, message: reviewPrompt.message, ...connectionInput });
@@ -719,7 +719,7 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
         outputTokens = (outputTokens ?? 0) + (rewritten.outputTokens ?? 0);
         output = parseCopyOutput(rewritten.content, snapshot.action, snapshot);
         const finalVoiceIssues = detectVoiceViolations(output.body, snapshot.accountVoice?.rules);
-        if (finalVoiceIssues.length) throw new Error(`账号声音检查未通过：${finalVoiceIssues.map((issue) => issue.message).join('；')}`);
+        if (snapshot.accountVoice && finalVoiceIssues.length) throw new Error(`账号声音检查未通过：${finalVoiceIssues.map((issue) => issue.message).join('；')}`);
         const finalReviewPrompt = buildCopyQualityReviewPrompt({ platform: snapshot.platform, output, researchContext: snapshot.researchContext });
         const finalReviewed = await textRunner.runText({ provider: route.provider, model: route.model, system: finalReviewPrompt.system, message: finalReviewPrompt.message, ...connectionInput });
         inputTokens = (inputTokens ?? 0) + (finalReviewed.inputTokens ?? 0);

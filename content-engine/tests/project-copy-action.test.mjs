@@ -27,6 +27,12 @@ test('账号声音规则检测明确的 AI 套话、emoji 标题和强制互动'
   assert.deepEqual(issues.map((item) => item.code), ['BANNED_PHRASE', 'EMOJI_HEADING', 'FORCED_CTA']);
 });
 
+test('未使用账号声音时，通用反套话改写不会把候选稿作为账号声音失败丢弃', () => {
+  const worker = fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8');
+  assert.match(worker, /if \(snapshot\.accountVoice && remainingVoiceIssues\.length\) throw new Error\(`账号声音检查未通过/);
+  assert.match(worker, /if \(snapshot\.accountVoice && finalVoiceIssues\.length\) throw new Error\(`账号声音检查未通过/);
+});
+
 test('文案提示词携带账号声音规则与本篇语气，但不携带校准原文', () => {
   const prompt = buildCopyPrompt({
     action: 'GENERATE_DRAFT', request: '生成正文', platform: 'WECHAT', template: '写成文章。',

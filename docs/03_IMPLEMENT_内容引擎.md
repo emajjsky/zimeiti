@@ -703,4 +703,10 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - Empty `accountVoiceProfileId` now returns a null account voice context without querying the voice profile store.
 - A selected but unavailable voice remains a blocking validation error.
 - Regression test verifies that copy generation context still has SUBJECT, CONTENT_TYPE, and CHANNEL strategies without a voice snapshot.
+
+## 2026-07-30 Fix: keep a no-voice copy candidate after generic cleanup
+
+- `worker.cjs` keeps one automatic generic anti-cliché rewrite for every copy candidate.
+- The post-rewrite and post-review hard failures now run only when `snapshot.accountVoice` exists. Choosing “暂不使用” can no longer turn generic phrasing into an “账号声音检查未通过” failure.
+- `project-copy-action.test.mjs` locks both worker guard conditions so this boundary cannot silently regress.
 - 完整文稿按自然段连续渲染在弹窗可滚动主体内；原有 LCS 段落差异计算不变，移动端仍沿用全屏弹窗与固定操作栏。
