@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { webCreative } from '../../data/webApi';
 import { platformName, type ContentProject, type CreativeVisualPlanItem, type CreativeVisualSize } from '../../domain/content';
 import type { CreativePlatform, ProjectReference } from '../../domain/creative';
-import { buildVisualPlan, mergeVisualPlan } from '../../domain/visual-plan.mjs';
+import { buildVisualPlan, mergeVisualPlan, VISUAL_PLAN_VERSION } from '../../domain/visual-plan.mjs';
 
 type ImageSearchResult = { id: string; title: string; thumbnailUrl: string; imageUrl: string; sourceUrl: string; license: string; attribution: string };
 type SourceView = 'search' | 'generate' | 'library';
@@ -15,11 +15,15 @@ function usableVisualReference(item: ProjectReference) {
 function visualPayload(platform: CreativePlatform, plan: CreativeVisualPlanItem[]) {
   const assetReferenceIds = [...new Set(plan.map((item) => item.assetReferenceId).filter((id): id is string => Boolean(id)))];
   const coverReferenceId = plan.find((item) => item.role === 'COVER' || item.role === 'MAIN')?.assetReferenceId ?? assetReferenceIds[0] ?? null;
-  return { platform, coverReferenceId, assetReferenceIds, plan };
+  return { platform, planVersion: VISUAL_PLAN_VERSION, coverReferenceId, assetReferenceIds, plan };
 }
 
 function roleName(role: CreativeVisualPlanItem['role']) {
   return ({ COVER: '封面', BODY: '正文图', CARD: '图文卡片', MAIN: '主图' } as const)[role];
+}
+
+function visualTypeName(type: CreativeVisualPlanItem['visualType']) {
+  return ({ NEWS_PHOTO: '新闻资料图', CONCEPT_DIAGRAM: '概念示意图', SCENE: '场景图', DATA_CHART: '数据图', QUOTE_CARD: '引语卡片', INFO_CARD: '信息卡片' } as const)[type];
 }
 
 export function VisualWorkspace({ project, activePlatform, onProjectChange, onOpenModelSettings }: {
@@ -31,11 +35,11 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
   const currentDelivery = project.delivery?.platforms?.[activePlatform];
   const version = project.versions.find((item) => item.platform === activePlatform);
   const generatedPlan = useMemo(() => buildVisualPlan({
-    title: version?.title || project.title,
+    title: project.planning.title || project.title || version?.title || '未命名内容',
     body: version?.body || '',
     category: project.planning.category,
     coreMessage: project.planning.coreMessage || project.coreViewpoint,
-  }, activePlatform), [activePlatform, project.coreViewpoint, project.planning.category, project.planning.coreMessage, project.title, version?.body, version?.title]);
+  }, activePlatform), [activePlatform, project.coreViewpoint, project.planning.category, project.planning.coreMessage, project.planning.title, project.title, version?.body, version?.title]);
   const [plan, setPlan] = useState<CreativeVisualPlanItem[]>([]);
   const [activeItemId, setActiveItemId] = useState('');
   const [references, setReferences] = useState<ProjectReference[]>([]);
@@ -43,6 +47,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
   const [busy, setBusy] = useState<'save' | 'complete' | null>(null);
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [sourceView, setSourceView] = useState<SourceView>('search');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<ImageSearchResult[]>([]);
@@ -57,11 +62,11 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
   const assets = useMemo(() => references.filter(usableVisualReference), [references]);
   const activeItem = plan.find((item) => item.id === activeItemId) ?? plan[0];
   const assignedAsset = activeItem?.assetReferenceId ? assets.find((item) => item.id === activeItem.assetReferenceId) : undefined;
-  const completedCount = plan.filter((item) => item.assetReferenceId).length;
+  const boundCount = plan.filter((item) => item.assetReferenceId).length;
   const hasCopy = String(version?.body ?? '').trim().length >= 80;
 
   useEffect(() => {
-    const next = mergeVisualPlan(generatedPlan, currentDelivery?.visual?.plan, currentDelivery?.visual?.assetReferenceIds ?? [], currentDelivery?.visual?.coverReferenceId ?? null);
+    const next = mergeVisualPlan(generatedPlan, currentDelivery?.visual?.plan, currentDelivery?.visual?.assetReferenceIds ?? [], currentDelivery?.visual?.coverReferenceId ?? null, currentDelivery?.visual?.planVersion ?? 0);
     const projectKey = `${project.id}:${activePlatform}`;
     const switchedProject = hydratedProjectKey.current !== projectKey;
     setPlan((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
@@ -72,7 +77,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
       setSourceView('search');
     }
     hydratedProjectKey.current = projectKey;
-    lastSavedSignature.current = currentDelivery?.visual?.plan?.length ? JSON.stringify(next) : '';
+    lastSavedSignature.current = currentDelivery?.visual?.plan?.length && currentDelivery.visual.planVersion === VISUAL_PLAN_VERSION ? JSON.stringify(next) : '';
   }, [activePlatform, currentDelivery?.visual?.updatedAt, generatedPlan, project.id]);
 
   useEffect(() => {
@@ -148,6 +153,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
     setActiveItemId(item.id);
     setSearchQuery(item.searchQueries[0] ?? '');
     setSearchResults([]);
+    setNotice('');
   };
 
   const updateActiveItem = (patch: Partial<CreativeVisualPlanItem>) => {
@@ -157,12 +163,24 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
 
   const assignAsset = (reference: ProjectReference) => {
     setReferences((current) => current.some((item) => item.id === reference.id) ? current : [reference, ...current]);
-    updateActiveItem({ assetReferenceId: reference.id });
+    if (!activeItem) return;
+    const normalizedUrl = reference.url?.trim();
+    const previous = plan.find((item) => item.id !== activeItem.id && item.assetReferenceId && (
+      item.assetReferenceId === reference.id || (normalizedUrl && assets.find((asset) => asset.id === item.assetReferenceId)?.url?.trim() === normalizedUrl)
+    ));
+    setPlan((current) => current.map((item) => {
+      if (item.id === activeItem.id) return { ...item, assetReferenceId: reference.id };
+      if (previous && item.id === previous.id) return { ...item, assetReferenceId: null };
+      return item;
+    }));
+    setNotice(previous ? `这张图已从“${previous.title}”移动到“${activeItem.title}”。` : '图片已绑定到当前配图位置。');
   };
 
   const importResult = async (result: ImageSearchResult) => {
     setImportingId(result.id); setError('');
     try {
+      const existing = references.find((item) => item.url?.trim() === result.imageUrl.trim());
+      if (existing) { assignAsset(existing); return; }
       const reference = await webCreative.createReference(project.id, {
         title: result.title, url: result.imageUrl, role: 'VISUAL', scope: 'IMAGING', platforms: [activePlatform],
         notes: `Wikimedia Commons｜许可：${result.license}｜署名：${result.attribution}｜来源：${result.sourceUrl}`,
@@ -209,21 +227,25 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
   };
 
   const regenerate = () => {
-    const next = generatedPlan.map((item, index) => ({ ...item, assetReferenceId: plan[index]?.assetReferenceId ?? null }));
+    if (!window.confirm('重新规划会保留封面，正文图片将退回项目素材库。是否继续？')) return;
+    const coverId = plan.find((item) => item.role === 'COVER' || item.role === 'MAIN')?.assetReferenceId ?? null;
+    const next = generatedPlan.map((item) => ({ ...item, assetReferenceId: item.role === 'COVER' || item.role === 'MAIN' ? coverId : null }));
     setPlan(next);
     setActiveItemId(next[0]?.id ?? '');
     setSearchQuery(next[0]?.searchQueries[0] ?? '');
     setSearchResults([]);
+    setNotice('已按当前正文重新规划，正文配图需要重新匹配。');
   };
 
   const assetSrc = (asset: ProjectReference | undefined) => asset?.url ?? (asset ? fileUrls[asset.id] : undefined);
 
   return <section className="visual-workspace">
     <header className="delivery-workspace-head visual-workspace-head">
-      <div><h2>{platformName[activePlatform]}配图</h2><p>已规划 {plan.length} 张，完成 {completedCount} 张</p></div>
+      <div><h2>{platformName[activePlatform]}配图</h2><p>已规划 {plan.length} 张，已绑定 {boundCount} 张</p></div>
       <button className="button" type="button" onClick={regenerate}><RefreshCw size={15}/>重新规划</button>
     </header>
     {error && <div className="delivery-error" role="alert">{error}</div>}
+    {notice && <div className="visual-workspace-notice" role="status">{notice}</div>}
 
     <div className="visual-plan-layout">
       <aside className="visual-plan-panel">
@@ -235,14 +257,14 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
             <span className="visual-plan-number">{String(index + 1).padStart(2, '0')}</span>
             <span className="visual-plan-thumb">{src ? <img src={src} alt=""/> : <Image size={18}/>}</span>
             <span className="visual-plan-copy"><b>{item.title}</b><small>{item.placement}</small></span>
-            <span className={`visual-plan-state${item.assetReferenceId ? ' done' : ''}`}>{item.assetReferenceId ? '已选图' : '待配图'}</span>
+            <span className={`visual-plan-state${item.assetReferenceId ? ' done' : ''}`}>{item.assetReferenceId ? '已绑定' : '待选图'}</span>
           </button>;
         })}</div>
       </aside>
 
       {activeItem && <main className="visual-task-panel">
         <header className="visual-task-head">
-          <div><span>{roleName(activeItem.role)} · {activeItem.placement}</span><h3>{activeItem.title}</h3><p>{activeItem.purpose}</p></div>
+          <div><span>{roleName(activeItem.role)} / {visualTypeName(activeItem.visualType)} / {activeItem.placement}</span><h3>{activeItem.title}</h3><p>{activeItem.purpose}</p></div>
           {assignedAsset && <div className="visual-assigned-asset">{assetSrc(assignedAsset) ? <img src={assetSrc(assignedAsset)} alt=""/> : <Image size={18}/>}<span><b>已绑定</b><small>{assignedAsset.title}</small></span><button type="button" title="移除当前配图" onClick={() => updateActiveItem({ assetReferenceId: null })}><Trash2 size={15}/></button></div>}
         </header>
 
@@ -284,6 +306,6 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
       </main>}
     </div>
 
-    <footer className="delivery-workspace-footer"><span>{saveState === 'saving' ? '正在自动保存配图方案' : completedCount ? `已完成 ${completedCount}/${plan.length} 张配图` : '方案已生成，可从第一张开始选图'}</span><div><button className="button" type="button" disabled={busy !== null} onClick={() => void save()}>{busy === 'save' ? <LoaderCircle size={16}/> : <Save size={16}/>}保存</button><button className="button primary" type="button" disabled={busy !== null || !hasCopy} onClick={() => void complete()}>{busy === 'complete' ? <LoaderCircle size={16}/> : null}确认素材，进入排版</button></div></footer>
+    <footer className="delivery-workspace-footer"><span>{saveState === 'saving' ? '正在自动保存配图方案' : boundCount ? `已绑定 ${boundCount}/${plan.length} 张图片` : '方案已生成，可从第一张开始选图'}</span><div><button className="button" type="button" disabled={busy !== null} onClick={() => void save()}>{busy === 'save' ? <LoaderCircle size={16}/> : <Save size={16}/>}保存</button><button className="button primary" type="button" disabled={busy !== null || !hasCopy} onClick={() => void complete()}>{busy === 'complete' ? <LoaderCircle size={16}/> : null}确认素材，进入排版</button></div></footer>
   </section>;
 }

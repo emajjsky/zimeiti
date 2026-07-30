@@ -85,6 +85,9 @@ const visualPlanItemInput = z.object({
   title: z.string().trim().min(1).max(120),
   placement: z.string().trim().min(1).max(200),
   purpose: z.string().trim().min(1).max(500),
+  visualType: z.enum(['NEWS_PHOTO', 'CONCEPT_DIAGRAM', 'SCENE', 'DATA_CHART', 'QUOTE_CARD', 'INFO_CARD']),
+  focus: z.string().trim().min(1).max(500),
+  avoidConcepts: z.array(z.string().trim().min(1).max(100)).max(12).default([]),
   searchQueries: z.array(z.string().trim().min(2).max(120)).min(1).max(5),
   prompt: z.string().trim().min(4).max(2_000),
   negativePrompt: z.string().trim().max(1_000).default(''),
@@ -2070,9 +2073,13 @@ app.put('/api/v1/creative/projects/:projectId/visual', { preHandler: authenticat
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = z.object({
     platform: creativePlatform,
+    planVersion: z.number().int().min(1).max(100),
     coverReferenceId: z.string().uuid().nullable(),
     assetReferenceIds: z.array(z.string().uuid()).max(12),
     plan: z.array(visualPlanItemInput).max(10).default([]),
+  }).superRefine((value, context) => {
+    const assigned = value.plan.map((item) => item.assetReferenceId).filter(Boolean);
+    if (new Set(assigned).size !== assigned.length) context.addIssue({ code: 'custom', path: ['plan'], message: '同一张图片不能绑定到多个配图位置。' });
   }).parse(request.body);
   const workspace = await currentWorkspace(request.user.sub);
   return transaction(async (client) => {
@@ -2083,6 +2090,13 @@ app.put('/api/v1/creative/projects/:projectId/visual', { preHandler: authenticat
     if (references.length !== requested.length) { const error = new Error('存在不属于当前项目的素材。'); error.statusCode = 400; throw error; }
     const invalid = references.find((item) => item.role !== 'VISUAL' && !item.mimeType?.startsWith('image/'));
     if (invalid) { const error = new Error(`“${invalid.title}”不是可用的视觉素材。`); error.statusCode = 400; throw error; }
+    const referenceById = new Map(references.map((item) => [item.id, item]));
+    const assignedKeys = input.plan.flatMap((item) => {
+      if (!item.assetReferenceId) return [];
+      const reference = referenceById.get(item.assetReferenceId);
+      return [reference?.url?.trim() || item.assetReferenceId];
+    });
+    if (new Set(assignedKeys).size !== assignedKeys.length) { const error = new Error('同一张图片不能绑定到多个配图位置。'); error.statusCode = 400; throw error; }
     const now = new Date().toISOString();
     let project;
     await updateCreativeState(client, workspace.id, (state) => {
@@ -2090,7 +2104,6 @@ app.put('/api/v1/creative/projects/:projectId/visual', { preHandler: authenticat
       if (index < 0) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
       const current = state.projects[index];
       const delivery = deliveryOf(current); const currentPlatform = platformDelivery(delivery, input.platform);
-      const referenceById = new Map(references.map((item) => [item.id, item]));
       const plannedAssets = input.plan.flatMap((item) => {
         const reference = item.assetReferenceId ? referenceById.get(item.assetReferenceId) : null;
         if (!reference) return [];
@@ -2113,6 +2126,7 @@ app.put('/api/v1/creative/projects/:projectId/visual', { preHandler: authenticat
         delivery: {
           ...delivery,
           platforms: { ...delivery.platforms, [input.platform]: { ...currentPlatform, visual: {
+            planVersion: input.planVersion,
             coverReferenceId: input.coverReferenceId,
             assetReferenceIds: requested,
             assets: [...plannedAssets, ...unplannedAssets],

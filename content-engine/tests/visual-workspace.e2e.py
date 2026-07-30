@@ -13,6 +13,8 @@ ARTIFACTS = Path(tempfile.gettempdir()) / "content-engine-visual-workspace-e2e"
 ARTIFACTS.mkdir(exist_ok=True)
 PROJECT_ID = "visual-project-1"
 NOW = "2026-07-30T08:00:00.000Z"
+COVER_ID = "11111111-1111-4111-8111-111111111111"
+BODY_ID = "22222222-2222-4222-8222-222222222222"
 SESSION = {
     "accessToken": "mock-access-token",
     "user": {"id": "user-1", "email": "creator@example.com", "display_name": "验收用户"},
@@ -62,7 +64,17 @@ def project():
         "factChecks": [],
         "versions": [{"id": "version-1", "platform": "WECHAT", "title": "我国成功发射天链三号01星", "body": body, "status": "PREFLIGHT_PASSED", "updatedAt": NOW}],
         "sourceSnapshot": {},
-        "delivery": {"platforms": {"WECHAT": {"stage": "VISUAL", "visual": None, "review": None}}},
+        "delivery": {"platforms": {"WECHAT": {"stage": "VISUAL", "visual": {
+            "planVersion": 1,
+            "coverReferenceId": COVER_ID,
+            "assetReferenceIds": [COVER_ID, BODY_ID],
+            "assets": [],
+            "plan": [
+                {"id": "old-cover", "role": "COVER", "assetReferenceId": COVER_ID},
+                {"id": "old-body", "role": "BODY", "assetReferenceId": BODY_ID},
+            ],
+            "updatedAt": NOW,
+        }, "review": None}}},
         "createdAt": NOW,
         "updatedAt": NOW,
     }
@@ -93,7 +105,10 @@ with sync_playwright() as playwright:
         if path in ("/api/v1/settings/account-voices", "/api/v1/account-voices"):
             return respond(route, {"voices": []})
         if path == f"/api/v1/creative/projects/{PROJECT_ID}/materials":
-            return respond(route, {"inputs": [], "references": []})
+            return respond(route, {"inputs": [], "references": [
+                {"id": COVER_ID, "title": "旧封面", "url": "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=", "role": "VISUAL", "scope": "IMAGING", "platforms": ["WECHAT"], "sourceType": "LINK", "mimeType": "image/gif", "notes": "", "createdAt": NOW, "updatedAt": NOW},
+                {"id": BODY_ID, "title": "旧正文火箭图", "url": "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=", "role": "VISUAL", "scope": "IMAGING", "platforms": ["WECHAT"], "sourceType": "LINK", "mimeType": "image/gif", "notes": "", "createdAt": NOW, "updatedAt": NOW},
+            ]})
         if path == "/api/v1/creative/image-search":
             query = request.url.split("q=", 1)[-1]
             state["searches"].append(query)
@@ -105,6 +120,7 @@ with sync_playwright() as playwright:
             payload = json.loads(request.post_data or "{}")
             state["visual_writes"] += 1
             state["project"]["delivery"]["platforms"]["WECHAT"]["visual"] = {
+                "planVersion": payload["planVersion"],
                 "coverReferenceId": payload["coverReferenceId"], "assetReferenceIds": payload["assetReferenceIds"],
                 "assets": [], "plan": payload["plan"], "updatedAt": NOW,
             }
@@ -121,14 +137,22 @@ with sync_playwright() as playwright:
     page.get_by_text(re.compile(r"已规划 [3-5] 张")).wait_for()
     page.get_by_role("button", name=re.compile(r"文章封面")).wait_for()
     page.get_by_role("button", name=re.compile(r"正文插图 1")).wait_for()
+    page.get_by_text(re.compile(r"已规划 [3-5] 张，已绑定 1 张")).wait_for()
+    assert page.locator(".visual-plan-state", has_text="待选图").count() >= 2, "旧版正文错误绑定没有在升级时清空"
     page.get_by_role("button", name=re.compile(r"天链三号01星")).first.wait_for()
     page.get_by_text("Satellite launch", exact=True).wait_for()
     assert state["searches"], "进入配图页后没有自动搜索第一组关键词"
+    page.get_by_role("button", name=re.compile(r"正文插图 1")).click()
+    page.get_by_text(re.compile(r"概念示意图|场景图|数据图")).first.wait_for()
+    assert len(state["searches"]) >= 2 and state["searches"][0] != state["searches"][-1], "封面与正文仍在自动搜索同一个关键词"
     for _ in range(20):
         if state["visual_writes"]:
             break
         page.wait_for_timeout(100)
     assert state["visual_writes"] >= 1, "自动生成的配图方案没有保存"
+    assert state["project"]["delivery"]["platforms"]["WECHAT"]["visual"]["planVersion"] == 2
+    assert all(item["assetReferenceId"] is None for item in state["project"]["delivery"]["platforms"]["WECHAT"]["visual"]["plan"][1:])
+    page.get_by_role("button", name=re.compile(r"文章封面")).click()
     page.get_by_role("button", name="AI 生图", exact=True).click()
     prompt = page.locator(".visual-prompt-field textarea").input_value()
     assert len(prompt) > 100 and "公众号" in prompt and "天链三号01星" in prompt

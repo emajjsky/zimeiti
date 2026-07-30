@@ -2,13 +2,15 @@
 
 ## 2026-07-30 实现：自动配图方案与任务式执行
 
-- 新增 `src/domain/visual-plan.mjs`。规划器使用标题主题、正文段落、题材和核心表达生成稳定的配图项，不调用收费模型；按平台控制数量、角色和比例，并为每项生成多组搜索词与完整生图提示词。
-- `ContentProject.delivery.platforms[platform].visual` 新增 `plan`。每项保存 `role / placement / purpose / searchQueries / prompt / negativePrompt / size / assetReferenceId`；`PUT /visual` 使用 Zod 校验并验证所有素材仍属于当前项目。
+- `src/domain/visual-plan.mjs` 导出 `VISUAL_PLAN_VERSION = 2`。规划器使用项目选题提取稳定主题，不再把渠道标题中的长钩子句作为搜索词；正文候选优先选择包含原理、关系、数据、应用和场景信息的段落及子句。
+- 配图项新增 `visualType / focus / avoidConcepts`。封面按全文主题生成，正文按 `CONCEPT_DIAGRAM / SCENE / DATA_CHART / INFO_CARD` 等视觉意图生成不同第一搜索词；正文提示词默认避开封面新闻现场和前序概念。
+- `ContentProject.delivery.platforms[platform].visual` 新增 `planVersion`。当前版本方案原样恢复；旧版或无版本方案只迁移封面，正文绑定清空但项目素材记录不删除，并通过 650ms 自动保存写回新版。
+- `PUT /visual` 使用 Zod 校验版本、视觉类型和语义字段，同时拒绝同一素材 ID 或同一图片 URL 绑定到多个位置。
 - `VisualWorkspace.tsx` 改为“左侧配图方案 + 右侧当前任务”。进入搜图自动执行第一组关键词，关键词标签可切换或编辑；AI 生图自动读取当前项提示词与比例；三种素材来源统一写回 `assetReferenceId`。
-- 配图方案采用 650ms 自动保存，仍保留显式保存按钮。旧视觉素材通过 `mergeVisualPlan()` 映射到封面和正文项，不要求迁移数据库。
+- “重新规划”读取当前正文并要求用户确认，只保留封面绑定。页面把原“完成”状态改为“已绑定”，避免把素材存在误报为匹配质量通过。
 - `searchTavilyImages()` 调用 Tavily `include_images` 与 `include_image_descriptions`。返回结果标记“使用前确认版权与授权”；无配置、无结果或调用失败时回退 Wikimedia Commons。
 - `documentForPlatform()` 读取配图顺序和插入位置。公众号/知乎 HTML 将封面放在标题后，并把正文图片按段落间隔插入；小红书/微博 Markdown 保留首图与配图位置。
-- 新增 `visual-plan.test.mjs`、`tavily-image-search.test.mjs` 和 `visual-workspace.e2e.py`，覆盖平台差异、旧数据映射、检索回退、自动保存、提示词预填以及 1440px/390px 无横向溢出。
+- `visual-plan.test.mjs` 和 `visual-workspace.e2e.py` 覆盖正文首选词去重、旧版迁移、当前版本恢复、自动保存、提示词预填以及 1440px/390px 无横向溢出。
 - 视觉参数保持 `DESIGN_VARIANCE 4 / MOTION_INTENSITY 2 / VISUAL_DENSITY 6`。沿用现有深蓝边线、钴蓝与马卡龙状态色，不新增装饰动画。
 
 ## 2026-07-30 实现：创作内页导航与配图能力

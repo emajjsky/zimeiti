@@ -136,6 +136,7 @@ export interface CreativeVisualAsset {
 
 export type CreativeVisualPlanRole = 'COVER' | 'BODY' | 'CARD' | 'MAIN';
 export type CreativeVisualSize = '1:1' | '3:4' | '4:3' | '9:16' | '16:9';
+export type CreativeVisualType = 'NEWS_PHOTO' | 'CONCEPT_DIAGRAM' | 'SCENE' | 'DATA_CHART' | 'QUOTE_CARD' | 'INFO_CARD';
 
 export interface CreativeVisualPlanItem {
   id: string;
@@ -143,6 +144,9 @@ export interface CreativeVisualPlanItem {
   title: string;
   placement: string;
   purpose: string;
+  visualType: CreativeVisualType;
+  focus: string;
+  avoidConcepts: string[];
   searchQueries: string[];
   prompt: string;
   negativePrompt: string;
@@ -151,6 +155,7 @@ export interface CreativeVisualPlanItem {
 }
 
 export interface CreativeVisualDelivery {
+  planVersion?: number;
   coverReferenceId: string | null;
   assetReferenceIds: string[];
   assets: CreativeVisualAsset[];
