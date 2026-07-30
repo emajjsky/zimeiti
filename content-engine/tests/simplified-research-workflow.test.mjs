@@ -4,8 +4,10 @@ import test from 'node:test';
 
 let buildResearchResult;
 let workflowSourceActionsForProject;
+let projectOriginalSource;
+let sourceMatchesProject;
 try {
-  ({ buildResearchResult, workflowSourceActionsForProject } = await import('../server/services/simplified-research.cjs'));
+  ({ buildResearchResult, workflowSourceActionsForProject, projectOriginalSource, sourceMatchesProject } = await import('../server/services/simplified-research.cjs'));
 } catch {}
 
 test('研究工作流优先读取项目原始资讯链接，再执行补充检索', () => {
@@ -29,6 +31,32 @@ test('研究工作流优先读取项目原始资讯链接，再执行补充检�
   assert.equal(actions[0].target, 'https://www.ithome.com/0/983/890.htm');
   assert.equal(actions.filter((item) => item.target === actions[0].target).length, 1);
   assert.equal(actions.filter((item) => ['SEARCH_WEB', 'READ_LINK'].includes(item.action)).length, 2);
+});
+
+test('研究优先复用项目已保存的原文快照，不依赖再次联网读取', () => {
+  const project = { sourceSnapshot: { intelligence: {
+    title: '宇树科技上市新进展',
+    source: 'IT之家',
+    url: 'https://www.ithome.com/0/983/890.htm',
+    summary: '宇树科技公告了首次公开发行安排。',
+    publishedAt: '2026-07-30T13:47:42.000Z',
+  } } };
+  assert.deepEqual(projectOriginalSource(project), {
+    title: '宇树科技上市新进展',
+    source: 'IT之家',
+    url: 'https://www.ithome.com/0/983/890.htm',
+    summary: '宇树科技公告了首次公开发行安排。',
+    publishedAt: '2026-07-30T13:47:42.000Z',
+    relevanceScore: 1,
+    language: 'ZH',
+  });
+});
+
+test('补充检索只保留与项目主体相关的来源', () => {
+  const project = { title: '宇树科技上市新进展：初步询价日为 8 月 5 日' };
+  assert.equal(sourceMatchesProject({ title: '宇树科技首次公开发行公告', summary: '' }, project), true);
+  assert.equal(sourceMatchesProject({ title: '杭州云深处科技股份有限公司', summary: '科创板上市材料' }, project), false);
+  assert.equal(sourceMatchesProject({ title: '成都迈科康生物科技股份有限公司', summary: '发行公告' }, project), false);
 });
 
 test('研究结果只把已核验事实交给正文，并保留用户草稿', () => {

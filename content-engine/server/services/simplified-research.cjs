@@ -56,6 +56,43 @@ function workflowSourceActionsForProject(plan, project) {
   return [{ action: 'READ_LINK', purpose: '读取项目原始资讯', target: url }, ...actions].slice(0, WORKFLOW_MAX_AUTOMATIC_SOURCE_ACTIONS);
 }
 
+function projectOriginalSource(project) {
+  const origin = project?.sourceSnapshot?.intelligence;
+  const url = typeof origin?.url === 'string' && /^https?:\/\//i.test(origin.url) ? origin.url : '';
+  const title = String(origin?.title ?? '').trim();
+  const summary = String(origin?.summary ?? '').trim();
+  if (!url || !title || !summary) return null;
+  return {
+    title,
+    url,
+    source: String(origin?.source ?? new URL(url).hostname).trim(),
+    summary,
+    publishedAt: origin?.publishedAt ?? null,
+    relevanceScore: 1,
+    language: /[\u3400-\u9fff]/.test(`${title}${summary}`) ? 'ZH' : 'EN',
+  };
+}
+
+function sourceMatchesProject(result, project) {
+  const terms = projectSubjectTerms(project);
+  if (!terms.length) return true;
+  const haystack = `${String(result?.title ?? '')} ${String(result?.summary ?? '')}`.toLowerCase().replace(/\s+/g, '');
+  return terms.some((term) => haystack.includes(term));
+}
+
+function projectSubjectTerms(project) {
+  const title = String(project?.sourceSnapshot?.intelligence?.title ?? project?.title ?? '').trim();
+  if (!title) return [];
+  const leadingClause = title.split(/[：:，,。！？!?]/, 1)[0]
+    .replace(/^(?:最新消息|最新|重磅|突发|今日|刚刚)[：:：\s]*/u, '')
+    .trim();
+  const entity = leadingClause.split(/(?:上市|发布|宣布|回应|推出|完成|获批|申请|融资|收购|计划|将于|成为|新进展)/u, 1)[0]
+    .replace(/[《》“”"'‘’\s]/g, '')
+    .toLowerCase();
+  const latinTerms = (title.toLowerCase().match(/[a-z0-9][a-z0-9._-]{2,}/g) ?? []).filter((term) => /[a-z]/.test(term));
+  return [...new Set(entity.length >= 2 && entity.length <= 24 ? [entity] : latinTerms)];
+}
+
 function buildResearchResult({ plan = {}, sources = [], verification = null, materials = [], allowSingleSource = false }) {
   const claims = Array.isArray(verification?.claims) ? verification.claims : (Array.isArray(plan.claims) ? plan.claims.map((item) => ({ claim: item.claim, status: 'NEEDS_REVIEW', explanation: '尚未完成事实核验。', evidence: [] })) : []);
   const usableStatuses = allowSingleSource ? new Set(['VERIFIED', 'SINGLE_SOURCE']) : new Set(['VERIFIED']);
@@ -74,4 +111,4 @@ function buildResearchResult({ plan = {}, sources = [], verification = null, mat
   });
 }
 
-module.exports = { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, WORKFLOW_MAX_AUTOMATIC_SOURCE_ACTIONS, researchResultSchema, classifyMaterials, workflowSourceActions, workflowSourceActionsForProject, buildResearchResult };
+module.exports = { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, WORKFLOW_MAX_AUTOMATIC_SOURCE_ACTIONS, researchResultSchema, classifyMaterials, workflowSourceActions, workflowSourceActionsForProject, projectOriginalSource, sourceMatchesProject, buildResearchResult };

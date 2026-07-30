@@ -29,7 +29,7 @@ const {
   buildSourceVerificationRepairPrompt,
   parseSourceVerification,
 } = require('./services/source-verification.cjs');
-const { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, workflowSourceActionsForProject, buildResearchResult } = require('./services/simplified-research.cjs');
+const { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, workflowSourceActionsForProject, projectOriginalSource, sourceMatchesProject, buildResearchResult } = require('./services/simplified-research.cjs');
 const { createProjectAgentStore } = require('./services/project-agent.cjs');
 const { buildCopyPrompt, buildCopyRepairPrompt, buildCopyQualityReviewPrompt, candidateQualityReview, detectVoiceViolations, mergeFactsToVerify, parseCopyOutput, parseCopyQualityReview } = require('./services/project-copy-action.cjs');
 
@@ -97,10 +97,13 @@ async function captureWorkflowSources(workspaceId, plan, project) {
     if (action.action === 'ASK_USER') { captured.push(manualSourceSnapshot(action)); continue; }
     try {
       if (action.action === 'SEARCH_WEB') {
-        const results = normalizeSearchResults(action, await searchTavily(workspaceId, { query: action.target, category: '其他', domains: [] }));
+        const searched = await searchTavily(workspaceId, { query: action.target, category: '其他', domains: [] });
+        const results = normalizeSearchResults(action, searched.filter((item) => sourceMatchesProject(item, project)));
         captured.push(...(results.length ? results : [failedSourceSnapshot(action, new Error('网页搜索没有返回可保存的结果。'))]));
       } else if (action.action === 'READ_LINK') {
-        captured.push(normalizeReadResult(action, await clipPublicLink(action.target)));
+        const original = projectOriginalSource(project);
+        const source = original?.url === action.target ? original : await clipPublicLink(action.target);
+        captured.push(normalizeReadResult(action, source));
       }
     } catch (error) {
       captured.push(failedSourceSnapshot(action, error));
