@@ -709,4 +709,10 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - `worker.cjs` keeps one automatic generic anti-cliché rewrite for every copy candidate.
 - The post-rewrite and post-review hard failures now run only when `snapshot.accountVoice` exists. Choosing “暂不使用” can no longer turn generic phrasing into an “账号声音检查未通过” failure.
 - `project-copy-action.test.mjs` locks both worker guard conditions so this boundary cannot silently regress.
+
+## 2026-07-30 Fix: preserve existing unverified claims during a revision
+
+- `parseCopyOutput()` now distinguishes generation from revision actions. A revision can retain a claim already present in the current draft only when the candidate also retains that claim in `factsToVerify`.
+- Revision prompts state that this exception is preservation, not verification: the model cannot introduce, expand, infer from, or present the claim as confirmed.
+- New regression coverage accepts a compliant `RESTRUCTURE_DRAFT` candidate and rejects the same candidate when its verification list is empty.
 - 完整文稿按自然段连续渲染在弹窗可滚动主体内；原有 LCS 段落差异计算不变，移动端仍沿用全屏弹窗与固定操作栏。

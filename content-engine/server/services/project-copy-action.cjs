@@ -208,8 +208,17 @@ function safeWritingBrief(brief, cautions) {
   return safe;
 }
 
-function assertNoUnresolvedClaimInBody(body, researchContext) {
-  const claim = unresolvedClaims(researchContext).find((item) => includesUnresolvedClaim(body, [item]));
+function isRevisionAction(action) {
+  return action !== 'GENERATE_OUTLINE' && action !== 'GENERATE_DRAFT';
+}
+
+function assertNoUnresolvedClaimInBody(output, action, safetyContext) {
+  const claim = unresolvedClaims(safetyContext?.researchContext).find((item) => includesUnresolvedClaim(output.body, [item]));
+  const existingBody = safetyContext?.currentContent?.body ?? '';
+  const preservedFromExistingDraft = isRevisionAction(action)
+    && includesUnresolvedClaim(existingBody, [claim])
+    && includesUnresolvedClaim(output.factsToVerify.join('\n'), [claim]);
+  if (claim && preservedFromExistingDraft) return;
   if (claim) throw new Error(`正式正文不得把待复核主张写成确定事实：${claim}`);
 }
 
@@ -217,7 +226,7 @@ function parseCopyOutput(content, action, safetyContext) {
   const value = parseJson(content, '模型没有返回文案内容。', '模型返回的文案不是有效 JSON。');
   if (action === 'GENERATE_OUTLINE') return outlineSchema.parse(value);
   const output = copyOutputSchema.parse(value);
-  assertNoUnresolvedClaimInBody(output.body, safetyContext?.researchContext);
+  assertNoUnresolvedClaimInBody(output, action, safetyContext);
   return output;
 }
 
@@ -244,7 +253,9 @@ function buildCopyPrompt(snapshot) {
   };
   const cautions = unresolvedClaims(snapshot.researchContext);
   const cautionBoundaryRule = cautions.length
-    ? `待复核主张禁止写入区：${cautions.map((claim, index) => `${index + 1}. ${claim}`).join('；')}。这些内容不得出现在正文中，也不得换词解释、推演、举例或以“通常”“可能”“待官方确认”等方式继续展开；只能原样保留在 factsToVerify。若它是项目的重要信息缺口，就把文章改为基于已核验事实的阅读判断，不要补写技术背景。`
+    ? isRevisionAction(snapshot.action)
+      ? `待复核主张：${cautions.map((claim, index) => `${index + 1}. ${claim}`).join('；')}。若某项已经出现在当前正文中，可在重构后保留原有表述，但必须原样列入 factsToVerify，且不得新增、扩写、推演、举例或把它包装成已确认结论。未出现在当前正文中的待复核主张仍不得写入正文。`
+      : `待复核主张禁止写入区：${cautions.map((claim, index) => `${index + 1}. ${claim}`).join('；')}。这些内容不得出现在正文中，也不得换词解释、推演、举例或以“通常”“可能”“待官方确认”等方式继续展开；只能原样保留在 factsToVerify。若它是项目的重要信息缺口，就把文章改为基于已核验事实的阅读判断，不要补写技术背景。`
     : null;
   const platformQualityRules = snapshot.platform === 'WECHAT'
     ? [

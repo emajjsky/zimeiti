@@ -193,6 +193,20 @@ test('公众号候选不得把待复核主张写成正文事实', () => {
   }), 'GENERATE_DRAFT', { platform: 'WECHAT', researchContext: { cautions: [{ claim, status: 'NEEDS_REVIEW' }] } }), /待复核|正文/);
 });
 
+test('重构已有正文可保留既有待复核事实，但必须继续列入核验清单', () => {
+  const claim = '该卫星主要用于为飞船、空间实验室、空间站等载人航天器提供数据中继和测控服务。';
+  const body = `这是一篇正在重构的公众号文章，原稿已提到该卫星为载人航天器提供数据中继和测控服务。\n\n${'重构只改善结构与表达，不新增未经核验的用途、数据或影响推演。'.repeat(5)}`;
+  const output = JSON.stringify({ title: '这颗卫星上天意味着什么？', body, changeSummary: '重组原有叙事结构。', factsToVerify: [claim] });
+  assert.doesNotThrow(() => parseCopyOutput(output, 'RESTRUCTURE_DRAFT', {
+    currentContent: { body },
+    researchContext: { cautions: [{ claim, status: 'NEEDS_REVIEW' }] },
+  }));
+  assert.throws(() => parseCopyOutput(JSON.stringify({ title: '标题', body, changeSummary: '错误示例', factsToVerify: [] }), 'RESTRUCTURE_DRAFT', {
+    currentContent: { body },
+    researchContext: { cautions: [{ claim, status: 'NEEDS_REVIEW' }] },
+  }), /待复核|正文/);
+});
+
 test('文案质量审稿只以已核验事实为准，并返回可执行的重写结论', () => {
   const review = parseCopyQualityReview(JSON.stringify({ approved: false, issues: ['正文把待复核用途写成了确定事实'] }));
   assert.deepEqual(review, { approved: false, issues: ['正文把待复核用途写成了确定事实'] });
