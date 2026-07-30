@@ -5,6 +5,7 @@ import {
   buildSourceVerificationPrompt,
   defaultSourceVerificationTemplate,
   parseSourceVerification,
+  mergeSourceVerificationResults,
   SOURCE_VERIFICATION_SCOPE,
   SOURCE_VERIFICATION_VERSION,
   validateSourceVerificationTemplate,
@@ -117,6 +118,39 @@ test('事实核验提示词模板可见可编辑且保留默认版本', () => {
   assert.match(defaultSourceVerificationTemplate(), /来源/);
   assert.equal(validateSourceVerificationTemplate('重点检查数字与适用范围。'), '重点检查数字与适用范围。');
   assert.throws(() => validateSourceVerificationTemplate(''), /不能为空/);
+});
+
+test('逐来源核验可隔离坏来源并合并仍然有效的单一来源结论', () => {
+  assert.equal(typeof mergeSourceVerificationResults, 'function');
+  const result = mergeSourceVerificationResults({
+    claims: context.claims,
+    results: [
+      parseSourceVerification(JSON.stringify(validOutput), context),
+      null,
+    ],
+  });
+
+  assert.equal(result.claims[0].status, 'SINGLE_SOURCE');
+  assert.equal(result.claims[0].evidence[0].sourceId, 'source-a');
+  assert.equal(result.claims[1].status, 'NEEDS_REVIEW');
+  assert.match(result.summary, /1 条获得单一来源支持/);
+});
+
+test('逐来源核验合并两个独立支持来源为多源核验通过', () => {
+  const sourceC = { id: 'source-c', title: '第二份公告', url: 'https://example.com/c', source: '公告平台', summary: '产品已向全部免费用户开放。' };
+  const second = {
+    summary: '第二个来源支持第一项主张。',
+    claims: [
+      { claim: context.claims[0].claim, status: 'SINGLE_SOURCE', explanation: '第二份公告支持。', evidence: [{ sourceId: 'source-c', relation: 'SUPPORTS', quote: '产品已向全部免费用户开放', note: '直接表述。' }] },
+      { claim: context.claims[1].claim, status: 'NEEDS_REVIEW', explanation: '没有证据。', evidence: [] },
+    ],
+  };
+  const merged = mergeSourceVerificationResults({
+    claims: context.claims,
+    results: [validOutput, parseSourceVerification(JSON.stringify(second), { ...context, sources: [sourceC] })],
+  });
+  assert.equal(merged.claims[0].status, 'VERIFIED');
+  assert.equal(merged.claims[0].evidence.length, 2);
 });
 
 test('迁移保存来源质量选择和事实核验产物', () => {

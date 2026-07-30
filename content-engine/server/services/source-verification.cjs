@@ -94,12 +94,49 @@ function buildSourceVerificationRepairPrompt(system, validationError) {
   return `${system}\n上一次输出未通过结构或证据校验。只返回修正后的 JSON。校验错误：${validationError}`;
 }
 
+function mergeSourceVerificationResults({ claims = [], results = [] }) {
+  const usableResults = (Array.isArray(results) ? results : []).filter((item) => item && Array.isArray(item.claims));
+  const mergedClaims = (Array.isArray(claims) ? claims : []).map((plannedClaim) => {
+    const claim = String(plannedClaim?.claim ?? '').trim();
+    const matches = usableResults.flatMap((result) => result.claims.filter((item) => item.claim === claim));
+    const evidenceByKey = new Map();
+    for (const item of matches.flatMap((match) => match.evidence ?? [])) {
+      const key = `${item.sourceId}:${item.relation}:${item.quote}`;
+      if (!evidenceByKey.has(key)) evidenceByKey.set(key, item);
+    }
+    const evidence = [...evidenceByKey.values()];
+    const supports = new Set(evidence.filter((item) => item.relation === 'SUPPORTS').map((item) => item.sourceId));
+    const conflicts = new Set(evidence.filter((item) => item.relation === 'CONFLICTS').map((item) => item.sourceId));
+    let status = 'NEEDS_REVIEW';
+    let explanation = matches.find((item) => item.explanation)?.explanation ?? '现有来源未提供足够的直接证据。';
+    if (supports.size && conflicts.size) {
+      status = 'CONFLICTING';
+      explanation = '不同来源对这项主张存在冲突，需要人工判断。';
+    } else if (supports.size >= 2) {
+      status = 'VERIFIED';
+      explanation = `${supports.size} 个独立来源直接支持这项主张。`;
+    } else if (supports.size === 1) {
+      status = 'SINGLE_SOURCE';
+      explanation = '1 个来源直接支持，使用时需要明确注明来源。';
+    }
+    return { claim, status, explanation, evidence };
+  });
+  const verified = mergedClaims.filter((item) => item.status === 'VERIFIED').length;
+  const singleSource = mergedClaims.filter((item) => item.status === 'SINGLE_SOURCE').length;
+  const unresolved = mergedClaims.length - verified - singleSource;
+  return {
+    summary: `逐来源核验完成：${verified} 条获得多源支持，${singleSource} 条获得单一来源支持，${unresolved} 条仍需补充核验。`,
+    claims: mergedClaims,
+  };
+}
+
 module.exports = {
   SOURCE_VERIFICATION_SCOPE,
   SOURCE_VERIFICATION_VERSION,
   buildSourceVerificationPrompt,
   buildSourceVerificationRepairPrompt,
   defaultSourceVerificationTemplate,
+  mergeSourceVerificationResults,
   parseSourceVerification,
   validateSourceVerificationTemplate,
   verificationSchema,

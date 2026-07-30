@@ -424,3 +424,9 @@ git push origin main
 - Spec coverage: 统一主链路由 Task 2 和 Task 4 实现；资料自动分流由 Task 1；来源过滤和事实边界由 Task 2；采用、跳过和正文继承由 Task 3；错误降级、移动端和视觉回归由 Task 2、Task 4、Task 5；四份产品文档由 Task 6 更新。
 - Placeholder scan: 未使用 TBD、TODO、“适当处理”或跨任务省略；所有测试步骤、命令、接口名、运行版本和迁移名均已明确。
 - Type consistency: `PROJECT_RESEARCH_WORKFLOW`、`RESEARCH_RESULT`、`researchContext`、`startResearch`、`acceptResearchResult` 和 `skipResearch` 在契约、服务端、前端和测试任务中名称一致。
+# 2026-07-30 补充执行结果
+
+- 已完成研究简报契约与题材化来源优先级。
+- 已完成逐来源核验恢复和确定性合并。
+- 已完成研究结果简报展示、渠道步骤权限和无正文配图门禁。
+- 已由全量测试、类型检查和生产构建验证。

@@ -65,6 +65,13 @@ test('研究结果只把已核验事实交给正文，并保留用户草稿', ()
   const result = buildResearchResult({
     plan: {
       summary: '核验一思智能的融资与交付情况',
+      researchBrief: {
+        subject: '一思智能融资与交付进展',
+        directions: ['核验融资事件', '核验批量交付状态'],
+        keywords: ['一思智能', '融资', '批量交付'],
+        preferredChannels: ['公司官方公告', '投资机构公告'],
+        searchQueries: ['一思智能 融资 官方公告', '一思智能 批量交付 官方'],
+      },
       claims: [
         { claim: '一思智能完成融资', priority: 'HIGH', reason: '正文将提及融资' },
         { claim: '一思智能已批量交付', priority: 'HIGH', reason: '正文将评价交付状态' },
@@ -86,6 +93,8 @@ test('研究结果只把已核验事实交给正文，并保留用户草稿', ()
   assert.deepEqual(result.facts.map((item) => item.claim), ['一思智能完成融资']);
   assert.deepEqual(result.cautions.map((item) => item.claim), ['一思智能已批量交付']);
   assert.deepEqual(result.materialContext.userContent.map((item) => item.id), ['draft-1']);
+  assert.equal(result.researchBrief.subject, '一思智能融资与交付进展');
+  assert.deepEqual(result.researchBrief.directions, ['核验融资事件', '核验批量交付状态']);
 });
 
 test('迁移允许研究结果作为项目级候选产物保存', () => {

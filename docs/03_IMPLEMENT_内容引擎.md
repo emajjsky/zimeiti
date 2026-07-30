@@ -822,3 +822,13 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - `CreateWorkspace` 顶部只保留项目级“规划、创作”，创作页按当前渠道状态渲染 `CopyWorkspace`、`VisualWorkspace`、`LayoutWorkspace` 或 `ReviewWorkspace`。
 - `CopyWorkspace` 渠道标签显示“文案中/配图中/排版中/审核中/已就绪”，且每个渠道的目标篇幅在 `platformSkills` 保存。服务端读取写作上下文时使用当前渠道篇幅。
 - 旧快照的项目级交付字段在读取时兼容转换为渠道映射，避免旧项目因本次升级无法打开。
+
+## 2026-07-30 修复：研究简报、核验隔离与配图阶段门
+
+- `project-research.cjs` 的研究计划新增 `researchBrief`：`subject`、`directions`、`keywords`、`preferredChannels`、`searchQueries`。提示词要求查询词包含实体、事实目标和来源线索，并针对财经、IPO 和科技选题设置第一方渠道优先级。
+- `simplified-research.cjs` 将研究简报写入统一研究结果，并记录核验为完整、部分恢复或失败。旧结果仍可读取，前端只在新字段存在时展示简报。
+- `source-verification.cjs` 新增逐来源结果合并。两个独立支持来源提升为 `VERIFIED`，一个支持来源为 `SINGLE_SOURCE`，支持和冲突并存为 `CONFLICTING`，其余保持 `NEEDS_REVIEW`。
+- `worker.cjs` 先执行原多来源核验；结构或引用校验失败时自动逐来源重试，忽略失败来源并合并成功结果。全部失败时记录明确诊断，不再静默吞掉异常。
+- `channel-workflow.mjs` 统一 `COPY/VISUAL/LAYOUT/REVIEW/READY` 与正文、配图、排版、审核四个页面的解锁关系。`CreateWorkspace` 使用安全步骤渲染，后续标签显示禁用态。
+- `VisualWorkspace` 在无正文时不启动配图方案自动保存；`PUT /creative/projects/:projectId/visual` 在读取素材前再次验证当前渠道正文不少于 80 字。
+- `ProjectAgent` 的研究结果新增研究主体、方向、关键词、渠道和查询词展示；沿用现有浅蓝信息层级和控件圆角，不引入新的页面说明或动效依赖。

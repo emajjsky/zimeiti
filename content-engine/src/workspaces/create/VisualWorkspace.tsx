@@ -134,6 +134,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
   }, [assets, fileUrls]);
 
   useEffect(() => {
+    if (!hasCopy) return;
     if (hydratedPlanKey !== `${project.id}:${activePlatform}`) return;
     const signature = JSON.stringify({ plan, styleProfile });
     if (signature === lastSavedSignature.current) return;
@@ -152,7 +153,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
       });
     }, 650);
     return () => window.clearTimeout(timer);
-  }, [activePlatform, hydratedPlanKey, onProjectChange, plan, project.id, styleProfile]);
+  }, [activePlatform, hasCopy, hydratedPlanKey, onProjectChange, plan, project.id, styleProfile]);
 
   const runSearch = async (query: string) => {
     const normalized = query.trim();

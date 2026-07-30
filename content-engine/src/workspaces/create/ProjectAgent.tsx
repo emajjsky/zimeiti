@@ -123,12 +123,24 @@ function ResearchResultPreview({ result, busy, onAccept }: { result: ResearchRes
   const needsReview = result.cautions.filter((item) => item.status !== 'SINGLE_SOURCE');
   return <section className="research-result-preview">
     <p className="research-result-summary">{researchResultSummary(result)}</p>
+    {result.researchBrief && <ResearchBriefPreview brief={result.researchBrief}/>}
     <ResultList title="可直接使用" items={verifiedFacts} empty="还没有可直接写入正文的事实。" tone="verified"/>
     <ResultList title="可参考（单一来源）" items={singleSource} empty="没有单一来源事实。" tone="single-source"/>
     <ResultList title="需要补充核验" items={needsReview} empty="没有需要补充核验的事实。" tone="caution"/>
-    <ResultList title="正文角度" items={result.angles} empty="可根据规划直接展开正文。" tone="angle"/>
     <details className="research-result-details"><summary>来源与研究说明</summary><div>{result.sources.map((source) => <a key={source.id} href={source.url ?? undefined} target={source.url ? '_blank' : undefined} rel="noreferrer">{source.source}：{source.title}</a>)}</div></details>
     <footer><button className="button primary" type="button" disabled={busy} onClick={onAccept}>{busy ? <LoaderCircle size={16}/> : <Check size={16}/>}采用并进入正文</button></footer>
+  </section>;
+}
+
+function ResearchBriefPreview({ brief }: { brief: NonNullable<ResearchResult['researchBrief']> }) {
+  return <section className="research-brief-preview" aria-label="本次研究范围">
+    <header><span>研究主体</span><b>{brief.subject}</b></header>
+    <dl>
+      <div><dt>方向</dt><dd>{brief.directions.map((item) => <span key={item}>{item}</span>)}</dd></div>
+      <div><dt>关键词</dt><dd>{brief.keywords.map((item) => <span key={item}>{item}</span>)}</dd></div>
+      <div><dt>渠道</dt><dd>{brief.preferredChannels.map((item) => <span key={item}>{item}</span>)}</dd></div>
+    </dl>
+    <details><summary>查看查询词</summary><ol>{brief.searchQueries.map((item) => <li key={item}>{item}</li>)}</ol></details>
   </section>;
 }
 

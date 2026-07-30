@@ -1,6 +1,19 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
+import { canOpenChannelView, channelViewForStage } from '../src/domain/channel-workflow.mjs';
+
+test('渠道步骤按正文确认状态逐步解锁', () => {
+  assert.equal(canOpenChannelView('COPY', 'copy', false), true);
+  assert.equal(canOpenChannelView('COPY', 'visual', false), false);
+  assert.equal(canOpenChannelView('COPY', 'visual', true), false);
+  assert.equal(canOpenChannelView('VISUAL', 'visual', true), true);
+  assert.equal(canOpenChannelView('VISUAL', 'layout', true), false);
+  assert.equal(canOpenChannelView('LAYOUT', 'layout', true), true);
+  assert.equal(canOpenChannelView('REVIEW', 'review', true), true);
+  assert.equal(channelViewForStage('COPY', false), 'copy');
+  assert.equal(channelViewForStage('VISUAL', true), 'visual');
+});
 
 test('创作后半段提供配图、排版、审核和发布包的真实接口', () => {
   const api = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
@@ -27,9 +40,21 @@ test('创作工作台不再把配图、排版和审核渲染为占位页面', ()
   assert.match(workspace, /<ReviewWorkspace/);
   assert.doesNotMatch(workspace, /配图尚未开始|排版尚未开始|审核尚未开始/);
   assert.match(visual, /确认素材，进入排版/);
+  assert.match(visual, /if \(!hasCopy\) return/);
+  assert.match(workspace, /canOpenChannelView/);
+  assert.match(workspace, /disabled=\{!canOpenChannelView/);
   assert.match(layout, /确认排版，进入审核/);
   assert.match(review, /完成审核，生成发布包/);
   assert.match(review, /下载 .*发布稿/);
+});
+
+test('服务端拒绝为没有正文的渠道保存配图方案', () => {
+  const api = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
+  const start = api.indexOf("app.put('/api/v1/creative/projects/:projectId/visual'");
+  const end = api.indexOf("app.post('/api/v1/creative/projects/:projectId/visual/complete'", start);
+  const route = api.slice(start, end);
+  assert.match(route, /existingVersion\.body/);
+  assert.match(route, /请先完成.*正文/);
 });
 
 test('后半段制作状态按渠道隔离，公众号无需等待其他平台', () => {

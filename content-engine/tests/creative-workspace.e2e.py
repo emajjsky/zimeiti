@@ -88,12 +88,19 @@ def research_result():
         "acceptedAt": None,
         "payload": {
             "summary": "官方资料与用户素材可以支撑正文的核心判断，价格类信息仍应以发布前页面为准。",
-            "facts": [{"claim": "产品定价和免费额度需要以官方价格页实时信息为准。"}],
-            "cautions": [{"claim": "用户个案不能直接推导为所有人的使用结论。"}],
+            "researchBrief": {
+                "subject": "AI 工具的真实价值与使用成本",
+                "directions": ["核验当前价格与免费额度", "确认普通创作者的适用边界"],
+                "keywords": ["AI 工具", "价格", "免费额度", "普通创作者"],
+                "preferredChannels": ["产品官方价格页", "产品官方文档", "可信科技媒体"],
+                "searchQueries": ["产品名 价格 免费额度 官方", "产品名 普通创作者 使用限制 官方文档"],
+            },
+            "facts": [{"claim": "产品定价和免费额度需要以官方价格页实时信息为准。", "status": "VERIFIED", "explanation": "两个官方页面直接支持。", "evidence": []}],
+            "cautions": [{"claim": "用户个案不能直接推导为所有人的使用结论。", "status": "NEEDS_REVIEW", "explanation": "需要更多用户样本。", "evidence": []}],
             "angles": ["用一项真实任务作为开场，再给出可复用的核验方法。"],
             "sources": [{"id": "source-1", "source": "官方文档", "title": "产品使用说明", "url": "https://example.com/docs"}],
-            "materialContext": {"inputs": 1, "references": 1},
-            "process": {"phase": "COMPLETED", "progress": 100},
+            "materialContext": {"userContent": [], "creativeReferences": [], "visualAssets": [], "verificationCandidates": []},
+            "process": {"phase": "COMPLETE", "sourceCount": 1},
         },
     }
 
@@ -104,7 +111,7 @@ with sync_playwright() as playwright:
         **({"executable_path": chrome_path()} if chrome_path() else {}),
     )
     page = browser.new_page(viewport={"width": 1440, "height": 1000})
-    state = {"project": project(), "phase": "idle", "agent_reads": 0, "requests": [], "unexpected": [], "console_errors": [], "brief_writes": 0}
+    state = {"project": project(), "phase": "idle", "agent_reads": 0, "requests": [], "unexpected": [], "console_errors": [], "brief_writes": 0, "brief": None}
     page.on("console", lambda message: state["console_errors"].append(message.text) if message.type == "error" else None)
     page.on("pageerror", lambda error: state["console_errors"].append(str(error)))
     page.add_init_script(
@@ -171,11 +178,14 @@ with sync_playwright() as playwright:
             return respond(route, {"artifact": accepted, "project": state["project"]})
         if path == "/api/v1/creative/skills" and method == "GET":
             return respond(route, [])
+        if path == "/api/v1/account-voices" and method == "GET":
+            return respond(route, {"voices": []})
         if path == f"/api/v1/creative/projects/{PROJECT_ID}/brief" and method == "GET":
-            return respond(route, {"brief": None})
+            return respond(route, {"brief": state["brief"]})
         if path == f"/api/v1/creative/projects/{PROJECT_ID}/brief" and method == "PUT":
             state["brief_writes"] += 1
-            return respond(route, {"brief": json.loads(request.post_data or "{}")})
+            state["brief"] = json.loads(request.post_data or "{}")
+            return respond(route, {"brief": state["brief"]})
         if path == "/api/v1/intelligence/sources" and method == "GET":
             return respond(route, [])
         if path == "/api/v1/intelligence/items" and method == "GET":
@@ -196,10 +206,11 @@ with sync_playwright() as playwright:
     page.get_by_placeholder("不填则沿用当前项目上下文").fill("核验价格信息，并保留我的实际测试感受")
     page.get_by_role("button", name="开始研究", exact=True).click()
     page.locator(".simplified-research-running b").get_by_text("正在核验", exact=True).wait_for()
-    page.get_by_text("可采用信息", exact=True).wait_for(timeout=10_000)
+    page.get_by_text("研究主体", exact=True).wait_for(timeout=10_000)
+    page.get_by_text("AI 工具的真实价值与使用成本", exact=True).wait_for()
+    page.get_by_text("可直接使用", exact=True).wait_for()
     page.get_by_text("产品定价和免费额度需要以官方价格页实时信息为准。", exact=True).wait_for()
-    page.get_by_text("暂未确认", exact=True).wait_for()
-    page.get_by_text("正文角度", exact=True).wait_for()
+    page.get_by_text("需要补充核验", exact=True).wait_for()
     assert_no_overflow(page, "1440px 研究结果")
     page.screenshot(path=ARTIFACTS / "simplified-research-desktop.png", full_page=True)
 
@@ -212,7 +223,10 @@ with sync_playwright() as playwright:
     page.get_by_role("button", name="采用并进入正文", exact=True).click()
     page.locator(".copy-editor").wait_for()
     page.get_by_text("已自动保存", exact=True).wait_for()
-    assert state["brief_writes"] == 1
+    assert page.get_by_role("button", name="配图", exact=True).is_disabled()
+    assert page.get_by_role("button", name="排版", exact=True).is_disabled()
+    assert page.get_by_role("button", name="审核", exact=True).is_disabled()
+    assert state["brief_writes"] == 1, {"brief_writes": state["brief_writes"], "requests": state["requests"]}
     assert "stage=master" in page.url
     assert not state["unexpected"], state["unexpected"]
     assert not state["console_errors"], state["console_errors"]

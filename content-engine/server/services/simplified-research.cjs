@@ -12,12 +12,24 @@ const materialContextSchema = z.object({
 
 const researchResultSchema = z.object({
   summary: z.string(),
+  researchBrief: z.object({
+    subject: z.string(),
+    directions: z.array(z.string()),
+    keywords: z.array(z.string()),
+    preferredChannels: z.array(z.string()),
+    searchQueries: z.array(z.string()),
+  }),
   facts: z.array(z.object({ claim: z.string(), status: z.enum(['VERIFIED', 'SINGLE_SOURCE']), explanation: z.string(), evidence: z.array(z.unknown()) })),
   cautions: z.array(z.object({ claim: z.string(), status: z.enum(['SINGLE_SOURCE', 'CONFLICTING', 'NEEDS_REVIEW']), explanation: z.string(), evidence: z.array(z.unknown()) })),
   angles: z.array(z.string()),
   sources: z.array(z.object({ id: z.string(), title: z.string(), url: z.string().nullable(), source: z.string() })),
   materialContext: materialContextSchema,
-  process: z.object({ phase: z.literal('COMPLETE'), sourceCount: z.number().int().nonnegative() }),
+  process: z.object({
+    phase: z.literal('COMPLETE'),
+    sourceCount: z.number().int().nonnegative(),
+    verificationStatus: z.enum(['COMPLETE', 'PARTIAL', 'FAILED']).optional(),
+    verificationMessage: z.string().optional(),
+  }),
 });
 
 function classifyMaterials(materials) {
@@ -93,7 +105,20 @@ function projectSubjectTerms(project) {
   return [...new Set(entity.length >= 2 && entity.length <= 24 ? [entity] : latinTerms)];
 }
 
-function buildResearchResult({ plan = {}, sources = [], verification = null, materials = [], allowSingleSource = false }) {
+function researchBriefForPlan(plan = {}) {
+  const brief = plan.researchBrief ?? {};
+  const questions = Array.isArray(plan.questions) ? plan.questions : [];
+  const actions = Array.isArray(plan.nextActions) ? plan.nextActions : [];
+  return {
+    subject: String(brief.subject ?? plan.title ?? '当前内容选题').trim(),
+    directions: (Array.isArray(brief.directions) ? brief.directions : questions.map((item) => item?.question)).map(String).map((item) => item.trim()).filter(Boolean).slice(0, 5),
+    keywords: (Array.isArray(brief.keywords) ? brief.keywords : []).map(String).map((item) => item.trim()).filter(Boolean).slice(0, 12),
+    preferredChannels: (Array.isArray(brief.preferredChannels) ? brief.preferredChannels : questions.flatMap((item) => item?.preferredSources ?? [])).map(String).map((item) => item.trim()).filter(Boolean).slice(0, 6),
+    searchQueries: (Array.isArray(brief.searchQueries) ? brief.searchQueries : actions.filter((item) => item?.action === 'SEARCH_WEB').map((item) => item.target)).map(String).map((item) => item.trim()).filter(Boolean).slice(0, 5),
+  };
+}
+
+function buildResearchResult({ plan = {}, sources = [], verification = null, materials = [], allowSingleSource = false, verificationStatus, verificationMessage }) {
   const claims = Array.isArray(verification?.claims) ? verification.claims : (Array.isArray(plan.claims) ? plan.claims.map((item) => ({ claim: item.claim, status: 'NEEDS_REVIEW', explanation: '尚未完成事实核验。', evidence: [] })) : []);
   const usableStatuses = allowSingleSource ? new Set(['VERIFIED', 'SINGLE_SOURCE']) : new Set(['VERIFIED']);
   const facts = claims.filter((item) => usableStatuses.has(item.status));
@@ -102,13 +127,19 @@ function buildResearchResult({ plan = {}, sources = [], verification = null, mat
 
   return researchResultSchema.parse({
     summary: String(verification?.summary ?? plan.summary ?? '研究完成，等待采用。'),
+    researchBrief: researchBriefForPlan(plan),
     facts: facts.map((item) => ({ claim: item.claim, status: item.status, explanation: item.explanation, evidence: item.evidence ?? [] })),
     cautions: cautions.map((item) => ({ claim: item.claim, status: item.status ?? 'NEEDS_REVIEW', explanation: item.explanation ?? '尚未确认。', evidence: item.evidence ?? [] })),
     angles: Array.isArray(plan.angles) ? plan.angles.filter((item) => typeof item === 'string') : [],
     sources: capturedSources.map((item) => ({ id: String(item.id), title: String(item.title ?? '未命名来源'), url: item.url ?? null, source: String(item.source ?? '网页来源') })),
     materialContext: classifyMaterials(materials),
-    process: { phase: 'COMPLETE', sourceCount: capturedSources.length },
+    process: {
+      phase: 'COMPLETE',
+      sourceCount: capturedSources.length,
+      ...(verificationStatus ? { verificationStatus } : {}),
+      ...(verificationMessage ? { verificationMessage } : {}),
+    },
   });
 }
 
-module.exports = { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, WORKFLOW_MAX_AUTOMATIC_SOURCE_ACTIONS, researchResultSchema, classifyMaterials, workflowSourceActions, workflowSourceActionsForProject, projectOriginalSource, sourceMatchesProject, buildResearchResult };
+module.exports = { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, WORKFLOW_MAX_AUTOMATIC_SOURCE_ACTIONS, researchResultSchema, classifyMaterials, workflowSourceActions, workflowSourceActionsForProject, projectOriginalSource, sourceMatchesProject, researchBriefForPlan, buildResearchResult };

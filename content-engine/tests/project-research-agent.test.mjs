@@ -17,6 +17,13 @@ import { readProjectUploadText } from '../server/services/projectUploadStorage.c
 const validPlan = {
   title: '公众号选题研究计划',
   summary: '先核验产品能力和价格，再确认适合普通用户的使用场景。',
+  researchBrief: {
+    subject: '产品面向普通用户的实际能力与使用门槛',
+    directions: ['核验当前可用能力', '核验价格与开放范围', '确认适用场景边界'],
+    keywords: ['产品名', '核心能力', '价格', '免费用户'],
+    preferredChannels: ['产品官方文档', '官方价格页', '可信科技媒体'],
+    searchQueries: ['产品名 核心能力 官方文档', '产品名 价格 免费用户 官方'],
+  },
   questions: [{
     question: '产品当前支持哪些核心能力？',
     why: '避免引用过期功能。',
@@ -60,6 +67,24 @@ test('研究提示词区分事实、观点、未读取链接和只有元数据�
   assert.match(prompt.message, /NOT_READ/);
   assert.match(prompt.message, /METADATA_ONLY/);
   assert.match(prompt.message, /保留我的观点/);
+});
+
+test('研究计划必须明确主体、方向、关键词、优先渠道和可执行查询词', () => {
+  const parsed = parseResearchPlan(JSON.stringify(validPlan));
+  assert.equal(parsed.researchBrief.subject, '产品面向普通用户的实际能力与使用门槛');
+  assert.equal(parsed.researchBrief.directions.length, 3);
+  assert.equal(parsed.researchBrief.preferredChannels[0], '产品官方文档');
+  assert.equal(parsed.researchBrief.searchQueries.length, 2);
+
+  const prompt = buildResearchPlanPrompt({
+    project: { title: '宇树科技上市新进展', coreViewpoint: '解释 IPO 时间表和关键发行安排。', factChecks: [] },
+    brief: { objective: '公众号文章', targetAudience: '普通投资者', coreMessage: '看懂发行安排', sourceRequirements: '优先正式披露', notes: '' },
+    request: '开始研究',
+    materials: [],
+  });
+  assert.match(prompt.system, /研究主体、研究方向、核心关键词、优先渠道和查询词/);
+  assert.match(prompt.system, /交易所正式公告/);
+  assert.match(prompt.system, /实体名称.*待核验事实.*来源线索/);
 });
 
 test('没有资料时研究提示词从已确认规划提出问题但不冒充完成研究', () => {

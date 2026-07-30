@@ -27,6 +27,7 @@ const {
   SOURCE_VERIFICATION_VERSION,
   buildSourceVerificationPrompt,
   buildSourceVerificationRepairPrompt,
+  mergeSourceVerificationResults,
   parseSourceVerification,
 } = require('./services/source-verification.cjs');
 const { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, workflowSourceActionsForProject, projectOriginalSource, sourceMatchesProject, buildResearchResult } = require('./services/simplified-research.cjs');
@@ -112,10 +113,7 @@ async function captureWorkflowSources(workspaceId, plan, project) {
   return dedupeSourceSnapshots(captured).map((source, index) => ({ ...source, id: `source-${index + 1}` }));
 }
 
-async function verifyWorkflowClaims(workspaceId, plan, sources, route, template) {
-  const selectedIds = new Set(recommendSourceSelection(sources, 8));
-  const selectedSources = sources.filter((source) => selectedIds.has(source.id));
-  if (!route || !selectedSources.length || !Array.isArray(plan.claims) || !plan.claims.length) return null;
+async function runWorkflowVerificationAttempt(workspaceId, plan, selectedSources, route, template) {
   const connectionInput = await textConnectionInput(workspaceId, route);
   const prompt = buildSourceVerificationPrompt({ claims: plan.claims, sources: selectedSources, template });
   const first = await textRunner.runText({ provider: route.provider, model: route.model, system: prompt.system, message: prompt.message, ...connectionInput });
@@ -128,6 +126,38 @@ async function verifyWorkflowClaims(workspaceId, plan, sources, route, template)
       output: parseSourceVerification(repaired.content, { claims: plan.claims, sources: selectedSources }),
       inputTokens: (first.inputTokens ?? 0) + (repaired.inputTokens ?? 0),
       outputTokens: (first.outputTokens ?? 0) + (repaired.outputTokens ?? 0),
+    };
+  }
+}
+
+async function verifyWorkflowClaims(workspaceId, plan, sources, route, template) {
+  const selectedIds = new Set(recommendSourceSelection(sources, 8));
+  const selectedSources = sources.filter((source) => selectedIds.has(source.id) && String(source.summary ?? '').trim());
+  if (!route || !selectedSources.length || !Array.isArray(plan.claims) || !plan.claims.length) return null;
+  try {
+    return { ...(await runWorkflowVerificationAttempt(workspaceId, plan, selectedSources, route, template)), recovered: false };
+  } catch (primaryError) {
+    const results = [];
+    const failures = [];
+    let inputTokens = 0;
+    let outputTokens = 0;
+    for (const source of selectedSources) {
+      try {
+        const verified = await runWorkflowVerificationAttempt(workspaceId, plan, [source], route, template);
+        results.push(verified.output);
+        inputTokens += verified.inputTokens;
+        outputTokens += verified.outputTokens;
+      } catch (error) {
+        failures.push(`${source.title}：${error instanceof Error ? error.message : '核验失败'}`);
+      }
+    }
+    if (!results.length) throw primaryError;
+    return {
+      output: mergeSourceVerificationResults({ claims: plan.claims, results }),
+      inputTokens,
+      outputTokens,
+      recovered: true,
+      warning: failures.length ? `${failures.length} 个来源内容不足，已忽略并保留其他来源的核验结果。` : '已改用逐来源核验并合并结果。',
     };
   }
 }
@@ -157,14 +187,27 @@ async function generateSimplifiedResearchWorkflow({ jobId, workspaceId, runId })
 
     await updateSimplifiedResearchPhase(workspaceId, runId, 'VERIFYING', 75);
     let verification = null;
+    let verificationStatus = 'FAILED';
+    let verificationMessage = '';
     try {
       verification = await verifyWorkflowClaims(workspaceId, planned.output, sources, input.verificationRoute, input.verificationTemplate);
       inputTokens += verification?.inputTokens ?? 0;
       outputTokens += verification?.outputTokens ?? 0;
+      verificationStatus = verification?.recovered ? 'PARTIAL' : verification ? 'COMPLETE' : 'FAILED';
+      verificationMessage = verification?.warning ?? '';
     } catch (error) {
       verification = null;
+      verificationMessage = error instanceof Error ? `现有来源未能完成直接证据核验：${error.message}` : '现有来源未能完成直接证据核验。';
+      console.warn(`[PROJECT_RESEARCH_WORKFLOW] verification failed for run ${runId}: ${verificationMessage}`);
     }
-    const result = buildResearchResult({ plan: planned.output, sources, verification: verification?.output ?? null, materials: snapshot.materials });
+    const result = buildResearchResult({
+      plan: planned.output,
+      sources,
+      verification: verification?.output ?? null,
+      materials: snapshot.materials,
+      verificationStatus,
+      verificationMessage,
+    });
 
     const saved = await transaction(async (client) => {
       const artifact = await projectAgentStore.createArtifact(client, {

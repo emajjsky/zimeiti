@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { CreateStageRoute } from '../../app/navigation.mjs';
 import { webAccountVoices, webCreative } from '../../data/webApi';
 import { canOpenCreateStage, creativeStages, stageRouteForProjectStage } from '../../domain/creative-flow.mjs';
+import { canOpenChannelView, channelViewForStage } from '../../domain/channel-workflow.mjs';
 import { projectStageName, type ContentProject, type ContentVersion, type Platform } from '../../domain/content';
 import type { AccountVoiceProfile, CreativePlatform, CreativePlatformSkillMap, CreativeSkillDefinition, CreativeSkillDimension, CreativeSkillSelection, WritingBriefInput } from '../../domain/creative';
 import { resolveWritingBriefPlatforms, shouldInitializeWritingBrief } from '../../domain/writing-brief-platforms.mjs';
@@ -19,10 +20,8 @@ type ChannelView = 'copy' | 'visual' | 'layout' | 'review';
 
 function channelViewFor(project: ContentProject | undefined, platform: CreativePlatform | undefined): ChannelView {
   const stage = platform ? project?.delivery?.platforms?.[platform]?.stage : undefined;
-  if (stage === 'VISUAL') return 'visual';
-  if (stage === 'LAYOUT') return 'layout';
-  if (stage === 'REVIEW' || stage === 'READY') return 'review';
-  return 'copy';
+  const version = platform ? project?.versions.find((item) => item.platform === platform) : undefined;
+  return channelViewForStage(stage ?? 'COPY', String(version?.body ?? '').trim().length >= 80) as ChannelView;
 }
 
 function channelStatus(stage: string | undefined) {
@@ -112,7 +111,11 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
   const contentVersions = useMemo(() => project?.versions.filter((version): version is ContentVersion & { platform: CreativePlatform } => version.platform !== 'VIDEO_CHANNEL') ?? [], [project?.versions]);
   const copyPlatform = activePlatform !== 'VIDEO_CHANNEL' && contentVersions.some((version) => version.platform === activePlatform) ? activePlatform : contentVersions[0]?.platform;
   const currentChannelDelivery = copyPlatform ? project?.delivery?.platforms?.[copyPlatform] : undefined;
+  const currentChannelStage = currentChannelDelivery?.stage ?? 'COPY';
+  const currentChannelVersion = copyPlatform ? contentVersions.find((version) => version.platform === copyPlatform) : undefined;
+  const currentHasCopy = String(currentChannelVersion?.body ?? '').trim().length >= 80;
   const [channelView, setChannelView] = useState<ChannelView>(() => channelViewFor(project, copyPlatform));
+  const safeChannelView = canOpenChannelView(currentChannelStage, channelView, currentHasCopy) ? channelView : channelViewFor(project, copyPlatform);
 
   useEffect(() => {
     if (!project) return;
@@ -203,7 +206,7 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
 
   useEffect(() => {
     setChannelView(channelViewFor(project, copyPlatform));
-  }, [copyPlatform, currentChannelDelivery?.stage, project?.id]);
+  }, [copyPlatform, currentChannelDelivery?.stage, currentHasCopy, project?.id]);
 
   const saveBrief = async (next: WritingBriefInput = brief as WritingBriefInput) => {
     if (!project || !next) return;
@@ -280,16 +283,16 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
     {stage === 'master' && copyPlatform && <section className="channel-workbench-nav" aria-label="渠道制作导航">
       <nav className="channel-platform-tabs" aria-label="创作平台">{contentVersions.map((version) => <button type="button" key={version.platform} className={version.platform === copyPlatform ? 'active' : ''} onClick={() => onPlatform(version.platform)}><b>{version.platform === 'WECHAT' ? '公众号' : version.platform === 'XIAOHONGSHU' ? '小红书' : version.platform === 'ZHIHU' ? '知乎' : '微博'}</b><small>{channelStatus(project.delivery?.platforms?.[version.platform]?.stage)}</small></button>)}</nav>
       <nav className="channel-step-tabs" aria-label="当前渠道步骤">
-        <button className={channelView === 'copy' ? 'active' : ''} type="button" onClick={() => setChannelView('copy')}>正文</button>
-        <button className={channelView === 'visual' ? 'active' : ''} type="button" onClick={() => setChannelView('visual')}>配图</button>
-        <button className={channelView === 'layout' ? 'active' : ''} type="button" onClick={() => setChannelView('layout')}>排版</button>
-        <button className={channelView === 'review' ? 'active' : ''} type="button" onClick={() => setChannelView('review')}>审核</button>
+        <button className={safeChannelView === 'copy' ? 'active' : ''} type="button" onClick={() => setChannelView('copy')}>正文</button>
+        <button className={safeChannelView === 'visual' ? 'active' : ''} type="button" disabled={!canOpenChannelView(currentChannelStage, 'visual', currentHasCopy)} onClick={() => canOpenChannelView(currentChannelStage, 'visual', currentHasCopy) && setChannelView('visual')}>配图</button>
+        <button className={safeChannelView === 'layout' ? 'active' : ''} type="button" disabled={!canOpenChannelView(currentChannelStage, 'layout', currentHasCopy)} onClick={() => canOpenChannelView(currentChannelStage, 'layout', currentHasCopy) && setChannelView('layout')}>排版</button>
+        <button className={safeChannelView === 'review' ? 'active' : ''} type="button" disabled={!canOpenChannelView(currentChannelStage, 'review', currentHasCopy)} onClick={() => canOpenChannelView(currentChannelStage, 'review', currentHasCopy) && setChannelView('review')}>审核</button>
       </nav>
     </section>}
-    {stage === 'master' && copyPlatform && channelView === 'copy' && <CopyWorkspace project={project} brief={brief} briefState={briefState} skills={skills} accountVoices={accountVoices} activePlatform={copyPlatform} onPlatform={onPlatform} onProjectChange={handleCopyProjectChange} onSaveBrief={saveBrief} onSaveVersion={onSaveVersion} onOpenResearch={() => onStage('research')} onCompletePlatforms={completePlatformVersions} onOpenModelSettings={onOpenModelSettings} onOpenAgentSettings={onOpenAgentSettings} onOpenVoiceSettings={onOpenVoiceSettings} />}
+    {stage === 'master' && copyPlatform && safeChannelView === 'copy' && <CopyWorkspace project={project} brief={brief} briefState={briefState} skills={skills} accountVoices={accountVoices} activePlatform={copyPlatform} onPlatform={onPlatform} onProjectChange={handleCopyProjectChange} onSaveBrief={saveBrief} onSaveVersion={onSaveVersion} onOpenResearch={() => onStage('research')} onCompletePlatforms={completePlatformVersions} onOpenModelSettings={onOpenModelSettings} onOpenAgentSettings={onOpenAgentSettings} onOpenVoiceSettings={onOpenVoiceSettings} />}
     {stage === 'master' && !copyPlatform && <div className="creative-stage-empty"><h2>没有可写作的图文平台</h2><p>请先在规划中选择公众号、小红书、知乎或微博。</p></div>}
-    {stage === 'master' && copyPlatform && channelView === 'visual' && <VisualWorkspace project={project} activePlatform={copyPlatform} onProjectChange={onProjectAccepted} onOpenModelSettings={onOpenModelSettings} />}
-    {stage === 'master' && copyPlatform && channelView === 'layout' && <LayoutWorkspace project={project} activePlatform={copyPlatform} onProjectChange={onProjectAccepted} />}
-    {stage === 'master' && copyPlatform && channelView === 'review' && <ReviewWorkspace project={project} activePlatform={copyPlatform} onProjectChange={onProjectAccepted}/>}
+    {stage === 'master' && copyPlatform && safeChannelView === 'visual' && <VisualWorkspace project={project} activePlatform={copyPlatform} onProjectChange={onProjectAccepted} onOpenModelSettings={onOpenModelSettings} />}
+    {stage === 'master' && copyPlatform && safeChannelView === 'layout' && <LayoutWorkspace project={project} activePlatform={copyPlatform} onProjectChange={onProjectAccepted} />}
+    {stage === 'master' && copyPlatform && safeChannelView === 'review' && <ReviewWorkspace project={project} activePlatform={copyPlatform} onProjectChange={onProjectAccepted}/>}
   </section>;
 }

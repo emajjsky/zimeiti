@@ -150,6 +150,13 @@ export interface ProjectAgentRun {
 
 export interface ResearchResult {
   summary: string;
+  researchBrief?: {
+    subject: string;
+    directions: string[];
+    keywords: string[];
+    preferredChannels: string[];
+    searchQueries: string[];
+  };
   facts: { claim: string; status: 'VERIFIED' | 'SINGLE_SOURCE'; explanation: string; evidence: unknown[] }[];
   cautions: { claim: string; status: 'SINGLE_SOURCE' | 'CONFLICTING' | 'NEEDS_REVIEW'; explanation: string; evidence: unknown[] }[];
   angles: string[];
@@ -160,7 +167,7 @@ export interface ResearchResult {
     visualAssets: { id: string; title: string; role: string }[];
     verificationCandidates: { id: string; title: string; role: string }[];
   };
-  process: { phase: 'COMPLETE'; sourceCount: number };
+  process: { phase: 'COMPLETE'; sourceCount: number; verificationStatus?: 'COMPLETE' | 'PARTIAL' | 'FAILED'; verificationMessage?: string };
 }
 
 export interface ProjectArtifact {

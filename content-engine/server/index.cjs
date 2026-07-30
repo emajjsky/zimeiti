@@ -2107,6 +2107,13 @@ app.put('/api/v1/creative/projects/:projectId/visual', { preHandler: authenticat
     if (new Set(assigned).size !== assigned.length) context.addIssue({ code: 'custom', path: ['plan'], message: '同一张图片不能绑定到多个配图位置。' });
   }).parse(request.body);
   const workspace = await currentWorkspace(request.user.sub);
+  const existingProject = await creativeProject(workspace.id, projectId);
+  const existingVersion = (existingProject.versions ?? []).find((item) => item.platform === input.platform);
+  if (!existingVersion || String(existingVersion.body ?? '').trim().length < 80) {
+    const error = new Error(`请先完成${creativePlatformNames[input.platform] ?? input.platform}的正文。`);
+    error.statusCode = 409;
+    throw error;
+  }
   return transaction(async (client) => {
     const listed = await projectMaterialStore.list(workspace.id, projectId);
     const requested = [...new Set([...input.assetReferenceIds, ...input.plan.map((item) => item.assetReferenceId).filter(Boolean)])];
