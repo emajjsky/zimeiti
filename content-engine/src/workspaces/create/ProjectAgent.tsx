@@ -118,18 +118,36 @@ function SimplifiedResearchAgent({ projectId, refreshToken = 0, onContextChange,
 }
 
 function ResearchResultPreview({ result, busy, onAccept }: { result: ResearchResult; busy: boolean; onAccept: () => void }) {
+  const verifiedFacts = result.facts.filter((item) => item.status === 'VERIFIED');
+  const singleSource = [...result.facts, ...result.cautions].filter((item) => item.status === 'SINGLE_SOURCE');
+  const needsReview = result.cautions.filter((item) => item.status !== 'SINGLE_SOURCE');
   return <section className="research-result-preview">
-    <p className="research-result-summary">{result.summary}</p>
-    <ResultList title="可采用信息" items={result.facts.map((item) => item.claim)} empty="没有已核验的外部事实。" tone="verified"/>
-    <ResultList title="暂未确认" items={result.cautions.map((item) => item.claim)} empty="没有待确认项。" tone="caution"/>
+    <p className="research-result-summary">{researchResultSummary(result)}</p>
+    <ResultList title="可直接使用" items={verifiedFacts} empty="还没有可直接写入正文的事实。" tone="verified"/>
+    <ResultList title="可参考（单一来源）" items={singleSource} empty="没有单一来源事实。" tone="single-source"/>
+    <ResultList title="需要补充核验" items={needsReview} empty="没有需要补充核验的事实。" tone="caution"/>
     <ResultList title="正文角度" items={result.angles} empty="可根据规划直接展开正文。" tone="angle"/>
     <details className="research-result-details"><summary>来源与研究说明</summary><div>{result.sources.map((source) => <a key={source.id} href={source.url ?? undefined} target={source.url ? '_blank' : undefined} rel="noreferrer">{source.source}：{source.title}</a>)}</div></details>
     <footer><button className="button primary" type="button" disabled={busy} onClick={onAccept}>{busy ? <LoaderCircle size={16}/> : <Check size={16}/>}采用并进入正文</button></footer>
   </section>;
 }
 
-function ResultList({ title, items, empty, tone }: { title: string; items: string[]; empty: string; tone: 'verified' | 'caution' | 'angle' }) {
-  return <section className={`research-result-list ${tone}`}><h3>{title}</h3>{items.length ? <ul>{items.map((item) => <li key={item}>{item}</li>)}</ul> : <p>{empty}</p>}</section>;
+type ResearchClaimItem = ResearchResult['facts'][number] | ResearchResult['cautions'][number];
+
+function ResultList({ title, items, empty, tone }: { title: string; items: string[] | ResearchClaimItem[]; empty: string; tone: 'verified' | 'single-source' | 'caution' | 'angle' }) {
+  return <section className={`research-result-list ${tone}`}><h3>{title}</h3>{items.length ? <ul>{items.map((item) => {
+    const claim = typeof item === 'string' ? item : item.claim;
+    const explanation = typeof item === 'string' ? '' : item.explanation;
+    return <li key={claim}><span>{claim}</span>{explanation && <small>{explanation}</small>}</li>;
+  })}</ul> : <p>{empty}</p>}</section>;
+}
+
+function researchResultSummary(result: ResearchResult) {
+  const verifiedFacts = result.facts.filter((item) => item.status === 'VERIFIED').length;
+  const singleSource = [...result.facts, ...result.cautions].filter((item) => item.status === 'SINGLE_SOURCE').length;
+  const needsReview = result.cautions.filter((item) => item.status !== 'SINGLE_SOURCE').length;
+  if (!result.sources.length) return '还没有读取到可用来源，暂时不能形成事实结论。';
+  return `已整理 ${result.sources.length} 条来源：${verifiedFacts} 条可直接使用，${singleSource} 条可参考，${needsReview} 条需要补充核验。`;
 }
 
 function asResearchResult(payload: Record<string, unknown>): ResearchResult | null {

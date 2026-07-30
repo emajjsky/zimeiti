@@ -198,3 +198,11 @@ test('研究页只保留开始、补充、采用和跳过的主路径', () => {
   assert.doesNotMatch(agent, /research-source-row/);
   assert.doesNotMatch(agent, /research-source-toolbar/);
 });
+
+test('research result separates usable, single-source, and review claims', () => {
+  const agent = fs.readFileSync(new URL('../src/workspaces/create/ProjectAgent.tsx', import.meta.url), 'utf8');
+  assert.match(agent, /singleSource/);
+  assert.match(agent, /researchResultSummary/);
+  assert.match(agent, /single-source/);
+  assert.match(agent, /needsReview/);
+});
