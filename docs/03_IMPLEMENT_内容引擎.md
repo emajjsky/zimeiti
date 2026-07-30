@@ -697,4 +697,10 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 ## 2026-07-30 实现：正文候选完整预览
 
 - `CopyCandidateDialog.tsx` 为 `PLATFORM_COPY` 候选增加“完整文稿 / 段落差异”页签；默认进入完整文稿，并在切换候选时重置为该视图。
+
+## 2026-07-30 Fix: optional account voice in copy generation
+
+- Empty `accountVoiceProfileId` now returns a null account voice context without querying the voice profile store.
+- A selected but unavailable voice remains a blocking validation error.
+- Regression test verifies that copy generation context still has SUBJECT, CONTENT_TYPE, and CHANNEL strategies without a voice snapshot.
 - 完整文稿按自然段连续渲染在弹窗可滚动主体内；原有 LCS 段落差异计算不变，移动端仍沿用全屏弹窗与固定操作栏。

@@ -106,6 +106,50 @@ test('写作上下文读取账号声音快照而不是 VOICE Skill', async () =>
   assert.equal(context.accountVoice.offset, 'SHARPER');
 });
 
+test('未选择账号声音时仍可获得写作上下文', async () => {
+  let call = 0;
+  let voiceSnapshotCalled = false;
+  const store = createCreativeSkillStore({
+    accountVoiceStore: {
+      getWritingSnapshot: async () => {
+        voiceSnapshotCalled = true;
+        return null;
+      },
+    },
+    query: async () => {
+      call += 1;
+      if (call === 1) {
+        return {
+          rowCount: 1,
+          rows: [{
+            project_id: 'project-1',
+            selected_platforms_json: ['WECHAT'],
+            selected_versions_json: selection,
+            platform_versions_json: platformSkills,
+            account_voice_profile_id: null,
+            voice_offset: 'DEFAULT',
+          }],
+        };
+      }
+      return {
+        rowCount: 3,
+        rows: [
+          { id: 'subject', dimension: 'SUBJECT', slug: 'ai', name: 'AI 科技', description: '', sort_order: 1, version_id: selection.SUBJECT, version: '1.0.0', instructions_md: '题材规则', rules_json: {} },
+          { id: 'type', dimension: 'CONTENT_TYPE', slug: 'education', name: '科普', description: '', sort_order: 1, version_id: selection.CONTENT_TYPE, version: '1.0.0', instructions_md: '内容规则', rules_json: {} },
+          { id: 'channel', dimension: 'CHANNEL', slug: 'wechat', name: '公众号', description: '', sort_order: 1, version_id: platformSkills.WECHAT.CHANNEL, version: '1.0.0', instructions_md: '渠道规则', rules_json: {} },
+        ],
+      };
+    },
+    transaction: async () => { throw new Error('不应写入'); },
+  });
+
+  const context = await store.getContext('workspace-1', 'project-1', 'WECHAT');
+
+  assert.deepEqual(context.skills.map((skill) => skill.dimension), ['SUBJECT', 'CONTENT_TYPE', 'CHANNEL']);
+  assert.equal(context.accountVoice, null);
+  assert.equal(voiceSnapshotCalled, false);
+});
+
 test('创作主流程不再把视频列为必经步骤', () => {
   assert.deepEqual(
     creativeStages.map(({ id, label }) => ({ id, label })),

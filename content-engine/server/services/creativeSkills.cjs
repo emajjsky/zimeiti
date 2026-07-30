@@ -79,9 +79,15 @@ function createCreativeSkillStore({ query, transaction, accountVoiceStore = null
     const byVersion = new Map(result.rows.map((row) => [row.version_id, skillView(row)]));
     const skills = requested.map((id) => byVersion.get(id)).filter(Boolean);
     if (skills.length !== WRITING_DIMENSIONS.length) throw new Error('项目绑定的写作策略已不可用，请重新保存写作策略。');
-    if (!brief.accountVoiceProfileId) throw new Error('请先在设置中创建并选择账号声音后再生成正文。');
-    const accountVoice = await accountVoiceStore?.getWritingSnapshot(workspaceId, brief.accountVoiceProfileId, brief.voiceOffset);
-    if (!accountVoice) throw new Error('当前账号声音不可用，请在设置中重新选择。');
+    let accountVoice = null;
+    if (brief.accountVoiceProfileId) {
+      accountVoice = await accountVoiceStore?.getWritingSnapshot(
+        workspaceId,
+        brief.accountVoiceProfileId,
+        brief.voiceOffset,
+      );
+      if (!accountVoice) throw new Error('当前账号声音不可用，请在设置中重新选择。');
+    }
     return { brief, skills, accountVoice };
   }
 
