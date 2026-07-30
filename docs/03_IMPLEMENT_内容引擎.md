@@ -7,10 +7,11 @@
 - `ContentProject.delivery.platforms[platform].visual` 新增 `planVersion`。当前版本方案原样恢复；旧版或无版本方案只迁移封面，正文绑定清空但项目素材记录不删除，并通过 650ms 自动保存写回新版。
 - `PUT /visual` 使用 Zod 校验版本、视觉类型和语义字段，同时拒绝同一素材 ID 或同一图片 URL 绑定到多个位置。
 - `VisualWorkspace.tsx` 改为“左侧配图方案 + 右侧当前任务”。进入搜图自动执行第一组关键词，关键词标签可切换或编辑；AI 生图自动读取当前项提示词与比例；三种素材来源统一写回 `assetReferenceId`。
+- `buildVisualPlan()` 支持 `bodyItemCount`，`visualPlanCountRange()` 统一声明各平台范围，`resizeVisualPlan()` 使用稳定配图项 ID 保留已有编辑和素材绑定。页头步进器调整正文数量后走原有 650ms 自动保存；减少数量不会删除 `ProjectReference`，重新规划和刷新从已保存方案恢复数量。
 - “重新规划”读取当前正文并要求用户确认，只保留封面绑定。页面把原“完成”状态改为“已绑定”，避免把素材存在误报为匹配质量通过。
 - `searchTavilyImages()` 调用 Tavily `include_images` 与 `include_image_descriptions`。返回结果标记“使用前确认版权与授权”；无配置、无结果或调用失败时回退 Wikimedia Commons。
 - `documentForPlatform()` 读取配图顺序和插入位置。公众号/知乎 HTML 将封面放在标题后，并把正文图片按段落间隔插入；小红书/微博 Markdown 保留首图与配图位置。
-- `visual-plan.test.mjs` 和 `visual-workspace.e2e.py` 覆盖正文首选词去重、旧版迁移、当前版本恢复、自动保存、提示词预填以及 1440px/390px 无横向溢出。
+- `visual-plan.test.mjs` 和 `visual-workspace.e2e.py` 覆盖正文首选词去重、平台数量边界、增减时绑定保留、旧版迁移、当前版本恢复、自动保存、重新规划与刷新保持数量、提示词预填以及 1440px/390px 无横向溢出。
 - 视觉参数保持 `DESIGN_VARIANCE 4 / MOTION_INTENSITY 2 / VISUAL_DENSITY 6`。沿用现有深蓝边线、钴蓝与马卡龙状态色，不新增装饰动画。
 
 ## 2026-07-30 实现：创作内页导航与配图能力

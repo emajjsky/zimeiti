@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildVisualPlan, mergeVisualPlan, VISUAL_PLAN_VERSION } from '../src/domain/visual-plan.mjs';
+import { buildVisualPlan, mergeVisualPlan, resizeVisualPlan, visualPlanCountRange, VISUAL_PLAN_VERSION } from '../src/domain/visual-plan.mjs';
 
 const article = {
   title: '我国成功发射天链三号01星',
@@ -68,4 +68,45 @@ test('当前版本方案保留用户已经编辑的内容和绑定', () => {
   const generated = buildVisualPlan(article, 'WECHAT');
   const persisted = generated.map((item, index) => ({ ...item, purpose: `自定义 ${index}`, assetReferenceId: index ? `body-${index}` : 'cover-id' }));
   assert.deepEqual(mergeVisualPlan(generated, persisted, [], null, VISUAL_PLAN_VERSION), persisted);
+});
+
+test('微博当前版本的空方案会被保留，不会在刷新后重新生成主图', () => {
+  const generated = buildVisualPlan(article, 'WEIBO');
+  assert.deepEqual(mergeVisualPlan(generated, [], [], null, VISUAL_PLAN_VERSION), []);
+});
+
+test('公众号支持指定正文插图数量，封面单独计算', () => {
+  const plan = buildVisualPlan(article, 'WECHAT', { bodyItemCount: 4 });
+  assert.equal(plan.length, 5);
+  assert.equal(plan.filter((item) => item.role === 'COVER').length, 1);
+  assert.equal(plan.filter((item) => item.role === 'BODY').length, 4);
+  assert.equal(new Set(plan.slice(1).map((item) => item.searchQueries[0])).size, 4);
+});
+
+test('用户指定的正文配图数量会限制在平台合理范围内', () => {
+  assert.deepEqual(visualPlanCountRange('WECHAT'), { min: 2, max: 5 });
+  assert.deepEqual(visualPlanCountRange('ZHIHU'), { min: 2, max: 4 });
+  assert.deepEqual(visualPlanCountRange('XIAOHONGSHU'), { min: 5, max: 8 });
+  assert.deepEqual(visualPlanCountRange('WEIBO'), { min: 0, max: 1 });
+  assert.equal(buildVisualPlan(article, 'WECHAT', { bodyItemCount: 0 }).length, 3);
+  assert.equal(buildVisualPlan(article, 'WECHAT', { bodyItemCount: 99 }).length, 6);
+  assert.equal(buildVisualPlan(article, 'XIAOHONGSHU', { bodyItemCount: 8 }).length, 9);
+});
+
+test('调整配图数量时保留现有项和素材绑定，新项目保持未绑定', () => {
+  const initial = buildVisualPlan(article, 'WECHAT', { bodyItemCount: 3 }).map((item, index) => ({
+    ...item,
+    purpose: `用户调整 ${index}`,
+    assetReferenceId: `asset-${index}`,
+  }));
+  const expanded = resizeVisualPlan(buildVisualPlan(article, 'WECHAT', { bodyItemCount: 5 }), initial);
+  assert.equal(expanded.length, 6);
+  assert.deepEqual(expanded.slice(0, 4).map((item) => item.assetReferenceId), ['asset-0', 'asset-1', 'asset-2', 'asset-3']);
+  assert.ok(expanded.slice(4).every((item) => item.assetReferenceId === null));
+  assert.equal(expanded[1].purpose, '用户调整 1');
+
+  const reduced = resizeVisualPlan(buildVisualPlan(article, 'WECHAT', { bodyItemCount: 2 }), expanded);
+  assert.equal(reduced.length, 3);
+  assert.deepEqual(reduced.map((item) => item.assetReferenceId), ['asset-0', 'asset-1', 'asset-2']);
+  assert.ok(reduced.every((item) => !['asset-3', 'asset-4', 'asset-5'].includes(item.assetReferenceId)));
 });

@@ -1,9 +1,9 @@
-import { Check, Image, LoaderCircle, RefreshCw, Save, Search, Sparkles, Trash2, Upload } from 'lucide-react';
+import { Check, Image, LoaderCircle, Minus, Plus, RefreshCw, Save, Search, Sparkles, Trash2, Upload } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { webCreative } from '../../data/webApi';
 import { platformName, type ContentProject, type CreativeVisualPlanItem, type CreativeVisualSize } from '../../domain/content';
 import type { CreativePlatform, ProjectReference } from '../../domain/creative';
-import { buildVisualPlan, mergeVisualPlan, VISUAL_PLAN_VERSION } from '../../domain/visual-plan.mjs';
+import { buildVisualPlan, mergeVisualPlan, resizeVisualPlan, visualPlanCountRange, VISUAL_PLAN_VERSION } from '../../domain/visual-plan.mjs';
 
 type ImageSearchResult = { id: string; title: string; thumbnailUrl: string; imageUrl: string; sourceUrl: string; license: string; attribution: string };
 type SourceView = 'search' | 'generate' | 'library';
@@ -34,13 +34,20 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
 }) {
   const currentDelivery = project.delivery?.platforms?.[activePlatform];
   const version = project.versions.find((item) => item.platform === activePlatform);
-  const generatedPlan = useMemo(() => buildVisualPlan({
+  const planInput = useMemo(() => ({
     title: project.planning.title || project.title || version?.title || '未命名内容',
     body: version?.body || '',
     category: project.planning.category,
     coreMessage: project.planning.coreMessage || project.coreViewpoint,
-  }, activePlatform), [activePlatform, project.coreViewpoint, project.planning.category, project.planning.coreMessage, project.planning.title, project.title, version?.body, version?.title]);
+  }), [project.coreViewpoint, project.planning.category, project.planning.coreMessage, project.planning.title, project.title, version?.body, version?.title]);
+  const persistedBodyItemCount = useMemo(() => {
+    const persisted = currentDelivery?.visual?.plan;
+    if (!Array.isArray(persisted) || currentDelivery?.visual?.planVersion !== VISUAL_PLAN_VERSION) return undefined;
+    return activePlatform === 'WEIBO' ? persisted.length : persisted.filter((item) => item.role === 'BODY' || item.role === 'CARD').length;
+  }, [activePlatform, currentDelivery?.visual?.plan, currentDelivery?.visual?.planVersion]);
+  const generatedPlan = useMemo(() => buildVisualPlan(planInput, activePlatform, { bodyItemCount: persistedBodyItemCount }), [activePlatform, persistedBodyItemCount, planInput]);
   const [plan, setPlan] = useState<CreativeVisualPlanItem[]>([]);
+  const [hydratedPlanKey, setHydratedPlanKey] = useState('');
   const [activeItemId, setActiveItemId] = useState('');
   const [references, setReferences] = useState<ProjectReference[]>([]);
   const [loading, setLoading] = useState(true);
@@ -63,6 +70,8 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
   const activeItem = plan.find((item) => item.id === activeItemId) ?? plan[0];
   const assignedAsset = activeItem?.assetReferenceId ? assets.find((item) => item.id === activeItem.assetReferenceId) : undefined;
   const boundCount = plan.filter((item) => item.assetReferenceId).length;
+  const bodyItemCount = activePlatform === 'WEIBO' ? plan.length : plan.filter((item) => item.role === 'BODY' || item.role === 'CARD').length;
+  const countRange = visualPlanCountRange(activePlatform);
   const hasCopy = String(version?.body ?? '').trim().length >= 80;
 
   useEffect(() => {
@@ -77,7 +86,8 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
       setSourceView('search');
     }
     hydratedProjectKey.current = projectKey;
-    lastSavedSignature.current = currentDelivery?.visual?.plan?.length && currentDelivery.visual.planVersion === VISUAL_PLAN_VERSION ? JSON.stringify(next) : '';
+    setHydratedPlanKey(projectKey);
+    lastSavedSignature.current = Array.isArray(currentDelivery?.visual?.plan) && currentDelivery.visual.planVersion === VISUAL_PLAN_VERSION ? JSON.stringify(next) : '';
   }, [activePlatform, currentDelivery?.visual?.updatedAt, generatedPlan, project.id]);
 
   useEffect(() => {
@@ -105,7 +115,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
   }, [assets, fileUrls]);
 
   useEffect(() => {
-    if (!plan.length) return;
+    if (hydratedPlanKey !== `${project.id}:${activePlatform}`) return;
     const signature = JSON.stringify(plan);
     if (signature === lastSavedSignature.current) return;
     const revision = ++saveRevision.current;
@@ -123,7 +133,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
       });
     }, 650);
     return () => window.clearTimeout(timer);
-  }, [activePlatform, onProjectChange, plan, project.id]);
+  }, [activePlatform, hydratedPlanKey, onProjectChange, plan, project.id]);
 
   const runSearch = async (query: string) => {
     const normalized = query.trim();
@@ -229,7 +239,8 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
   const regenerate = () => {
     if (!window.confirm('重新规划会保留封面，正文图片将退回项目素材库。是否继续？')) return;
     const coverId = plan.find((item) => item.role === 'COVER' || item.role === 'MAIN')?.assetReferenceId ?? null;
-    const next = generatedPlan.map((item) => ({ ...item, assetReferenceId: item.role === 'COVER' || item.role === 'MAIN' ? coverId : null }));
+    const rebuilt = buildVisualPlan(planInput, activePlatform, { bodyItemCount });
+    const next = rebuilt.map((item) => ({ ...item, assetReferenceId: item.role === 'COVER' || item.role === 'MAIN' ? coverId : null }));
     setPlan(next);
     setActiveItemId(next[0]?.id ?? '');
     setSearchQuery(next[0]?.searchQueries[0] ?? '');
@@ -237,12 +248,35 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
     setNotice('已按当前正文重新规划，正文配图需要重新匹配。');
   };
 
+  const changeBodyItemCount = (delta: number) => {
+    const target = Math.max(countRange.min, Math.min(countRange.max, bodyItemCount + delta));
+    if (target === bodyItemCount) return;
+    const next = resizeVisualPlan(buildVisualPlan(planInput, activePlatform, { bodyItemCount: target }), plan);
+    setPlan(next);
+    setActiveItemId((current) => next.some((item) => item.id === current) ? current : next.at(-1)?.id ?? '');
+    setSearchResults([]);
+    setNotice(target > bodyItemCount ? '已增加配图位置。' : '已减少配图位置，原图片仍保留在项目素材中。');
+  };
+
+  const planCountSummary = activePlatform === 'WEIBO'
+    ? `主图 ${bodyItemCount} 张`
+    : activePlatform === 'XIAOHONGSHU'
+      ? `封面 1 张，内容页 ${bodyItemCount} 张`
+      : `封面 1 张，正文插图 ${bodyItemCount} 张`;
+
   const assetSrc = (asset: ProjectReference | undefined) => asset?.url ?? (asset ? fileUrls[asset.id] : undefined);
 
   return <section className="visual-workspace">
     <header className="delivery-workspace-head visual-workspace-head">
-      <div><h2>{platformName[activePlatform]}配图</h2><p>已规划 {plan.length} 张，已绑定 {boundCount} 张</p></div>
-      <button className="button" type="button" onClick={regenerate}><RefreshCw size={15}/>重新规划</button>
+      <div><h2>{platformName[activePlatform]}配图</h2><p>{planCountSummary}</p></div>
+      <div className="visual-plan-actions">
+        <div className="visual-count-stepper" aria-label="配图数量">
+          <button type="button" aria-label={activePlatform === 'WEIBO' ? '减少主图' : '减少正文插图'} disabled={bodyItemCount <= countRange.min} onClick={() => changeBodyItemCount(-1)}><Minus size={14}/></button>
+          <output aria-label={activePlatform === 'WEIBO' ? '主图数量' : '正文插图数量'}>{bodyItemCount}</output>
+          <button type="button" aria-label={activePlatform === 'WEIBO' ? '增加主图' : '增加正文插图'} disabled={bodyItemCount >= countRange.max} onClick={() => changeBodyItemCount(1)}><Plus size={14}/></button>
+        </div>
+        <button className="button" type="button" onClick={regenerate}><RefreshCw size={15}/>重新规划</button>
+      </div>
     </header>
     {error && <div className="delivery-error" role="alert">{error}</div>}
     {notice && <div className="visual-workspace-notice" role="status">{notice}</div>}

@@ -167,29 +167,42 @@ function searchQueriesFor({ title, focus, category, role, visualType }) {
   ]).filter((query) => query.length >= 2 && query.length <= 60).slice(0, 3);
 }
 
-function desiredItemCount(platform, body) {
+export function visualPlanCountRange(platform) {
+  if (platform === 'WEIBO') return { min: 0, max: 1 };
+  if (platform === 'XIAOHONGSHU') return { min: 5, max: 8 };
+  if (platform === 'ZHIHU') return { min: 2, max: 4 };
+  return { min: 2, max: 5 };
+}
+
+function desiredItemCount(platform, body, requestedBodyItemCount) {
   const length = clean(body).length;
-  if (platform === 'WEIBO') return 1;
-  if (platform === 'XIAOHONGSHU') return Math.max(6, Math.min(8, 6 + Math.floor(length / 900)));
-  return Math.max(3, Math.min(5, 3 + Math.floor(length / 1200)));
+  const range = visualPlanCountRange(platform);
+  const recommended = platform === 'WEIBO'
+    ? 1
+    : platform === 'XIAOHONGSHU'
+      ? 5 + Math.floor(length / 900)
+      : 2 + Math.floor(length / 1200);
+  const requested = Number.isFinite(requestedBodyItemCount) ? Math.round(requestedBodyItemCount) : recommended;
+  const bodyItemCount = Math.max(range.min, Math.min(range.max, requested));
+  return platform === 'WEIBO' ? bodyItemCount : bodyItemCount + 1;
 }
 
 function focusFor(section, subject, usedConcepts, index) {
   const candidates = unique([...conceptsFrom(section), ...termsFrom(section, 8)])
     .filter((term) => term !== subject && !subject.includes(term) && !term.includes(subject));
   const fresh = candidates.filter((term) => !usedConcepts.has(term));
-  const selected = (fresh.length ? fresh : candidates).slice(0, 3);
+  const selected = (fresh.length ? fresh : usedConcepts.size ? [] : candidates).slice(0, 3);
   if (selected.length) return selected.join('、');
   return unique([subject, ['工作原理', '应用场景', '影响关系', '发展趋势'][index % 4]]).join('、');
 }
 
-export function buildVisualPlan(input, platform) {
+export function buildVisualPlan(input, platform, options = {}) {
   const title = clean(input?.title) || '未命名内容';
   const body = String(input?.body ?? '');
   const category = clean(input?.category);
   const coreMessage = clean(input?.coreMessage);
   const subject = subjectFromTitle(title);
-  const count = desiredItemCount(platform, body);
+  const count = desiredItemCount(platform, body, options.bodyItemCount);
   const plan = [];
   const coverRole = platform === 'WEIBO' ? 'MAIN' : 'COVER';
   const coverPurpose = platform === 'WEIBO' ? '在信息流中快速传达主题并吸引点击' : '概括全文主题并承担首屏识别';
@@ -237,7 +250,7 @@ export function buildVisualPlan(input, platform) {
 }
 
 export function mergeVisualPlan(generated, persisted, legacyAssetIds = [], legacyCoverId = null, persistedVersion = 0) {
-  if (Array.isArray(persisted) && persisted.length && persistedVersion >= VISUAL_PLAN_VERSION) return persisted;
+  if (Array.isArray(persisted) && persistedVersion >= VISUAL_PLAN_VERSION) return persisted;
   const persistedCoverId = Array.isArray(persisted)
     ? persisted.find((item) => item.role === 'COVER' || item.role === 'MAIN')?.assetReferenceId
     : null;
@@ -246,4 +259,9 @@ export function mergeVisualPlan(generated, persisted, legacyAssetIds = [], legac
     ...item,
     assetReferenceId: item.role === 'COVER' || item.role === 'MAIN' ? coverId : null,
   }));
+}
+
+export function resizeVisualPlan(generated, current = []) {
+  const currentById = new Map(current.map((item) => [item.id, item]));
+  return generated.map((item) => currentById.get(item.id) ?? item);
 }
