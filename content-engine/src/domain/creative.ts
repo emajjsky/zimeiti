@@ -59,7 +59,7 @@ export interface AccountVoiceCalibrationDraft extends AccountVoiceInput {
   };
 }
 export type CreativePlatform = Exclude<Platform, 'VIDEO_CHANNEL'>;
-export type CreativePlatformSkillSelection = Record<'LAYOUT' | 'CHANNEL', string>;
+export type CreativePlatformSkillSelection = { LAYOUT: string; CHANNEL: string; lengthTarget?: string };
 export type CreativePlatformSkillMap = Partial<Record<CreativePlatform, CreativePlatformSkillSelection>>;
 export type ProjectMaterialScope = 'PROJECT' | 'RESEARCH' | 'WRITING' | 'IMAGING';
 export type ProjectInputKind = 'IDEA' | 'DRAFT' | 'NOTE' | 'TRANSCRIPT';

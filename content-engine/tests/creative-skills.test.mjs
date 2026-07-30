@@ -150,15 +150,12 @@ test('未选择账号声音时仍可获得写作上下文', async () => {
   assert.equal(voiceSnapshotCalled, false);
 });
 
-test('创作主流程不再把视频列为必经步骤', () => {
+test('创作主流程只保留项目级步骤，视频不列为必经步骤', () => {
   assert.deepEqual(
     creativeStages.map(({ id, label }) => ({ id, label })),
     [
       { id: 'planning', label: '规划' },
       { id: 'master', label: '创作' },
-      { id: 'visual', label: '配图' },
-      { id: 'layout', label: '排版' },
-      { id: 'review', label: '审核' },
     ],
   );
   assert.equal(creativeStages.some(({ id, label }) => id === 'video' || label === '视频'), false);

@@ -6,14 +6,11 @@ const flow = await import('../src/domain/creative-flow.mjs').catch(() => null);
 const require = createRequire(import.meta.url);
 const { confirmProjectPlanning } = require('../server/services/project-planning.cjs');
 
-test('创作工作台固定为规划到审核的五步链路，研究按需进入', () => {
+test('创作工作台只保留项目级规划和创作，渠道内独立完成后续步骤', () => {
   assert.ok(flow, '创作流程模型尚未实现');
   assert.deepEqual(flow.creativeStages.map(({ id, label }) => [id, label]), [
     ['planning', '规划'],
     ['master', '创作'],
-    ['visual', '配图'],
-    ['layout', '排版'],
-    ['review', '审核'],
   ]);
 });
 
@@ -33,7 +30,7 @@ test('项目阶段映射为刷新后应恢复的创作步骤', () => {
   assert.equal(flow.stageRouteForProjectStage('RESEARCH'), 'research');
   assert.equal(flow.stageRouteForProjectStage('MASTER_WRITING'), 'master');
   assert.equal(flow.stageRouteForProjectStage('PLATFORM_ADAPTATION'), 'master');
-  assert.equal(flow.stageRouteForProjectStage('COMPLETED'), 'review');
+  assert.equal(flow.stageRouteForProjectStage('COMPLETED'), 'master');
 });
 
 test('确认规划只要求选题标题和目标平台，不把目标篇幅列为规划字段', () => {

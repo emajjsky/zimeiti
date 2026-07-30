@@ -39,7 +39,12 @@ function platformSkills(platform: CreativePlatform, skills: CreativeSkillDefinit
   return {
     LAYOUT: firstSkill(skills, 'LAYOUT', platformSlugs[platform].LAYOUT),
     CHANNEL: firstSkill(skills, 'CHANNEL', platformSlugs[platform].CHANNEL),
+    lengthTarget: platform === 'XIAOHONGSHU' ? '300-800 字，6-8 页图文卡片' : platform === 'WEIBO' ? '140-500 字，必要时串文' : platform === 'ZHIHU' ? '1500-3000 字' : '1500-2500 字',
   };
+}
+
+function deliveryLabel(stage: string | undefined) {
+  return ({ COPY: '文案中', VISUAL: '配图中', LAYOUT: '排版中', REVIEW: '审核中', READY: '已就绪' } as Record<string, string>)[stage ?? 'COPY'] ?? '待制作';
 }
 
 function artifactTitle(artifact: ProjectArtifact) {
@@ -65,7 +70,7 @@ export function CopyWorkspace({ project, brief, briefState, skills, accountVoice
   onSaveBrief: (next: WritingBriefInput) => Promise<void>;
   onSaveVersion: (projectId: string, versionId: string, patch: Pick<ContentVersion, 'title' | 'body'>) => void;
   onOpenResearch: () => void;
-  onCompletePlatforms: () => Promise<void>;
+  onCompletePlatforms: (platform: CreativePlatform) => Promise<void>;
   onOpenModelSettings: () => void;
   onOpenAgentSettings: () => void;
   onOpenVoiceSettings: () => void;
@@ -180,7 +185,7 @@ export function CopyWorkspace({ project, brief, briefState, skills, accountVoice
     setCompletionBusy(true);
     setCompletionError('');
     try {
-      await onCompletePlatforms();
+      await onCompletePlatforms(activeVersion.platform);
     } catch (reason) {
       setCompletionError(reason instanceof Error ? reason.message : '确认创作失败，请检查各渠道正文。');
     } finally {
@@ -215,20 +220,20 @@ export function CopyWorkspace({ project, brief, briefState, skills, accountVoice
 
   return <section className="copy-workspace">
     <header className="copy-platform-bar">
-      <nav className="copy-platform-tabs" aria-label="图文平台版本">{versions.map((version) => <button type="button" key={version.platform} className={version.platform === activeVersion.platform ? 'active' : ''} onClick={() => switchPlatform(version.platform)}>{platformName[version.platform]}</button>)}</nav>
+      <nav className="copy-platform-tabs" aria-label="图文平台版本">{versions.map((version) => <button type="button" key={version.platform} className={version.platform === activeVersion.platform ? 'active' : ''} onClick={() => switchPlatform(version.platform)}><b>{platformName[version.platform]}</b><small>{deliveryLabel(project.delivery?.platforms?.[version.platform]?.stage)}</small></button>)}</nav>
       <div className="copy-platform-actions">
         <button className="text-button copy-research-link" type="button" onClick={onOpenResearch}><Search size={15}/>补充研究</button>
         {missingPlatforms.length > 0 && <div className="copy-platform-add"><button className="icon-button" type="button" aria-label="增加图文平台" aria-expanded={platformMenu} onClick={() => setPlatformMenu((value) => !value)}><Plus size={17}/><ChevronDown size={13}/></button>{platformMenu && <div className="copy-platform-menu">{missingPlatforms.map((platform) => <button type="button" key={platform} disabled={Boolean(platformBusy)} onClick={() => void enablePlatform(platform)}>{platformBusy === platform ? <LoaderCircle size={15}/> : <Plus size={15}/>} {platformName[platform]}</button>)}</div>}</div>}
       </div>
     </header>
 
-    {project.stage === 'PLATFORM_ADAPTATION' && <section className="copy-adaptation-ready" aria-label="渠道适配完成">
-      <span>渠道适配</span>
-      <button className="button primary" type="button" disabled={completionBusy} onClick={() => void completePlatforms()}>{completionBusy ? '正在确认…' : '确认创作，进入配图'}</button>
+    {(!project.delivery?.platforms?.[activeVersion.platform] || project.delivery.platforms[activeVersion.platform]?.stage === 'COPY') && <section className="copy-adaptation-ready" aria-label="当前渠道下一步">
+      <span>{platformName[activeVersion.platform]}</span>
+      <button className="button primary" type="button" disabled={completionBusy} onClick={() => void completePlatforms()}>{completionBusy ? '正在确认…' : activeVersion.platform === 'XIAOHONGSHU' ? '确认文案，制作图文卡片' : activeVersion.platform === 'WEIBO' ? '确认文案，生成发布排版' : '确认正文，开始配图'}</button>
       {completionError && <p role="alert">{completionError}</p>}
     </section>}
 
-    {strategy && <section className="copy-strategy" aria-labelledby="copy-strategy-title"><header><div><h2 id="copy-strategy-title">写作策略</h2><span>{platformName[activeVersion.platform]}</span></div><div className={`copy-strategy-state ${strategyState}`}>{strategyState === 'saving' && '正在保存创作设定'}{strategyState === 'dirty' && '准备自动保存'}{strategyState === 'saved' && '已自动保存'}{strategyState === 'error' && <><span>保存失败</span><button className="text-button" type="button" onClick={() => void saveStrategy()}>重试保存</button></>}</div></header><div className="copy-strategy-fields">{sharedDimensions.map(({ id, label }) => <label key={id}><span>{label}</span><select value={strategy.selectedSkills[id]} onChange={(event) => changeStrategy({ selectedSkills: { ...strategy.selectedSkills, [id]: event.target.value } })}>{(skillGroups.get(id) ?? []).map((skill) => <option key={skill.version.id} value={skill.version.id}>{skill.name}</option>)}</select></label>)}{platformDimensions.map(({ id, label }) => <label key={id}><span>{label}</span><select value={platformStrategy?.[id] ?? ''} onChange={(event) => changeStrategy({ platformSkills: { ...strategy.platformSkills, [activeVersion.platform]: { ...(platformStrategy ?? platformSkills(activeVersion.platform, skills)), [id]: event.target.value } } })}>{(skillGroups.get(id) ?? []).map((skill) => <option key={skill.version.id} value={skill.version.id}>{skill.name}</option>)}</select></label>)}<label><span>目标篇幅</span><input value={strategy.lengthTarget} onChange={(event) => changeStrategy({ lengthTarget: event.target.value })}/></label></div></section>}
+    {strategy && <section className="copy-strategy" aria-labelledby="copy-strategy-title"><header><div><h2 id="copy-strategy-title">写作策略</h2><span>{platformName[activeVersion.platform]}</span></div><div className={`copy-strategy-state ${strategyState}`}>{strategyState === 'saving' && '正在保存创作设定'}{strategyState === 'dirty' && '准备自动保存'}{strategyState === 'saved' && '已自动保存'}{strategyState === 'error' && <><span>保存失败</span><button className="text-button" type="button" onClick={() => void saveStrategy()}>重试保存</button></>}</div></header><div className="copy-strategy-fields">{sharedDimensions.map(({ id, label }) => <label key={id}><span>{label}</span><select value={strategy.selectedSkills[id]} onChange={(event) => changeStrategy({ selectedSkills: { ...strategy.selectedSkills, [id]: event.target.value } })}>{(skillGroups.get(id) ?? []).map((skill) => <option key={skill.version.id} value={skill.version.id}>{skill.name}</option>)}</select></label>)}{platformDimensions.map(({ id, label }) => <label key={id}><span>{label}</span><select value={platformStrategy?.[id] ?? ''} onChange={(event) => changeStrategy({ platformSkills: { ...strategy.platformSkills, [activeVersion.platform]: { ...(platformStrategy ?? platformSkills(activeVersion.platform, skills)), [id]: event.target.value } } })}>{(skillGroups.get(id) ?? []).map((skill) => <option key={skill.version.id} value={skill.version.id}>{skill.name}</option>)}</select></label>)}<label><span>目标篇幅</span><input value={platformStrategy?.lengthTarget ?? ''} onChange={(event) => changeStrategy({ platformSkills: { ...strategy.platformSkills, [activeVersion.platform]: { ...(platformStrategy ?? platformSkills(activeVersion.platform, skills)), lengthTarget: event.target.value } } })}/></label></div></section>}
 
     {error && <div className="copy-workspace-error" role="alert"><CircleAlert size={16}/><span>{error}</span>{/模型|提示词|任务策略/.test(error) && <button className="text-button" type="button" onClick={onOpenModelSettings}>去配置</button>}</div>}
 

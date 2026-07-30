@@ -138,10 +138,17 @@ export interface CreativeLayoutDocument {
   generatedAt: string;
 }
 
-export interface CreativeDelivery {
+export type CreativeDeliveryStage = 'COPY' | 'VISUAL' | 'LAYOUT' | 'REVIEW' | 'READY';
+
+export interface PlatformCreativeDelivery {
+  stage: CreativeDeliveryStage;
   visual: { coverReferenceId: string | null; assetReferenceIds: string[]; assets: CreativeVisualAsset[]; updatedAt: string } | null;
-  layouts: Partial<Record<Exclude<Platform, 'VIDEO_CHANNEL'>, CreativeLayoutDocument>>;
+  layout?: CreativeLayoutDocument;
   review: { acknowledgedFactChecks: string[]; completedAt: string } | null;
+}
+
+export interface CreativeDelivery {
+  platforms: Partial<Record<Exclude<Platform, 'VIDEO_CHANNEL'>, PlatformCreativeDelivery>>;
 }
 
 export interface ContentProject {

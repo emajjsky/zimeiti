@@ -1868,19 +1868,22 @@ app.post('/api/v1/creative/projects/:projectId/platforms/:platform', { preHandle
 
 app.post('/api/v1/creative/projects/:projectId/platform-versions/complete', { preHandler: authenticate }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const input = z.object({ platform: creativePlatform }).parse(request.body);
   const workspace = await currentWorkspace(request.user.sub);
   return transaction(async (client) => {
     const snapshotResult = await client.query('SELECT state_json FROM workspace_snapshots WHERE workspace_id = $1 FOR UPDATE', [workspace.id]);
     const state = snapshotResult.rows[0]?.state_json;
     const project = state?.projects?.find((item) => item.id === projectId);
     if (!project) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
-    if (!['MASTER_WRITING', 'PLATFORM_ADAPTATION'].includes(project.stage)) { const error = new Error('当前项目不在平台版本阶段。'); error.statusCode = 409; throw error; }
-    const targetPlatforms = (project.planning?.targetPlatforms ?? project.versions?.map((version) => version.platform) ?? []).filter((platform) => platform !== 'VIDEO_CHANNEL');
-    const incomplete = targetPlatforms.filter((platform) => !project.versions?.some((version) => version.platform === platform && String(version.body ?? '').trim().length >= 80));
-    if (incomplete.length) { const error = new Error(`请先完成${incomplete.map((platform) => creativePlatformNames[platform] ?? platform).join('、')}的正文。`); error.statusCode = 409; throw error; }
+    if (!['MASTER_WRITING', 'PLATFORM_ADAPTATION'].includes(project.stage)) { const error = new Error('当前项目不在创作阶段。'); error.statusCode = 409; throw error; }
+    const version = project.versions?.find((item) => item.platform === input.platform);
+    if (!version || String(version.body ?? '').trim().length < 80) { const error = new Error(`请先完成${creativePlatformNames[input.platform] ?? input.platform}的正文。`); error.statusCode = 409; throw error; }
     const updatedAt = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
-    project.stage = 'VISUAL';
-    project.status = 'VISUAL';
+    const delivery = deliveryOf(project);
+    const currentPlatform = platformDelivery(delivery, input.platform);
+    project.delivery = { ...delivery, platforms: { ...delivery.platforms, [input.platform]: { ...currentPlatform, stage: needsVisual(input.platform) ? 'VISUAL' : 'LAYOUT' } } };
+    project.stage = 'PLATFORM_ADAPTATION';
+    project.status = 'WRITING';
     project.updatedAt = updatedAt;
     await client.query('UPDATE workspace_snapshots SET state_json = $2, revision = revision + 1, updated_at = now() WHERE workspace_id = $1', [workspace.id, JSON.stringify(state)]);
     return { project };
@@ -1889,11 +1892,26 @@ app.post('/api/v1/creative/projects/:projectId/platform-versions/complete', { pr
 
 function deliveryOf(project) {
   const delivery = project?.delivery && typeof project.delivery === 'object' ? project.delivery : {};
-  return {
-    visual: delivery.visual ?? null,
-    layouts: delivery.layouts && typeof delivery.layouts === 'object' ? delivery.layouts : {},
-    review: delivery.review ?? null,
-  };
+  if (delivery.platforms && typeof delivery.platforms === 'object') return { platforms: delivery.platforms };
+  // Compatibility for projects created before channel-level delivery existed.
+  const legacyLayouts = delivery.layouts && typeof delivery.layouts === 'object' ? delivery.layouts : {};
+  const legacyPlatforms = {};
+  for (const [platform, layout] of Object.entries(legacyLayouts)) {
+    legacyPlatforms[platform] = { stage: delivery.review ? 'READY' : 'REVIEW', visual: delivery.visual ?? null, layout, review: delivery.review ?? null };
+  }
+  return { platforms: legacyPlatforms };
+}
+
+function needsVisual(platform) { return platform !== 'WEIBO'; }
+function platformDelivery(delivery, platform) {
+  return delivery.platforms?.[platform] ?? { stage: 'COPY', visual: null, layout: undefined, review: null };
+}
+function targetCreativePlatforms(project) {
+  return (project.planning?.targetPlatforms ?? project.versions?.map((version) => version.platform) ?? []).filter((platform) => platform !== 'VIDEO_CHANNEL');
+}
+function allTargetPlatformsReady(project, delivery) {
+  const targets = targetCreativePlatforms(project);
+  return targets.length > 0 && targets.every((platform) => platformDelivery(delivery, platform).stage === 'READY');
 }
 
 function escapeDeliveryHtml(value) {
@@ -1924,7 +1942,7 @@ app.get('/api/v1/creative/projects/:projectId/delivery', { preHandler: authentic
 
 app.put('/api/v1/creative/projects/:projectId/visual', { preHandler: authenticate }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
-  const input = z.object({ coverReferenceId: z.string().uuid().nullable(), assetReferenceIds: z.array(z.string().uuid()).max(12) }).parse(request.body);
+  const input = z.object({ platform: creativePlatform, coverReferenceId: z.string().uuid().nullable(), assetReferenceIds: z.array(z.string().uuid()).max(12) }).parse(request.body);
   const workspace = await currentWorkspace(request.user.sub);
   return transaction(async (client) => {
     const listed = await projectMaterialStore.list(workspace.id, projectId);
@@ -1940,17 +1958,18 @@ app.put('/api/v1/creative/projects/:projectId/visual', { preHandler: authenticat
       const index = state.projects.findIndex((item) => item.id === projectId);
       if (index < 0) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
       const current = state.projects[index];
-      if (current.stage !== 'VISUAL') { const error = new Error('当前项目不在配图阶段。'); error.statusCode = 409; throw error; }
+      const delivery = deliveryOf(current); const currentPlatform = platformDelivery(delivery, input.platform);
+      if (currentPlatform.stage !== 'VISUAL') { const error = new Error('当前渠道不在配图阶段。'); error.statusCode = 409; throw error; }
       project = {
         ...current,
         delivery: {
-          ...deliveryOf(current),
-          visual: {
+          ...delivery,
+          platforms: { ...delivery.platforms, [input.platform]: { ...currentPlatform, visual: {
             coverReferenceId: input.coverReferenceId,
             assetReferenceIds: requested,
             assets: references.map((item) => ({ referenceId: item.id, title: item.title, role: item.id === input.coverReferenceId ? 'COVER' : 'BODY', url: item.url ?? null })),
             updatedAt: now,
-          },
+          } } },
         },
         updatedAt: now,
       };
@@ -1963,6 +1982,7 @@ app.put('/api/v1/creative/projects/:projectId/visual', { preHandler: authenticat
 
 app.post('/api/v1/creative/projects/:projectId/visual/complete', { preHandler: authenticate }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const input = z.object({ platform: creativePlatform }).parse(request.body);
   const workspace = await currentWorkspace(request.user.sub);
   return transaction(async (client) => {
     const now = new Date().toISOString(); let project;
@@ -1970,8 +1990,9 @@ app.post('/api/v1/creative/projects/:projectId/visual/complete', { preHandler: a
       const index = state.projects.findIndex((item) => item.id === projectId);
       if (index < 0) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
       const current = state.projects[index];
-      if (current.stage !== 'VISUAL') { const error = new Error('当前项目不在配图阶段。'); error.statusCode = 409; throw error; }
-      project = { ...current, stage: 'LAYOUT', status: 'VISUAL', updatedAt: now };
+      const delivery = deliveryOf(current); const currentPlatform = platformDelivery(delivery, input.platform);
+      if (currentPlatform.stage !== 'VISUAL') { const error = new Error('当前渠道不在配图阶段。'); error.statusCode = 409; throw error; }
+      project = { ...current, stage: 'PLATFORM_ADAPTATION', status: 'WRITING', delivery: { ...delivery, platforms: { ...delivery.platforms, [input.platform]: { ...currentPlatform, stage: 'LAYOUT' } } }, updatedAt: now };
       const projects = [...state.projects]; projects[index] = project;
       return { ...state, projects };
     }, now);
@@ -1981,6 +2002,7 @@ app.post('/api/v1/creative/projects/:projectId/visual/complete', { preHandler: a
 
 app.post('/api/v1/creative/projects/:projectId/layout/generate', { preHandler: authenticate }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const input = z.object({ platform: creativePlatform }).parse(request.body);
   const workspace = await currentWorkspace(request.user.sub);
   return transaction(async (client) => {
     const now = new Date().toISOString(); let project;
@@ -1988,10 +2010,11 @@ app.post('/api/v1/creative/projects/:projectId/layout/generate', { preHandler: a
       const index = state.projects.findIndex((item) => item.id === projectId);
       if (index < 0) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
       const current = state.projects[index];
-      if (current.stage !== 'LAYOUT') { const error = new Error('当前项目不在排版阶段。'); error.statusCode = 409; throw error; }
-      const delivery = deliveryOf(current);
-      const layouts = Object.fromEntries((current.versions ?? []).filter((item) => item.platform !== 'VIDEO_CHANNEL' && String(item.body ?? '').trim()).map((item) => [item.platform, documentForPlatform(current, item.platform, delivery.visual, now)]));
-      project = { ...current, delivery: { ...delivery, layouts }, updatedAt: now };
+      const delivery = deliveryOf(current); const currentPlatform = platformDelivery(delivery, input.platform);
+      if (currentPlatform.stage !== 'LAYOUT') { const error = new Error('当前渠道不在排版阶段。'); error.statusCode = 409; throw error; }
+      const version = (current.versions ?? []).find((item) => item.platform === input.platform);
+      if (!version || !String(version.body ?? '').trim()) { const error = new Error('请先完成当前渠道的正文。'); error.statusCode = 409; throw error; }
+      project = { ...current, delivery: { ...delivery, platforms: { ...delivery.platforms, [input.platform]: { ...currentPlatform, layout: documentForPlatform(current, input.platform, currentPlatform.visual, now) } } }, updatedAt: now };
       const projects = [...state.projects]; projects[index] = project;
       return { ...state, projects };
     }, now);
@@ -2001,16 +2024,17 @@ app.post('/api/v1/creative/projects/:projectId/layout/generate', { preHandler: a
 
 app.post('/api/v1/creative/projects/:projectId/layout/complete', { preHandler: authenticate }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const input = z.object({ platform: creativePlatform }).parse(request.body);
   const workspace = await currentWorkspace(request.user.sub);
   return transaction(async (client) => {
     const now = new Date().toISOString(); let project;
     await updateCreativeState(client, workspace.id, (state) => {
       const index = state.projects.findIndex((item) => item.id === projectId);
       if (index < 0) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
-      const current = state.projects[index]; const delivery = deliveryOf(current);
-      if (current.stage !== 'LAYOUT') { const error = new Error('当前项目不在排版阶段。'); error.statusCode = 409; throw error; }
-      if (!Object.keys(delivery.layouts).length) { const error = new Error('请先生成排版预览。'); error.statusCode = 409; throw error; }
-      project = { ...current, stage: 'REVIEW', status: 'REVIEW', updatedAt: now };
+      const current = state.projects[index]; const delivery = deliveryOf(current); const currentPlatform = platformDelivery(delivery, input.platform);
+      if (currentPlatform.stage !== 'LAYOUT') { const error = new Error('当前渠道不在排版阶段。'); error.statusCode = 409; throw error; }
+      if (!currentPlatform.layout) { const error = new Error('请先生成当前渠道的排版预览。'); error.statusCode = 409; throw error; }
+      project = { ...current, stage: 'PLATFORM_ADAPTATION', status: 'WRITING', delivery: { ...delivery, platforms: { ...delivery.platforms, [input.platform]: { ...currentPlatform, stage: 'REVIEW' } } }, updatedAt: now };
       const projects = [...state.projects]; projects[index] = project;
       return { ...state, projects };
     }, now);
@@ -2020,19 +2044,20 @@ app.post('/api/v1/creative/projects/:projectId/layout/complete', { preHandler: a
 
 app.post('/api/v1/creative/projects/:projectId/review/complete', { preHandler: authenticate }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
-  const input = z.object({ acknowledgedFactChecks: z.array(z.string().min(1).max(2_000)).max(100) }).parse(request.body);
+  const input = z.object({ platform: creativePlatform, acknowledgedFactChecks: z.array(z.string().min(1).max(2_000)).max(100) }).parse(request.body);
   const workspace = await currentWorkspace(request.user.sub);
   return transaction(async (client) => {
     const now = new Date().toISOString(); let project;
     await updateCreativeState(client, workspace.id, (state) => {
       const index = state.projects.findIndex((item) => item.id === projectId);
       if (index < 0) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
-      const current = state.projects[index]; const delivery = deliveryOf(current);
-      if (!['REVIEW', 'COMPLETED'].includes(current.stage)) { const error = new Error('当前项目不在审核阶段。'); error.statusCode = 409; throw error; }
+      const current = state.projects[index]; const delivery = deliveryOf(current); const currentPlatform = platformDelivery(delivery, input.platform);
+      if (currentPlatform.stage !== 'REVIEW') { const error = new Error('当前渠道不在审核阶段。'); error.statusCode = 409; throw error; }
       const required = [...new Set(current.factChecks ?? [])];
       const confirmed = new Set(input.acknowledgedFactChecks);
       if (required.some((item) => !confirmed.has(item))) { const error = new Error('请先确认所有需要人工核对的事实。'); error.statusCode = 409; throw error; }
-      project = { ...current, stage: 'COMPLETED', status: 'SCHEDULED', delivery: { ...delivery, review: { acknowledgedFactChecks: required, completedAt: now } }, updatedAt: now };
+      const nextDelivery = { ...delivery, platforms: { ...delivery.platforms, [input.platform]: { ...currentPlatform, stage: 'READY', review: { acknowledgedFactChecks: required, completedAt: now } } } };
+      project = { ...current, stage: allTargetPlatformsReady(current, nextDelivery) ? 'COMPLETED' : 'PLATFORM_ADAPTATION', status: allTargetPlatformsReady(current, nextDelivery) ? 'SCHEDULED' : 'WRITING', delivery: nextDelivery, updatedAt: now };
       const projects = [...state.projects]; projects[index] = project;
       return { ...state, projects };
     }, now);

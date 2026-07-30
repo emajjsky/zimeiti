@@ -88,7 +88,7 @@ function createCreativeSkillStore({ query, transaction, accountVoiceStore = null
       );
       if (!accountVoice) throw new Error('当前账号声音不可用，请在设置中重新选择。');
     }
-    return { brief, skills, accountVoice };
+    return { brief: { ...brief, lengthTarget: platformSelection.lengthTarget || brief.lengthTarget }, skills, accountVoice };
   }
 
   async function saveBrief(workspaceId, projectId, input) {

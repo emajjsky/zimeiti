@@ -320,5 +320,5 @@ test('采用候选、完成平台版本和启用平台都锁定 workspace snapsh
   assert.match(enable, /VIDEO_CHANNEL/);
   assert.match(complete, /FOR UPDATE/);
   assert.match(complete, /PLATFORM_ADAPTATION/);
-  assert.match(complete, /stage = 'VISUAL'/);
+  assert.match(complete, /\[input\.platform\]: \{ \.\.\.currentPlatform, stage: needsVisual\(input\.platform\) \? 'VISUAL' : 'LAYOUT'/);
 });

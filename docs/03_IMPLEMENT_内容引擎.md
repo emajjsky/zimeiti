@@ -756,3 +756,10 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - `POST /layout/generate` 以项目当前正文和已选素材生成渠道发布稿。公众号、知乎为 HTML，小红书、微博为 Markdown；`POST /layout/complete` 才进入审核。
 - `POST /review/complete` 只接受项目当前待核验项的人工确认，并将项目推进为 `COMPLETED/SCHEDULED`。前端使用浏览器 Blob 下载对应 HTML 或 Markdown，未把私有素材文件错误地伪造成公开 URL。
 - `VisualWorkspace`、`LayoutWorkspace`、`ReviewWorkspace` 取代三个旧占位页。服务端保留阶段校验，前端按钮不能绕过当前项目阶段。
+## 2026-07-30 实现：渠道级交付状态
+
+- `ContentProject.delivery` 改为 `platforms` 映射，每个渠道独立保存 `COPY/VISUAL/LAYOUT/REVIEW/READY` 状态、已选素材、排版稿和审核确认。
+- `platform-versions/complete`、视觉、排版和审核 API 均要求 `platform`；公众号完成正文不会检查知乎、小红书或微博正文。微博正文确认后直接进入排版，其余图文渠道进入素材步骤。
+- `CreateWorkspace` 顶部只保留项目级“规划、创作”，创作页按当前渠道状态渲染 `CopyWorkspace`、`VisualWorkspace`、`LayoutWorkspace` 或 `ReviewWorkspace`。
+- `CopyWorkspace` 渠道标签显示“文案中/配图中/排版中/审核中/已就绪”，且每个渠道的目标篇幅在 `platformSkills` 保存。服务端读取写作上下文时使用当前渠道篇幅。
+- 旧快照的项目级交付字段在读取时兼容转换为渠道映射，避免旧项目因本次升级无法打开。

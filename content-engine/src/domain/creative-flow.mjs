@@ -1,9 +1,6 @@
 export const creativeStages = [
   { id: 'planning', label: '规划', projectStage: 'PLANNING' },
   { id: 'master', label: '创作', projectStage: 'MASTER_WRITING' },
-  { id: 'visual', label: '配图', projectStage: 'VISUAL' },
-  { id: 'layout', label: '排版', projectStage: 'LAYOUT' },
-  { id: 'review', label: '审核', projectStage: 'REVIEW' },
 ];
 
 const projectStageRoutes = {
@@ -11,10 +8,10 @@ const projectStageRoutes = {
   RESEARCH: 'research',
   MASTER_WRITING: 'master',
   PLATFORM_ADAPTATION: 'master',
-  VISUAL: 'visual',
-  LAYOUT: 'layout',
-  REVIEW: 'review',
-  COMPLETED: 'review',
+  VISUAL: 'master',
+  LAYOUT: 'master',
+  REVIEW: 'master',
+  COMPLETED: 'master',
 };
 
 export const planningFieldNames = [
@@ -36,7 +33,7 @@ export function stageRouteForProjectStage(projectStage) {
 }
 
 export function canOpenCreateStage(projectStage, routeStage) {
-  const stageIndex = { planning: 0, research: 1, master: 1, platform: 1, visual: 2, layout: 3, review: 4 };
+  const stageIndex = { planning: 0, research: 1, master: 1, platform: 1, visual: 1, layout: 1, review: 1 };
   const currentIndex = stageIndex[stageRouteForProjectStage(projectStage)];
   const requestedIndex = stageIndex[routeStage];
   return requestedIndex >= 0 && requestedIndex <= currentIndex;

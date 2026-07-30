@@ -26,10 +26,21 @@ test('创作工作台不再把配图、排版和审核渲染为占位页面', ()
   assert.match(workspace, /<LayoutWorkspace/);
   assert.match(workspace, /<ReviewWorkspace/);
   assert.doesNotMatch(workspace, /配图尚未开始|排版尚未开始|审核尚未开始/);
-  assert.match(visual, /确认配图，进入排版/);
+  assert.match(visual, /确认素材，进入排版/);
   assert.match(layout, /确认排版，进入审核/);
   assert.match(review, /完成审核，生成发布包/);
   assert.match(review, /下载 .*发布稿/);
+});
+
+test('后半段制作状态按渠道隔离，公众号无需等待其他平台', () => {
+  const api = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
+  const workspace = fs.readFileSync(new URL('../src/workspaces/create/CreateWorkspace.tsx', import.meta.url), 'utf8');
+  const client = fs.readFileSync(new URL('../src/data/webApi.ts', import.meta.url), 'utf8');
+  assert.match(api, /platforms: \{ \.\.\.delivery\.platforms, \[input\.platform\]/);
+  assert.match(api, /platformDelivery\(delivery, input\.platform\)/);
+  assert.doesNotMatch(api.slice(api.indexOf("platform-versions/complete"), api.indexOf('function deliveryOf')), /incomplete/);
+  assert.match(workspace, /delivery\?\.platforms\?\.\[copyPlatform\]/);
+  assert.match(client, /completePlatformVersions: \(projectId: string, platform: CreativePlatform\)/);
 });
 
 test('发布稿按渠道保留 HTML 或 Markdown 格式，且不需要外部平台授权', () => {

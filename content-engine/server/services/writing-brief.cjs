@@ -5,6 +5,7 @@ const creativePlatformNames = { WECHAT: '公众号', XIAOHONGSHU: '小红书', Z
 const platformSkillInput = z.object({
   LAYOUT: z.string().min(1).max(160).optional(),
   CHANNEL: z.string().min(1).max(160).optional(),
+  lengthTarget: z.string().min(1).max(120).optional(),
 });
 
 const writingBriefInput = z.object({

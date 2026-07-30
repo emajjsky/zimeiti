@@ -88,6 +88,6 @@ test('主稿与渠道版本收敛在同一个创作页面，研究和渠道适�
   assert.match(workspace, /stage === 'platform'.*onStage\('master'\)/s);
   assert.doesNotMatch(workspace, /platform-versions-workspace/);
   assert.match(copy, /补充研究/);
-  assert.match(copy, /渠道适配/);
-  assert.match(copy, /确认创作，进入配图/);
+  assert.match(copy, /当前渠道下一步/);
+  assert.match(copy, /确认正文，开始配图/);
 });

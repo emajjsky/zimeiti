@@ -38,10 +38,11 @@ function platformSkillDefaults(platforms: Platform[], skills: CreativeSkillDefin
       ZHIHU: { layout: 'zhihu-answer', channel: 'zhihu' },
       WEIBO: { layout: 'weibo-thread', channel: 'weibo' },
     }[platform];
-    result[platform] = current[platform] ?? {
+    const defaultLength = platform === 'XIAOHONGSHU' ? '300-800 字，6-8 页图文卡片' : platform === 'WEIBO' ? '140-500 字，必要时串文' : platform === 'ZHIHU' ? '1500-3000 字' : '1500-2500 字';
+    result[platform] = { ...(current[platform] ?? {
       LAYOUT: firstVersion(skills, 'LAYOUT', slugs.layout),
       CHANNEL: firstVersion(skills, 'CHANNEL', slugs.channel),
-    };
+    }), lengthTarget: current[platform]?.lengthTarget ?? defaultLength };
     return result;
   }, { ...current });
 }
@@ -94,7 +95,7 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
 
   useEffect(() => {
     if (!project) return;
-    if (stage === 'platform') { onStage('master'); return; }
+    if (stage === 'platform' || stage === 'visual' || stage === 'layout' || stage === 'review') { onStage('master'); return; }
     if (!canOpenCreateStage(project.stage, stage)) onStage(stageRouteForProjectStage(project.stage));
   }, [onStage, project?.stage, stage]);
 
@@ -201,12 +202,11 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
     }
   };
 
-  const completePlatformVersions = async () => {
+  const completePlatformVersions = async (platform: CreativePlatform) => {
     if (!project) return;
     try {
-      const result = await webCreative.completePlatformVersions(project.id);
+      const result = await webCreative.completePlatformVersions(project.id, platform);
       onProjectAccepted(result.project);
-      onStage('visual');
     } catch (error) { throw error; }
   };
 
@@ -235,10 +235,10 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
       <ProjectAgent projectId={project.id} stage="RESEARCH" onArtifactAccepted={(_artifact, nextProject) => { if (!nextProject) return; onProjectAccepted(nextProject); onStage('master'); }} onOpenSettings={(target) => target === 'search' ? onOpenSearchSettings() : onOpenAgentSettings()}/>
     </div>}
     {stage === 'master' && briefError && <div className="creative-stage-error"><CircleAlert size={18}/><span>{briefError}</span></div>}
-    {stage === 'master' && copyPlatform && <CopyWorkspace project={project} brief={brief} briefState={briefState} skills={skills} accountVoices={accountVoices} activePlatform={copyPlatform} onPlatform={onPlatform} onProjectChange={handleCopyProjectChange} onSaveBrief={saveBrief} onSaveVersion={onSaveVersion} onOpenResearch={() => onStage('research')} onCompletePlatforms={completePlatformVersions} onOpenModelSettings={onOpenModelSettings} onOpenAgentSettings={onOpenAgentSettings} onOpenVoiceSettings={onOpenVoiceSettings} />}
+    {stage === 'master' && copyPlatform && (!project.delivery?.platforms?.[copyPlatform] || project.delivery.platforms[copyPlatform]?.stage === 'COPY') && <CopyWorkspace project={project} brief={brief} briefState={briefState} skills={skills} accountVoices={accountVoices} activePlatform={copyPlatform} onPlatform={onPlatform} onProjectChange={handleCopyProjectChange} onSaveBrief={saveBrief} onSaveVersion={onSaveVersion} onOpenResearch={() => onStage('research')} onCompletePlatforms={completePlatformVersions} onOpenModelSettings={onOpenModelSettings} onOpenAgentSettings={onOpenAgentSettings} onOpenVoiceSettings={onOpenVoiceSettings} />}
     {stage === 'master' && !copyPlatform && <div className="creative-stage-empty"><h2>没有可写作的图文平台</h2><p>请先在规划中选择公众号、小红书、知乎或微博。</p></div>}
-    {stage === 'visual' && <VisualWorkspace project={project} onProjectChange={onProjectAccepted} onOpenMaterials={() => onStage('research')} onComplete={() => onStage('layout')}/>}
-    {stage === 'layout' && copyPlatform && <LayoutWorkspace project={project} activePlatform={copyPlatform} onPlatform={onPlatform} onProjectChange={onProjectAccepted} onComplete={() => onStage('review')}/>}
-    {stage === 'review' && copyPlatform && <ReviewWorkspace project={project} activePlatform={copyPlatform} onPlatform={onPlatform} onProjectChange={onProjectAccepted}/>}
+    {stage === 'master' && copyPlatform && project.delivery?.platforms?.[copyPlatform]?.stage === 'VISUAL' && <VisualWorkspace project={project} activePlatform={copyPlatform} onPlatform={onPlatform} onProjectChange={onProjectAccepted} onOpenMaterials={() => onStage('research')} />}
+    {stage === 'master' && copyPlatform && project.delivery?.platforms?.[copyPlatform]?.stage === 'LAYOUT' && <LayoutWorkspace project={project} activePlatform={copyPlatform} onPlatform={onPlatform} onProjectChange={onProjectAccepted} />}
+    {stage === 'master' && copyPlatform && ['REVIEW', 'READY'].includes(project.delivery?.platforms?.[copyPlatform]?.stage ?? '') && <ReviewWorkspace project={project} activePlatform={copyPlatform} onPlatform={onPlatform} onProjectChange={onProjectAccepted}/>}
   </section>;
 }
