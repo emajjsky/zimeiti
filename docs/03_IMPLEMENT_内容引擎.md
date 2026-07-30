@@ -723,3 +723,9 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - `buildCopyQualityReviewPrompt()` now receives the action and frozen current content, passes `allowedExistingCautions` to the reviewer, and makes preservation conditional on the candidate verification list.
 - Both initial and second quality-review calls in `worker.cjs` pass the identical frozen context.
 - 完整文稿按自然段连续渲染在弹窗可滚动主体内；原有 LCS 段落差异计算不变，移动端仍沿用全屏弹窗与固定操作栏。
+
+## 2026-07-30 Fix: candidate-quality review is advisory
+
+- `candidateQualityReview()` 将质量审稿映射为 `PASSED` 或 `NEEDS_REVIEW`，仅在候选已具备合法结构时写入产物元数据。
+- Worker 保留初次审稿和一次自动改写；二次审稿未通过不再抛出“研究事实不足”错误，而是保存 `qualityReview`、候选版本及运行结果为成功。
+- `CopyCandidateDialog` 和 Agent 的产物预览都会在正文前显示精简的人工确认问题，待核验清单继续独立显示。

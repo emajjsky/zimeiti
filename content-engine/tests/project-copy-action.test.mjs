@@ -16,6 +16,7 @@ const {
   mergeFactsToVerify,
   parseCopyOutput,
   parseCopyQualityReview,
+  candidateQualityReview,
   resolveCopyAction,
 } = copyActionModule;
 
@@ -211,6 +212,8 @@ test('文案质量审稿只以已核验事实为准，并返回可执行的重�
   const retainedClaim = '该卫星主要用于为飞船、空间实验室、空间站等载人航天器提供数据中继和测控服务。';
   const review = parseCopyQualityReview(JSON.stringify({ approved: false, issues: ['正文把待复核用途写成了确定事实'] }));
   assert.deepEqual(review, { approved: false, issues: ['正文把待复核用途写成了确定事实'] });
+  assert.deepEqual(candidateQualityReview(review), { status: 'NEEDS_REVIEW', issues: ['正文把待复核用途写成了确定事实'] });
+  assert.deepEqual(candidateQualityReview({ approved: true, issues: ['应被忽略'] }), { status: 'PASSED', issues: [] });
   assert.throws(() => parseCopyQualityReview(JSON.stringify({ approved: 'false', issues: [] })), /boolean|expected/i);
   const prompt = buildCopyQualityReviewPrompt({
     action: 'RESTRUCTURE_DRAFT',
@@ -261,14 +264,15 @@ test('Project Agent prepare 不入队，confirm 才创建 Worker Job', () => {
   assert.match(confirm, /await enqueue/);
 });
 
-test('Project Agent Worker 只创建候选产物，不直接覆盖正式正文', () => {
+test('Project Agent Worker 始终创建候选产物，质量风险仅随候选保存', () => {
   const worker = fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8');
   const execute = routeSlice(worker, 'async function generateProjectCopyAction', 'async function generateAgentPlan');
   assert.match(worker, /PROJECT_COPY_ACTION/);
   assert.match(execute, /project_artifacts/);
   assert.match(execute, /platform_content_versions/);
   assert.match(execute, /buildCopyQualityReviewPrompt/);
-  assert.match(execute, /研究事实不足，暂不生成正文/);
+  assert.match(execute, /candidateQualityReview\(review\)/);
+  assert.doesNotMatch(execute, /review\.approved\) throw new Error/);
   assert.doesNotMatch(execute, /workspace_snapshots/);
 });
 

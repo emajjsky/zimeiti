@@ -31,7 +31,7 @@ const {
 } = require('./services/source-verification.cjs');
 const { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, workflowSourceActions, buildResearchResult } = require('./services/simplified-research.cjs');
 const { createProjectAgentStore } = require('./services/project-agent.cjs');
-const { buildCopyPrompt, buildCopyRepairPrompt, buildCopyQualityReviewPrompt, detectVoiceViolations, mergeFactsToVerify, parseCopyOutput, parseCopyQualityReview } = require('./services/project-copy-action.cjs');
+const { buildCopyPrompt, buildCopyRepairPrompt, buildCopyQualityReviewPrompt, candidateQualityReview, detectVoiceViolations, mergeFactsToVerify, parseCopyOutput, parseCopyQualityReview } = require('./services/project-copy-action.cjs');
 
 const connection = new IORedis(config.redisUrl, { maxRetriesPerRequest: null });
 const textRunner = createTextModelRunner();
@@ -686,6 +686,7 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
       output = parseCopyOutput(repaired.content, snapshot.action, snapshot);
     }
     if (!isOutlineAction) {
+      let qualityReview;
       const voiceIssues = detectVoiceViolations(output.body, snapshot.accountVoice?.rules);
       if (voiceIssues.length) {
         const rewritten = await textRunner.runText({
@@ -725,8 +726,9 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
         inputTokens = (inputTokens ?? 0) + (finalReviewed.inputTokens ?? 0);
         outputTokens = (outputTokens ?? 0) + (finalReviewed.outputTokens ?? 0);
         review = parseCopyQualityReview(finalReviewed.content);
-        if (!review.approved) throw new Error(`研究事实不足，暂不生成正文。请返回资料研究补充权威来源后再生成：${review.issues.join('；')}`);
       }
+      qualityReview = candidateQualityReview(review);
+      output.qualityReview = qualityReview;
     }
     output.factsToVerify = mergeFactsToVerify(
       snapshot.project?.factChecks ?? [],

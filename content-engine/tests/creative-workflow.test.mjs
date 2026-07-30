@@ -23,6 +23,8 @@ test('文案工作区支持四平台且只使用通用 Project Agent', () => {
   assert.match(copy, /CopyCandidateDialog/);
   assert.match(dialog, /完整文稿/);
   assert.match(dialog, /段落差异/);
+  assert.match(dialog, /需要人工确认/);
+  assert.match(dialog, /qualityReview/);
   assert.match(dialog, /previewMode/);
   assert.doesNotMatch(workspace, /creative-agent-panel/);
   assert.doesNotMatch(workspace, /prepareOutline|prepareDraft/);

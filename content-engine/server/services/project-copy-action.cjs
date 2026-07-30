@@ -330,6 +330,12 @@ function parseCopyQualityReview(content) {
   return copyQualityReviewSchema.parse(parseJson(content, '质量审稿没有返回结果。', '质量审稿返回的不是有效 JSON。'));
 }
 
+function candidateQualityReview(review) {
+  return review.approved
+    ? { status: 'PASSED', issues: [] }
+    : { status: 'NEEDS_REVIEW', issues: review.issues };
+}
+
 function buildCopyQualityReviewPrompt({ action, platform, output, researchContext, currentContent }) {
   const allowedExistingCautions = preservedExistingCautions(action, { currentContent, researchContext });
   const system = [
@@ -372,5 +378,6 @@ module.exports = {
   buildCopyPrompt,
   buildCopyRepairPrompt,
   parseCopyQualityReview,
+  candidateQualityReview,
   buildCopyQualityReviewPrompt,
 };

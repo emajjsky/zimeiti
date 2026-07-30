@@ -230,6 +230,8 @@ function CopyProjectAgent({ projectId, stage, platform, selectedMaterials, selec
 function ArtifactPreview({ artifact, selectedTitle, onTitle, busy, onAccept, onClose }: { artifact: ProjectArtifact; selectedTitle: string; onTitle: (value: string) => void; busy: boolean; onAccept: () => void; onClose: () => void }) {
   const titleOptions = strings(artifact.payload.titleOptions);
   const facts = strings(artifact.payload.factsToVerify);
+  const review = artifact.payload.qualityReview;
+  const reviewIssues = review && typeof review === 'object' && (review as Record<string, unknown>).status === 'NEEDS_REVIEW' ? strings((review as Record<string, unknown>).issues) : [];
   const body = typeof artifact.payload.body === 'string' ? artifact.payload.body : '';
   const summary = typeof artifact.payload.summary === 'string' ? artifact.payload.summary : typeof artifact.payload.changeSummary === 'string' ? artifact.payload.changeSummary : '';
   const canAccept = artifact.status === 'CANDIDATE' && ['OUTLINE', 'PLATFORM_COPY'].includes(artifact.type);
@@ -239,6 +241,7 @@ function ArtifactPreview({ artifact, selectedTitle, onTitle, busy, onAccept, onC
       <div className="agent-artifact-body">
         {titleOptions.length > 0 && <label><span>标题方案</span><select value={selectedTitle} onChange={(event) => onTitle(event.target.value)}>{titleOptions.map((title) => <option key={title}>{title}</option>)}</select></label>}
         {summary && <p className="artifact-summary">{summary}</p>}
+        {reviewIssues.length > 0 && <div className="artifact-review-alert" role="alert"><b>需要人工确认</b><ul>{reviewIssues.map((issue) => <li key={issue}>{issue}</li>)}</ul></div>}
         {body && <div className="artifact-copy"><h3>{artifactHeading(artifact)}</h3><p>{body}</p></div>}
         {facts.length > 0 && <div className="artifact-facts"><b>待核验</b><ul>{facts.map((fact) => <li key={fact}>{fact}</li>)}</ul></div>}
       </div>
