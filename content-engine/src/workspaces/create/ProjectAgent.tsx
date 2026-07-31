@@ -4,6 +4,7 @@ import { webCreative } from '../../data/webApi';
 import { copyActionPanelState, copyActionRequest, type CopyPanelAction } from '../../domain/copy-action-panel.mjs';
 import { platformName, type ContentProject } from '../../domain/content';
 import type { CreativePlatform, ProjectAgentContext, ProjectArtifact, ResearchResult } from '../../domain/creative';
+import { selectCurrentResearchArtifact } from '../../domain/research-result-selection.mjs';
 
 type ProjectAgentProps = {
   projectId: string;
@@ -42,12 +43,12 @@ function SimplifiedResearchAgent({ projectId, refreshToken = 0, onContextChange,
   const [context, setContext] = useState<ProjectAgentContext | null>(null);
   const [request, setRequest] = useState('');
   const [showResearchSupplement, setShowResearchSupplement] = useState(false);
-  const [busy, setBusy] = useState<'idle' | 'loading' | 'starting' | 'accepting' | 'skipping'>('loading');
+  const [busy, setBusy] = useState<'idle' | 'loading' | 'starting' | 'accepting' | 'skipping' | 'cancelling'>('loading');
   const [error, setError] = useState('');
 
   const reload = async () => {
     const result = await webCreative.agentContext(projectId, { stage: 'RESEARCH', history: 'CURRENT' });
-    setContext(result); onContextChange?.(result);
+    setContext(result); setError(''); onContextChange?.(result);
     return result;
   };
 
@@ -69,7 +70,7 @@ function SimplifiedResearchAgent({ projectId, refreshToken = 0, onContextChange,
     return () => window.clearInterval(timer);
   }, [isRunning, projectId]);
 
-  const resultArtifact = useMemo(() => (context?.artifacts ?? []).find((artifact) => artifact.type === 'RESEARCH_RESULT' && artifact.status === 'CANDIDATE') ?? null, [context?.artifacts]);
+  const resultArtifact = useMemo(() => selectCurrentResearchArtifact(context?.artifacts ?? []), [context?.artifacts]);
   const result = resultArtifact ? asResearchResult(resultArtifact.payload) : null;
 
   const startResearch = async () => {
@@ -103,11 +104,19 @@ function SimplifiedResearchAgent({ projectId, refreshToken = 0, onContextChange,
     finally { setBusy('idle'); }
   };
 
+  const cancelResearch = async () => {
+    if (!activeRun || busy !== 'idle') return;
+    setBusy('cancelling'); setError('');
+    try { await webCreative.cancelAgentRun(activeRun.id); await reload(); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : '取消研究失败。'); }
+    finally { setBusy('idle'); }
+  };
+
   return <aside className="simplified-research" aria-label="资料研究">
     <header className="simplified-research-head"><div><Bot size={19}/><div><h2>资料研究</h2><span>{result ? '研究结果已就绪' : isRunning ? researchRunLabel(activeRun?.confirmation.phase) : '用已保存资料补足外部事实'}</span></div></div></header>
     {busy === 'loading' && <div className="simplified-research-skeleton" aria-label="正在读取研究状态"><i/><i/><i/></div>}
-    {busy !== 'loading' && isRunning && <div className="simplified-research-running" aria-live="polite"><LoaderCircle size={18}/><div><b>{researchRunLabel(activeRun?.confirmation.phase)}</b><span>{activeRun?.status === 'QUEUED' ? '任务已排队' : '完成后会自动显示结果'}</span></div></div>}
-    {busy !== 'loading' && !isRunning && resultArtifact && result && <ResearchResultPreview result={result} busy={busy !== 'idle'} onAccept={() => void acceptResearchResult()}/>}
+    {busy !== 'loading' && isRunning && <div className="simplified-research-running" aria-live="polite"><LoaderCircle size={18}/><div><b>{researchRunLabel(activeRun?.confirmation.phase)}</b><span>{activeRun?.status === 'QUEUED' ? '任务已排队' : '完成后会自动显示结果'}</span></div><button className="text-button" type="button" disabled={busy !== 'idle'} onClick={() => void cancelResearch()}>{busy === 'cancelling' ? '取消中' : '取消任务'}</button></div>}
+    {busy !== 'loading' && !isRunning && resultArtifact && result && <ResearchResultPreview result={result} accepted={resultArtifact.status === 'ACCEPTED'} busy={busy !== 'idle'} onAccept={() => void acceptResearchResult()}/>}
     {busy !== 'loading' && !isRunning && !resultArtifact && <div className="simplified-research-empty"><FileCheck2 size={22}/><b>还没有研究结果</b><span>可直接开始，项目资料会自动带入。</span></div>}
     {error && <div className="simplified-research-error" role="alert"><CircleAlert size={16}/><span>{error}</span>{/(模型|核心 Agent|Key)/.test(error) && <button className="text-button" type="button" onClick={() => onOpenSettings('agent')}><Settings2 size={14}/>去配置</button>}</div>}
     {!isRunning && <footer className="simplified-research-actions">
@@ -117,7 +126,7 @@ function SimplifiedResearchAgent({ projectId, refreshToken = 0, onContextChange,
   </aside>;
 }
 
-function ResearchResultPreview({ result, busy, onAccept }: { result: ResearchResult; busy: boolean; onAccept: () => void }) {
+function ResearchResultPreview({ result, accepted, busy, onAccept }: { result: ResearchResult; accepted: boolean; busy: boolean; onAccept: () => void }) {
   const verifiedFacts = result.facts.filter((item) => item.status === 'VERIFIED');
   const singleSource = [...result.facts, ...result.cautions].filter((item) => item.status === 'SINGLE_SOURCE');
   const needsReview = result.cautions.filter((item) => item.status !== 'SINGLE_SOURCE');
@@ -128,7 +137,7 @@ function ResearchResultPreview({ result, busy, onAccept }: { result: ResearchRes
     <ResultList title="可参考（单一来源）" items={singleSource} empty="没有单一来源事实。" tone="single-source"/>
     <ResultList title="需要补充核验" items={needsReview} empty="没有需要补充核验的事实。" tone="caution"/>
     <details className="research-result-details"><summary>来源与研究说明</summary><div>{result.sources.map((source) => <a key={source.id} href={source.url ?? undefined} target={source.url ? '_blank' : undefined} rel="noreferrer">{source.source}：{source.title}</a>)}</div></details>
-    <footer><button className="button primary" type="button" disabled={busy} onClick={onAccept}>{busy ? <LoaderCircle size={16}/> : <Check size={16}/>}采用并进入正文</button></footer>
+    {!accepted && <footer><button className="button primary" type="button" disabled={busy} onClick={onAccept}>{busy ? <LoaderCircle size={16}/> : <Check size={16}/>}采用并进入正文</button></footer>}
   </section>;
 }
 

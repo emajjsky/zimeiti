@@ -40,8 +40,18 @@ const projectAgentStore = createProjectAgentStore({ query, transaction });
 
 async function processJob(queueJob) {
   const { jobId, workspaceId, payload } = queueJob.data;
-  const claimed = await query("UPDATE jobs SET status = 'RUNNING', started_at = now() WHERE id = $1 AND workspace_id = $2 AND status = 'PENDING' RETURNING id", [jobId, workspaceId]);
+  const claimed = await query(`WITH claimable AS (
+      SELECT id, status AS previous_status FROM jobs
+      WHERE id = $1 AND workspace_id = $2 AND status IN ('PENDING', 'RUNNING')
+      FOR UPDATE
+    )
+    UPDATE jobs j SET status = 'RUNNING', started_at = COALESCE(j.started_at, now()), completed_at = NULL
+    FROM claimable c WHERE j.id = c.id
+    RETURNING j.id, c.previous_status`, [jobId, workspaceId]);
   if (!claimed.rowCount) return { jobId, skipped: true };
+  if (claimed.rows[0].previous_status === 'RUNNING' && payload.runId) {
+    await query("UPDATE generation_runs SET status = 'QUEUED', started_at = NULL, completed_at = NULL WHERE id = $1 AND workspace_id = $2 AND status = 'RUNNING'", [payload.runId, workspaceId]);
+  }
   try {
     if (queueJob.name === 'AGENT_PLAN') return await generateAgentPlan({ jobId, workspaceId, planId: payload.planId });
     if (queueJob.name === 'INTELLIGENCE_ANALYSIS') return await generateIntelligenceAnalysis({ jobId, workspaceId, runId: payload.runId });
@@ -61,7 +71,7 @@ async function processJob(queueJob) {
   } catch (error) {
     const message = error instanceof Error ? error.message : '任务失败。';
     if (queueJob.name === 'AGENT_PLAN' && payload.planId) await query('UPDATE agent_plans SET status = $1, error = $2, updated_at = now() WHERE id = $3 AND workspace_id = $4', ['FAILED', message.slice(0, 2_000), payload.planId, workspaceId]);
-    await query('UPDATE jobs SET status = $1, error = $2, completed_at = now() WHERE id = $3', ['FAILED', message.slice(0, 2_000), jobId]);
+    await query("UPDATE jobs SET status = $1, error = $2, completed_at = now() WHERE id = $3 AND status <> 'CANCELLED'", ['FAILED', message.slice(0, 2_000), jobId]);
     throw error;
   }
 }
@@ -210,6 +220,8 @@ async function generateSimplifiedResearchWorkflow({ jobId, workspaceId, runId })
     });
 
     const saved = await transaction(async (client) => {
+      const activeRun = await client.query("SELECT id FROM generation_runs WHERE id = $1 AND workspace_id = $2 AND status = 'RUNNING' FOR UPDATE", [runId, workspaceId]);
+      if (!activeRun.rowCount) throw new Error('研究任务已取消或中断。');
       const artifact = await projectAgentStore.createArtifact(client, {
         workspaceId,
         projectId: snapshot.projectId,
@@ -242,7 +254,7 @@ async function generateSimplifiedResearchWorkflow({ jobId, workspaceId, runId })
     const message = error instanceof Error ? error.message : '研究任务失败。';
     await transaction(async (client) => {
       await client.query("UPDATE generation_runs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1 AND workspace_id = $3 AND status <> 'CANCELLED'", [runId, message.slice(0, 2_000), workspaceId]);
-      await client.query("UPDATE jobs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1", [jobId, message.slice(0, 2_000)]);
+      await client.query("UPDATE jobs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1 AND status <> 'CANCELLED'", [jobId, message.slice(0, 2_000)]);
       await client.query(`INSERT INTO api_usage_logs
         (workspace_id, job_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens, error)
         VALUES ($1, $2, $3, $4, 'PROJECT_RESEARCH_WORKFLOW', 'FAILED', $5, $6, $7, $8)`, [workspaceId, jobId, route?.provider ?? 'UNKNOWN', route?.model ?? null, Date.now() - startedAt, inputTokens || null, outputTokens || null, message.slice(0, 2_000)]);

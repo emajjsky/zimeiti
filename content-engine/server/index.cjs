@@ -1103,7 +1103,7 @@ app.post('/api/v1/creative/research-results/:artifactId/accept', { preHandler: a
     const now = new Date().toISOString();
     await client.query(`UPDATE project_artifacts SET status = 'REJECTED', updated_at = now()
       WHERE workspace_id = $1 AND project_id = $2 AND artifact_type = 'RESEARCH_RESULT'
-        AND status = 'ACCEPTED' AND id <> $3`, [workspace.id, candidate.project_id, candidate.id]);
+        AND status IN ('CANDIDATE', 'ACCEPTED') AND id <> $3`, [workspace.id, candidate.project_id, candidate.id]);
     const accepted = await client.query(`UPDATE project_artifacts
       SET status = 'ACCEPTED', accepted_at = now(), updated_at = now()
       WHERE id = $1 AND workspace_id = $2 RETURNING *`, [candidate.id, workspace.id]);
@@ -1332,10 +1332,10 @@ app.post('/api/v1/creative/agent-runs/:id/cancel', { preHandler: authenticate },
   const runId = z.string().uuid().parse(request.params.id);
   const workspace = await currentWorkspace(request.user.sub);
   const result = await query(`UPDATE generation_runs SET status = 'CANCELLED', completed_at = now()
-    WHERE id = $1 AND workspace_id = $2 AND status IN ('DRAFT', 'QUEUED')
-      AND (action_version_id = $3 OR action_version_id LIKE 'project-copy-%') RETURNING *`, [runId, workspace.id, PROJECT_RESEARCH_ACTION_VERSION]);
+    WHERE id = $1 AND workspace_id = $2 AND status IN ('DRAFT', 'QUEUED', 'RUNNING')
+      AND (action_version_id = $3 OR action_version_id = $4 OR action_version_id LIKE 'project-copy-%') RETURNING *`, [runId, workspace.id, PROJECT_RESEARCH_ACTION_VERSION, SIMPLIFIED_RESEARCH_WORKFLOW_VERSION]);
   if (!result.rowCount) { const error = new Error('该 Agent 任务当前不能取消。'); error.statusCode = 409; throw error; }
-  await query("UPDATE jobs SET status = 'CANCELLED', completed_at = now() WHERE workspace_id = $1 AND payload_json->>'runId' = $2 AND status = 'PENDING'", [workspace.id, runId]);
+  await query("UPDATE jobs SET status = 'CANCELLED', completed_at = now() WHERE workspace_id = $1 AND payload_json->>'runId' = $2 AND status IN ('PENDING', 'RUNNING')", [workspace.id, runId]);
   return runView(result.rows[0]);
 });
 

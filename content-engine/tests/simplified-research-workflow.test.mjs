@@ -126,6 +126,27 @@ test('开始研究直接入队统一任务，不再创建确认草稿', () => {
   assert.match(worker, /generateSimplifiedResearchWorkflow/);
 });
 
+test('Worker restart reclaims interrupted research jobs instead of leaving RUNNING forever', () => {
+  const worker = fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8');
+
+  assert.match(worker, /status IN \('PENDING', 'RUNNING'\)/);
+  assert.match(worker, /previous_status/);
+  assert.match(worker, /status = 'QUEUED'.*status = 'RUNNING'/s);
+});
+
+test('accepted research replaces stale candidates and running research can be cancelled', () => {
+  const server = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
+  const acceptStart = server.indexOf("app.post('/api/v1/creative/research-results/:artifactId/accept'");
+  const acceptEnd = server.indexOf("app.post('/api/v1/creative/projects/:projectId/research/skip'", acceptStart);
+  const cancelStart = server.indexOf("app.post('/api/v1/creative/agent-runs/:id/cancel'");
+  const cancelEnd = server.indexOf("app.post('/api/v1/creative/projects/:projectId/research/sources/prepare'", cancelStart);
+
+  assert.match(server.slice(acceptStart, acceptEnd), /status IN \('CANDIDATE', 'ACCEPTED'\)/);
+  assert.match(server.slice(cancelStart, cancelEnd), /SIMPLIFIED_RESEARCH_WORKFLOW_VERSION/);
+  assert.match(server.slice(cancelStart, cancelEnd), /status IN \('DRAFT', 'QUEUED', 'RUNNING'\)/);
+  assert.match(fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8'), /研究任务已取消或中断/);
+});
+
 test('采用或跳过研究都会推进正文，正文上下文只读取已确认事实', () => {
   const server = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
 
