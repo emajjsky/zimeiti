@@ -1880,6 +1880,11 @@ app.post('/api/v1/creative/project-artifacts/:id/accept', { preHandler: authenti
       FOR UPDATE OF a`, [artifactId, workspace.id]);
     if (!candidateResult.rowCount) { const error = new Error('该候选产物当前不能采用。'); error.statusCode = 409; throw error; }
     const candidate = candidateResult.rows[0];
+    if (candidate.artifact_type === 'PLATFORM_COPY' && candidate.metadata_json?.payload?.qualityReview?.status === 'NEEDS_REVIEW') {
+      const error = new Error('正文质量审稿尚未通过，请废弃当前候选并重新生成。');
+      error.statusCode = 409;
+      throw error;
+    }
     const snapshotResult = await client.query('SELECT state_json FROM workspace_snapshots WHERE workspace_id = $1 FOR UPDATE', [workspace.id]);
     let state = snapshotResult.rows[0]?.state_json;
     const updatedAt = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());

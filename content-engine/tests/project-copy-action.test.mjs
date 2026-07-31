@@ -14,11 +14,32 @@ const {
   applyAcceptedCopyToState,
   copyPromptTemplateScope,
   mergeFactsToVerify,
+  reconcileFactsToVerify,
   parseCopyOutput,
   parseCopyQualityReview,
   candidateQualityReview,
   resolveCopyAction,
 } = copyActionModule;
+
+test('已核验研究事实不会再次进入正文候选的发布前核验列表', () => {
+  const verifiedFacts = [
+    { claim: '宇树科技本次拟公开发行股份4044.6434万股，占发行后总股本10%' },
+    { claim: '宇树科技IPO全程仅用时73天' },
+    { claim: '王兴兴在表决权差异安排下合计控制公司68.78%的表决权' },
+    { claim: '宇树科技IPO计划募集资金总额为42.02亿元' },
+  ];
+  const candidateFacts = [
+    '宇树科技本次拟公开发行股份 4044.6434 万股，占发行后总股本的 10%',
+    '宇树科技 IPO 申请从获上交所正式受理到上会并通过审议，全程仅用时 73 天',
+    '上交所官网显示，宇树科技股份有限公司科创板 IPO 审核状态已变更为注册生效',
+    '宇树科技本次 IPO 计划募集资金总额为 42.02 亿元',
+    '宇树科技存在特别表决权机制安排，实际控制人王兴兴在表决权差异安排下合计控制公司 68.78% 的表决权',
+  ];
+
+  assert.deepEqual(reconcileFactsToVerify(candidateFacts, verifiedFacts), [
+    '上交所官网显示，宇树科技股份有限公司科创板 IPO 审核状态已变更为注册生效',
+  ]);
+});
 
 test('账号声音规则检测明确的 AI 套话、emoji 标题和强制互动', () => {
   const issues = detectVoiceViolations('很多人会问：这意味着什么？\n\n✨ 总结\n\n建议点赞收藏，评论区聊聊。', {

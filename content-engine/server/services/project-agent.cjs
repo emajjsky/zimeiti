@@ -138,7 +138,8 @@ function createProjectAgentStore({ query, transaction }) {
               'title', v.title,
               'body', v.body,
               'factsToVerify', v.facts_to_verify_json,
-              'changeSummary', v.change_summary
+              'changeSummary', v.change_summary,
+              'qualityReview', a.metadata_json->'payload'->'qualityReview'
             ) AS payload_json,
             v.parent_version_id
           FROM platform_content_versions v WHERE v.artifact_id = a.id

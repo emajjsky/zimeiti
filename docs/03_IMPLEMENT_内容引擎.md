@@ -840,3 +840,11 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - Worker 允许 BullMQ 在进程重启后重新接管数据库中仍为 `RUNNING` 的任务，并将对应生成运行重置为可重跑状态，避免 Redis 已完成而数据库永久卡住。
 - 研究运行增加“取消任务”入口。取消后 Worker 在保存产物前再次锁定并检查运行状态，不会把已取消任务的迟到结果写回项目。
 - 研究状态轮询成功后会清除瞬时 502 错误，避免服务恢复后仍持续显示旧错误。
+
+## 2026-07-31 修复：研究事实对账与正文质量门禁
+
+- `project-copy-action.cjs` 新增 `reconcileFactsToVerify()`：先归一化事实文本和数字签名，再用包含关系与最长公共子序列识别已核验事实的改写版本，避免模型换一种说法后重新标成待核验。
+- `worker.cjs` 在保存 `PLATFORM_COPY` 前，以本次不可变研究快照的 `verifiedFacts` 对候选 `factsToVerify` 做对账；研究内容是否进入正文不再依赖前端展示推断。
+- `project-agent.cjs` 的候选产物投影补充 `qualityReview`。`CopyCandidateDialog` 与 `ProjectAgent` 分别渲染“正文需重写”和“发布前核验”，不再把审稿问题拼入核验清单。
+- `POST /api/v1/creative/project-artifacts/:id/accept` 对 `qualityReview.status === 'NEEDS_REVIEW'` 的正文候选返回 409；前端采用按钮同步禁用，形成双层门禁。
+- 现有宇树科技候选 `35bf3755-5c3c-43ab-9cab-7cd22e39314f` 已从误采用状态退回 `CANDIDATE`，正式公众号正文恢复为空，错误内容母版标记为 `REJECTED`。候选只保留“注册生效”一项真正待核验事实，五项无证据推演保留在质量审稿中。

@@ -147,6 +147,21 @@ test('accepted research replaces stale candidates and running research can be ca
   assert.match(fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8'), /研究任务已取消或中断/);
 });
 
+test('正文候选会剔除已核验事实，质量复审未通过时前后端都禁止采用', () => {
+  const worker = fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8');
+  const server = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
+  const projectAgent = fs.readFileSync(new URL('../server/services/project-agent.cjs', import.meta.url), 'utf8');
+  const dialog = fs.readFileSync(new URL('../src/workspaces/create/CopyCandidateDialog.tsx', import.meta.url), 'utf8');
+  const acceptStart = server.indexOf("app.post('/api/v1/creative/project-artifacts/:id/accept'");
+  const acceptEnd = server.indexOf("app.post('/api/v1/creative/project-artifacts/:id/reject'", acceptStart);
+
+  assert.match(worker, /reconcileFactsToVerify\(output\.factsToVerify, snapshot\.researchContext\?\.verifiedFacts\)/);
+  assert.match(server.slice(acceptStart, acceptEnd), /qualityReview\?\.status === 'NEEDS_REVIEW'/);
+  assert.match(projectAgent, /'qualityReview',\s*a\.metadata_json->'payload'->'qualityReview'/);
+  assert.match(dialog, /const needsRewrite = reviewIssues\.length > 0/);
+  assert.match(dialog, /disabled=\{busy !== 'idle' \|\| needsRewrite/);
+});
+
 test('采用或跳过研究都会推进正文，正文上下文只读取已确认事实', () => {
   const server = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
 

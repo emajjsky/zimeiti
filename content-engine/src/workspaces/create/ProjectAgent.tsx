@@ -271,7 +271,8 @@ function ArtifactPreview({ artifact, selectedTitle, onTitle, busy, onAccept, onC
   const facts = strings(artifact.payload.factsToVerify);
   const review = artifact.payload.qualityReview;
   const reviewIssues = review && typeof review === 'object' && (review as Record<string, unknown>).status === 'NEEDS_REVIEW' ? strings((review as Record<string, unknown>).issues) : [];
-  const verificationItems = [...new Set([...reviewIssues, ...facts].map((item) => item.trim()).filter(Boolean))];
+  const verificationItems = [...new Set(facts.map((item) => item.trim()).filter(Boolean))];
+  const needsRewrite = reviewIssues.length > 0;
   const [verificationOpen, setVerificationOpen] = useState(false);
   const body = typeof artifact.payload.body === 'string' ? artifact.payload.body : '';
   const summary = typeof artifact.payload.summary === 'string' ? artifact.payload.summary : typeof artifact.payload.changeSummary === 'string' ? artifact.payload.changeSummary : '';
@@ -282,10 +283,11 @@ function ArtifactPreview({ artifact, selectedTitle, onTitle, busy, onAccept, onC
       <div className="agent-artifact-body">
         {titleOptions.length > 0 && <label><span>标题方案</span><select value={selectedTitle} onChange={(event) => onTitle(event.target.value)}>{titleOptions.map((title) => <option key={title}>{title}</option>)}</select></label>}
         {summary && <p className="artifact-summary">{summary}</p>}
+        {needsRewrite && <section className="candidate-verification candidate-quality-block artifact-verification"><header><div><b>正文需重写</b><span>{reviewIssues.length} 项质量问题</span></div></header><ul>{reviewIssues.map((item) => <li key={item}>{item}</li>)}</ul></section>}
         {verificationItems.length > 0 && <section className="candidate-verification artifact-verification"><header><div><b>发布前核验</b><span>{verificationItems.length} 项待处理</span></div><button type="button" aria-expanded={verificationOpen} onClick={() => setVerificationOpen((current) => !current)}>{verificationOpen ? '收起' : '查看核验项'}</button></header>{verificationOpen && <ul>{verificationItems.map((item) => <li key={item}>{item}</li>)}</ul>}</section>}
         {body && <div className="artifact-copy"><h3>{artifactHeading(artifact)}</h3><p>{body}</p></div>}
       </div>
-      <footer><button className="button" type="button" disabled={busy} onClick={onClose}>关闭</button>{canAccept && <button className="button primary" type="button" disabled={busy || (artifact.type === 'OUTLINE' && !selectedTitle)} onClick={onAccept}>{busy ? <LoaderCircle size={16}/> : <Check size={16}/>}采用到正文</button>}</footer>
+      <footer><button className="button" type="button" disabled={busy} onClick={onClose}>关闭</button>{canAccept && <button className="button primary" type="button" disabled={busy || needsRewrite || (artifact.type === 'OUTLINE' && !selectedTitle)} onClick={onAccept}>{busy ? <LoaderCircle size={16}/> : <Check size={16}/>} {needsRewrite ? '需先重写' : '采用到正文'}</button>}</footer>
     </section>
   </div>;
 }

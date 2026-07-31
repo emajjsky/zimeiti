@@ -89,6 +89,51 @@ function mergeFactsToVerify(...groups) {
   return [...new Set(groups.flat().map((fact) => String(fact ?? '').trim()).filter(Boolean))];
 }
 
+function normalizedFactClaim(value) {
+  return normalizeSafetyText(value).toLowerCase().replace(/[的了]/g, '');
+}
+
+function factNumbers(value) {
+  return String(value ?? '').match(/\d+(?:\.\d+)?/g) ?? [];
+}
+
+function longestCommonSubsequenceLength(left, right) {
+  const shorter = [...left];
+  const longer = [...right];
+  const table = Array(shorter.length + 1).fill(0);
+  for (const character of longer) {
+    let diagonal = 0;
+    for (let index = 1; index <= shorter.length; index += 1) {
+      const previous = table[index];
+      if (shorter[index - 1] === character) table[index] = diagonal + 1;
+      else table[index] = Math.max(table[index], table[index - 1]);
+      diagonal = previous;
+    }
+  }
+  return table[shorter.length];
+}
+
+function verifiedFactSupports(candidate, verified) {
+  const candidateText = normalizedFactClaim(candidate);
+  const verifiedText = normalizedFactClaim(verified);
+  if (!candidateText || !verifiedText) return false;
+  if (candidateText.includes(verifiedText) || verifiedText.includes(candidateText)) return true;
+  const verifiedNumbers = factNumbers(verified);
+  if (verifiedNumbers.length && verifiedNumbers.join('|') !== factNumbers(candidate).join('|')) return false;
+  const shorterLength = Math.min(candidateText.length, verifiedText.length);
+  if (shorterLength < 8) return false;
+  return longestCommonSubsequenceLength(candidateText, verifiedText) / shorterLength >= 0.82;
+}
+
+function reconcileFactsToVerify(factsToVerify, verifiedFacts) {
+  const verifiedClaims = (Array.isArray(verifiedFacts) ? verifiedFacts : [])
+    .map((item) => typeof item === 'string' ? item : item?.claim)
+    .map((claim) => String(claim ?? '').trim())
+    .filter(Boolean);
+  return mergeFactsToVerify(factsToVerify ?? [])
+    .filter((candidate) => !verifiedClaims.some((verified) => verifiedFactSupports(candidate, verified)));
+}
+
 function detectVoiceViolations(body, rules = {}) {
   const text = String(body ?? '');
   const issues = [];
@@ -367,6 +412,7 @@ module.exports = {
   copyTemplateScope,
   copyPromptTemplateScope,
   mergeFactsToVerify,
+  reconcileFactsToVerify,
   detectVoiceViolations,
   unresolvedClaims,
   safeProjectContext,

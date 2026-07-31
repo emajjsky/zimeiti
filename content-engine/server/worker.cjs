@@ -32,7 +32,7 @@ const {
 } = require('./services/source-verification.cjs');
 const { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, workflowSourceActionsForProject, projectOriginalSource, sourceMatchesProject, buildResearchResult } = require('./services/simplified-research.cjs');
 const { createProjectAgentStore } = require('./services/project-agent.cjs');
-const { buildCopyPrompt, buildCopyRepairPrompt, buildCopyQualityReviewPrompt, candidateQualityReview, detectVoiceViolations, mergeFactsToVerify, parseCopyOutput, parseCopyQualityReview } = require('./services/project-copy-action.cjs');
+const { buildCopyPrompt, buildCopyRepairPrompt, buildCopyQualityReviewPrompt, candidateQualityReview, detectVoiceViolations, reconcileFactsToVerify, parseCopyOutput, parseCopyQualityReview } = require('./services/project-copy-action.cjs');
 
 const connection = new IORedis(config.redisUrl, { maxRetriesPerRequest: null });
 const textRunner = createTextModelRunner();
@@ -789,7 +789,7 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
       output.qualityReview = qualityReview;
     }
     // 项目历史核验池不属于本次候选，候选版本只保存正文直接涉及的核验项。
-    const candidateFactsToVerify = mergeFactsToVerify(output.factsToVerify ?? []);
+    const candidateFactsToVerify = reconcileFactsToVerify(output.factsToVerify, snapshot.researchContext?.verifiedFacts);
     output.factsToVerify = candidateFactsToVerify;
     const saved = await transaction(async (client) => {
       await client.query("UPDATE generation_runs SET status = 'SUCCEEDED', output_json = $2, usage_json = $3, completed_at = now() WHERE id = $1", [runId, JSON.stringify(output), JSON.stringify({ inputTokens, outputTokens })]);
