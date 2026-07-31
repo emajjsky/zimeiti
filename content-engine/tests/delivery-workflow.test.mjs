@@ -80,7 +80,8 @@ test('视觉导演保存完整策划字段并支持参考图真实图生图', ()
   const api = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
   const client = fs.readFileSync(new URL('../src/data/webApi.ts', import.meta.url), 'utf8');
   assert.match(api, /referenceImageIds:\s*z\.array\(z\.string\(\)\.uuid\(\)\)\.max\(3\)/);
-  assert.match(api, /stylePreset:\s*z\.enum\(\['INHERIT'/);
+  assert.match(api, /stylePreset:\s*z\.union\(\[z\.literal\('INHERIT'\), visualStylePreset\]\)/);
+  assert.match(api, /customPrompt:\s*z\.string\(\)\.trim\(\)\.max\(1_200\)/);
   assert.match(api, /contentBlocks:\s*z\.array/);
   assert.ok((api.match(/prompt:\s*z\.string\(\)\.trim\(\)\.min\(4\)\.max\(8_000\)/g) ?? []).length >= 2);
   assert.match(api, /references:\s*z\.array/);

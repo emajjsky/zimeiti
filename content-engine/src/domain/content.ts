@@ -138,11 +138,16 @@ export type CreativeVisualPlanRole = 'COVER' | 'BODY' | 'CARD' | 'MAIN';
 export type CreativeVisualSize = '1:1' | '3:4' | '4:3' | '9:16' | '16:9';
 export type CreativeVisualType = 'NEWS_PHOTO' | 'HERO_VISUAL' | 'CONCEPT_DIAGRAM' | 'SCENE' | 'MIND_MAP' | 'FLOWCHART' | 'TIMELINE' | 'COMPARISON' | 'DATA_CHART' | 'QUOTE_CARD' | 'INFO_CARD' | 'CHECKLIST_CARD';
 export type CreativeVisualGenerationMode = 'ILLUSTRATION' | 'INFOGRAPHIC';
-export type CreativeVisualStylePreset = 'FRESH_EDITORIAL' | 'RETRO_POP' | 'MINIMAL_KNOWLEDGE' | 'TECH_MEDIA' | 'DOCUMENTARY';
+export type CreativeVisualStylePreset =
+  | 'FRESH_EDITORIAL' | 'BUSINESS_EDITORIAL' | 'SWISS_GRID' | 'DOCUMENTARY' | 'CINEMATIC_DOCUMENTARY'
+  | 'MINIMAL_KNOWLEDGE' | 'DATA_VISUAL' | 'BLUEPRINT_DIAGRAM' | 'HAND_DRAWN_NOTES'
+  | 'RETRO_POP' | 'PAPER_COLLAGE' | 'FLAT_GEOMETRIC' | 'SOFT_3D'
+  | 'NEW_CHINESE' | 'INK_WASH' | 'GUOCHAO_POSTER' | 'TECH_MEDIA';
 export type CreativeVisualReferenceUse = 'COLOR' | 'COMPOSITION' | 'LAYOUT' | 'TEXTURE' | 'SUBJECT';
 
 export interface CreativeVisualStyleProfile {
   preset: CreativeVisualStylePreset;
+  customPrompt?: string;
 }
 
 export interface CreativeVisualReference {

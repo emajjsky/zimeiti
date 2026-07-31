@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildVisualGenerationSpec, buildVisualPlan, mergeVisualPlan, resizeVisualPlan, updateVisualPlanItem, visualPlanCountRange, visualStylePresets, visualTemplatesFor, VISUAL_PLAN_VERSION } from '../src/domain/visual-plan.mjs';
+import { buildVisualGenerationSpec, buildVisualPlan, mergeVisualPlan, replanVisualPlan, resizeVisualPlan, updateVisualPlanItem, visualPlanCountRange, visualStylePresets, visualTemplatesFor, VISUAL_PLAN_VERSION } from '../src/domain/visual-plan.mjs';
 
 const article = {
   title: '我国成功发射天链三号01星',
@@ -195,6 +195,44 @@ test('项目风格默认继承且单张图片可以独立覆盖', () => {
   const overridden = updateVisualPlanItem(inherited, { stylePreset: 'TECH_MEDIA' }, { platform: 'WECHAT', title: article.title }, { preset: 'RETRO_POP' });
   assert.match(overridden.prompt, /科技媒体/);
   assert.doesNotMatch(overridden.prompt, /波普怀旧/);
+});
+
+test('项目风格库覆盖编辑、知识、插画、文化和科技，并提供可执行视觉约束', () => {
+  const styles = visualStylePresets();
+  assert.ok(styles.length >= 16);
+  assert.deepEqual(new Set(styles.map((style) => style.group)), new Set(['EDITORIAL', 'KNOWLEDGE', 'ILLUSTRATION', 'CULTURAL', 'TECHNOLOGY']));
+  assert.ok(styles.every((style) => style.description.length >= 8 && style.swatches.length === 4 && style.prompt.length >= 60));
+  const retro = styles.find((style) => style.id === 'RETRO_POP');
+  assert.match(retro.prompt, /薄荷绿.*婴儿蓝.*珊瑚粉.*奶油黄/);
+  assert.match(retro.prompt, /丝网印刷网点|错版质感/);
+  assert.match(retro.prompt, /避免霓虹渐变|禁止棕黄/);
+});
+
+test('项目统一补充要求会进入每张图的提示词', () => {
+  const [item] = buildVisualPlan(article, 'WECHAT');
+  const updated = updateVisualPlanItem(item, {}, { platform: 'WECHAT', title: article.title }, {
+    preset: 'RETRO_POP',
+    customPrompt: '所有图片统一使用薄荷绿边框，人物服装不要出现高饱和紫色',
+  });
+  assert.match(updated.prompt, /项目统一补充要求/);
+  assert.match(updated.prompt, /薄荷绿边框/);
+  assert.match(updated.prompt, /不要出现高饱和紫色/);
+});
+
+test('重新规划默认保留已选图片，用户明确取消时只解除正文图绑定', () => {
+  const current = buildVisualPlan(article, 'WECHAT', { bodyItemCount: 3 }).map((item, index) => ({ ...item, assetReferenceId: `asset-${index}` }));
+  const kept = replanVisualPlan({ ...article, body: `新的正文先解释普通人使用中继卫星服务的实际场景。\n\n${article.body}` }, 'WECHAT', current, {
+    bodyItemCount: 3,
+    styleProfile: { preset: 'RETRO_POP', customPrompt: '统一使用薄荷绿边框' },
+  });
+  assert.deepEqual(kept.map((item) => item.assetReferenceId), current.map((item) => item.assetReferenceId));
+  assert.notEqual(kept[1].prompt, current[1].prompt);
+  assert.match(kept[1].prompt, /清新波普怀旧/);
+  assert.match(kept[1].prompt, /统一使用薄荷绿边框/);
+
+  const cleared = replanVisualPlan(article, 'WECHAT', current, { bodyItemCount: 3, keepAssignedAssets: false });
+  assert.equal(cleared[0].assetReferenceId, 'asset-0');
+  assert.ok(cleared.slice(1).every((item) => item.assetReferenceId === null));
 });
 
 test('视觉提示词包含结构内容和参考图用途但不暴露项目文件名', () => {

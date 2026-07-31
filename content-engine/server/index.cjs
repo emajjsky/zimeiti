@@ -82,7 +82,12 @@ const visualGenerationInput = z.object({
   negativePrompt: z.string().trim().max(1_000).optional(),
   referenceImageIds: z.array(z.string().uuid()).max(3).default([]),
 });
-const visualStylePreset = z.enum(['FRESH_EDITORIAL', 'RETRO_POP', 'MINIMAL_KNOWLEDGE', 'TECH_MEDIA', 'DOCUMENTARY']);
+const visualStylePreset = z.enum([
+  'FRESH_EDITORIAL', 'BUSINESS_EDITORIAL', 'SWISS_GRID', 'DOCUMENTARY', 'CINEMATIC_DOCUMENTARY',
+  'MINIMAL_KNOWLEDGE', 'DATA_VISUAL', 'BLUEPRINT_DIAGRAM', 'HAND_DRAWN_NOTES',
+  'RETRO_POP', 'PAPER_COLLAGE', 'FLAT_GEOMETRIC', 'SOFT_3D',
+  'NEW_CHINESE', 'INK_WASH', 'GUOCHAO_POSTER', 'TECH_MEDIA',
+]);
 const visualReferenceUse = z.enum(['COLOR', 'COMPOSITION', 'LAYOUT', 'TEXTURE', 'SUBJECT']);
 const visualPlanItemInput = z.object({
   id: z.string().trim().min(1).max(100),
@@ -96,7 +101,7 @@ const visualPlanItemInput = z.object({
   searchQueries: z.array(z.string().trim().min(2).max(120)).min(1).max(5),
   generationMode: z.enum(['ILLUSTRATION', 'INFOGRAPHIC']),
   informationPoints: z.array(z.string().trim().min(1).max(160)).min(1).max(5),
-  stylePreset: z.enum(['INHERIT', 'FRESH_EDITORIAL', 'RETRO_POP', 'MINIMAL_KNOWLEDGE', 'TECH_MEDIA', 'DOCUMENTARY']),
+  stylePreset: z.union([z.literal('INHERIT'), visualStylePreset]),
   templatePreset: z.string().trim().min(1).max(80),
   sourceExcerpt: z.string().trim().max(4_000).default(''),
   contentBlocks: z.array(z.object({ label: z.string().trim().min(1).max(80), detail: z.string().trim().min(1).max(300) })).min(1).max(8),
@@ -2119,7 +2124,10 @@ app.put('/api/v1/creative/projects/:projectId/visual', { preHandler: authenticat
   const input = z.object({
     platform: creativePlatform,
     planVersion: z.number().int().min(1).max(100),
-    styleProfile: z.object({ preset: visualStylePreset }).default({ preset: 'FRESH_EDITORIAL' }),
+    styleProfile: z.object({
+      preset: visualStylePreset,
+      customPrompt: z.string().trim().max(1_200).default(''),
+    }).default({ preset: 'FRESH_EDITORIAL', customPrompt: '' }),
     coverReferenceId: z.string().uuid().nullable(),
     assetReferenceIds: z.array(z.string().uuid()).max(12),
     plan: z.array(visualPlanItemInput).max(10).default([]),

@@ -44,11 +44,74 @@ const visualTypeLabels = {
 };
 
 const stylePresets = [
-  { id: 'FRESH_EDITORIAL', name: '清新杂志', prompt: '清新杂志风格，明亮自然的综合色彩，中文编辑设计感，留白充足，层级克制' },
-  { id: 'RETRO_POP', name: '波普怀旧', prompt: '波普怀旧风格，复古印刷质感，马卡龙撞色，几何色块与轻颗粒纹理，清新而不厚重' },
-  { id: 'MINIMAL_KNOWLEDGE', name: '极简知识图', prompt: '极简知识图风格，中性底色，少量强调色，结构线清楚，信息密度高但不拥挤' },
-  { id: 'TECH_MEDIA', name: '科技媒体', prompt: '科技媒体风格，冷暖综合色彩，精确网格与简洁数据元素，专业但不使用夸张霓虹光效' },
-  { id: 'DOCUMENTARY', name: '纪实报道', prompt: '纪实报道风格，自然光与真实材质，低修饰，克制色彩，不摆拍、不伪造新闻现场' },
+  {
+    id: 'FRESH_EDITORIAL', name: '清新杂志', group: 'EDITORIAL', description: '明亮留白，适合人物、生活方式与通用长文', swatches: ['#F7FAFC', '#B9D8F2', '#F5C8D8', '#24324A'],
+    prompt: '清新中文杂志编辑风格；珍珠白底，雾蓝、浅珊瑚粉与少量深海军蓝；自然光或柔和棚拍光；非对称编辑构图，大面积留白，主体与信息层级分明；纸张轻纹理，边缘干净；避免奶油黄滤镜、廉价素材拼贴和过度装饰',
+  },
+  {
+    id: 'BUSINESS_EDITORIAL', name: '商业杂志', group: 'EDITORIAL', description: '克制、成熟，适合财经、公司与行业分析', swatches: ['#F3F5F7', '#25324B', '#7EA0C4', '#C9A86A'],
+    prompt: '现代商业杂志视觉；冷白、石墨蓝、钢蓝和少量低饱和金色；严谨网格，主体裁切大胆但不过分；图表与照片保持同一编辑秩序；细腻铜版纸质感，明暗对比清楚；避免交易软件截图感、金钱符号堆叠、黑金土豪风和夸张成功学视觉',
+  },
+  {
+    id: 'SWISS_GRID', name: '瑞士网格', group: 'EDITORIAL', description: '强网格与高对比，适合观点、清单与专题封面', swatches: ['#F5F4F0', '#171717', '#E74B3C', '#2F67C7'],
+    prompt: '瑞士国际主义平面设计；暖白底、纯黑文字结构、信号红与钴蓝点缀；严格模数网格，不对称排版，几何块面和明确对齐；无衬线字体气质，字号层级强；哑光印刷质感；避免圆润卡通、渐变光效、装饰性花纹和随意居中',
+  },
+  {
+    id: 'DOCUMENTARY', name: '纪实报道', group: 'EDITORIAL', description: '真实自然，适合新闻、人物与现场资料', swatches: ['#E7E4DE', '#6F786F', '#A98D70', '#28312F'],
+    prompt: '克制的纪实报道摄影；自然光、真实材质与真实环境色，低饱和灰绿和中性肤色；观察式构图，保留环境关系与现场细节；轻微胶片颗粒，锐度自然；不摆拍、不磨皮、不制造戏剧冲突，不伪造新闻现场、机构标识或人物行为',
+  },
+  {
+    id: 'CINEMATIC_DOCUMENTARY', name: '电影纪实', group: 'EDITORIAL', description: '叙事光影更强，适合故事、人物与社会议题', swatches: ['#17212B', '#54707D', '#D49B72', '#D9D5CC'],
+    prompt: '电影感纪实摄影；蓝灰阴影、自然暖肤色和低饱和环境色；使用真实可解释的侧光或窗光，宽银幕式层次和前中后景；克制胶片颗粒与柔和高光；画面有叙事张力但保持事实边界；避免赛博霓虹、过暗看不清、虚构现场和夸张灾难感',
+  },
+  {
+    id: 'MINIMAL_KNOWLEDGE', name: '极简知识图', group: 'KNOWLEDGE', description: '少色高密度，适合方法、结构与知识解释', swatches: ['#FAFAF7', '#DCE8F5', '#F3D58A', '#27364A'],
+    prompt: '极简中文知识图解；近白底、雾蓝、浅黄和深灰蓝；信息先于装饰，使用细线、简洁图标、编号与清晰分区；网格稳定，模块间留白充分，手机缩略图仍可读；扁平印刷质感；避免渐变背景、伪3D图表、密集小字、无意义图标和模板化卡片堆叠',
+  },
+  {
+    id: 'DATA_VISUAL', name: '数据可视化', group: 'KNOWLEDGE', description: '数据关系优先，适合趋势、对比与财经信息', swatches: ['#F7F9FB', '#2D6CDF', '#22A67A', '#F0B44D'],
+    prompt: '专业编辑数据可视化；冷白底、蓝绿主数据色与琥珀强调色；图表类型必须匹配数据关系，坐标、单位、图例和来源区清晰；关键数字优先，辅助线克制，颜色具有一致语义；避免仪表盘截图、3D饼图、彩虹配色、虚构精确数据和无依据趋势线',
+  },
+  {
+    id: 'BLUEPRINT_DIAGRAM', name: '蓝图图解', group: 'KNOWLEDGE', description: '工程结构感，适合技术原理、流程与系统关系', swatches: ['#EAF2F7', '#315A78', '#7CA5BC', '#F2B66D'],
+    prompt: '现代工程蓝图图解；浅灰蓝纸底、深蓝线稿、雾青辅助线和少量橙色关键标记；轴测或正投影视角，结构关系、连线和编号精确；细密但可读的技术绘图质感；避免纯深蓝底老式蓝图、科幻HUD、无意义电路线和无法解释的机械细节',
+  },
+  {
+    id: 'HAND_DRAWN_NOTES', name: '手绘笔记', group: 'KNOWLEDGE', description: '亲和、有温度，适合教程、读书与个人经验', swatches: ['#FFFDF5', '#466B5B', '#E5A65B', '#D97873'],
+    prompt: '整洁的手绘知识笔记；柔白纸张、墨绿线条、橙黄和珊瑚红重点；真实手写线条气质但文字必须清晰，使用箭头、圈注、小图标与分区框建立阅读路径；轻微纸纤维质感；避免儿童涂鸦、过多贴纸、荧光笔铺满和无法识别的手写字',
+  },
+  {
+    id: 'RETRO_POP', name: '清新波普怀旧', group: 'ILLUSTRATION', description: '马卡龙撞色与复古印刷，轻快但不俗气', swatches: ['#BFE3E0', '#F7B7C5', '#F6D76B', '#315D8A'],
+    prompt: '清新波普怀旧编辑插画；薄荷绿、婴儿蓝、珊瑚粉、奶油黄与少量深蓝描边，禁止棕黄旧照片主色；采用复古丝网印刷网点、剪纸几何块、粗细有节奏的黑色轮廓和轻微错版质感；构图活泼但信息区整齐，主体简洁有记忆点；避免霓虹渐变、厚重做旧、廉价卡通和元素堆满',
+  },
+  {
+    id: 'PAPER_COLLAGE', name: '纸感拼贴', group: 'ILLUSTRATION', description: '照片与纸片混合，适合人文、历史与观点表达', swatches: ['#F1EEE8', '#91A8A4', '#D88373', '#3B4252'],
+    prompt: '现代纸感编辑拼贴；灰白纸、鼠尾草绿、陶土红和深灰蓝；使用真实照片裁片、色纸、撕边和少量铅笔线组合，保持清楚的视觉中心与层次；纸张阴影浅而真实；避免素材随意堆叠、复古棕色滤镜、邮票贴纸泛滥和版权标识',
+  },
+  {
+    id: 'FLAT_GEOMETRIC', name: '扁平几何', group: 'ILLUSTRATION', description: '简洁现代，适合概念、商业与产品场景', swatches: ['#F6F7F2', '#5A8DEE', '#64C2A6', '#F2A65A'],
+    prompt: '现代扁平几何插画；明亮中性底、钴蓝、青绿和暖橙；用清楚的几何形、简化人物与对象表达关系，透视统一，轮廓干净；构图留白充分，重点对象比例明确；避免企业素材库套图感、紫蓝AI渐变、过度圆润和无意义漂浮元素',
+  },
+  {
+    id: 'SOFT_3D', name: '柔和 3D', group: 'ILLUSTRATION', description: '有体积但不过分卡通，适合产品与概念主视觉', swatches: ['#F2F5F7', '#9CC8E8', '#B9D6B0', '#F0B6A8'],
+    prompt: '柔和编辑型3D视觉；冷白背景、雾蓝、嫩绿和浅珊瑚；使用哑光材质、柔和环境光、清晰接触阴影和简洁实体模型；主体集中，空间关系可解释，边缘精致；避免塑料玩具感、糖果色过饱和、漂浮球体装饰、金属炫光和复杂科幻场景',
+  },
+  {
+    id: 'NEW_CHINESE', name: '新中式', group: 'CULTURAL', description: '东方秩序与现代编辑感，适合文化、国学与品牌', swatches: ['#F4F1EA', '#4D665A', '#B84A3A', '#28312E'],
+    prompt: '现代新中式编辑视觉；宣纸白、松石灰绿、朱砂红和墨黑；使用东方留白、竖向节奏、窗棂或器物轮廓等克制元素，与现代网格结合；材质为细腻纸张、木、陶或织物；避免宫廷金色堆砌、龙凤祥云滥用、影楼古风和仿古棕黄滤镜',
+  },
+  {
+    id: 'INK_WASH', name: '水墨留白', group: 'CULTURAL', description: '轻墨与大留白，适合诗词、哲思与人文内容', swatches: ['#F7F6F1', '#262B2C', '#899A91', '#B75A4A'],
+    prompt: '当代水墨留白视觉；纸白、墨黑、灰绿与一点朱红；墨色有干湿浓淡，主体笔触简练，大片留白承担节奏；可融入极少现代几何或编辑标注；避免满幅山水模板、书法乱码、古装人物脸谱化和廉价卷轴边框',
+  },
+  {
+    id: 'GUOCHAO_POSTER', name: '现代国潮', group: 'CULTURAL', description: '高对比东方图形，适合节日、历史与强传播封面', swatches: ['#F0E8D8', '#D33C32', '#216A70', '#202329'],
+    prompt: '现代国潮海报视觉；纸白、正红、孔雀青与炭黑；传统纹样只做结构性点缀，结合大胆裁切、层叠图形和现代中文海报网格；印刷套色清楚，画面有力量且不过度繁复；避免大面积金色、龙凤祥云堆叠、旅游纪念品感和文字花哨变形',
+  },
+  {
+    id: 'TECH_MEDIA', name: '科技媒体', group: 'TECHNOLOGY', description: '精准、冷静，适合 AI、互联网与产业科技', swatches: ['#F3F6F8', '#2864DC', '#29A38A', '#1E293B'],
+    prompt: '现代科技媒体编辑视觉；浅冷灰底、钴蓝、青绿和深石墨色；使用精确网格、真实产品或技术结构、克制的数据元素与细线连接；画面明亮清晰，重点关系可解释；避免紫蓝霓虹渐变、发光大脑、机器人剪影、代码雨、HUD界面和无依据未来城市',
+  },
 ];
 
 const visualTemplates = {
@@ -76,7 +139,7 @@ const visualTemplates = {
 };
 
 export function visualStylePresets() {
-  return stylePresets.map((item) => ({ ...item }));
+  return stylePresets.map((item) => ({ ...item, swatches: [...item.swatches] }));
 }
 
 export function visualTemplatesFor(type) {
@@ -175,7 +238,9 @@ function visualStyle(platform, role) {
 
 function stylePrompt(stylePreset, styleProfile = { preset: 'FRESH_EDITORIAL' }) {
   const resolved = stylePreset && stylePreset !== 'INHERIT' ? stylePreset : styleProfile?.preset ?? 'FRESH_EDITORIAL';
-  return stylePresets.find((item) => item.id === resolved)?.prompt ?? stylePresets[0].prompt;
+  const presetPrompt = stylePresets.find((item) => item.id === resolved)?.prompt ?? stylePresets[0].prompt;
+  const customPrompt = clean(styleProfile?.customPrompt).slice(0, 1_200);
+  return customPrompt ? `${presetPrompt}；项目统一补充要求：${customPrompt}` : presetPrompt;
 }
 
 function templateFor(type, templatePreset) {
@@ -407,6 +472,25 @@ export function buildVisualPlan(input, platform, options = {}) {
     plan.push({ ...item, ...buildVisualGenerationSpec(item, { platform, title }) });
   }
   return plan;
+}
+
+export function replanVisualPlan(input, platform, current = [], options = {}) {
+  const generated = buildVisualPlan(input, platform, options).map((item) => updateVisualPlanItem(
+    item,
+    {},
+    { platform, title: clean(input?.title) || '未命名内容' },
+    options.styleProfile ?? { preset: 'FRESH_EDITORIAL' },
+  ));
+  const currentById = new Map((Array.isArray(current) ? current : []).map((item) => [item.id, item]));
+  const keepAssignedAssets = options.keepAssignedAssets !== false;
+  return generated.map((item) => {
+    const previous = currentById.get(item.id);
+    const isCover = item.role === 'COVER' || item.role === 'MAIN';
+    return {
+      ...item,
+      assetReferenceId: isCover || keepAssignedAssets ? previous?.assetReferenceId ?? null : null,
+    };
+  });
 }
 
 export function mergeVisualPlan(generated, persisted, legacyAssetIds = [], legacyCoverId = null, persistedVersion = 0) {

@@ -169,8 +169,12 @@ with sync_playwright() as playwright:
     page.get_by_role("button", name="减少正文插图").click()
     page.get_by_text("封面 1 张，正文插图 2 张", exact=True).wait_for()
     page.get_by_role("button", name="增加正文插图").click()
-    page.once("dialog", lambda dialog: dialog.accept())
     page.get_by_role("button", name="重新规划").click()
+    page.get_by_role("heading", name="重新规划配图方案", exact=True).wait_for()
+    assert page.get_by_text("配图位置、图片类型、搜索词、生图提示词", exact=True).is_visible()
+    assert page.get_by_text("保留已选图片", exact=True).is_visible()
+    page.screenshot(path=ARTIFACTS / "visual-replan-dialog.png", full_page=True)
+    page.get_by_role("button", name="确认重新规划", exact=True).click()
     page.get_by_text("封面 1 张，正文插图 3 张", exact=True).wait_for()
     page.wait_for_timeout(900)
     page.reload()
@@ -195,7 +199,13 @@ with sync_playwright() as playwright:
     assert all(item["assetReferenceId"] is None for item in state["project"]["delivery"]["platforms"]["WECHAT"]["visual"]["plan"][1:])
     page.get_by_role("button", name=re.compile(r"文章封面")).click()
     page.get_by_role("button", name="AI 生图", exact=True).click()
-    page.get_by_label("项目默认风格").select_option("RETRO_POP")
+    page.get_by_role("button", name="设置项目配图风格", exact=True).click()
+    page.get_by_role("heading", name="项目配图风格", exact=True).wait_for()
+    assert page.locator(".visual-style-card").count() >= 16
+    page.screenshot(path=ARTIFACTS / "visual-style-dialog.png", full_page=True)
+    page.get_by_role("button", name=re.compile(r"清新波普怀旧")).click()
+    page.locator(".visual-style-custom textarea").fill("统一使用薄荷绿边框，避免高饱和紫色")
+    page.get_by_role("button", name="应用到项目", exact=True).click()
     page.get_by_label("视觉结构", exact=True).select_option("MIND_MAP")
     assert page.get_by_label("版式模板", exact=True).input_value() == "RADIAL_BRANCH"
     assert page.get_by_label("单图风格", exact=True).input_value() == "INHERIT"
@@ -213,6 +223,7 @@ with sync_playwright() as playwright:
     prompt = page.locator(".visual-prompt-field textarea").first.input_value()
     assert len(prompt) > 100 and "公众号" in prompt and "天链三号01星" in prompt
     assert "思维导图" in prompt and "波普怀旧" in prompt and "参考图只用于参考色彩、排版" in prompt
+    assert "统一使用薄荷绿边框" in prompt and "避免高饱和紫色" in prompt
     assert "主标题：" in prompt and "信息点：" in prompt and "不在图片内生成文字" not in prompt
     assert page.locator(".visual-generate-controls select").input_value() == "16:9"
     page.get_by_role("button", name="生成这一张", exact=True).click()
@@ -226,7 +237,7 @@ with sync_playwright() as playwright:
     page.wait_for_load_state("networkidle")
     page.get_by_role("button", name="AI 生图", exact=True).click()
     page.locator(".visual-generated-preview img").wait_for()
-    assert page.get_by_label("项目默认风格").input_value() == "RETRO_POP"
+    assert "清新波普怀旧" in page.get_by_role("button", name="设置项目配图风格", exact=True).inner_text()
     assert page.get_by_label("视觉结构", exact=True).input_value() == "MIND_MAP"
     page.screenshot(path=ARTIFACTS / "visual-generated-preview.png", full_page=True)
     page.get_by_role("button", name=re.compile(r"正文插图 2")).click()
@@ -245,6 +256,10 @@ with sync_playwright() as playwright:
     assert mobile_channel_nav and mobile_channel_nav["height"] <= 104, f"移动端渠道导航过高: {mobile_channel_nav}"
     assert page.locator(".channel-platform-tabs").evaluate("element => element.scrollWidth <= element.clientWidth"), "390px 渠道栏仍需横向滚动"
     page.screenshot(path=ARTIFACTS / "visual-workspace-mobile.png", full_page=True)
+    page.get_by_role("button", name="设置项目配图风格", exact=True).click()
+    assert page.locator(".visual-style-dialog").evaluate("element => element.scrollWidth <= element.clientWidth"), "移动端风格库存在横向溢出"
+    page.screenshot(path=ARTIFACTS / "visual-style-dialog-mobile.png")
+    page.get_by_role("button", name="关闭风格设置", exact=True).click()
     assert not state["unexpected"], state["unexpected"]
     assert not state["console_errors"], state["console_errors"]
     browser.close()
