@@ -107,6 +107,41 @@ test('首次正文使用锁定标题和纯文本单次成稿契约', () => {
   assert.throws(() => parseFinishedCopyBody('```json\n{"body":"错误"}\n```', packet), /代码围栏|JSON|正文/);
 });
 
+test('首次正文自动把平台常见 Markdown 归一化为可保存纯文本', () => {
+  const packet = buildWritingPacket({
+    projectId: 'project-markdown', platform: 'XIAOHONGSHU',
+    project: { title: '宇树科技 IPO 到底意味着什么', planning: { title: '宇树科技 IPO 到底意味着什么' } },
+    brief: { lengthTarget: '300-800 字' }, materials: [], researchContext: { verifiedFacts: [], cautions: [] },
+  });
+  const parsed = parseFinishedCopyBody([
+    '# 宇树科技 IPO 到底意味着什么',
+    '',
+    '## 先说结论',
+    '',
+    '> 这不是一次普通的资本市场新闻。',
+    '',
+    '- **看业务**：资金将继续投向研发。',
+    '- **看行业**：机器人赛道进入新阶段。',
+    '- [看风险说明](https://example.com/risk)：仍要关注定价与兑现节奏。',
+    '',
+    '真正值得普通读者关注的，不是一个短期数字，而是企业如何把技术、产品和商业化连接起来。'.repeat(3),
+  ].join('\n'), packet);
+
+  assert.equal(parsed.title, '宇树科技 IPO 到底意味着什么');
+  assert.doesNotMatch(parsed.body, /(^|\n)\s*#{1,6}\s|\*\*|__|^>\s|\[[^\]]+\]\([^)]+\)/m);
+  assert.doesNotMatch(parsed.body, /^宇树科技 IPO 到底意味着什么$/m);
+  assert.match(parsed.body, /^先说结论$/m);
+  assert.match(parsed.body, /^• 看业务：资金将继续投向研发。$/m);
+  assert.match(parsed.body, /看风险说明：仍要关注定价与兑现节奏/);
+});
+
+test('正文格式归一化后仍执行内容安全和完整性校验', () => {
+  const packet = { lockedTitle: '锁定标题' };
+  assert.throws(() => parseFinishedCopyBody('{"body":"结构化正文"}', packet), /结构化对象/);
+  assert.throws(() => parseFinishedCopyBody('正文泄漏 writingPacket 内部字段。'.repeat(10), packet), /内部字段/);
+  assert.throws(() => parseFinishedCopyBody('# 锁定标题\n\n**太短了**', packet), /不完整/);
+});
+
 test('首次生成直接正式保存，只有主动修改保留候选', () => {
   assert.equal(copyActionPersistenceMode('GENERATE_DRAFT'), 'ACCEPTED');
   assert.equal(copyActionPersistenceMode('POLISH_EXISTING_DRAFT'), 'CANDIDATE');

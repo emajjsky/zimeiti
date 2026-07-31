@@ -404,13 +404,51 @@ function buildFinishedCopyPrompt(packet, template) {
   };
 }
 
+function normalizeFinishedCopyBody(content, packet = {}) {
+  let body = String(content ?? '').replace(/\r\n?/g, '\n').replace(/^\uFEFF/, '').trim();
+
+  body = body
+    .split('\n')
+    .map((line) => {
+      if (/^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)) return '';
+      return line
+        .replace(/^\s{0,3}#{1,6}[ \t]+/, '')
+        .replace(/^\s{0,3}>[ \t]?/, '')
+        .replace(/^\s*[-+*][ \t]+/, '• ')
+        .trimEnd();
+    })
+    .join('\n')
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/`([^`\n]+)`/g, '$1')
+    .replace(/\*\*([^*\n]+)\*\*/g, '$1')
+    .replace(/__([^_\n]+)__/g, '$1')
+    .replace(/~~([^~\n]+)~~/g, '$1')
+    .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1$2')
+    .replace(/(^|[^_])_([^_\n]+)_(?!_)/g, '$1$2')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  const lockedTitle = String(packet.lockedTitle ?? '').trim();
+  if (lockedTitle) {
+    const lines = body.split('\n');
+    const firstContentIndex = lines.findIndex((line) => line.trim());
+    if (firstContentIndex !== -1 && lines[firstContentIndex].trim() === lockedTitle) {
+      lines.splice(firstContentIndex, 1);
+      body = lines.join('\n').replace(/^\s+/, '').trim();
+    }
+  }
+
+  return body;
+}
+
 function parseFinishedCopyBody(content, packet) {
   if (typeof content !== 'string' || !content.trim()) throw new Error('模型没有返回完整正文。');
-  const body = content.trim();
-  if (/```/.test(body)) throw new Error('正文包含代码围栏，不能保存。');
-  if (/^\s*[\[{]/.test(body)) throw new Error('正文返回了结构化对象，不能保存。');
-  if (/(qualityReview|factsToVerify|changeSummary|writingPacket|system prompt|系统提示词)/i.test(body)) throw new Error('正文泄漏了内部字段，不能保存。');
-  if (/(\*\*|__(?:[^_]|$)|(?:^|\n)\s{0,3}#{1,6}\s+)/m.test(body)) throw new Error('正式正文不得包含 Markdown 标记。');
+  const rawBody = content.trim();
+  if (/```/.test(rawBody)) throw new Error('正文包含代码围栏，不能保存。');
+  if (/^\s*[\[{]/.test(rawBody)) throw new Error('正文返回了结构化对象，不能保存。');
+  if (/(qualityReview|factsToVerify|changeSummary|writingPacket|system prompt|系统提示词)/i.test(rawBody)) throw new Error('正文泄漏了内部字段，不能保存。');
+  const body = normalizeFinishedCopyBody(rawBody, packet);
   if (body.length < 80) throw new Error('模型返回的正文不完整。');
   if (body.length > 30_000) throw new Error('模型返回的正文超过可保存长度。');
   return { title: packet.lockedTitle, body };
@@ -591,6 +629,7 @@ module.exports = {
   parseCopyOutput,
   buildWritingPacket,
   buildFinishedCopyPrompt,
+  normalizeFinishedCopyBody,
   parseFinishedCopyBody,
   buildCopyPrompt,
   buildCopyRepairPrompt,
