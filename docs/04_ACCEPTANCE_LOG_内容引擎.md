@@ -856,3 +856,13 @@
 | 采用门禁 | 通过 | 前端按钮显示“需先重写”并禁用；服务端对 `NEEDS_REVIEW` 正文候选返回 409，不能绕过页面写入正式正文。 |
 | 现有数据修复 | 通过 | 候选状态为 `CANDIDATE`、正式公众号正文长度为 0、错误内容母版为 `REJECTED`、候选完整正文和质量审稿记录均保留。 |
 | 自动化与页面回归 | 通过 | `npm test` 289/289、`npm run typecheck`、`npm run build`、服务端语法检查、`git diff --check`、`creative-workspace.e2e.py` 与 `visual-workspace.e2e.py` 均通过；真实登录页面确认质量问题与待核验项分区、采用按钮禁用。 |
+
+## A66. 账号声音残留问题保留候选（2026-07-31）
+
+| 验收项 | 状态 | 证据 |
+| --- | --- | --- |
+| 真实根因 | 通过 | 两次 `PROJECT_COPY` 调用均由 `glm-5.2-fast-preview` 返回正文并执行声音修正，最终仅因全局套话“这意味着”残留而失败；用户声音自身禁词列表并不包含该短语。 |
+| 自动修正 | 通过 | 首次检测到声音问题仍会调用一次受控修正，不取消现有反 AI 表达检查。 |
+| 候选保留 | 通过 | 修正后残留问题进入 `qualityReview.issues`，任务保存为候选，不再抛出“账号声音检查未通过”。 |
+| 采用安全 | 通过 | `NEEDS_REVIEW` 候选继续由前端按钮和服务端采用接口双重阻止，不会污染正式正文。 |
+| 自动化回归 | 通过 | 已完成红绿测试；`npm test` 289/289、`npm run typecheck`、`npm run build`、Worker 与文案服务语法检查、`git diff --check` 和 `creative-workspace.e2e.py` 均通过。 |

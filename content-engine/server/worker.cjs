@@ -757,8 +757,6 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
         inputTokens = (inputTokens ?? 0) + (rewritten.inputTokens ?? 0);
         outputTokens = (outputTokens ?? 0) + (rewritten.outputTokens ?? 0);
         output = parseCopyOutput(rewritten.content, snapshot.action, snapshot);
-        const remainingVoiceIssues = detectVoiceViolations(output.body, snapshot.accountVoice?.rules);
-        if (snapshot.accountVoice && remainingVoiceIssues.length) throw new Error(`账号声音检查未通过：${remainingVoiceIssues.map((issue) => issue.message).join('；')}`);
       }
       const reviewPrompt = buildCopyQualityReviewPrompt({ action: snapshot.action, platform: snapshot.platform, output, researchContext: snapshot.researchContext, currentContent: snapshot.currentContent });
       const reviewed = await textRunner.runText({ provider: route.provider, model: route.model, system: reviewPrompt.system, message: reviewPrompt.message, ...connectionInput });
@@ -777,15 +775,14 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
         inputTokens = (inputTokens ?? 0) + (rewritten.inputTokens ?? 0);
         outputTokens = (outputTokens ?? 0) + (rewritten.outputTokens ?? 0);
         output = parseCopyOutput(rewritten.content, snapshot.action, snapshot);
-        const finalVoiceIssues = detectVoiceViolations(output.body, snapshot.accountVoice?.rules);
-        if (snapshot.accountVoice && finalVoiceIssues.length) throw new Error(`账号声音检查未通过：${finalVoiceIssues.map((issue) => issue.message).join('；')}`);
         const finalReviewPrompt = buildCopyQualityReviewPrompt({ action: snapshot.action, platform: snapshot.platform, output, researchContext: snapshot.researchContext, currentContent: snapshot.currentContent });
         const finalReviewed = await textRunner.runText({ provider: route.provider, model: route.model, system: finalReviewPrompt.system, message: finalReviewPrompt.message, ...connectionInput });
         inputTokens = (inputTokens ?? 0) + (finalReviewed.inputTokens ?? 0);
         outputTokens = (outputTokens ?? 0) + (finalReviewed.outputTokens ?? 0);
         review = parseCopyQualityReview(finalReviewed.content);
       }
-      qualityReview = candidateQualityReview(review);
+      const finalVoiceIssues = snapshot.accountVoice ? detectVoiceViolations(output.body, snapshot.accountVoice.rules) : [];
+      qualityReview = candidateQualityReview(review, finalVoiceIssues);
       output.qualityReview = qualityReview;
     }
     // 项目历史核验池不属于本次候选，候选版本只保存正文直接涉及的核验项。

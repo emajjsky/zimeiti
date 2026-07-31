@@ -375,10 +375,14 @@ function parseCopyQualityReview(content) {
   return copyQualityReviewSchema.parse(parseJson(content, '质量审稿没有返回结果。', '质量审稿返回的不是有效 JSON。'));
 }
 
-function candidateQualityReview(review) {
-  return review.approved
-    ? { status: 'PASSED', issues: [] }
-    : { status: 'NEEDS_REVIEW', issues: review.issues };
+function candidateQualityReview(review, voiceIssues = []) {
+  const issues = [...new Set([
+    ...(review.approved ? [] : review.issues),
+    ...voiceIssues.map((issue) => typeof issue === 'string' ? issue : issue?.message),
+  ].map((issue) => String(issue ?? '').trim()).filter(Boolean))];
+  return issues.length
+    ? { status: 'NEEDS_REVIEW', issues }
+    : { status: 'PASSED', issues: [] };
 }
 
 function buildCopyQualityReviewPrompt({ action, platform, output, researchContext, currentContent }) {

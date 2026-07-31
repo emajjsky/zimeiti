@@ -848,3 +848,10 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - `project-agent.cjs` 的候选产物投影补充 `qualityReview`。`CopyCandidateDialog` 与 `ProjectAgent` 分别渲染“正文需重写”和“发布前核验”，不再把审稿问题拼入核验清单。
 - `POST /api/v1/creative/project-artifacts/:id/accept` 对 `qualityReview.status === 'NEEDS_REVIEW'` 的正文候选返回 409；前端采用按钮同步禁用，形成双层门禁。
 - 现有宇树科技候选 `35bf3755-5c3c-43ab-9cab-7cd22e39314f` 已从误采用状态退回 `CANDIDATE`，正式公众号正文恢复为空，错误内容母版标记为 `REJECTED`。候选只保留“注册生效”一项真正待核验事实，五项无证据推演保留在质量审稿中。
+
+## 2026-07-31 修复：账号声音残留问题不再导致空正文
+
+- 真实运行 `914a27db-5932-4219-ab9f-59a7dad62058` 与 `9b992e8e-86b7-4f6d-ab84-935249afa772` 均在正文与声音修正完成后，因为全局禁用短语“这意味着”仍存在而被标记为 `FAILED`；两次分别消耗约 9700 输入 Token 和 1700 输出 Token。
+- `worker.cjs` 不再在首次声音修正或质量重写后抛出“账号声音检查未通过”。最终正文统一再次执行声音检查，并将结果传给候选质量状态。
+- `candidateQualityReview(review, voiceIssues)` 对事实审稿问题和账号声音问题去重合并；存在任一问题时保存 `NEEDS_REVIEW` 候选，没有问题时保存 `PASSED`。
+- 该调整不降低采用标准：现有前后端质量门禁继续阻止未通过候选进入正式正文，只改变“丢失结果”为“保留结果供用户审核和重写”。

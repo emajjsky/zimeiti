@@ -49,10 +49,17 @@ test('账号声音规则检测明确的 AI 套话、emoji 标题和强制互动'
   assert.deepEqual(issues.map((item) => item.code), ['BANNED_PHRASE', 'EMOJI_HEADING', 'FORCED_CTA']);
 });
 
-test('未使用账号声音时，通用反套话改写不会把候选稿作为账号声音失败丢弃', () => {
+test('账号声音改写后仍有套话时保留候选并进入正文重写，不把整次生成标成失败', () => {
+  assert.deepEqual(candidateQualityReview(
+    { approved: true, issues: [] },
+    [{ code: 'BANNED_PHRASE', excerpt: '这意味着', message: '避免使用套话：这意味着' }],
+  ), {
+    status: 'NEEDS_REVIEW',
+    issues: ['避免使用套话：这意味着'],
+  });
   const worker = fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8');
-  assert.match(worker, /if \(snapshot\.accountVoice && remainingVoiceIssues\.length\) throw new Error\(`账号声音检查未通过/);
-  assert.match(worker, /if \(snapshot\.accountVoice && finalVoiceIssues\.length\) throw new Error\(`账号声音检查未通过/);
+  assert.doesNotMatch(worker, /throw new Error\(`账号声音检查未通过/);
+  assert.match(worker, /candidateQualityReview\(review, finalVoiceIssues\)/);
 });
 
 test('文案提示词携带账号声音规则与本篇语气，但不携带校准原文', () => {
@@ -292,7 +299,7 @@ test('Project Agent Worker 始终创建候选产物，质量风险仅随候选�
   assert.match(execute, /project_artifacts/);
   assert.match(execute, /platform_content_versions/);
   assert.match(execute, /buildCopyQualityReviewPrompt/);
-  assert.match(execute, /candidateQualityReview\(review\)/);
+  assert.match(execute, /candidateQualityReview\(review, finalVoiceIssues\)/);
   assert.match(execute, /candidateFactsToVerify/);
   assert.doesNotMatch(execute, /snapshot\.project\?\.factChecks[\s\S]*output\.factsToVerify/);
   assert.doesNotMatch(execute, /review\.approved\) throw new Error/);
