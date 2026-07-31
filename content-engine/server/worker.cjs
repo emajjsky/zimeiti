@@ -33,6 +33,7 @@ const {
 const { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, workflowSourceActionsForProject, projectOriginalSource, sourceMatchesProject, buildResearchResult } = require('./services/simplified-research.cjs');
 const { createProjectAgentStore } = require('./services/project-agent.cjs');
 const { updateCreativeState } = require('./services/project-planning.cjs');
+const { loadContentMasterState } = require('./services/content-master.cjs');
 const { applyAcceptedCopyToState, buildCopyPrompt, buildFinishedCopyPrompt, buildWritingPacket, copyActionPersistenceMode, parseCopyOutput, parseFinishedCopyBody } = require('./services/project-copy-action.cjs');
 
 const connection = new IORedis(config.redisUrl, { maxRetriesPerRequest: null });
@@ -813,6 +814,7 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
       const activeRun = await client.query("SELECT id FROM generation_runs WHERE id = $1 AND workspace_id = $2 AND status = 'RUNNING' FOR UPDATE", [runId, workspaceId]);
       if (!activeRun.rowCount) throw new Error('文案任务已取消或中断。');
       const isOutline = isOutlineAction;
+      const masterState = isInitialDraft ? await loadContentMasterState(client, workspaceId, snapshot.projectId) : null;
       const artifact = await projectAgentStore.createArtifact(client, {
         workspaceId,
         projectId: snapshot.projectId,
@@ -835,7 +837,7 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
           JOIN project_artifacts a ON a.id = v.artifact_id
           WHERE v.workspace_id = $1 AND v.project_id = $2 AND v.platform = $3`, [workspaceId, snapshot.projectId, snapshot.platform]);
         const version = versionResult.rows[0];
-        let masterVersionId = version.master_version_id ?? null;
+        let masterVersionId = version.master_version_id ?? masterState?.acceptedMasterId ?? null;
         if (isInitialDraft && !masterVersionId) {
           const masterArtifact = await projectAgentStore.createArtifact(client, {
             workspaceId,
@@ -849,9 +851,15 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
           await client.query('UPDATE project_artifacts SET accepted_at = now(), updated_at = now() WHERE id = $1 AND workspace_id = $2', [masterArtifact.id, workspaceId]);
           const materialRefs = writingPacket.authorMaterials.map((material) => material.id);
           const createdMaster = await client.query(`INSERT INTO content_master_versions
-            (workspace_id, project_id, artifact_id, version_number, thesis, facts_to_verify_json, material_refs_json)
-            VALUES ($1, $2, $3, 1, $4, '[]'::jsonb, $5) RETURNING id`, [
-            workspaceId, snapshot.projectId, masterArtifact.id, writingPacket.coreMessage || output.title, JSON.stringify(materialRefs),
+            (workspace_id, project_id, artifact_id, version_number, thesis, facts_to_verify_json, material_refs_json, parent_version_id)
+            VALUES ($1, $2, $3, $4, $5, '[]'::jsonb, $6, $7) RETURNING id`, [
+            workspaceId,
+            snapshot.projectId,
+            masterArtifact.id,
+            masterState.nextVersion,
+            writingPacket.coreMessage || output.title,
+            JSON.stringify(materialRefs),
+            masterState.parentVersionId,
           ]);
           masterVersionId = createdMaster.rows[0].id;
         }

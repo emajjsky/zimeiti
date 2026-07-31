@@ -33,6 +33,7 @@ const {
 } = require('./services/project-planning.cjs');
 const { createProjectMaterialStore } = require('./services/projectMaterials.cjs');
 const { createProjectAgentStore, artifactView, runView } = require('./services/project-agent.cjs');
+const { loadContentMasterState } = require('./services/content-master.cjs');
 const { saveProjectUpload, removeProjectUpload, openProjectUpload, readProjectUploadText } = require('./services/projectUploadStorage.cjs');
 const { PROJECT_RESEARCH_ACTION_VERSION, PROJECT_RESEARCH_SCOPE, researchRunView, researchPlanView } = require('./services/project-research.cjs');
 const { PROJECT_RESEARCH_SOURCES_VERSION, researchSourceActions } = require('./services/project-research-sources.cjs');
@@ -1922,13 +1923,11 @@ app.post('/api/v1/creative/project-artifacts/:id/accept', { preHandler: authenti
       summary = payload.summary || `已采用${creativePlatformNames[candidate.platform]}大纲。`;
     } else {
       if (!candidate.content_version_id) throw new Error('候选文案内容已不存在。');
-      const latestMaster = await client.query(`SELECT m.* FROM content_master_versions m
-        JOIN project_artifacts a ON a.id = m.artifact_id AND a.status = 'ACCEPTED'
-        WHERE m.workspace_id = $1 AND m.project_id = $2 ORDER BY m.version_number DESC LIMIT 1`, [workspace.id, candidate.project_id]);
-      let master = latestMaster.rows[0];
+      const masterState = await loadContentMasterState(client, workspace.id, candidate.project_id);
+      let masterId = masterState.acceptedMasterId;
       // 项目核验池已在快照中保留；采用候选时仅追加候选正文直接关联的项。
       const candidateFacts = mergeFactsToVerify(candidate.facts_to_verify_json ?? []);
-      if (!master) {
+      if (!masterId) {
         const masterArtifact = await projectAgentStore.createArtifact(client, {
           workspaceId: workspace.id,
           projectId: candidate.project_id,
@@ -1940,18 +1939,20 @@ app.post('/api/v1/creative/project-artifacts/:id/accept', { preHandler: authenti
         });
         const materialRefs = (candidate.source_snapshot_json?.materials ?? []).map((material) => material.id).filter(Boolean);
         const createdMaster = await client.query(`INSERT INTO content_master_versions
-          (workspace_id, project_id, artifact_id, version_number, thesis, facts_to_verify_json, material_refs_json)
-          VALUES ($1, $2, $3, 1, $4, $5, $6) RETURNING *`, [
+          (workspace_id, project_id, artifact_id, version_number, thesis, facts_to_verify_json, material_refs_json, parent_version_id)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`, [
           workspace.id,
           candidate.project_id,
           masterArtifact.id,
+          masterState.nextVersion,
           candidate.source_snapshot_json?.project?.coreViewpoint || candidate.content_title,
           JSON.stringify(candidateFacts),
           JSON.stringify(materialRefs),
+          masterState.parentVersionId,
         ]);
-        master = createdMaster.rows[0];
+        masterId = createdMaster.rows[0].id;
       }
-      await client.query('UPDATE platform_content_versions SET content_master_version_id = $1 WHERE id = $2', [master.id, candidate.content_version_id]);
+      await client.query('UPDATE platform_content_versions SET content_master_version_id = $1 WHERE id = $2', [masterId, candidate.content_version_id]);
       const applied = applyAcceptedCopyToState(state, {
         projectId: candidate.project_id,
         platform: candidate.platform,

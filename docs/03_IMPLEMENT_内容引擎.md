@@ -874,3 +874,9 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - `ProjectAgent.tsx` 监听首次任务完成，读取最新项目后通知 `CopyWorkspace` 更新编辑器；候选不再自动弹出。`CopyCandidateDialog.tsx` 删除 AI 质量问题和发布前核验门禁，只保留全文、段落差异与用户采用/放弃操作。
 - `023_finished_copy_workflow.sql` 将历史 `PLATFORM_COPY + CANDIDATE + NEEDS_REVIEW` 产物更新为 `REJECTED`，不删除正文、审稿或运行记录。
 - API 为首次正文任务始终冻结 `researchRoute` 和 `verificationRoute`：有独立百炼策略时使用对应模型，否则复用 `CONTENT_WRITING` 的模型与连接。`prepareCopyResearchContext()` 对整个自动研究阶段设置故障边界，任何研究异常都回退到任务快照中的已保存上下文后继续最终写作。
+
+## 2026-07-31 修复：正文母版版本唯一键冲突
+
+- 失败调用 `d7dcec13-2641-4a8b-8daf-f1665884e321` 已确认模型正常返回，事务在插入 `content_master_versions.version_number = 1` 时与历史 `REJECTED` 母版冲突。
+- 新增 `content-master.cjs`，以项目级 PostgreSQL 事务锁统一读取最新已采用母版、历史最大版本号和父版本；没有可复用母版时使用 `MAX(version_number) + 1` 创建新版本。
+- 首次正文自动保存与后续采用修改共用相同母版状态逻辑，不再分别硬编码版本 1；并发执行同一项目时由事务锁串行化母版版本分配。

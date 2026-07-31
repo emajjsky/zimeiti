@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
+import contentMasterModule from '../server/services/content-master.cjs';
 import copyActionModule from '../server/services/project-copy-action.cjs';
+
+const { loadContentMasterState } = contentMasterModule;
 
 const {
   COPY_ACTIONS,
@@ -377,6 +380,42 @@ test('Project Agent Worker 首次生成直接落正式正文，主动修改才�
   assert.match(execute, /applyAcceptedCopyToState/);
   assert.match(execute, /accepted_at = now\(\)/);
   assert.doesNotMatch(execute, /qualityReview/);
+});
+
+test('首次正文根据项目母版历史递增版本号，不重复创建版本一', () => {
+  const worker = fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8');
+  const execute = routeSlice(worker, 'async function generateProjectCopyAction', 'async function generateAgentPlan');
+  assert.match(worker, /loadContentMasterState/);
+  assert.match(execute, /loadContentMasterState\(client, workspaceId, snapshot\.projectId\)/);
+  assert.match(execute, /masterState\.nextVersion/);
+  assert.match(execute, /masterState\.parentVersionId/);
+  assert.doesNotMatch(execute, /content_master_versions[\s\S]{0,250}VALUES \(\$1, \$2, \$3, 1,/);
+});
+
+test('项目母版状态在事务锁内返回已采用版本和下一版本', async () => {
+  const calls = [];
+  const client = {
+    async query(sql, params) {
+      calls.push({ sql, params });
+      if (sql.includes('pg_advisory_xact_lock')) return { rows: [{}] };
+      return { rows: [{ accepted_master_id: 'master-2', next_master_version: '4', parent_master_version_id: 'master-3' }] };
+    },
+  };
+  const state = await loadContentMasterState(client, 'workspace-1', 'project-1');
+  assert.deepEqual(state, { acceptedMasterId: 'master-2', nextVersion: 4, parentVersionId: 'master-3' });
+  assert.match(calls[0].sql, /pg_advisory_xact_lock\(hashtextextended/);
+  assert.deepEqual(calls[0].params, ['content-master:workspace-1:project-1']);
+  assert.match(calls[1].sql, /MAX\(m\.version_number\)/);
+});
+
+test('采用修改候选时根据项目母版历史递增版本号', () => {
+  const server = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
+  const accept = routeSlice(server, "/project-artifacts/:id/accept", "/project-artifacts/:id/reject");
+  assert.match(server, /loadContentMasterState/);
+  assert.match(accept, /loadContentMasterState\(client, workspace\.id, candidate\.project_id\)/);
+  assert.match(accept, /masterState\.nextVersion/);
+  assert.match(accept, /masterState\.parentVersionId/);
+  assert.doesNotMatch(accept, /content_master_versions[\s\S]{0,250}VALUES \(\$1, \$2, \$3, 1,/);
 });
 
 test('首次正文没有独立研究 Scope 时复用正文模型准备上下文', () => {
