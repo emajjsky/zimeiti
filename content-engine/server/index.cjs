@@ -79,14 +79,13 @@ const visualGenerationInput = z.object({
   platform: creativePlatform,
   prompt: z.string().trim().min(4).max(8_000),
   size: z.enum(['1:1', '3:4', '4:3', '9:16', '16:9']).default('3:4'),
-  negativePrompt: z.string().trim().max(1_000).optional(),
   referenceImageIds: z.array(z.string().uuid()).max(3).default([]),
 });
 const visualStylePreset = z.enum([
-  'FRESH_EDITORIAL', 'BUSINESS_EDITORIAL', 'SWISS_GRID', 'DOCUMENTARY', 'CINEMATIC_DOCUMENTARY',
-  'MINIMAL_KNOWLEDGE', 'DATA_VISUAL', 'BLUEPRINT_DIAGRAM', 'HAND_DRAWN_NOTES',
-  'RETRO_POP', 'PAPER_COLLAGE', 'FLAT_GEOMETRIC', 'SOFT_3D',
-  'NEW_CHINESE', 'INK_WASH', 'GUOCHAO_POSTER', 'TECH_MEDIA',
+  'FRESH_EDITORIAL', 'BUSINESS_EDITORIAL', 'SWISS_GRID', 'DOCUMENTARY', 'CINEMATIC_DOCUMENTARY', 'MONO_EDITORIAL', 'NEWSPAPER_EDITORIAL', 'LIFESTYLE_PHOTO',
+  'MINIMAL_KNOWLEDGE', 'DATA_VISUAL', 'BLUEPRINT_DIAGRAM', 'HAND_DRAWN_NOTES', 'CONSULTING_REPORT', 'SCIENCE_ATLAS',
+  'RETRO_POP', 'PAPER_COLLAGE', 'FLAT_GEOMETRIC', 'SOFT_3D', 'PENCIL_SKETCH',
+  'NEW_CHINESE', 'INK_WASH', 'GUOCHAO_POSTER', 'WOODCUT_PRINT', 'TECH_MEDIA', 'INDUSTRIAL_MEDIA',
 ]);
 const visualReferenceUse = z.enum(['COLOR', 'COMPOSITION', 'LAYOUT', 'TEXTURE', 'SUBJECT']);
 const visualPlanItemInput = z.object({
@@ -107,7 +106,6 @@ const visualPlanItemInput = z.object({
   contentBlocks: z.array(z.object({ label: z.string().trim().min(1).max(80), detail: z.string().trim().min(1).max(300) })).min(1).max(8),
   references: z.array(z.object({ referenceId: z.string().uuid(), uses: z.array(visualReferenceUse).min(1).max(5) })).max(3).default([]),
   prompt: z.string().trim().min(4).max(8_000),
-  negativePrompt: z.string().trim().max(1_000).default(''),
   size: z.enum(['1:1', '3:4', '4:3', '9:16', '16:9']),
   assetReferenceId: z.string().uuid().nullable(),
 });
@@ -891,7 +889,6 @@ app.post('/api/v1/creative/projects/:projectId/visual/generate', { preHandler: a
     const command = input.referenceImageIds.length ? 'edit' : 'generate';
     const args = ['image', command, '--prompt', input.prompt, '--model', model, '--size', input.size, '--n', '1', '--out-dir', jobFolder, '--out-prefix', 'visual', '--output', 'json', '--quiet'];
     for (const image of referenceImages) args.push('--image', image);
-    if (input.negativePrompt) args.push('--negative-prompt', input.negativePrompt);
     await runBailianCli(args, apiKey, 180_000);
     const files = await fs.readdir(jobFolder, { withFileTypes: true });
     const image = files.find((entry) => entry.isFile() && /\.(png|jpe?g|webp)$/i.test(entry.name));

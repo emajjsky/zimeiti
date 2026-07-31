@@ -57,7 +57,7 @@ Expected: PASS。
 
 **Interfaces:**
 - Consumes: `CreativeVisualPlanItem.references`。
-- Produces: `generateImage(projectId, { platform, prompt, size, negativePrompt, referenceImageIds })`。
+- Produces: `generateImage(projectId, { platform, prompt, size, referenceImageIds })`。
 
 - [ ] **Step 1: Write the failing API contract tests**
 

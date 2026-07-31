@@ -26,7 +26,6 @@ export interface VisualGenerationContext {
 export interface VisualGenerationSpec {
   generationMode: CreativeVisualGenerationMode;
   prompt: string;
-  negativePrompt: string;
 }
 
 export interface VisualStylePresetDefinition {
@@ -36,6 +35,9 @@ export interface VisualStylePresetDefinition {
   description: string;
   swatches: string[];
   prompt: string;
+  caseLabel: string;
+  caseTitle: string;
+  caseMeta: string;
 }
 
 export interface VisualTemplateDefinition {

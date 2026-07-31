@@ -54,27 +54,27 @@ test('小红书内容页默认生成带中文信息层级的图文信息图', ()
   assert.match(card.prompt, /核心结论：/);
   assert.match(card.prompt, /信息点：/);
   assert.doesNotMatch(card.prompt, /不在图片内生成文字/);
-  assert.ok(!card.negativePrompt.split('、').includes('文字'));
-  assert.match(card.negativePrompt, /错别字/);
-  assert.match(card.negativePrompt, /乱码/);
+  assert.match(card.prompt, /错别字/);
+  assert.match(card.prompt, /乱码/);
+  assert.ok(!Object.hasOwn(card, 'negativePrompt'));
 });
 
 test('视觉插图与图文信息图切换时生成各自正确的提示词约束', () => {
   const item = {
     id: 'scene-1', role: 'BODY', title: '正文插图 1', placement: '正文第一段后', purpose: '解释普通人的实际使用场景',
     visualType: 'SCENE', focus: '普通人使用AI工具', avoidConcepts: [], searchQueries: ['AI 工具 使用场景'],
-    informationPoints: ['先确认任务目标', '再选择合适工具', '最后人工检查结果'], prompt: '', negativePrompt: '',
+    informationPoints: ['先确认任务目标', '再选择合适工具', '最后人工检查结果'], prompt: '',
     generationMode: 'ILLUSTRATION', size: '4:3', assetReferenceId: null,
   };
   const illustration = buildVisualGenerationSpec(item, { platform: 'WECHAT', title: '普通人怎样使用AI工具' }, 'ILLUSTRATION');
   assert.match(illustration.prompt, /不在图片内生成文字/);
-  assert.ok(illustration.negativePrompt.split('、').includes('文字'));
+  assert.ok(!Object.hasOwn(illustration, 'negativePrompt'));
 
   const infographic = buildVisualGenerationSpec(item, { platform: 'WECHAT', title: '普通人怎样使用AI工具' }, 'INFOGRAPHIC');
   assert.match(infographic.prompt, /主标题：普通人使用AI工具/);
   assert.match(infographic.prompt, /先确认任务目标/);
   assert.doesNotMatch(infographic.prompt, /不在图片内生成文字/);
-  assert.ok(!infographic.negativePrompt.split('、').includes('文字'));
+  assert.ok(!Object.hasOwn(infographic, 'negativePrompt'));
 });
 
 test('没有旧方案时只迁移历史封面，正文素材留在项目素材库', () => {
@@ -199,9 +199,10 @@ test('项目风格默认继承且单张图片可以独立覆盖', () => {
 
 test('项目风格库覆盖编辑、知识、插画、文化和科技，并提供可执行视觉约束', () => {
   const styles = visualStylePresets();
-  assert.ok(styles.length >= 16);
+  assert.ok(styles.length >= 25);
   assert.deepEqual(new Set(styles.map((style) => style.group)), new Set(['EDITORIAL', 'KNOWLEDGE', 'ILLUSTRATION', 'CULTURAL', 'TECHNOLOGY']));
   assert.ok(styles.every((style) => style.description.length >= 8 && style.swatches.length === 4 && style.prompt.length >= 60));
+  assert.ok(styles.every((style) => style.caseLabel && style.caseTitle && style.caseMeta));
   const retro = styles.find((style) => style.id === 'RETRO_POP');
   assert.match(retro.prompt, /薄荷绿.*婴儿蓝.*珊瑚粉.*奶油黄/);
   assert.match(retro.prompt, /丝网印刷网点|错版质感/);
@@ -271,10 +272,24 @@ test('第三版方案升级视觉导演字段时保留用户内容和最终图�
     assetReferenceId: `asset-${index}`,
   }));
   const upgraded = mergeVisualPlan(generated, oldPlan, [], null, 3);
-  assert.equal(VISUAL_PLAN_VERSION, 4);
+  assert.equal(VISUAL_PLAN_VERSION, 5);
   assert.deepEqual(upgraded.map((item) => item.assetReferenceId), oldPlan.map((item) => item.assetReferenceId));
   assert.deepEqual(upgraded.map((item) => item.purpose), oldPlan.map((item) => item.purpose));
   assert.deepEqual(upgraded.map((item) => item.informationPoints), oldPlan.map((item) => item.informationPoints));
   assert.ok(upgraded.every((item) => item.stylePreset === 'INHERIT' && Array.isArray(item.references) && item.templatePreset));
   assert.ok(upgraded.every((item) => item.prompt !== '旧提示词'));
+  assert.ok(upgraded.every((item) => !Object.hasOwn(item, 'negativePrompt')));
+});
+
+test('第四版方案升级时移除独立负面提示词并保留图片绑定', () => {
+  const generated = buildVisualPlan(article, 'WECHAT');
+  const oldPlan = generated.map((item, index) => ({
+    ...item,
+    negativePrompt: '文字、水印、低清晰度',
+    assetReferenceId: `asset-${index}`,
+  }));
+  const upgraded = mergeVisualPlan(generated, oldPlan, [], null, 4);
+  assert.ok(upgraded.every((item) => !Object.hasOwn(item, 'negativePrompt')));
+  assert.deepEqual(upgraded.map((item) => item.assetReferenceId), oldPlan.map((item) => item.assetReferenceId));
+  assert.ok(upgraded.every((item) => item.prompt.includes('水印')));
 });

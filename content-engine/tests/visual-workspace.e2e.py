@@ -195,14 +195,17 @@ with sync_playwright() as playwright:
             break
         page.wait_for_timeout(100)
     assert state["visual_writes"] >= 1, "自动生成的配图方案没有保存"
-    assert state["project"]["delivery"]["platforms"]["WECHAT"]["visual"]["planVersion"] == 4
+    assert state["project"]["delivery"]["platforms"]["WECHAT"]["visual"]["planVersion"] == 5
     assert all(item["assetReferenceId"] is None for item in state["project"]["delivery"]["platforms"]["WECHAT"]["visual"]["plan"][1:])
     page.get_by_role("button", name=re.compile(r"文章封面")).click()
     page.get_by_role("button", name="AI 生图", exact=True).click()
     page.get_by_role("button", name="设置项目配图风格", exact=True).click()
     page.get_by_role("heading", name="项目配图风格", exact=True).wait_for()
-    assert page.locator(".visual-style-card").count() >= 16
+    assert page.locator(".visual-style-card").count() >= 5
+    assert page.locator(".visual-style-preview").count() >= 6
+    assert page.get_by_text("25 套案例模板", exact=True).is_visible()
     page.screenshot(path=ARTIFACTS / "visual-style-dialog.png", full_page=True)
+    page.get_by_role("button", name=re.compile(r"插画与创意")).click()
     page.get_by_role("button", name=re.compile(r"清新波普怀旧")).click()
     page.locator(".visual-style-custom textarea").fill("统一使用薄荷绿边框，避免高饱和紫色")
     page.get_by_role("button", name="应用到项目", exact=True).click()
@@ -220,6 +223,7 @@ with sync_playwright() as playwright:
     assert portrait_preview and abs(portrait_preview["width"] / portrait_preview["height"] - 0.75) <= 0.04, f"3:4 预览比例错误: {portrait_preview}"
     page.locator(".visual-generate-controls select").select_option("16:9")
     page.get_by_text("高级设置", exact=True).click()
+    assert page.get_by_text("负面提示词", exact=True).count() == 0
     prompt = page.locator(".visual-prompt-field textarea").first.input_value()
     assert len(prompt) > 100 and "公众号" in prompt and "天链三号01星" in prompt
     assert "思维导图" in prompt and "波普怀旧" in prompt and "参考图只用于参考色彩、排版" in prompt

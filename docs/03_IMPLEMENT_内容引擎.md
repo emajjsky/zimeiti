@@ -19,7 +19,7 @@
 
 ## 2026-07-30 实现：视觉导演 v4
 
-- `visual-plan.mjs` 将 `VISUAL_PLAN_VERSION` 升级为 4，新增 `visualStylePresets()`、`visualTemplatesFor()` 和 `updateVisualPlanItem()`。视觉类型、模板、风格、结构内容或参考图变化时统一重编译提示词，避免前端拼接业务字符串。
+- `visual-plan.mjs` 当前 `VISUAL_PLAN_VERSION` 为 5，并通过 `visualStylePresets()`、`visualTemplatesFor()` 和 `updateVisualPlanItem()` 统一重编译提示词。版本 5 移除独立负面提示词，把所有禁止项写入最终提示词，并为每套项目风格提供案例模板元数据。
 - `CreativeVisualPlanItem` 新增 `stylePreset / templatePreset / sourceExcerpt / contentBlocks / references`。`CreativeVisualDelivery.styleProfile` 保存当前平台项目默认风格，`INHERIT` 项跟随项目，显式预设保持独立。
 - `mergeVisualPlan()` 对 v3 方案执行无损升级：保留 `purpose / focus / avoidConcepts / searchQueries / informationPoints / size / assetReferenceId`，补齐视觉导演字段并替换旧提示词。v2 与 v1 继续使用既有迁移边界。
 - `VisualWorkspace.tsx` 保留左侧图片位和右侧任务结构，新增项目风格、视觉结构、版式模板、单图风格、策划内容和参考图控制。结构化修改使用 650ms 自动保存；手工修改高级提示词不会被非结构操作覆盖。
@@ -896,3 +896,10 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - “波普怀旧”升级为“清新波普怀旧”，明确薄荷绿、婴儿蓝、珊瑚粉、奶油黄、丝网印刷网点和轻微错版质感，同时排除棕黄旧照片、霓虹渐变和厚重做旧。
 - 项目风格新增最多 1200 字的统一补充要求，一次保存后自动进入所有跟随项目风格的图片提示词；每张图片仍可使用单图风格覆盖项目预设。
 - 风格选择使用应用内分组风格库，桌面端三列、移动端单列，操作区固定且无横向溢出。页面继续沿用现有浅色工具台视觉，不增加无关说明或装饰动画。
+
+## 2026-07-31 实现：配图案例模板与单提示词协议
+
+- 独立负面提示词从配图项类型、保存协议、生图接口、百炼 CLI 参数和前端高级设置中删除。错别字、乱码、水印、虚构标识等禁止项统一进入最终提示词，避免两份规则冲突。
+- `VISUAL_PLAN_VERSION` 升级为 5。旧版项目配图方案在加载时重新编译最终提示词，并移除遗留的 `negativePrompt` 字段，已有素材绑定继续保留。
+- 项目风格由 17 套扩展为 25 套，新增黑白刊物、现代报刊、生活方式摄影、咨询报告、科普图谱、铅笔线稿、木刻版画和工业纪实。
+- 风格选择器改为分类案例画廊。每次只显示当前分类，卡片直接呈现版式、构图、图文密度、色彩和材质差异；右侧固定展示选中案例的大预览、用途、色板及项目统一补充要求。

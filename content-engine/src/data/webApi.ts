@@ -77,7 +77,7 @@ export const webCreative = {
   removeInput: (id: string) => request<void>(`/creative/project-inputs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   createReference: (projectId: string, input: ProjectReferenceMetadata & { url: string }) => request<ProjectReference>(`/creative/projects/${encodeURIComponent(projectId)}/references`, { method: 'POST', body: JSON.stringify(input) }),
   searchImages: (query: string) => request<{ provider: string; results: Array<{ id: string; title: string; thumbnailUrl: string; imageUrl: string; sourceUrl: string; license: string; attribution: string }> }>(`/creative/image-search?q=${encodeURIComponent(query)}`),
-  generateImage: (projectId: string, input: { platform: CreativePlatform; prompt: string; size: '1:1' | '3:4' | '4:3' | '9:16' | '16:9'; negativePrompt?: string; referenceImageIds?: string[] }) => request<{ reference: ProjectReference }>(`/creative/projects/${encodeURIComponent(projectId)}/visual/generate`, { method: 'POST', body: JSON.stringify(input) }),
+  generateImage: (projectId: string, input: { platform: CreativePlatform; prompt: string; size: '1:1' | '3:4' | '4:3' | '9:16' | '16:9'; referenceImageIds?: string[] }) => request<{ reference: ProjectReference }>(`/creative/projects/${encodeURIComponent(projectId)}/visual/generate`, { method: 'POST', body: JSON.stringify(input) }),
   updateReference: (id: string, input: ProjectReferenceMetadata) => request<ProjectReference>(`/creative/project-references/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(input) }),
   removeReference: (id: string) => request<void>(`/creative/project-references/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   uploadFile: (projectId: string, file: File, input: ProjectReferenceMetadata) => {

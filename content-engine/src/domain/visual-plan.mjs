@@ -1,4 +1,4 @@
-export const VISUAL_PLAN_VERSION = 4;
+export const VISUAL_PLAN_VERSION = 5;
 
 const platformLabels = {
   WECHAT: '公众号',
@@ -112,7 +112,67 @@ const stylePresets = [
     id: 'TECH_MEDIA', name: '科技媒体', group: 'TECHNOLOGY', description: '精准、冷静，适合 AI、互联网与产业科技', swatches: ['#F3F6F8', '#2864DC', '#29A38A', '#1E293B'],
     prompt: '现代科技媒体编辑视觉；浅冷灰底、钴蓝、青绿和深石墨色；使用精确网格、真实产品或技术结构、克制的数据元素与细线连接；画面明亮清晰，重点关系可解释；避免紫蓝霓虹渐变、发光大脑、机器人剪影、代码雨、HUD界面和无依据未来城市',
   },
+  {
+    id: 'MONO_EDITORIAL', name: '黑白刊物', group: 'EDITORIAL', description: '高反差黑白，适合人物观点与深度专题', swatches: ['#F7F7F4', '#171717', '#737373', '#D8D8D2'],
+    prompt: '现代黑白独立刊物视觉；以纸白、炭黑和两级灰度建立层次，只保留一个极小的灰色强调；使用大胆裁切、非对称栏目网格、醒目的留白和克制编号；照片保持真实颗粒与清楚中间调；避免黑底白字铺满、奢侈品广告感、装饰线滥用和过暗细节丢失',
+  },
+  {
+    id: 'NEWSPAPER_EDITORIAL', name: '现代报刊', group: 'EDITORIAL', description: '栏目与标题感强，适合时事、评论与历史', swatches: ['#F5F2EA', '#202020', '#A52D2D', '#7F8A82'],
+    prompt: '现代中文报刊专题视觉；柔和新闻纸底、墨黑正文结构、暗红重点和灰绿辅助；多栏网格、醒目标题、细分隔线与资料图片形成清楚阅读秩序；保留轻微油墨渗透和纸纤维；避免仿旧发黄过度、英文假报头、密集小字和复古贴纸拼盘',
+  },
+  {
+    id: 'LIFESTYLE_PHOTO', name: '生活方式摄影', group: 'EDITORIAL', description: '自然松弛，适合成长、职场与生活经验', swatches: ['#F7F4EE', '#9DB8AD', '#D7A48F', '#4B5960'],
+    prompt: '当代生活方式编辑摄影；柔和自然日光、低饱和鼠尾草绿、浅珊瑚和中性灰蓝；记录真实空间、手部动作与日常物件，构图松弛但主体明确，保留可用于标题的自然留白；材质真实不过度磨皮；避免摆拍微笑、网红奶油滤镜、空洞咖啡桌和无关装饰物',
+  },
+  {
+    id: 'CONSULTING_REPORT', name: '咨询报告', group: 'KNOWLEDGE', description: '结论先行，适合策略、行业与商业框架', swatches: ['#F7F8FA', '#173B73', '#5B83B4', '#D9A441'],
+    prompt: '专业咨询报告信息视觉；冷白底、深海军蓝、钢蓝和少量琥珀色强调；结论置顶，使用矩阵、阶段箭头、结构树和关键数字建立咨询式阅读路径；网格严谨、标签简短、信息密度高但不拥挤；避免PPT默认SmartArt、彩虹配色、虚构数据和大段正文塞进图片',
+  },
+  {
+    id: 'SCIENCE_ATLAS', name: '科普图谱', group: 'KNOWLEDGE', description: '结构准确，适合自然、医学与技术科普', swatches: ['#F5F8F7', '#2D6B66', '#85B8A5', '#E3A55B'],
+    prompt: '现代科普图谱视觉；清洁浅灰白底、深青绿、植物绿与少量橙色标注；以剖面、局部放大、编号引线和尺度关系解释结构，主体准确、标注对应明确；兼具自然绘图质感和现代编辑网格；避免伪科学器官结构、无意义分子式、儿童教材卡通化和无法辨认的小标签',
+  },
+  {
+    id: 'PENCIL_SKETCH', name: '铅笔线稿', group: 'ILLUSTRATION', description: '轻巧克制，适合思考、教程与人物故事', swatches: ['#FAF8F2', '#353A40', '#9AA6A0', '#D68A78'],
+    prompt: '精致编辑型铅笔线稿；暖白素描纸、石墨灰、灰绿和少量陶粉色；线条有轻重与停顿，使用局部排线表达体积，构图像设计手稿而非儿童涂鸦；主体清楚，旁注与箭头保持克制；避免脏乱擦痕、漫画夸张表情、满页手写字和机械描边感',
+  },
+  {
+    id: 'WOODCUT_PRINT', name: '木刻版画', group: 'CULTURAL', description: '粗粝有力，适合历史、民俗与人物主题', swatches: ['#F2EBDD', '#1F2724', '#B63C31', '#315F61'],
+    prompt: '当代木刻版画海报视觉；米白纸、深墨黑、砖红和孔雀青；用粗细刀痕、黑白块面对比和有限套色塑造人物或历史场景，构图集中而有力量；保留真实印刷压痕与轻微套色偏差；避免旅游纪念品图案、满版传统纹样、仿古棕黄和过度血腥戏剧化',
+  },
+  {
+    id: 'INDUSTRIAL_MEDIA', name: '工业纪实', group: 'TECHNOLOGY', description: '真实硬朗，适合制造、汽车与产业现场', swatches: ['#EEF1F2', '#39464F', '#6F8F93', '#E18B47'],
+    prompt: '现代工业纪实媒体视觉；冷灰、钢铁蓝、低饱和青灰和安全橙点缀；真实工厂、设备、材料与作业关系优先，使用清晰透视、自然工业光和适度广角交代尺度；细节锐利但不过分HDR；避免科幻工厂、无人物空车间、蓝色霓虹、虚构品牌标识和廉价宣传片光效',
+  },
 ];
+
+const styleCases = {
+  FRESH_EDITORIAL: { caseLabel: '人物专题', caseTitle: '把复杂的事，说得清楚一点', caseMeta: '照片主导 · 非对称留白' },
+  BUSINESS_EDITORIAL: { caseLabel: '行业观察', caseTitle: '市场正在进入新的增长周期', caseMeta: '数据与照片 · 稳定网格' },
+  SWISS_GRID: { caseLabel: '观点封面', caseTitle: '重新理解效率', caseMeta: '强对比 · 模数网格' },
+  DOCUMENTARY: { caseLabel: '现场记录', caseTitle: '真实工作的一天', caseMeta: '环境人物 · 自然光' },
+  CINEMATIC_DOCUMENTARY: { caseLabel: '人物故事', caseTitle: '那些没有被看见的选择', caseMeta: '宽银幕 · 叙事光影' },
+  MONO_EDITORIAL: { caseLabel: '深度访谈', caseTitle: '保持判断，比追赶更重要', caseMeta: '黑白影像 · 大胆裁切' },
+  NEWSPAPER_EDITORIAL: { caseLabel: '时事评论', caseTitle: '今天，我们如何理解变化', caseMeta: '报刊栏目 · 资料编排' },
+  LIFESTYLE_PHOTO: { caseLabel: '个人成长', caseTitle: '慢一点，也能把事情做好', caseMeta: '日常场景 · 自然留白' },
+  MINIMAL_KNOWLEDGE: { caseLabel: '方法拆解', caseTitle: '三步建立自己的内容系统', caseMeta: '模块卡片 · 结论优先' },
+  DATA_VISUAL: { caseLabel: '数据解读', caseTitle: '一张图看懂五年变化', caseMeta: '趋势对比 · 数据语义' },
+  BLUEPRINT_DIAGRAM: { caseLabel: '原理图解', caseTitle: '一个智能体是怎样工作的', caseMeta: '结构连线 · 工程视角' },
+  HAND_DRAWN_NOTES: { caseLabel: '读书笔记', caseTitle: '真正有用的五个方法', caseMeta: '圈注箭头 · 纸张质感' },
+  CONSULTING_REPORT: { caseLabel: '策略框架', caseTitle: '增长机会与行动路径', caseMeta: '结论先行 · 矩阵框架' },
+  SCIENCE_ATLAS: { caseLabel: '科学解释', caseTitle: '大模型如何理解一句话', caseMeta: '剖面放大 · 编号引线' },
+  RETRO_POP: { caseLabel: '清新科普', caseTitle: 'AI 工具也可以很好玩', caseMeta: '丝网网点 · 马卡龙套色' },
+  PAPER_COLLAGE: { caseLabel: '人文观察', caseTitle: '记忆是怎样被保存的', caseMeta: '照片裁片 · 撕纸层次' },
+  FLAT_GEOMETRIC: { caseLabel: '概念解释', caseTitle: '人与工具的新关系', caseMeta: '几何人物 · 清晰关系' },
+  SOFT_3D: { caseLabel: '产品主视觉', caseTitle: '让想法变成看得见的东西', caseMeta: '哑光体积 · 柔和光影' },
+  PENCIL_SKETCH: { caseLabel: '思考手稿', caseTitle: '一个创意是怎样长出来的', caseMeta: '石墨线条 · 局部排线' },
+  NEW_CHINESE: { caseLabel: '文化专题', caseTitle: '古人的时间观', caseMeta: '东方留白 · 现代网格' },
+  INK_WASH: { caseLabel: '哲思随笔', caseTitle: '留白，也是一种表达', caseMeta: '轻墨层次 · 朱红落点' },
+  GUOCHAO_POSTER: { caseLabel: '历史封面', caseTitle: '从一件器物看见时代', caseMeta: '大胆裁切 · 现代套色' },
+  WOODCUT_PRINT: { caseLabel: '民俗人物', caseTitle: '土地上生长出的故事', caseMeta: '刀痕块面 · 有限套色' },
+  TECH_MEDIA: { caseLabel: '前沿科技', caseTitle: '智能体正在重写工作流', caseMeta: '结构数据 · 明亮冷静' },
+  INDUSTRIAL_MEDIA: { caseLabel: '产业现场', caseTitle: '制造业里的新效率', caseMeta: '真实设备 · 工业尺度' },
+};
 
 const visualTemplates = {
   NEWS_PHOTO: [{ id: 'EDITORIAL_CROP', name: '编辑裁切', prompt: '编辑式主体裁切，保留标题安全区' }],
@@ -139,7 +199,7 @@ const visualTemplates = {
 };
 
 export function visualStylePresets() {
-  return stylePresets.map((item) => ({ ...item, swatches: [...item.swatches] }));
+  return stylePresets.map((item) => ({ ...item, ...styleCases[item.id], swatches: [...item.swatches] }));
 }
 
 export function visualTemplatesFor(type) {
@@ -336,14 +396,12 @@ export function buildVisualGenerationSpec(item, context, mode = item.generationM
     const pointText = points.map((point, index) => `${index + 1}. ${point}`).join('；');
     return {
       generationMode: mode,
-      prompt: `为${platformLabel}内容《${title}》制作一张${roleLabel}${visualTypeLabels[item.visualType]}。视觉风格：${style}。版式模板：${template.name}，${template.prompt}。${structure}请在图片内准确生成简体中文，并严格使用以下文案：主标题：${headline}；核心结论：${item.purpose}；信息点：${pointText}。平台版式：${infographicStyle(platform)}；阅读顺序明确，字号清晰，留白充足。${reference}${avoid}不得自行添加数据、机构、人物引语或未经正文支持的结论；涉及新闻事件时不伪造新闻现场，不虚构具体机构标识。`,
-      negativePrompt: unique(['错别字', '乱码', '拼写错误', '文字变形', '信息拥挤', '层级混乱', '水印', 'Logo', '二维码', '低清晰度', ...item.avoidConcepts]).join('、'),
+      prompt: `为${platformLabel}内容《${title}》制作一张${roleLabel}${visualTypeLabels[item.visualType]}。视觉风格：${style}。版式模板：${template.name}，${template.prompt}。${structure}请在图片内准确生成简体中文，并严格使用以下文案：主标题：${headline}；核心结论：${item.purpose}；信息点：${pointText}。平台版式：${infographicStyle(platform)}；阅读顺序明确，字号清晰，留白充足；不得出现错别字、乱码、拼写错误、文字变形、信息拥挤、层级混乱、水印、Logo、二维码或低清晰度内容。${reference}${avoid}不得自行添加数据、机构、人物引语或未经正文支持的结论；涉及新闻事件时不伪造新闻现场，不虚构具体机构标识。`,
     };
   }
   return {
     generationMode: mode,
     prompt: `为${platformLabel}内容《${title}》制作一张${roleLabel}${visualTypeLabels[item.visualType]}。视觉风格：${style}。版式模板：${template.name}，${template.prompt}。核心画面：${item.focus}。表达目的：${item.purpose}。${structure}${visualStyle(platform, item.role)}。${reference}${avoid}画面真实、准确、干净，细节清晰；只生成视觉素材，不在图片内生成文字、Logo、二维码或水印。涉及新闻事件时采用概念视觉，不伪造新闻现场，不虚构具体机构标识。`,
-    negativePrompt: unique(['文字', '水印', 'Logo', '二维码', '低清晰度', '错误标识', '畸形结构', '夸张光效', ...item.avoidConcepts]).join('、'),
   };
 }
 
@@ -361,6 +419,7 @@ export function updateVisualPlanItem(item, patch, context, styleProfile = { pres
     contentBlocks: patch.contentBlocks ?? item.contentBlocks ?? contentBlocksFor(visualType, item.sourceExcerpt ?? item.purpose, item.focus, item.purpose),
     references: patch.references ?? item.references ?? [],
   };
+  delete next.negativePrompt;
   return { ...next, ...buildVisualGenerationSpec(next, context, next.generationMode, styleProfile) };
 }
 

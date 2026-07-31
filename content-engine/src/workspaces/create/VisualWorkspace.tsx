@@ -1,5 +1,5 @@
 import { Check, Image, LoaderCircle, Minus, Palette, Plus, RefreshCw, Save, Search, Sparkles, Trash2, Upload, X } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { webCreative } from '../../data/webApi';
 import { platformName, type ContentProject, type CreativeVisualGenerationMode, type CreativeVisualPlanItem, type CreativeVisualReferenceUse, type CreativeVisualSize, type CreativeVisualStylePreset, type CreativeVisualStyleProfile } from '../../domain/content';
 import type { CreativePlatform, ProjectReference } from '../../domain/creative';
@@ -43,6 +43,23 @@ const visualStyleGroups = Object.entries(visualStyleGroupLabels).map(([id, name]
   name,
   styles: visualStyles.filter((style) => style.group === id),
 }));
+type VisualStyleGroupId = (typeof visualStyleGroups)[number]['id'];
+type VisualStyleDefinition = (typeof visualStyles)[number];
+
+function VisualStylePreview({ style, large = false }: { style: VisualStyleDefinition; large?: boolean }) {
+  const previewStyle = {
+    '--style-1': style.swatches[0],
+    '--style-2': style.swatches[1],
+    '--style-3': style.swatches[2],
+    '--style-4': style.swatches[3],
+  } as CSSProperties;
+  return <span className={'visual-style-preview' + (large ? ' large' : '')} data-style={style.id} style={previewStyle} aria-hidden="true">
+    <span className="visual-style-case-label">{style.caseLabel}</span>
+    <strong>{style.caseTitle}</strong>
+    <span className="visual-style-case-art"><i/><i/><i/><i/></span>
+    <small>{style.caseMeta}</small>
+  </span>;
+}
 
 function referenceModeValue(uses: CreativeVisualReferenceUse[]) {
   return referenceModes.find((mode) => mode.uses.length === uses.length && mode.uses.every((use) => uses.includes(use)))?.id ?? 'COLOR_LAYOUT';
@@ -72,6 +89,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
   const [styleProfile, setStyleProfile] = useState<CreativeVisualStyleProfile>({ preset: 'FRESH_EDITORIAL', customPrompt: '' });
   const [styleDraft, setStyleDraft] = useState<CreativeVisualStyleProfile>({ preset: 'FRESH_EDITORIAL', customPrompt: '' });
   const [styleDialogOpen, setStyleDialogOpen] = useState(false);
+  const [activeStyleGroup, setActiveStyleGroup] = useState<VisualStyleGroupId>('EDITORIAL');
   const [replanDialogOpen, setReplanDialogOpen] = useState(false);
   const [keepAssignedAssets, setKeepAssignedAssets] = useState(true);
   const [hydratedPlanKey, setHydratedPlanKey] = useState('');
@@ -102,6 +120,8 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
   const bodyItemCount = activePlatform === 'WEIBO' ? plan.length : plan.filter((item) => item.role === 'BODY' || item.role === 'CARD').length;
   const countRange = visualPlanCountRange(activePlatform);
   const hasCopy = String(version?.body ?? '').trim().length >= 80;
+  const selectedStyle = visualStyles.find((style) => style.id === styleDraft.preset) ?? visualStyles[0];
+  const visibleStyleGroup = visualStyleGroups.find((group) => group.id === activeStyleGroup) ?? visualStyleGroups[0];
 
   useEffect(() => {
     const next = mergeVisualPlan(generatedPlan, currentDelivery?.visual?.plan, currentDelivery?.visual?.assetReferenceIds ?? [], currentDelivery?.visual?.coverReferenceId ?? null, currentDelivery?.visual?.planVersion ?? 0);
@@ -214,6 +234,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
 
   const openStyleDialog = () => {
     setStyleDraft({ preset: styleProfile.preset, customPrompt: styleProfile.customPrompt ?? '' });
+    setActiveStyleGroup(visualStyles.find((style) => style.id === styleProfile.preset)?.group ?? 'EDITORIAL');
     setStyleDialogOpen(true);
   };
 
@@ -280,7 +301,6 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
     try {
       const { reference } = await webCreative.generateImage(project.id, {
         platform: activePlatform, prompt: activeItem.prompt.trim(), size: activeItem.size,
-        negativePrompt: activeItem.negativePrompt.trim() || undefined,
         referenceImageIds: activeItem.references.map((item) => item.referenceId),
       });
       assignAsset(reference);
@@ -434,7 +454,6 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
                 <summary>高级设置</summary>
                 <div>
                   <label className="visual-prompt-field"><span>生图提示词</span><textarea value={activeItem.prompt} onChange={(event) => updateActiveItem({ prompt: event.target.value }, false)}/></label>
-                  <label className="visual-prompt-field compact"><span>负面提示词</span><textarea value={activeItem.negativePrompt} onChange={(event) => updateActiveItem({ negativePrompt: event.target.value }, false)}/></label>
                 </div>
               </details>
               <button className="text-button visual-model-link" type="button" onClick={onOpenModelSettings}>文生图模型设置</button>
@@ -455,12 +474,21 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
 
     {styleDialogOpen && <div className="visual-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setStyleDialogOpen(false); }}>
       <section className="visual-style-dialog" role="dialog" aria-modal="true" aria-labelledby="visual-style-dialog-title">
-        <header><div><h2 id="visual-style-dialog-title">项目配图风格</h2><span>{visualStyles.length} 套预设</span></div><button className="icon-button" type="button" aria-label="关闭风格设置" onClick={() => setStyleDialogOpen(false)}><X size={18}/></button></header>
+        <header><div><h2 id="visual-style-dialog-title">项目配图风格</h2><span>{visualStyles.length} 套案例模板</span></div><button className="icon-button" type="button" aria-label="关闭风格设置" onClick={() => setStyleDialogOpen(false)}><X size={18}/></button></header>
         <div className="visual-style-dialog-body">
-          {visualStyleGroups.map((group) => <section className="visual-style-group" key={group.id}><h3>{group.name}</h3><div>{group.styles.map((style) => <button className={`visual-style-card${styleDraft.preset === style.id ? ' active' : ''}`} type="button" key={style.id} onClick={() => setStyleDraft((current) => ({ ...current, preset: style.id }))}><span className="visual-style-swatches" aria-hidden="true">{style.swatches.map((color) => <i key={color} style={{ background: color }}/>)}</span><b>{style.name}</b><small>{style.description}</small>{styleDraft.preset === style.id && <Check size={16}/>}</button>)}</div></section>)}
-          <label className="visual-style-custom"><span>统一补充要求（可选）</span><textarea maxLength={1200} value={styleDraft.customPrompt ?? ''} onChange={(event) => setStyleDraft((current) => ({ ...current, customPrompt: event.target.value }))} placeholder="例如：使用薄荷绿、珊瑚粉和奶油黄；保留复古印刷网点；不要深色科技感"/><small>{styleDraft.customPrompt?.length ?? 0}/1200</small></label>
+          <nav className="visual-style-tabs" aria-label="风格分类">{visualStyleGroups.map((group) => <button type="button" className={group.id === activeStyleGroup ? 'active' : ''} key={group.id} onClick={() => setActiveStyleGroup(group.id)}><span>{group.name}</span><small>{group.styles.length}</small></button>)}</nav>
+          <div className="visual-style-browser">
+            <section className="visual-style-gallery" aria-label={visibleStyleGroup.name + '案例模板'}>
+              {visibleStyleGroup.styles.map((style) => <button aria-label={style.name + '：' + style.description} className={'visual-style-card' + (styleDraft.preset === style.id ? ' active' : '')} type="button" key={style.id} onClick={() => setStyleDraft((current) => ({ ...current, preset: style.id }))}><VisualStylePreview style={style}/><span className="visual-style-card-copy"><b>{style.name}</b><small>{style.description}</small></span>{styleDraft.preset === style.id && <span className="visual-style-selected"><Check size={13}/>已选</span>}</button>)}
+            </section>
+            <aside className="visual-style-inspector">
+              <VisualStylePreview style={selectedStyle} large/>
+              <div className="visual-style-inspector-head"><div><b>{selectedStyle.name}</b><span>{selectedStyle.description}</span></div><span className="visual-style-palette" aria-label="模板配色">{selectedStyle.swatches.map((color) => <i key={color} style={{ background: color }}/>)}</span></div>
+              <label className="visual-style-custom"><span>统一补充要求</span><textarea maxLength={1200} value={styleDraft.customPrompt ?? ''} onChange={(event) => setStyleDraft((current) => ({ ...current, customPrompt: event.target.value }))} placeholder="可补充品牌色、构图偏好、参考质感或必须保留的视觉元素"/><small>{styleDraft.customPrompt?.length ?? 0}/1200</small></label>
+            </aside>
+          </div>
         </div>
-        <footer><button className="button" type="button" onClick={() => setStyleDialogOpen(false)}>取消</button><button className="button primary" type="button" onClick={applyProjectStyle}>应用到项目</button></footer>
+        <footer><span>当前选择：<b>{selectedStyle.name}</b></span><button className="button" type="button" onClick={() => setStyleDialogOpen(false)}>取消</button><button className="button primary" type="button" onClick={applyProjectStyle}>应用到项目</button></footer>
       </section>
     </div>}
 
