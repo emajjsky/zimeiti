@@ -863,3 +863,14 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - `server/worker.cjs` 将账号声音自动修正、首次质量审稿、质量重写和复审视为正文后的次级步骤。任一步骤失败均累计到 `pipelineIssues`，保留最近一次已通过 `parseCopyOutput()` 的正文并继续创建候选产物。
 - 审稿提示词明确要求 `issues` 必须为字符串数组，降低模型再次输出对象数组的概率；解析层仍保留兼容处理，不能依赖提示词保证稳定性。
 - 候选质量状态继续由 `candidateQualityReview()` 汇总审稿、声音与流水线问题。异常候选为 `NEEDS_REVIEW`，不会绕过现有采用门禁。
+
+## 2026-07-31 实现：一次生成并保存最终正文
+
+- `server/services/project-copy-action.cjs` 新增 `buildWritingPacket()`、`buildFinishedCopyPrompt()`、`parseFinishedCopyBody()` 和 `copyActionPersistenceMode()`。资料包只保留作者材料、平台规则、账号声音、Skill、顶层已核验主张和禁止主张，不复制 evidence quote 或参考文章原文。
+- `server/worker.cjs` 的 `GENERATE_DRAFT` 先调用 `prepareCopyResearchContext()`。它优先复用已采用研究或作者材料，必要时复用研究计划、来源抓取和事实核验函数；研究用量与最终写作用量归到同一 `PROJECT_COPY` 任务。
+- 最终成稿使用纯文本契约并只调用一次写作模型。Worker 不再导入或调用 `buildCopyRepairPrompt()`、`buildCopyQualityReviewPrompt()`、`detectVoiceViolations()`、`candidateQualityReview()` 或 `parseCopyQualityReviewSafely()`。
+- 首次正文事务创建 `ACCEPTED` 的 `PLATFORM_COPY`，必要时创建 `CONTENT_MASTER`，写入 `platform_content_versions`，并通过 `updateCreativeState()` 与 `applyAcceptedCopyToState()` 更新正式项目快照和阶段摘要。
+- 非首次动作仍使用现有结构化修改契约，但每个用户动作只调用一次模型并保存 `CANDIDATE`，不覆盖正式正文。
+- `ProjectAgent.tsx` 监听首次任务完成，读取最新项目后通知 `CopyWorkspace` 更新编辑器；候选不再自动弹出。`CopyCandidateDialog.tsx` 删除 AI 质量问题和发布前核验门禁，只保留全文、段落差异与用户采用/放弃操作。
+- `023_finished_copy_workflow.sql` 将历史 `PLATFORM_COPY + CANDIDATE + NEEDS_REVIEW` 产物更新为 `REJECTED`，不删除正文、审稿或运行记录。
+- API 为首次正文任务始终冻结 `researchRoute` 和 `verificationRoute`：有独立百炼策略时使用对应模型，否则复用 `CONTENT_WRITING` 的模型与连接。`prepareCopyResearchContext()` 对整个自动研究阶段设置故障边界，任何研究异常都回退到任务快照中的已保存上下文后继续最终写作。

@@ -6,6 +6,10 @@ import copyActionModule from '../server/services/project-copy-action.cjs';
 const {
   COPY_ACTIONS,
   buildCopyPrompt,
+  buildWritingPacket,
+  buildFinishedCopyPrompt,
+  parseFinishedCopyBody,
+  copyActionPersistenceMode,
   buildCopyQualityReviewPrompt,
   detectVoiceViolations,
   copyActionVersion,
@@ -50,7 +54,7 @@ test('账号声音规则检测明确的 AI 套话、emoji 标题和强制互动'
   assert.deepEqual(issues.map((item) => item.code), ['BANNED_PHRASE', 'EMOJI_HEADING', 'FORCED_CTA']);
 });
 
-test('账号声音改写后仍有套话时保留候选并进入正文重写，不把整次生成标成失败', () => {
+test('历史账号声音审查结果仍可读取，但不参与新的正文生成执行链', () => {
   assert.deepEqual(candidateQualityReview(
     { approved: true, issues: [] },
     [{ code: 'BANNED_PHRASE', excerpt: '这意味着', message: '避免使用套话：这意味着' }],
@@ -58,9 +62,52 @@ test('账号声音改写后仍有套话时保留候选并进入正文重写，�
     status: 'NEEDS_REVIEW',
     issues: ['避免使用套话：这意味着'],
   });
-  const worker = fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8');
-  assert.doesNotMatch(worker, /throw new Error\(`账号声音检查未通过/);
-  assert.match(worker, /candidateQualityReview\(review, \[\.\.\.finalVoiceIssues, \.\.\.pipelineIssues\]\)/);
+});
+
+test('写作资料包只保留顶层已核验事实，不泄漏证据摘录和旧审稿信息', () => {
+  const packet = buildWritingPacket({
+    projectId: 'project-1',
+    platform: 'WECHAT',
+    project: {
+      title: '宇树科技 IPO 到底意味着什么',
+      planning: { title: '宇树科技 IPO 到底意味着什么', category: '财经', angle: '解释上市进程', objective: '帮助普通读者看懂', targetAudience: '普通投资者', coreMessage: '看懂进程，不做收益承诺' },
+    },
+    brief: { lengthTarget: '1800 字', notes: '语气克制' },
+    accountVoice: { name: '把话说透', rules: { opening: '先给判断', bannedPhrases: ['众所周知'] } },
+    materials: [{ id: 'draft-1', kind: 'DRAFT', title: '我的草稿', body: '这是作者自己的判断。' }],
+    researchContext: {
+      verifiedFacts: [{ claim: 'IPO 计划募集资金总额为 42.02 亿元', status: 'VERIFIED', evidence: [{ sourceId: 'source-1', quote: '3 月 20 日另有一项旁支信息' }] }],
+      cautions: [{ claim: '预计上市后股价翻倍', status: 'NEEDS_REVIEW', evidence: [{ sourceId: 'source-2', quote: '未经核验的预测' }] }],
+      creativeReferences: [{ id: 'ref-1', purpose: 'STRUCTURE', summary: '先事件后影响', originalText: '不得复制的参考原文' }],
+    },
+    qualityReview: { status: 'NEEDS_REVIEW', issues: ['旧审稿问题'] },
+  });
+
+  assert.equal(packet.lockedTitle, '宇树科技 IPO 到底意味着什么');
+  assert.deepEqual(packet.verifiedClaims, [{ id: 'claim-1', claim: 'IPO 计划募集资金总额为 42.02 亿元', sourceIds: ['source-1'] }]);
+  assert.deepEqual(packet.forbiddenClaims, ['预计上市后股价翻倍']);
+  assert.equal(packet.authorMaterials[0].content, '这是作者自己的判断。');
+  const serialized = JSON.stringify(packet);
+  assert.doesNotMatch(serialized, /3 月 20 日|未经核验的预测|不得复制的参考原文|旧审稿问题|qualityReview|evidence/);
+});
+
+test('首次正文使用锁定标题和纯文本单次成稿契约', () => {
+  const packet = buildWritingPacket({
+    projectId: 'project-1', platform: 'WECHAT',
+    project: { title: '锁定标题', planning: { title: '锁定标题', category: '科技', targetAudience: '普通读者', objective: '解释变化', coreMessage: '给出清晰判断' } },
+    brief: { lengthTarget: '1200 字' }, materials: [], researchContext: { verifiedFacts: [], cautions: [] },
+  });
+  const prompt = buildFinishedCopyPrompt(packet, '写成适合公众号阅读的完整文章。');
+  assert.match(prompt.system, /只输出最终正文/);
+  assert.doesNotMatch(prompt.system, /JSON|factsToVerify|changeSummary|候选/);
+  assert.equal(parseFinishedCopyBody('这是完整正文。'.repeat(50), packet).title, '锁定标题');
+  assert.throws(() => parseFinishedCopyBody('```json\n{"body":"错误"}\n```', packet), /代码围栏|JSON|正文/);
+});
+
+test('首次生成直接正式保存，只有主动修改保留候选', () => {
+  assert.equal(copyActionPersistenceMode('GENERATE_DRAFT'), 'ACCEPTED');
+  assert.equal(copyActionPersistenceMode('POLISH_EXISTING_DRAFT'), 'CANDIDATE');
+  assert.equal(copyActionPersistenceMode('RESTRUCTURE_DRAFT'), 'CANDIDATE');
 });
 
 test('文案提示词携带账号声音规则与本篇语气，但不携带校准原文', () => {
@@ -257,7 +304,7 @@ test('文案质量审稿只以已核验事实为准，并返回可执行的重�
   assert.deepEqual(reviewInput.allowedExistingCautions, [retainedClaim]);
 });
 
-test('质量审稿的对象型问题会归一为文字，完全异常时也保留正文候选', () => {
+test('历史质量审稿数据仍可兼容读取，但 Worker 不再调用审稿与自动重写', () => {
   assert.deepEqual(parseCopyQualityReview(JSON.stringify({
     approved: false,
     issues: [
@@ -276,10 +323,9 @@ test('质量审稿的对象型问题会归一为文字，完全异常时也保�
   });
 
   const worker = fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8');
-  assert.match(worker, /parseCopyQualityReviewSafely\(reviewed\.content\)/);
-  assert.match(worker, /!review\.approved && !review\.malformed/);
-  assert.match(worker, /账号声音自动修正未完成，已保留修正前正文/);
-  assert.match(worker, /质量审稿未完成，候选正文已保留/);
+  const execute = routeSlice(worker, 'async function generateProjectCopyAction', 'async function generateAgentPlan');
+  assert.doesNotMatch(execute, /buildCopyQualityReviewPrompt|parseCopyQualityReviewSafely|candidateQualityReview|detectVoiceViolations/);
+  assert.doesNotMatch(execute, /buildCopyRepairPrompt/);
 });
 
 test('017 注册八个需要确认的受控文案动作', () => {
@@ -319,18 +365,36 @@ test('Project Agent prepare 不入队，confirm 才创建 Worker Job', () => {
   assert.match(confirm, /await enqueue/);
 });
 
-test('Project Agent Worker 始终创建候选产物，质量风险仅随候选保存', () => {
+test('Project Agent Worker 首次生成直接落正式正文，主动修改才保存候选', () => {
   const worker = fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8');
   const execute = routeSlice(worker, 'async function generateProjectCopyAction', 'async function generateAgentPlan');
   assert.match(worker, /PROJECT_COPY_ACTION/);
   assert.match(execute, /project_artifacts/);
   assert.match(execute, /platform_content_versions/);
-  assert.match(execute, /buildCopyQualityReviewPrompt/);
-  assert.match(execute, /candidateQualityReview\(review, \[\.\.\.finalVoiceIssues, \.\.\.pipelineIssues\]\)/);
-  assert.match(execute, /candidateFactsToVerify/);
-  assert.doesNotMatch(execute, /snapshot\.project\?\.factChecks[\s\S]*output\.factsToVerify/);
-  assert.doesNotMatch(execute, /review\.approved\) throw new Error/);
-  assert.doesNotMatch(execute, /workspace_snapshots/);
+  assert.match(execute, /copyActionPersistenceMode\(snapshot\.action\)/);
+  assert.match(execute, /status:\s*persistenceMode/);
+  assert.match(execute, /updateCreativeState/);
+  assert.match(execute, /applyAcceptedCopyToState/);
+  assert.match(execute, /accepted_at = now\(\)/);
+  assert.doesNotMatch(execute, /qualityReview/);
+});
+
+test('首次正文没有独立研究 Scope 时复用正文模型准备上下文', () => {
+  const server = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
+  const prepare = routeSlice(server, "/agent/prepare", "/agent-runs/:id/confirm");
+  assert.match(prepare, /const primaryRoute = \{ provider: route\.provider, connectionId: route\.connectionId \?\? null, model: route\.model \}/);
+  assert.match(prepare, /researchPolicy\.rowCount \? \{ provider: 'BAILIAN_CLI',[^\n]+ \} : primaryRoute/);
+  assert.match(prepare, /verificationPolicy\.rowCount \? \{ provider: 'BAILIAN_CLI',[^\n]+ \} : primaryRoute/);
+});
+
+test('自动研究失败时降级使用已有上下文继续写正文', () => {
+  const worker = fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8');
+  const prepareStart = worker.indexOf('async function prepareCopyResearchContext');
+  const prepareEnd = worker.indexOf('async function generateProjectCopyAction', prepareStart);
+  const prepare = worker.slice(prepareStart, prepareEnd);
+  assert.match(prepare, /catch \(error\)/);
+  assert.match(prepare, /automatic research failed/);
+  assert.match(prepare, /researchContext:\s*snapshot\.researchContext/);
 });
 
 test('采用候选时更新正式版本并合并待核验事实', () => {

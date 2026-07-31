@@ -23,11 +23,8 @@ test('文案工作区支持四平台且只使用通用 Project Agent', () => {
   assert.match(copy, /CopyCandidateDialog/);
   assert.match(dialog, /完整文稿/);
   assert.match(dialog, /段落差异/);
-  assert.match(dialog, /发布前核验/);
-  assert.match(dialog, /查看核验项/);
-  assert.match(dialog, /qualityReview/);
+  assert.doesNotMatch(dialog, /发布前核验|查看核验项|qualityReview|正文需重写|需先重写/);
   assert.match(dialog, /previewMode/);
-  assert.match(dialog, /useState\(false\)/);
   assert.doesNotMatch(dialog, /candidate-facts/);
   assert.doesNotMatch(workspace, /creative-agent-panel/);
   assert.doesNotMatch(workspace, /prepareOutline|prepareDraft/);
@@ -47,8 +44,8 @@ test('文案工作区支持启用缺失平台、正文选区和明确采用候�
   assert.match(agent, /修改选中.*字/);
   assert.match(agent, /blockedReason/);
   assert.match(dialog, /added[\s\S]*removed[\s\S]*unchanged/);
-  assert.match(dialog, /采用到正文/);
-  assert.match(dialog, /废弃候选/);
+  assert.match(dialog, /采用修改/);
+  assert.match(dialog, /放弃修改/);
   assert.match(api, /enableProjectPlatform/);
   assert.match(api, /rejectArtifact/);
   assert.match(server, /project-artifacts\/:id\/reject/);

@@ -20,6 +20,26 @@ const REVISION_TEMPLATE_SCOPES = {
 };
 const MAX_REVISION_TEMPLATE_LENGTH = 12_000;
 
+const PLATFORM_WRITING_RULES = {
+  WECHAT: [
+    '写成适合手机阅读的完整公众号文章，使用短段落和自然的小标题。',
+    '开篇直接建立读者关心的问题、场景或反差，正文形成完整论证，结尾回收核心判断。',
+    '不写新闻通稿、百科词条、模板化互动或 Markdown 标记。',
+  ],
+  XIAOHONGSHU: [
+    '首屏给出明确阅读价值，使用短段落和高信息密度的图文结构。',
+    '不虚构个人体验，不堆砌 emoji，不强迫点赞收藏。',
+  ],
+  ZHIHU: [
+    '先回答问题，再展开论证、证据、边界和必要的反例。',
+    '保留问题语境，不照搬公众号口吻，不用态度替代论证。',
+  ],
+  WEIBO: [
+    '核心信息或观点前置，根据篇幅写成单条、长微博或可独立阅读的串文。',
+    '压缩重复表达，不照搬小红书分段话术。',
+  ],
+};
+
 const copyOutputSchema = z.object({
   title: z.string().trim().min(1).max(120),
   body: z.string().trim().min(80).max(30_000).refine((value) => !/(\*\*|__|(?:^|\n)\s{0,3}#{1,6}\s+)/m.test(value), '正式文稿不得包含 Markdown 标记。'),
@@ -39,6 +59,11 @@ function copyActionVersion(action) {
 function copyActionScope(action) {
   if (!COPY_ACTIONS.includes(action)) throw new Error('未知的文案动作。');
   return action === 'GENERATE_OUTLINE' || action === 'GENERATE_DRAFT' ? 'CONTENT_WRITING' : 'CONTENT_REWRITE';
+}
+
+function copyActionPersistenceMode(action) {
+  if (!COPY_ACTIONS.includes(action)) throw new Error('未知的文案动作。');
+  return action === 'GENERATE_DRAFT' ? 'ACCEPTED' : 'CANDIDATE';
 }
 
 function conflictQuestion(actions) {
@@ -283,6 +308,114 @@ function parseCopyOutput(content, action, safetyContext) {
   return output;
 }
 
+function compactStrings(values) {
+  return [...new Set((Array.isArray(values) ? values : []).map((value) => String(value ?? '').trim()).filter(Boolean))];
+}
+
+function evidenceSourceIds(fact) {
+  const direct = compactStrings(fact?.sourceIds);
+  const evidence = (Array.isArray(fact?.evidence) ? fact.evidence : []).flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    return [item.sourceId, item.source_id, ...(Array.isArray(item.sourceIds) ? item.sourceIds : [])];
+  });
+  return compactStrings([...direct, ...evidence]);
+}
+
+function authorMaterialView(material) {
+  const rawKind = String(material?.kind ?? '').toUpperCase();
+  const kind = ['DRAFT', 'OPINION', 'EXPERIENCE'].includes(rawKind) ? rawKind : null;
+  const content = String(material?.body ?? material?.content ?? '').trim();
+  if (!kind || !content) return null;
+  return { id: String(material.id), kind, content };
+}
+
+function buildWritingPacket(snapshot, preparedResearch = null) {
+  const research = preparedResearch ?? snapshot.researchContext ?? {};
+  const verifiedFacts = Array.isArray(research.verifiedFacts) ? research.verifiedFacts : Array.isArray(research.facts) ? research.facts : [];
+  const cautions = Array.isArray(research.cautions) ? research.cautions : [];
+  const projectPlanning = snapshot.project?.planning ?? {};
+  const lockedTitle = String(projectPlanning.title ?? snapshot.project?.title ?? snapshot.currentContent?.title ?? '').trim();
+  if (!lockedTitle) throw new Error('项目规划缺少已确认标题。');
+
+  const materialCandidates = [
+    ...(Array.isArray(snapshot.materials) ? snapshot.materials : []),
+    ...(Array.isArray(research.userContent) ? research.userContent : []),
+    ...(Array.isArray(research.materialContext?.userContent) ? research.materialContext.userContent : []),
+  ];
+  const authorMaterials = materialCandidates.map(authorMaterialView).filter(Boolean)
+    .filter((item, index, items) => index === items.findIndex((other) => other.id === item.id));
+  const creativeReferences = (Array.isArray(research.creativeReferences) ? research.creativeReferences : Array.isArray(research.materialContext?.creativeReferences) ? research.materialContext.creativeReferences : [])
+    .map((item, index) => {
+      const purpose = ['ANGLE', 'STRUCTURE', 'STYLE'].includes(item?.purpose) ? item.purpose : item?.role === 'STYLE' ? 'STYLE' : item?.role === 'ANGLE' ? 'ANGLE' : 'STRUCTURE';
+      const summary = String(item?.summary ?? item?.title ?? '').trim();
+      return summary ? { id: String(item?.id ?? `reference-${index + 1}`), purpose, summary } : null;
+    }).filter(Boolean);
+  const verifiedClaims = verifiedFacts
+    .filter((item) => typeof item === 'string' || !item?.status || item.status === 'VERIFIED')
+    .map((item, index) => ({
+      id: String(typeof item === 'object' && item?.id ? item.id : `claim-${index + 1}`),
+      claim: String(typeof item === 'string' ? item : item?.claim ?? '').trim(),
+      sourceIds: typeof item === 'string' ? [] : evidenceSourceIds(item),
+    })).filter((item) => item.claim);
+  const accountVoice = compactStrings([
+    snapshot.accountVoice?.name,
+    snapshot.accountVoice?.offset,
+    ...Object.values(snapshot.accountVoice?.rules ?? {}).flatMap((value) => Array.isArray(value) ? value : [value]),
+  ]);
+  const skillInstructions = (Array.isArray(snapshot.skills) ? snapshot.skills : [])
+    .map((skill) => String(skill?.version?.instructions ?? skill?.instructions ?? '').trim()).filter(Boolean);
+
+  return {
+    projectId: String(snapshot.projectId ?? snapshot.project?.id ?? ''),
+    platform: snapshot.platform,
+    lockedTitle,
+    subject: String(projectPlanning.category ?? snapshot.project?.category ?? '').trim(),
+    contentType: String(snapshot.brief?.contentType ?? snapshot.project?.contentType ?? '图文内容').trim(),
+    audience: String(snapshot.brief?.targetAudience ?? projectPlanning.targetAudience ?? '').trim(),
+    objective: String(snapshot.brief?.objective ?? projectPlanning.objective ?? '').trim(),
+    coreMessage: String(snapshot.brief?.coreMessage ?? projectPlanning.coreMessage ?? snapshot.project?.coreViewpoint ?? '').trim(),
+    targetLength: String(snapshot.brief?.lengthTarget ?? '').trim(),
+    platformRules: PLATFORM_WRITING_RULES[snapshot.platform] ?? [],
+    accountVoice,
+    articleTone: String(snapshot.brief?.notes ?? snapshot.accountVoice?.offset ?? '').trim(),
+    skillInstructions,
+    authorMaterials,
+    verifiedClaims,
+    creativeReferences,
+    forbiddenClaims: compactStrings(cautions.map((item) => typeof item === 'string' ? item : item?.claim)),
+  };
+}
+
+function buildFinishedCopyPrompt(packet, template) {
+  const businessTemplate = String(template ?? '').trim();
+  if (!businessTemplate) throw new Error('正文生成提示词不能为空。');
+  return {
+    system: [
+      '你是内容项目的主笔编辑。请在一次写作中交付可直接进入编辑器的最终成稿。',
+      '先在内部完成选题理解、结构设计、事实边界检查、平台适配和语言检查，再输出结果。',
+      '只输出最终正文，不输出标题、解释、构思过程、检查清单、字段名、代码围栏或其他附加内容。',
+      '标题已经锁定，正文必须承接该标题，不得另起标题或改变选题。',
+      'verifiedClaims 是唯一可作为确定外部事实使用的研究结论；authorMaterials 中的内容按作者草稿、观点或经历处理。',
+      'forbiddenClaims 不得写成确定事实，也不得借助模型已有知识补写具体日期、数字、引语、人物经历或产品能力。',
+      '遵守平台规则、账号声音、本篇语气和 Skill 指令；避免套话、虚假权威、夸张承诺、生硬互动和 AI 模板感。',
+      '成稿必须完整，不得留下待补充、待核验、建议修改或下一步处理等内部工作痕迹。',
+    ].join('\n'),
+    message: JSON.stringify({ businessTemplate, writingPacket: packet }),
+  };
+}
+
+function parseFinishedCopyBody(content, packet) {
+  if (typeof content !== 'string' || !content.trim()) throw new Error('模型没有返回完整正文。');
+  const body = content.trim();
+  if (/```/.test(body)) throw new Error('正文包含代码围栏，不能保存。');
+  if (/^\s*[\[{]/.test(body)) throw new Error('正文返回了结构化对象，不能保存。');
+  if (/(qualityReview|factsToVerify|changeSummary|writingPacket|system prompt|系统提示词)/i.test(body)) throw new Error('正文泄漏了内部字段，不能保存。');
+  if (/(\*\*|__(?:[^_]|$)|(?:^|\n)\s{0,3}#{1,6}\s+)/m.test(body)) throw new Error('正式正文不得包含 Markdown 标记。');
+  if (body.length < 80) throw new Error('模型返回的正文不完整。');
+  if (body.length > 30_000) throw new Error('模型返回的正文超过可保存长度。');
+  return { title: packet.lockedTitle, body };
+}
+
 function buildCopyPrompt(snapshot) {
   const businessTemplate = snapshot.action === 'GENERATE_OUTLINE' || snapshot.action === 'GENERATE_DRAFT'
     ? String(snapshot.template ?? '').trim()
@@ -442,6 +575,7 @@ module.exports = {
   copyOutputSchema,
   copyActionVersion,
   copyActionScope,
+  copyActionPersistenceMode,
   resolveCopyAction,
   copyTemplateScope,
   copyPromptTemplateScope,
@@ -455,6 +589,9 @@ module.exports = {
   validateRevisionTemplate,
   defaultRevisionTemplate,
   parseCopyOutput,
+  buildWritingPacket,
+  buildFinishedCopyPrompt,
+  parseFinishedCopyBody,
   buildCopyPrompt,
   buildCopyRepairPrompt,
   parseCopyQualityReview,

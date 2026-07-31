@@ -147,7 +147,7 @@ test('accepted research replaces stale candidates and running research can be ca
   assert.match(fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8'), /研究任务已取消或中断/);
 });
 
-test('正文候选会剔除已核验事实，质量复审未通过时前后端都禁止采用', () => {
+test('正文首次生成不再经过质量复审，历史审稿状态也不阻止用户采用主动修改', () => {
   const worker = fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8');
   const server = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
   const projectAgent = fs.readFileSync(new URL('../server/services/project-agent.cjs', import.meta.url), 'utf8');
@@ -155,11 +155,23 @@ test('正文候选会剔除已核验事实，质量复审未通过时前后端�
   const acceptStart = server.indexOf("app.post('/api/v1/creative/project-artifacts/:id/accept'");
   const acceptEnd = server.indexOf("app.post('/api/v1/creative/project-artifacts/:id/reject'", acceptStart);
 
-  assert.match(worker, /reconcileFactsToVerify\(output\.factsToVerify, snapshot\.researchContext\?\.verifiedFacts\)/);
-  assert.match(server.slice(acceptStart, acceptEnd), /qualityReview\?\.status === 'NEEDS_REVIEW'/);
+  const executeStart = worker.indexOf('async function generateProjectCopyAction');
+  const executeEnd = worker.indexOf('async function generateAgentPlan', executeStart);
+  const execute = worker.slice(executeStart, executeEnd);
+  assert.doesNotMatch(execute, /buildCopyQualityReviewPrompt|parseCopyQualityReviewSafely|candidateQualityReview/);
+  assert.doesNotMatch(server.slice(acceptStart, acceptEnd), /qualityReview\?\.status === 'NEEDS_REVIEW'/);
   assert.match(projectAgent, /'qualityReview',\s*a\.metadata_json->'payload'->'qualityReview'/);
-  assert.match(dialog, /const needsRewrite = reviewIssues\.length > 0/);
-  assert.match(dialog, /disabled=\{busy !== 'idle' \|\| needsRewrite/);
+  assert.doesNotMatch(dialog, /needsRewrite|qualityReview|发布前核验/);
+});
+
+test('023 迁移保留旧正文内容，只退出会阻塞创作的 NEEDS_REVIEW 候选', () => {
+  const migration = fs.readFileSync(new URL('../server/migrations/023_finished_copy_workflow.sql', import.meta.url), 'utf8');
+  assert.match(migration, /UPDATE project_artifacts/);
+  assert.match(migration, /artifact_type = 'PLATFORM_COPY'/);
+  assert.match(migration, /status = 'CANDIDATE'/);
+  assert.match(migration, /qualityReview.*NEEDS_REVIEW/s);
+  assert.match(migration, /SET status = 'REJECTED'/);
+  assert.doesNotMatch(migration, /DELETE\s+FROM/i);
 });
 
 test('采用或跳过研究都会推进正文，正文上下文只读取已确认事实', () => {

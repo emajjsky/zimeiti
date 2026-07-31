@@ -1,6 +1,6 @@
-import { Bot, Check, CircleAlert, Eye, FileCheck2, LoaderCircle, Search, Settings2, X } from 'lucide-react';
+import { Bot, Check, CircleAlert, FileCheck2, LoaderCircle, Search, Settings2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { webCreative } from '../../data/webApi';
+import { webCreative, webProjects } from '../../data/webApi';
 import { copyActionPanelState, copyActionRequest, type CopyPanelAction } from '../../domain/copy-action-panel.mjs';
 import { platformName, type ContentProject } from '../../domain/content';
 import type { CreativePlatform, ProjectAgentContext, ProjectArtifact, ResearchResult } from '../../domain/creative';
@@ -21,18 +21,6 @@ type ProjectAgentProps = {
   onArtifactAccepted: (artifact: ProjectArtifact, project?: ContentProject) => void;
   onOpenSettings: (target: 'agent' | 'policies' | 'search') => void;
 };
-
-function strings(value: unknown) {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
-}
-
-function artifactHeading(artifact: ProjectArtifact) {
-  const title = artifact.payload.title;
-  if (typeof title === 'string' && title.trim()) return title;
-  const options = strings(artifact.payload.titleOptions);
-  if (options[0]) return options[0];
-  return artifact.type === 'OUTLINE' ? '文案大纲' : '文案候选';
-}
 
 export function ProjectAgent(props: ProjectAgentProps) {
   if (props.stage === 'RESEARCH') return <SimplifiedResearchAgent {...props}/>;
@@ -180,16 +168,26 @@ function researchRunLabel(phase: string | undefined) {
   return phase === 'VERIFYING' ? '正在核验' : phase === 'SOURCES' ? '正在检索' : phase === 'PLANNING' ? '正在整理' : '正在研究';
 }
 
-function CopyProjectAgent({ projectId, stage, platform, selectedMaterials, selection, hasAcceptedCopy = false, blockedReason, refreshToken = 0, onClearSelection, onContextChange, onArtifactOpen, onOpenSettings }: ProjectAgentProps) {
+function CopyProjectAgent({ projectId, stage, platform, selectedMaterials, selection, hasAcceptedCopy = false, blockedReason, refreshToken = 0, onClearSelection, onContextChange, onArtifactOpen, onArtifactAccepted, onOpenSettings }: ProjectAgentProps) {
   const [context, setContext] = useState<ProjectAgentContext | null>(null);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState<'idle' | 'loading' | 'starting' | 'cancelling'>('loading');
   const [error, setError] = useState('');
-  const openedCandidateId = useRef<string | null>(null);
+  const watchedRun = useRef<{ id: string; action: string } | null>(null);
 
   const reload = async () => {
     const result = await webCreative.agentContext(projectId, { stage, platform, history: 'CURRENT' });
     setContext(result); onContextChange?.(result);
+    if (result.activeRun && ['DRAFT', 'QUEUED', 'RUNNING'].includes(result.activeRun.status)) {
+      watchedRun.current = { id: result.activeRun.id, action: result.activeRun.action };
+    } else if (watchedRun.current?.action === 'GENERATE_DRAFT') {
+      const accepted = result.artifacts.find((artifact) => artifact.type === 'PLATFORM_COPY' && artifact.platform === platform && artifact.status === 'ACCEPTED');
+      if (accepted) {
+        const refreshed = await webProjects.planning(projectId);
+        onArtifactAccepted(accepted, refreshed.project);
+      }
+      watchedRun.current = null;
+    }
     return result;
   };
 
@@ -216,11 +214,6 @@ function CopyProjectAgent({ projectId, stage, platform, selectedMaterials, selec
   const disabled = busy !== 'idle' || Boolean(blockedReason) || runIsActive;
 
   const openCandidate = () => { if (candidate && onArtifactOpen) onArtifactOpen(candidate); };
-  useEffect(() => {
-    if (!candidate || openedCandidateId.current === candidate.id || !onArtifactOpen) return;
-    openedCandidateId.current = candidate.id;
-    onArtifactOpen(candidate);
-  }, [candidate, onArtifactOpen]);
 
   const startAction = async (action: CopyPanelAction) => {
     if (disabled) return;
@@ -253,8 +246,8 @@ function CopyProjectAgent({ projectId, stage, platform, selectedMaterials, selec
   return <aside className="copy-action-panel" aria-label="文案助手">
     <header className="copy-action-panel-head"><div><Bot size={19}/><div><h2>文案助手</h2><span>{platform ? platformName[platform] : '当前平台'}</span></div></div></header>
     {busy === 'loading' && <div className="copy-action-loading" aria-label="正在读取文案状态"><i/><i/></div>}
-    {busy !== 'loading' && candidate && <section className="copy-action-candidate"><div><b>{candidate.type === 'OUTLINE' ? '大纲候选已生成' : '正文候选已生成'}</b><span>正式文稿尚未改变</span></div><button className="button" type="button" onClick={openCandidate}><Eye size={15}/>查看并采用</button></section>}
-    {busy !== 'loading' && activeRun && ['DRAFT', 'QUEUED', 'RUNNING'].includes(activeRun.status) && <section className="copy-action-running" aria-live="polite"><LoaderCircle size={18}/><div><b>{activeRun.status === 'RUNNING' ? '正在生成正文候选' : '正文任务已排队'}</b><span>完成后会自动打开候选审核</span></div>{['DRAFT', 'QUEUED'].includes(activeRun.status) && <button className="text-button" type="button" disabled={busy !== 'idle'} onClick={() => void cancel()}>{busy === 'cancelling' ? '取消中' : '取消'}</button>}</section>}
+    {busy !== 'loading' && candidate && <section className="copy-action-candidate"><div><b>{candidate.type === 'OUTLINE' ? '大纲候选已生成' : '修改版本已生成'}</b><span>当前正文保持不变</span></div><button className="button" type="button" onClick={openCandidate}>查看修改</button></section>}
+    {busy !== 'loading' && activeRun && ['DRAFT', 'QUEUED', 'RUNNING'].includes(activeRun.status) && <section className="copy-action-running" aria-live="polite"><LoaderCircle size={18}/><div><b>{activeRun.status === 'RUNNING' ? (activeRun.action === 'GENERATE_DRAFT' ? '正在生成正文' : '正在生成修改版本') : '任务已排队'}</b><span>{activeRun.action === 'GENERATE_DRAFT' ? 'Agent 正在准备资料并生成最终成稿' : '完成后可查看修改差异'}</span></div>{['DRAFT', 'QUEUED'].includes(activeRun.status) && <button className="text-button" type="button" disabled={busy !== 'idle'} onClick={() => void cancel()}>{busy === 'cancelling' ? '取消中' : '取消'}</button>}</section>}
     {busy !== 'loading' && !candidate && !runIsActive && <div className="copy-action-body">
       {panel.quickActions.length > 0 && <div className="copy-action-quick" aria-label="快捷修改">{panel.quickActions.map((item) => <button key={item.action} type="button" className="text-button" disabled={disabled} onClick={() => void startAction(item.action)}>{item.label}</button>)}</div>}
       {(hasAcceptedCopy || Boolean(selection?.text)) && <label className="copy-action-note"><span>{selection?.text ? `修改选中 ${selection.text.length} 字` : '补充要求（可选）'}</span><textarea rows={3} value={note} maxLength={2_000} placeholder={selection?.text ? '例如：语气更有说服力，保留事实' : '例如：更口语化，保留已有案例'} onChange={(event) => setNote(event.target.value)}/>{selection?.text && onClearSelection && <button className="text-button" type="button" onClick={onClearSelection}>取消选区</button>}</label>}
@@ -264,30 +257,4 @@ function CopyProjectAgent({ projectId, stage, platform, selectedMaterials, selec
     {blockedReason && <div className="copy-action-blocked"><CircleAlert size={16}/><span>{blockedReason}</span></div>}
     {error && <div className="copy-action-error" role="alert"><CircleAlert size={16}/><span>{error}</span>{/(模型|提示词|核心 Agent|Key)/.test(error) && <button className="text-button" type="button" onClick={() => onOpenSettings(/核心 Agent/.test(error) ? 'agent' : 'policies')}>去配置</button>}</div>}
   </aside>;
-}
-
-function ArtifactPreview({ artifact, selectedTitle, onTitle, busy, onAccept, onClose }: { artifact: ProjectArtifact; selectedTitle: string; onTitle: (value: string) => void; busy: boolean; onAccept: () => void; onClose: () => void }) {
-  const titleOptions = strings(artifact.payload.titleOptions);
-  const facts = strings(artifact.payload.factsToVerify);
-  const review = artifact.payload.qualityReview;
-  const reviewIssues = review && typeof review === 'object' && (review as Record<string, unknown>).status === 'NEEDS_REVIEW' ? strings((review as Record<string, unknown>).issues) : [];
-  const verificationItems = [...new Set(facts.map((item) => item.trim()).filter(Boolean))];
-  const needsRewrite = reviewIssues.length > 0;
-  const [verificationOpen, setVerificationOpen] = useState(false);
-  const body = typeof artifact.payload.body === 'string' ? artifact.payload.body : '';
-  const summary = typeof artifact.payload.summary === 'string' ? artifact.payload.summary : typeof artifact.payload.changeSummary === 'string' ? artifact.payload.changeSummary : '';
-  const canAccept = artifact.status === 'CANDIDATE' && ['OUTLINE', 'PLATFORM_COPY'].includes(artifact.type);
-  return <div className="agent-artifact-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
-    <section className="agent-artifact-preview" role="dialog" aria-modal="true" aria-labelledby="agent-artifact-title">
-      <header><div><span>{artifact.platform ? platformName[artifact.platform] : '项目'}</span><h2 id="agent-artifact-title">{artifactHeading(artifact)}</h2></div><button className="icon-button" type="button" aria-label="关闭候选" onClick={onClose}><X size={18}/></button></header>
-      <div className="agent-artifact-body">
-        {titleOptions.length > 0 && <label><span>标题方案</span><select value={selectedTitle} onChange={(event) => onTitle(event.target.value)}>{titleOptions.map((title) => <option key={title}>{title}</option>)}</select></label>}
-        {summary && <p className="artifact-summary">{summary}</p>}
-        {needsRewrite && <section className="candidate-verification candidate-quality-block artifact-verification"><header><div><b>正文需重写</b><span>{reviewIssues.length} 项质量问题</span></div></header><ul>{reviewIssues.map((item) => <li key={item}>{item}</li>)}</ul></section>}
-        {verificationItems.length > 0 && <section className="candidate-verification artifact-verification"><header><div><b>发布前核验</b><span>{verificationItems.length} 项待处理</span></div><button type="button" aria-expanded={verificationOpen} onClick={() => setVerificationOpen((current) => !current)}>{verificationOpen ? '收起' : '查看核验项'}</button></header>{verificationOpen && <ul>{verificationItems.map((item) => <li key={item}>{item}</li>)}</ul>}</section>}
-        {body && <div className="artifact-copy"><h3>{artifactHeading(artifact)}</h3><p>{body}</p></div>}
-      </div>
-      <footer><button className="button" type="button" disabled={busy} onClick={onClose}>关闭</button>{canAccept && <button className="button primary" type="button" disabled={busy || needsRewrite || (artifact.type === 'OUTLINE' && !selectedTitle)} onClick={onAccept}>{busy ? <LoaderCircle size={16}/> : <Check size={16}/>} {needsRewrite ? '需先重写' : '采用到正文'}</button>}</footer>
-    </section>
-  </div>;
 }

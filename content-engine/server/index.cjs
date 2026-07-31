@@ -1235,9 +1235,16 @@ app.post('/api/v1/creative/projects/:projectId/agent/prepare', { preHandler: aut
     return;
   }
   const action = resolution.action;
-  const [route, template] = await Promise.all([
+  const [route, template, researchPolicy, verificationPolicy, verificationTemplate] = await Promise.all([
     textTaskRoute(workspace.id, copyActionScope(action), action === 'GENERATE_OUTLINE' || action === 'GENERATE_DRAFT' ? '文案生成' : '文案改写'),
     templateStore.get(workspace.id, copyPromptTemplateScope(action, input.platform)),
+    action === 'GENERATE_DRAFT' ? query(`SELECT p.model FROM agent_model_policies p
+      JOIN credential_vault c ON c.workspace_id = p.workspace_id AND c.provider = 'BAILIAN' AND c.status = 'READY'
+      WHERE p.workspace_id = $1 AND p.scope = $2 AND p.provider = 'BAILIAN_CLI'`, [workspace.id, PROJECT_RESEARCH_SCOPE]) : Promise.resolve({ rowCount: 0, rows: [] }),
+    action === 'GENERATE_DRAFT' ? query(`SELECT p.model FROM agent_model_policies p
+      JOIN credential_vault c ON c.workspace_id = p.workspace_id AND c.provider = 'BAILIAN' AND c.status = 'READY'
+      WHERE p.workspace_id = $1 AND p.scope = $2 AND p.provider = 'BAILIAN_CLI'`, [workspace.id, SOURCE_VERIFICATION_SCOPE]) : Promise.resolve({ rowCount: 0, rows: [] }),
+    action === 'GENERATE_DRAFT' ? templateStore.get(workspace.id, SOURCE_VERIFICATION_SCOPE) : Promise.resolve(null),
   ]);
   const materials = await projectResearchMaterialSnapshot(materialRows);
   const master = masterResult.rows[0];
@@ -1274,7 +1281,20 @@ app.post('/api/v1/creative/projects/:projectId/agent/prepare', { preHandler: aut
     materials,
     researchContext,
   };
-  const runInput = { template: { id: template.id, version: template.version, body: template.body }, route: { provider: route.provider, connectionId: route.connectionId ?? null, model: route.model } };
+  const primaryRoute = { provider: route.provider, connectionId: route.connectionId ?? null, model: route.model };
+  const researchRoute = action === 'GENERATE_DRAFT'
+    ? researchPolicy.rowCount ? { provider: 'BAILIAN_CLI', model: researchPolicy.rows[0].model } : primaryRoute
+    : null;
+  const verificationRoute = action === 'GENERATE_DRAFT'
+    ? verificationPolicy.rowCount ? { provider: 'BAILIAN_CLI', model: verificationPolicy.rows[0].model } : primaryRoute
+    : null;
+  const runInput = {
+    template: { id: template.id, version: template.version, body: template.body },
+    route: primaryRoute,
+    ...(researchRoute ? { researchRoute } : {}),
+    ...(verificationRoute ? { verificationRoute } : {}),
+    ...(verificationTemplate ? { verificationTemplate: verificationTemplate.body } : {}),
+  };
   const run = await transaction(async (client) => {
     await client.query(`UPDATE generation_runs SET status = 'CANCELLED', completed_at = now()
       WHERE workspace_id = $1 AND action_version_id LIKE 'project-copy-%' AND status = 'DRAFT'
@@ -1289,7 +1309,7 @@ app.post('/api/v1/creative/projects/:projectId/agent/prepare', { preHandler: aut
       VALUES ($1, $2, $3, 'USER', $4, 'COPY', 'MESSAGE', $5),
              ($1, $2, $3, 'ASSISTANT', $6, 'COPY', 'CONFIRMATION', $7)`, [
       workspace.id, projectId, created.rows[0].id, input.request, JSON.stringify({ platform: input.platform }),
-      '文案动作已准备，确认后生成候选版本。',
+       action === 'GENERATE_DRAFT' ? '正文任务已准备，确认后自动补齐上下文并生成成稿。' : '文案修改已准备，确认后生成可对比版本。',
       JSON.stringify({ platform: input.platform, action, model: route.model, promptVersion: template.version }),
     ]);
     return created.rows[0];
@@ -1880,11 +1900,6 @@ app.post('/api/v1/creative/project-artifacts/:id/accept', { preHandler: authenti
       FOR UPDATE OF a`, [artifactId, workspace.id]);
     if (!candidateResult.rowCount) { const error = new Error('该候选产物当前不能采用。'); error.statusCode = 409; throw error; }
     const candidate = candidateResult.rows[0];
-    if (candidate.artifact_type === 'PLATFORM_COPY' && candidate.metadata_json?.payload?.qualityReview?.status === 'NEEDS_REVIEW') {
-      const error = new Error('正文质量审稿尚未通过，请废弃当前候选并重新生成。');
-      error.statusCode = 409;
-      throw error;
-    }
     const snapshotResult = await client.query('SELECT state_json FROM workspace_snapshots WHERE workspace_id = $1 FOR UPDATE', [workspace.id]);
     let state = snapshotResult.rows[0]?.state_json;
     const updatedAt = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());

@@ -5,7 +5,7 @@ const actionLabels = {
   EXPAND_DRAFT: '扩写',
   SHORTEN_DRAFT: '压缩',
   RESTRUCTURE_DRAFT: '重构',
-  REVIEW_CANDIDATE: '查看并采用',
+  REVIEW_CANDIDATE: '查看修改',
 };
 
 const revisionActions = [

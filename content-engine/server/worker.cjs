@@ -32,7 +32,8 @@ const {
 } = require('./services/source-verification.cjs');
 const { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, workflowSourceActionsForProject, projectOriginalSource, sourceMatchesProject, buildResearchResult } = require('./services/simplified-research.cjs');
 const { createProjectAgentStore } = require('./services/project-agent.cjs');
-const { buildCopyPrompt, buildCopyRepairPrompt, buildCopyQualityReviewPrompt, candidateQualityReview, detectVoiceViolations, reconcileFactsToVerify, parseCopyOutput, parseCopyQualityReviewSafely } = require('./services/project-copy-action.cjs');
+const { updateCreativeState } = require('./services/project-planning.cjs');
+const { applyAcceptedCopyToState, buildCopyPrompt, buildFinishedCopyPrompt, buildWritingPacket, copyActionPersistenceMode, parseCopyOutput, parseFinishedCopyBody } = require('./services/project-copy-action.cjs');
 
 const connection = new IORedis(config.redisUrl, { maxRetriesPerRequest: null });
 const textRunner = createTextModelRunner();
@@ -707,11 +708,77 @@ async function generateCreativeDraft({ jobId, workspaceId, runId }) {
   }
 }
 
+function copyResearchContext(result) {
+  if (!result) return null;
+  return {
+    verifiedFacts: Array.isArray(result.facts) ? result.facts.filter((item) => item?.status === 'VERIFIED') : [],
+    cautions: Array.isArray(result.cautions) ? result.cautions : [],
+    creativeReferences: result.materialContext?.creativeReferences ?? [],
+    userContent: result.materialContext?.userContent ?? [],
+    visualAssets: result.materialContext?.visualAssets ?? [],
+  };
+}
+
+function hasVerifiedCopyFacts(researchContext) {
+  return (researchContext?.verifiedFacts ?? []).some((item) => typeof item === 'string' ? item.trim() : item?.status === 'VERIFIED' && String(item.claim ?? '').trim());
+}
+
+function canWriteFromAuthorMaterials(snapshot) {
+  const materials = [
+    ...(Array.isArray(snapshot.materials) ? snapshot.materials : []),
+    ...(Array.isArray(snapshot.researchContext?.userContent) ? snapshot.researchContext.userContent : []),
+  ];
+  const hasAuthorContent = materials.some((item) => ['DRAFT', 'OPINION', 'EXPERIENCE'].includes(String(item?.kind ?? '').toUpperCase()) && String(item?.body ?? item?.content ?? '').trim());
+  const explicitlyNeedsSources = Boolean(String(snapshot.project?.planning?.sourceRequirements ?? snapshot.brief?.sourceRequirements ?? '').trim()) || (snapshot.project?.factChecks ?? []).length > 0;
+  return hasAuthorContent && !explicitlyNeedsSources;
+}
+
+async function prepareCopyResearchContext(workspaceId, snapshot, input) {
+  if (hasVerifiedCopyFacts(snapshot.researchContext) || canWriteFromAuthorMaterials(snapshot) || !input.researchRoute) {
+    return { researchContext: snapshot.researchContext, inputTokens: 0, outputTokens: 0, sourceCount: 0 };
+  }
+  const researchSnapshot = {
+    projectId: snapshot.projectId,
+    project: snapshot.project,
+    brief: snapshot.brief,
+    request: '为最终成稿自动补齐与当前选题直接相关的公开事实，不改变已确认选题。',
+    materials: snapshot.materials ?? [],
+    stage: 'COPY',
+  };
+  try {
+    const planned = await runWorkflowResearchPlan(workspaceId, researchSnapshot, input.researchRoute);
+    const sources = await captureWorkflowSources(workspaceId, planned.output, snapshot.project);
+    let verification = null;
+    try {
+      verification = await verifyWorkflowClaims(workspaceId, planned.output, sources, input.verificationRoute, input.verificationTemplate);
+    } catch (error) {
+      console.warn(`[PROJECT_COPY] automatic verification failed: ${error instanceof Error ? error.message : '核验失败'}`);
+    }
+    const result = buildResearchResult({
+      plan: planned.output,
+      sources,
+      verification: verification?.output ?? null,
+      materials: snapshot.materials ?? [],
+      verificationStatus: verification?.recovered ? 'PARTIAL' : verification ? 'COMPLETE' : 'FAILED',
+      verificationMessage: verification?.warning ?? '',
+    });
+    return {
+      researchContext: copyResearchContext(result),
+      inputTokens: planned.inputTokens + (verification?.inputTokens ?? 0),
+      outputTokens: planned.outputTokens + (verification?.outputTokens ?? 0),
+      sourceCount: result.sources.length,
+    };
+  } catch (error) {
+    console.warn(`[PROJECT_COPY] automatic research failed, continuing with saved context: ${error instanceof Error ? error.message : '研究失败'}`);
+    return { researchContext: snapshot.researchContext, inputTokens: 0, outputTokens: 0, sourceCount: 0 };
+  }
+}
+
 async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
   const startedAt = Date.now();
   let route;
-  let inputTokens;
-  let outputTokens;
+  let inputTokens = 0;
+  let outputTokens = 0;
   try {
     const runResult = await query(`SELECT id, action_version_id, source_snapshot_json, input_json
       FROM generation_runs WHERE id = $1 AND workspace_id = $2
@@ -722,84 +789,29 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
     const snapshot = run.source_snapshot_json;
     const input = run.input_json;
     route = input.route;
-    const connectionInput = await textConnectionInput(workspaceId, route);
-    const prompt = buildCopyPrompt({ ...snapshot, template: input.template.body });
     const isOutlineAction = snapshot.action === 'GENERATE_OUTLINE';
+    const isInitialDraft = snapshot.action === 'GENERATE_DRAFT';
+    const persistenceMode = copyActionPersistenceMode(snapshot.action);
+    const prepared = isInitialDraft
+      ? await prepareCopyResearchContext(workspaceId, snapshot, input)
+      : { researchContext: snapshot.researchContext, inputTokens: 0, outputTokens: 0, sourceCount: 0 };
+    inputTokens += prepared.inputTokens;
+    outputTokens += prepared.outputTokens;
+    const preparedSnapshot = { ...snapshot, researchContext: prepared.researchContext };
+    const writingPacket = buildWritingPacket(preparedSnapshot, prepared.researchContext);
+    const connectionInput = await textConnectionInput(workspaceId, route);
+    const prompt = isInitialDraft
+      ? buildFinishedCopyPrompt(writingPacket, input.template.body)
+      : buildCopyPrompt({ ...preparedSnapshot, template: input.template.body });
     const first = await textRunner.runText({ provider: route.provider, model: route.model, system: prompt.system, message: prompt.message, ...connectionInput });
-    inputTokens = first.inputTokens;
-    outputTokens = first.outputTokens;
-    let output;
-    try { output = parseCopyOutput(first.content, snapshot.action, snapshot); }
-    catch (error) {
-      const validationError = error instanceof Error ? error.message : '输出不符合文案 JSON 契约。';
-      const repaired = await textRunner.runText({
-        provider: route.provider,
-        model: route.model,
-        system: buildCopyRepairPrompt(prompt.system, validationError),
-        message: first.content,
-        ...connectionInput,
-      });
-      inputTokens = (inputTokens ?? 0) + (repaired.inputTokens ?? 0);
-      outputTokens = (outputTokens ?? 0) + (repaired.outputTokens ?? 0);
-      output = parseCopyOutput(repaired.content, snapshot.action, snapshot);
-    }
-    if (!isOutlineAction) {
-      let qualityReview;
-      const pipelineIssues = [];
-      const voiceIssues = detectVoiceViolations(output.body, snapshot.accountVoice?.rules);
-      if (voiceIssues.length) {
-        try {
-          const rewritten = await textRunner.runText({
-            provider: route.provider,
-            model: route.model,
-            system: buildCopyRepairPrompt(prompt.system, voiceIssues.map((issue) => issue.message).join('；')),
-            message: JSON.stringify(output),
-            ...connectionInput,
-          });
-          inputTokens = (inputTokens ?? 0) + (rewritten.inputTokens ?? 0);
-          outputTokens = (outputTokens ?? 0) + (rewritten.outputTokens ?? 0);
-          output = parseCopyOutput(rewritten.content, snapshot.action, snapshot);
-        } catch {
-          pipelineIssues.push('账号声音自动修正未完成，已保留修正前正文，请人工检查。');
-        }
-      }
-      let review = { approved: true, issues: [], malformed: false };
-      try {
-        const reviewPrompt = buildCopyQualityReviewPrompt({ action: snapshot.action, platform: snapshot.platform, output, researchContext: snapshot.researchContext, currentContent: snapshot.currentContent });
-        const reviewed = await textRunner.runText({ provider: route.provider, model: route.model, system: reviewPrompt.system, message: reviewPrompt.message, ...connectionInput });
-        inputTokens = (inputTokens ?? 0) + (reviewed.inputTokens ?? 0);
-        outputTokens = (outputTokens ?? 0) + (reviewed.outputTokens ?? 0);
-        review = parseCopyQualityReviewSafely(reviewed.content);
-        if (!review.approved && !review.malformed) {
-          const qualityError = `质量审稿未通过：${review.issues.join('；')}`;
-          const rewritten = await textRunner.runText({
-            provider: route.provider,
-            model: route.model,
-            system: buildCopyRepairPrompt(prompt.system, qualityError),
-            message: JSON.stringify(output),
-            ...connectionInput,
-          });
-          inputTokens = (inputTokens ?? 0) + (rewritten.inputTokens ?? 0);
-          outputTokens = (outputTokens ?? 0) + (rewritten.outputTokens ?? 0);
-          output = parseCopyOutput(rewritten.content, snapshot.action, snapshot);
-          const finalReviewPrompt = buildCopyQualityReviewPrompt({ action: snapshot.action, platform: snapshot.platform, output, researchContext: snapshot.researchContext, currentContent: snapshot.currentContent });
-          const finalReviewed = await textRunner.runText({ provider: route.provider, model: route.model, system: finalReviewPrompt.system, message: finalReviewPrompt.message, ...connectionInput });
-          inputTokens = (inputTokens ?? 0) + (finalReviewed.inputTokens ?? 0);
-          outputTokens = (outputTokens ?? 0) + (finalReviewed.outputTokens ?? 0);
-          review = parseCopyQualityReviewSafely(finalReviewed.content);
-        }
-      } catch {
-        pipelineIssues.push('质量审稿未完成，候选正文已保留，请人工检查。');
-      }
-      const finalVoiceIssues = snapshot.accountVoice ? detectVoiceViolations(output.body, snapshot.accountVoice.rules) : [];
-      qualityReview = candidateQualityReview(review, [...finalVoiceIssues, ...pipelineIssues]);
-      output.qualityReview = qualityReview;
-    }
-    // 项目历史核验池不属于本次候选，候选版本只保存正文直接涉及的核验项。
-    const candidateFactsToVerify = reconcileFactsToVerify(output.factsToVerify, snapshot.researchContext?.verifiedFacts);
-    output.factsToVerify = candidateFactsToVerify;
+    inputTokens += first.inputTokens ?? 0;
+    outputTokens += first.outputTokens ?? 0;
+    const output = isInitialDraft
+      ? { ...parseFinishedCopyBody(first.content, writingPacket), factsToVerify: [], changeSummary: '已生成正式正文。' }
+      : parseCopyOutput(first.content, snapshot.action, preparedSnapshot);
     const saved = await transaction(async (client) => {
-      await client.query("UPDATE generation_runs SET status = 'SUCCEEDED', output_json = $2, usage_json = $3, completed_at = now() WHERE id = $1", [runId, JSON.stringify(output), JSON.stringify({ inputTokens, outputTokens })]);
+      const activeRun = await client.query("SELECT id FROM generation_runs WHERE id = $1 AND workspace_id = $2 AND status = 'RUNNING' FOR UPDATE", [runId, workspaceId]);
+      if (!activeRun.rowCount) throw new Error('文案任务已取消或中断。');
       const isOutline = isOutlineAction;
       const artifact = await projectAgentStore.createArtifact(client, {
         workspaceId,
@@ -807,12 +819,13 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
         type: isOutline ? 'OUTLINE' : 'PLATFORM_COPY',
         stage: 'COPY',
         platform: snapshot.platform,
-        status: 'CANDIDATE',
+        status: persistenceMode,
         actionRunId: runId,
         title: isOutline ? output.titleOptions[0] : output.title,
         metadata: { action: snapshot.action, payload: output },
       });
       let versionId = null;
+      let acceptedProject = null;
       if (!isOutline) {
         const versionResult = await client.query(`SELECT
             COALESCE(MAX(v.version_number), 0) + 1 AS next_version,
@@ -822,6 +835,26 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
           JOIN project_artifacts a ON a.id = v.artifact_id
           WHERE v.workspace_id = $1 AND v.project_id = $2 AND v.platform = $3`, [workspaceId, snapshot.projectId, snapshot.platform]);
         const version = versionResult.rows[0];
+        let masterVersionId = version.master_version_id ?? null;
+        if (isInitialDraft && !masterVersionId) {
+          const masterArtifact = await projectAgentStore.createArtifact(client, {
+            workspaceId,
+            projectId: snapshot.projectId,
+            type: 'CONTENT_MASTER',
+            stage: 'COPY',
+            status: 'ACCEPTED',
+            actionRunId: runId,
+            title: output.title,
+          });
+          await client.query('UPDATE project_artifacts SET accepted_at = now(), updated_at = now() WHERE id = $1 AND workspace_id = $2', [masterArtifact.id, workspaceId]);
+          const materialRefs = writingPacket.authorMaterials.map((material) => material.id);
+          const createdMaster = await client.query(`INSERT INTO content_master_versions
+            (workspace_id, project_id, artifact_id, version_number, thesis, facts_to_verify_json, material_refs_json)
+            VALUES ($1, $2, $3, 1, $4, '[]'::jsonb, $5) RETURNING id`, [
+            workspaceId, snapshot.projectId, masterArtifact.id, writingPacket.coreMessage || output.title, JSON.stringify(materialRefs),
+          ]);
+          masterVersionId = createdMaster.rows[0].id;
+        }
         const inserted = await client.query(`INSERT INTO platform_content_versions
           (workspace_id, project_id, platform, artifact_id, content_master_version_id, parent_version_id,
            version_number, title, body, facts_to_verify_json, change_summary)
@@ -830,7 +863,7 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
           snapshot.projectId,
           snapshot.platform,
           artifact.id,
-          version.master_version_id ?? null,
+          masterVersionId,
           version.parent_version_id ?? null,
           Number(version.next_version),
           output.title,
@@ -839,6 +872,25 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
           output.changeSummary,
         ]);
         versionId = inserted.rows[0].id;
+        if (isInitialDraft) {
+          await client.query(`UPDATE project_artifacts SET status = 'REJECTED', updated_at = now()
+            WHERE workspace_id = $1 AND project_id = $2 AND platform = $3 AND artifact_type = 'PLATFORM_COPY'
+              AND status = 'ACCEPTED' AND id <> $4`, [workspaceId, snapshot.projectId, snapshot.platform, artifact.id]);
+          await client.query('UPDATE project_artifacts SET accepted_at = now(), updated_at = now() WHERE id = $1 AND workspace_id = $2', [artifact.id, workspaceId]);
+          const updatedAt = new Date().toISOString();
+          await updateCreativeState(client, workspaceId, (state) => {
+            const applied = applyAcceptedCopyToState(state, {
+              projectId: snapshot.projectId,
+              platform: snapshot.platform,
+              title: output.title,
+              body: output.body,
+              factsToVerify: [],
+              updatedAt,
+            });
+            acceptedProject = applied.project;
+            return applied.state;
+          }, updatedAt);
+        }
       }
       const message = await client.query(`INSERT INTO project_agent_messages
         (workspace_id, project_id, action_run_id, role, content, stage, message_type, artifact_refs_json, metadata_json)
@@ -846,18 +898,29 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
         workspaceId,
         snapshot.projectId,
         runId,
-        isOutline ? output.summary : output.changeSummary,
+        isOutline ? output.summary : isInitialDraft ? '正文已生成并自动保存。' : output.changeSummary,
         JSON.stringify([artifact.id]),
-        JSON.stringify({ platform: snapshot.platform, action: snapshot.action, model: route.model, status: 'CANDIDATE' }),
+        JSON.stringify({ platform: snapshot.platform, action: snapshot.action, model: route.model, status: persistenceMode }),
       ]);
       await client.query('UPDATE project_artifacts SET created_by_message_id = $1 WHERE id = $2 AND workspace_id = $3', [message.rows[0].id, artifact.id, workspaceId]);
-      await client.query("UPDATE jobs SET status = 'SUCCEEDED', result_json = $2, completed_at = now() WHERE id = $1", [jobId, JSON.stringify({ artifactId: artifact.id, versionId })]);
+      if (isInitialDraft) {
+        await projectAgentStore.upsertStageSummary(client, {
+          workspaceId,
+          projectId: snapshot.projectId,
+          stage: 'COPY',
+          platform: snapshot.platform,
+          summary: '正文已生成并自动保存。',
+          throughMessageId: message.rows[0].id,
+        });
+      }
+      await client.query("UPDATE generation_runs SET status = 'SUCCEEDED', output_json = $2, usage_json = $3, completed_at = now() WHERE id = $1", [runId, JSON.stringify(output), JSON.stringify({ inputTokens, outputTokens, automaticResearchSources: prepared.sourceCount })]);
+      await client.query("UPDATE jobs SET status = 'SUCCEEDED', result_json = $2, completed_at = now() WHERE id = $1", [jobId, JSON.stringify({ artifactId: artifact.id, versionId, project: acceptedProject })]);
       await client.query(`INSERT INTO api_usage_logs
         (workspace_id, job_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens)
         VALUES ($1, $2, $3, $4, 'PROJECT_COPY', 'SUCCESS', $5, $6, $7)`, [
         workspaceId, jobId, route.provider, route.model, Date.now() - startedAt, inputTokens ?? null, outputTokens ?? null,
       ]);
-      return { artifactId: artifact.id, versionId };
+      return { artifactId: artifact.id, versionId, project: acceptedProject };
     });
     return saved;
   } catch (error) {

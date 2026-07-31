@@ -22,7 +22,7 @@ test('已有正文提供明确修改动作，选区优先修改选中内容', ()
 test('存在候选时先审核，不再展示新的生成或修改动作', () => {
   const state = copyActionPanelState({ hasAcceptedCopy: true, hasSelection: false, hasCandidate: true });
   assert.equal(state.primary.action, 'REVIEW_CANDIDATE');
-  assert.equal(state.primary.label, '查看并采用');
+  assert.equal(state.primary.label, '查看修改');
   assert.deepEqual(state.quickActions, []);
 });
 
@@ -46,8 +46,10 @@ test('正文 Agent 使用动作面板并在点击后直接启动任务', () => {
   assert.doesNotMatch(agent, /确认调用/);
 });
 
-test('大纲与正文候选都必须先进入审核，不能在候选存在时继续生成', () => {
+test('首次正文不产生候选，只有大纲或主动修改候选进入查看流程', () => {
   const agent = fs.readFileSync(new URL('../src/workspaces/create/ProjectAgent.tsx', import.meta.url), 'utf8');
   assert.match(agent, /artifact\.type === 'OUTLINE' \|\| artifact\.type === 'PLATFORM_COPY'/);
   assert.match(agent, /artifact\.status === 'CANDIDATE'/);
+  assert.doesNotMatch(agent, /正文候选已生成|正式文稿尚未改变|查看并采用|正在生成正文候选|候选审核/);
+  assert.match(agent, /正在准备资料|正在生成正文/);
 });
