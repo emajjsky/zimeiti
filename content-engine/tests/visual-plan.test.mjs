@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync, statSync } from 'node:fs';
 import test from 'node:test';
 import { buildVisualGenerationSpec, buildVisualPlan, mergeVisualPlan, replanVisualPlan, resizeVisualPlan, updateVisualPlanItem, visualPlanCountRange, visualStylePresets, visualTemplatesFor, VISUAL_PLAN_VERSION } from '../src/domain/visual-plan.mjs';
 
@@ -209,6 +210,34 @@ test('项目风格库覆盖编辑、知识、插画、文化和科技，并提�
   assert.match(retro.prompt, /避免霓虹渐变|禁止棕黄/);
 });
 
+test('正式风格选择器只使用真实案例图清单并覆盖核心视觉方向', () => {
+  const featured = visualStylePresets().filter((style) => style.featured);
+  assert.equal(featured.length, 13);
+  assert.ok(featured.every((style) => /^\/visual-style-previews\/[a-z0-9-]+\.png$/.test(style.previewImage)));
+  assert.ok(featured.some((style) => style.id === 'MACARON_CARTOON' && /卡通/.test(style.name)));
+  assert.ok(featured.some((style) => style.id === 'CYBER_TECH' && /赛博/.test(style.name)));
+  assert.ok(featured.some((style) => style.id === 'PIXEL_RETRO' && /像素/.test(style.name)));
+  assert.ok(featured.some((style) => style.id === 'SOFT_3D'));
+  assert.ok(featured.some((style) => style.id === 'MINIMAL_KNOWLEDGE'));
+});
+
+test('genimage 模板清单与正式风格案例路径一一对应', () => {
+  const manifest = JSON.parse(readFileSync(new URL('../scripts/visual-style-previews.json', import.meta.url), 'utf8'));
+  const expected = new Map(visualStylePresets().filter((style) => style.featured).map((style) => [style.id, style.previewImage.split('/').at(-1)]));
+  assert.equal(manifest.items.length, expected.size);
+  assert.ok(manifest.sharedPrompt.includes('公众号') && manifest.sharedPrompt.includes('小红书') && manifest.sharedPrompt.includes('微博') && manifest.sharedPrompt.includes('知乎'));
+  assert.deepEqual(new Map(manifest.items.map((item) => [item.id, item.filename])), expected);
+});
+
+test('正式风格案例资产全部落盘且为有效 PNG', () => {
+  const featured = visualStylePresets().filter((style) => style.featured);
+  for (const style of featured) {
+    const assetUrl = new URL(`../public${style.previewImage}`, import.meta.url);
+    assert.ok(statSync(assetUrl).size > 100_000, `${style.id} 案例图不应为空壳文件`);
+    assert.deepEqual([...readFileSync(assetUrl).subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+  }
+});
+
 test('项目统一补充要求会进入每张图的提示词', () => {
   const [item] = buildVisualPlan(article, 'WECHAT');
   const updated = updateVisualPlanItem(item, {}, { platform: 'WECHAT', title: article.title }, {
@@ -272,7 +301,7 @@ test('第三版方案升级视觉导演字段时保留用户内容和最终图�
     assetReferenceId: `asset-${index}`,
   }));
   const upgraded = mergeVisualPlan(generated, oldPlan, [], null, 3);
-  assert.equal(VISUAL_PLAN_VERSION, 5);
+  assert.equal(VISUAL_PLAN_VERSION, 6);
   assert.deepEqual(upgraded.map((item) => item.assetReferenceId), oldPlan.map((item) => item.assetReferenceId));
   assert.deepEqual(upgraded.map((item) => item.purpose), oldPlan.map((item) => item.purpose));
   assert.deepEqual(upgraded.map((item) => item.informationPoints), oldPlan.map((item) => item.informationPoints));

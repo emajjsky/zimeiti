@@ -44,6 +44,32 @@ def assert_no_overflow(page, label):
     assert dimensions["width"] <= dimensions["viewport"], f"{label} 横向溢出: {dimensions}"
 
 
+def planned_items(count, current=None, style_requirement=""):
+    current = current or []
+    result = []
+    roles = ["COVER", *(["BODY"] * count)]
+    for index, role in enumerate(roles):
+        previous = current[index] if index < len(current) else {}
+        title = "文章封面" if role == "COVER" else f"正文插图 {index}"
+        focus = "天链三号01星与地球通信链路的主题视觉" if role == "COVER" else "中继卫星位于航天器与地面站之间，转发测控指令和业务数据"
+        prompt = f"为公众号《天链三号01星有什么用》制作{title}，画面准确展示{focus}，使用清新编辑风格和明确的信息层级，所有简体中文必须准确，不编造正文没有的数据、机构、标识或结论。{style_requirement}"
+        result.append({
+            "id": "wechat-cover" if role == "COVER" else f"wechat-body-{index}",
+            "role": role, "title": title, "placement": "发布首图" if role == "COVER" else f"正文第 {index} 个核心段落后",
+            "purpose": "建立文章主题识别" if role == "COVER" else "帮助普通读者理解中继卫星如何扩大航天器测控覆盖范围",
+            "visualType": "HERO_VISUAL" if role == "COVER" else "CONCEPT_DIAGRAM", "focus": focus,
+            "avoidConcepts": [], "searchQueries": ["天链三号01星 中继卫星", "航天器 地面站 数据中继"],
+            "generationMode": "ILLUSTRATION" if role == "COVER" else "INFOGRAPHIC",
+            "informationPoints": ["航天器发送业务数据", "中继卫星在轨转发", "地面站接收数据"],
+            "stylePreset": "INHERIT", "templatePreset": "AI_DIRECTED",
+            "sourceExcerpt": "中继卫星承担航天器与地面站之间的数据转发任务，能够扩展测控覆盖范围。",
+            "contentBlocks": [{"label": "航天器", "detail": "产生测控与业务数据"}, {"label": "中继卫星", "detail": "在轨接收并转发数据"}, {"label": "地面站", "detail": "接收数据并发送控制指令"}],
+            "references": previous.get("references", []), "prompt": prompt, "size": "16:9" if role == "COVER" else "4:3",
+            "assetReferenceId": previous.get("assetReferenceId") if previous.get("assetReferenceId") else (COVER_ID if role == "COVER" else None),
+        })
+    return result
+
+
 def project():
     body = """天链三号01星由运载火箭送入预定轨道，这是我国新一代中继卫星系统建设的重要一步。
 
@@ -91,7 +117,7 @@ def project():
 with sync_playwright() as playwright:
     browser = playwright.chromium.launch(headless=True, **({"executable_path": chrome_path()} if chrome_path() else {}))
     page = browser.new_page(viewport={"width": 1440, "height": 1000})
-    state = {"project": project(), "searches": [], "visual_writes": 0, "generations": 0, "generation_payloads": [], "unexpected": [], "console_errors": [], "references": [
+    state = {"project": project(), "searches": [], "planning_calls": [], "visual_writes": 0, "generations": 0, "generation_payloads": [], "unexpected": [], "console_errors": [], "references": [
         {"id": COVER_ID, "title": "旧封面", "url": f"data:image/gif;base64,{ONE_PIXEL_GIF}", "role": "VISUAL", "scope": "IMAGING", "platforms": ["WECHAT"], "sourceType": "LINK", "mimeType": "image/gif", "notes": "", "createdAt": NOW, "updatedAt": NOW},
         {"id": BODY_ID, "title": "旧正文火箭图", "url": f"data:image/gif;base64,{ONE_PIXEL_GIF}", "role": "VISUAL", "scope": "IMAGING", "platforms": ["WECHAT"], "sourceType": "LINK", "mimeType": "image/gif", "notes": "", "createdAt": NOW, "updatedAt": NOW},
     ]}
@@ -117,6 +143,20 @@ with sync_playwright() as playwright:
             return respond(route, {"voices": []})
         if path == f"/api/v1/creative/projects/{PROJECT_ID}/materials":
             return respond(route, {"inputs": [], "references": state["references"]})
+        if path == f"/api/v1/creative/projects/{PROJECT_ID}/visual/plan" and method == "POST":
+            payload = json.loads(request.post_data or "{}")
+            state["planning_calls"].append(payload)
+            if payload.get("currentItemId"):
+                plan = payload.get("currentPlan", [])
+                for item in plan:
+                    if item["id"] == payload["currentItemId"]:
+                        item["title"] = "三方通信关系图"
+                        item["focus"] = "用航天器、中继卫星、地面站三层关系解释双向数据链路"
+                        item["purpose"] = "按用户意见突出三方通信关系"
+                        item["prompt"] += " 用户要求：" + payload.get("request", "")
+                return respond(route, {"plan": plan, "strategy": "逐图解释文章。", "model": "qwen-plus", "provider": "BAILIAN_CLI", "scope": "AGENT_PLANNER"}, status=201)
+            plan = planned_items(payload["bodyItemCount"], payload.get("currentPlan"), payload.get("styleProfile", {}).get("customPrompt", ""))
+            return respond(route, {"plan": plan, "strategy": "封面建立识别，正文图解释通信关系。", "model": "qwen-plus", "provider": "BAILIAN_CLI", "scope": "AGENT_PLANNER"}, status=201)
         if path == f"/api/v1/creative/projects/{PROJECT_ID}/visual/generate" and method == "POST":
             state["generations"] += 1
             state["generation_payloads"].append(json.loads(request.post_data or "{}"))
@@ -159,97 +199,83 @@ with sync_playwright() as playwright:
     assert platform_nav and step_nav and abs(platform_nav["y"] - step_nav["y"]) <= 4, "渠道与步骤导航没有在同一行"
     assert page.locator(".channel-platform-tabs button").count() == 4
     page.get_by_text("封面 1 张，正文插图 2 张", exact=True).wait_for()
+    page.get_by_role("heading", name="让核心 Agent 先读正文，再安排每一张图", exact=True).wait_for()
+    assert page.get_by_text("视觉结构", exact=True).count() == 0
+    assert page.get_by_text("版式模板", exact=True).count() == 0
+    assert page.get_by_text("高级设置", exact=True).count() == 0
+    page.screenshot(path=ARTIFACTS / "visual-plan-empty.png", full_page=True)
+    page.get_by_role("button", name="生成配图方案", exact=True).click()
     page.get_by_role("button", name=re.compile(r"文章封面")).wait_for()
     page.get_by_role("button", name=re.compile(r"正文插图 1")).wait_for()
-    page.get_by_role("button", name="增加正文插图").click()
-    page.get_by_text("封面 1 张，正文插图 3 张", exact=True).wait_for()
-    page.get_by_role("button", name=re.compile(r"正文插图 3")).wait_for()
-    page.wait_for_timeout(900)
-    assert len(state["project"]["delivery"]["platforms"]["WECHAT"]["visual"]["plan"]) == 4
-    page.get_by_role("button", name="减少正文插图").click()
-    page.get_by_text("封面 1 张，正文插图 2 张", exact=True).wait_for()
-    page.get_by_role("button", name="增加正文插图").click()
-    page.get_by_role("button", name="重新规划").click()
-    page.get_by_role("heading", name="重新规划配图方案", exact=True).wait_for()
-    assert page.get_by_text("配图位置、图片类型、搜索词、生图提示词", exact=True).is_visible()
-    assert page.get_by_text("保留已选图片", exact=True).is_visible()
-    page.screenshot(path=ARTIFACTS / "visual-replan-dialog.png", full_page=True)
-    page.get_by_role("button", name="确认重新规划", exact=True).click()
-    page.get_by_text("封面 1 张，正文插图 3 张", exact=True).wait_for()
-    page.wait_for_timeout(900)
-    page.reload()
-    page.wait_for_load_state("networkidle")
-    page.get_by_text("封面 1 张，正文插图 3 张", exact=True).wait_for()
-    page.get_by_role("button", name=re.compile(r"正文插图 3")).wait_for()
-    assert page.locator(".visual-plan-state", has_text="待选图").count() >= 2, "旧版正文错误绑定没有在升级时清空"
-    page.get_by_role("button", name=re.compile(r"天链三号01星")).first.wait_for()
-    assert not state["searches"], "进入配图页或刷新时不应自动产生图片检索请求"
-    page.locator(".visual-query-chips button").first.click()
-    page.get_by_text("Satellite launch", exact=True).wait_for()
-    assert len(state["searches"]) == 1, "点击推荐关键词后应只执行一次图片检索"
-    page.get_by_role("button", name=re.compile(r"正文插图 1")).click()
-    page.get_by_text(re.compile(r"概念示意图|场景图|数据图")).first.wait_for()
-    assert len(state["searches"]) == 1, "切换配图项时不应自动产生新的图片检索请求"
+    assert len(state["planning_calls"]) == 1
+    assert state["planning_calls"][0]["bodyItemCount"] == 2
+    assert not state["searches"], "生成配图方案时不应自动搜索图片"
     for _ in range(20):
         if state["visual_writes"]:
             break
         page.wait_for_timeout(100)
-    assert state["visual_writes"] >= 1, "自动生成的配图方案没有保存"
-    assert state["project"]["delivery"]["platforms"]["WECHAT"]["visual"]["planVersion"] == 5
-    assert all(item["assetReferenceId"] is None for item in state["project"]["delivery"]["platforms"]["WECHAT"]["visual"]["plan"][1:])
-    page.get_by_role("button", name=re.compile(r"文章封面")).click()
+    assert state["visual_writes"] >= 1, "AI 配图方案没有自动保存"
+    assert state["project"]["delivery"]["platforms"]["WECHAT"]["visual"]["planVersion"] == 6
+
+    page.get_by_role("button", name="增加正文插图").click()
+    page.get_by_text("封面 1 张，正文插图 3 张", exact=True).wait_for()
+    page.get_by_role("button", name="更新方案", exact=True).click()
+    page.get_by_role("button", name=re.compile(r"正文插图 3")).wait_for()
+    assert len(state["planning_calls"]) == 2
+
+    page.locator(".visual-query-chips button").first.click()
+    page.get_by_text("Satellite launch", exact=True).wait_for()
+    assert len(state["searches"]) == 1, "点击推荐关键词后应只执行一次图片检索"
+    page.get_by_role("button", name=re.compile(r"正文插图 1")).click()
+    assert len(state["searches"]) == 1, "切换配图项时不应自动产生新的图片检索请求"
     page.get_by_role("button", name="AI 生图", exact=True).click()
+    page.get_by_text("画面任务", exact=True).wait_for()
+    page.get_by_text("为什么配", exact=True).wait_for()
+    page.get_by_text("正文依据", exact=True).wait_for()
+    page.get_by_text("图内信息", exact=True).wait_for()
+    assert page.get_by_text("视觉结构", exact=True).count() == 0
+    assert page.get_by_text("版式模板", exact=True).count() == 0
+    assert page.get_by_text("单图风格", exact=True).count() == 0
+    assert page.get_by_text("高级设置", exact=True).count() == 0
+    page.get_by_label("修改这张图", exact=True).fill("改成三方通信关系图，突出双向数据链路")
+    page.locator(".visual-item-replan").get_by_role("button", name="重新策划", exact=True).click()
+    page.get_by_role("heading", name="三方通信关系图", exact=True).wait_for()
+    assert len(state["planning_calls"]) == 3 and state["planning_calls"][-1]["currentItemId"] == "wechat-body-1"
+
     page.get_by_role("button", name="设置项目配图风格", exact=True).click()
     page.get_by_role("heading", name="项目配图风格", exact=True).wait_for()
-    assert page.locator(".visual-style-card").count() >= 5
-    assert page.locator(".visual-style-preview").count() >= 6
-    assert page.get_by_text("25 套案例模板", exact=True).is_visible()
+    assert page.locator(".visual-style-card").count() == 3
+    assert page.locator(".visual-style-preview").count() == 4
+    assert page.get_by_text("13 套案例模板", exact=True).is_visible()
     page.screenshot(path=ARTIFACTS / "visual-style-dialog.png", full_page=True)
     page.get_by_role("button", name=re.compile(r"插画与创意")).click()
     page.get_by_role("button", name=re.compile(r"清新波普怀旧")).click()
     page.locator(".visual-style-custom textarea").fill("统一使用薄荷绿边框，避免高饱和紫色")
     page.get_by_role("button", name="应用到项目", exact=True).click()
-    page.get_by_label("视觉结构", exact=True).select_option("MIND_MAP")
-    assert page.get_by_label("版式模板", exact=True).input_value() == "RADIAL_BRANCH"
-    assert page.get_by_label("单图风格", exact=True).input_value() == "INHERIT"
-    page.get_by_text("查看策划", exact=True).click()
-    assert page.locator(".visual-director-blocks textarea").count() >= 2
+    page.get_by_role("button", name="更新方案", exact=True).click()
+    page.get_by_text("配图方案已由核心 Agent 完成，共 4 张。", exact=True).wait_for()
+    assert "统一使用薄荷绿边框" in state["planning_calls"][-1]["styleProfile"]["customPrompt"]
+    page.get_by_role("button", name=re.compile(r"正文插图 1")).click()
+    page.get_by_role("button", name="AI 生图", exact=True).click()
     page.get_by_role("button", name="添加参考图", exact=True).click()
     page.get_by_role("button", name=re.compile(r"旧正文火箭图")).click()
     page.get_by_label("参考方式", exact=True).select_option("COLOR_LAYOUT")
-    page.get_by_role("button", name="图文信息图", exact=True).click()
-    page.locator(".visual-generate-controls select").select_option("3:4")
-    portrait_preview = page.locator(".visual-generated-preview").bounding_box()
-    assert portrait_preview and abs(portrait_preview["width"] / portrait_preview["height"] - 0.75) <= 0.04, f"3:4 预览比例错误: {portrait_preview}"
-    page.locator(".visual-generate-controls select").select_option("16:9")
-    page.get_by_text("高级设置", exact=True).click()
-    assert page.get_by_text("负面提示词", exact=True).count() == 0
-    prompt = page.locator(".visual-prompt-field textarea").first.input_value()
-    assert len(prompt) > 100 and "公众号" in prompt and "天链三号01星" in prompt
-    assert "思维导图" in prompt and "波普怀旧" in prompt and "参考图只用于参考色彩、排版" in prompt
-    assert "统一使用薄荷绿边框" in prompt and "避免高饱和紫色" in prompt
-    assert "主标题：" in prompt and "信息点：" in prompt and "不在图片内生成文字" not in prompt
-    assert page.locator(".visual-generate-controls select").input_value() == "16:9"
+    assert page.locator(".visual-prompt-field").count() == 0, "原始提示词不应暴露给普通用户"
     page.get_by_role("button", name="生成这一张", exact=True).click()
     page.locator(".visual-generated-preview img").wait_for()
     preview = page.locator(".visual-generated-preview").bounding_box()
-    assert preview and preview["width"] >= 420 and preview["height"] >= 240, f"生成结果预览尺寸不足: {preview}"
+    assert preview and preview["width"] >= 360 and preview["height"] >= 240, f"生成结果预览尺寸不足: {preview}"
     assert state["generations"] == 1
     assert state["generation_payloads"][0]["referenceImageIds"] == [BODY_ID]
+    assert "统一使用薄荷绿边框" in state["generation_payloads"][0]["prompt"]
     page.wait_for_timeout(900)
     page.reload()
     page.wait_for_load_state("networkidle")
+    page.get_by_role("button", name=re.compile(r"正文插图 1")).click()
     page.get_by_role("button", name="AI 生图", exact=True).click()
     page.locator(".visual-generated-preview img").wait_for()
     assert "清新波普怀旧" in page.get_by_role("button", name="设置项目配图风格", exact=True).inner_text()
-    assert page.get_by_label("视觉结构", exact=True).input_value() == "MIND_MAP"
     page.screenshot(path=ARTIFACTS / "visual-generated-preview.png", full_page=True)
-    page.get_by_role("button", name=re.compile(r"正文插图 2")).click()
-    page.get_by_text("高级设置", exact=True).click()
-    body_prompt = page.locator(".visual-prompt-field textarea").first.input_value()
-    page.locator(".visual-prompt-field textarea").first.fill(body_prompt + " 保持主体在画面中心。")
-    page.wait_for_timeout(1200)
-    assert "正文插图 2" in page.locator(".visual-task-head h3").inner_text(), "自动保存后当前配图项被重置"
     assert_no_overflow(page, "1440px 配图工作台")
     page.screenshot(path=ARTIFACTS / "visual-workspace-desktop.png", full_page=True)
 

@@ -38,6 +38,8 @@ export interface VisualStylePresetDefinition {
   caseLabel: string;
   caseTitle: string;
   caseMeta: string;
+  previewImage: string | null;
+  featured: boolean;
 }
 
 export interface VisualTemplateDefinition {

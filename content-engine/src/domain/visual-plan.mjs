@@ -1,4 +1,4 @@
-export const VISUAL_PLAN_VERSION = 5;
+export const VISUAL_PLAN_VERSION = 6;
 
 const platformLabels = {
   WECHAT: '公众号',
@@ -144,6 +144,18 @@ const stylePresets = [
     id: 'INDUSTRIAL_MEDIA', name: '工业纪实', group: 'TECHNOLOGY', description: '真实硬朗，适合制造、汽车与产业现场', swatches: ['#EEF1F2', '#39464F', '#6F8F93', '#E18B47'],
     prompt: '现代工业纪实媒体视觉；冷灰、钢铁蓝、低饱和青灰和安全橙点缀；真实工厂、设备、材料与作业关系优先，使用清晰透视、自然工业光和适度广角交代尺度；细节锐利但不过分HDR；避免科幻工厂、无人物空车间、蓝色霓虹、虚构品牌标识和廉价宣传片光效',
   },
+  {
+    id: 'MACARON_CARTOON', name: '马卡龙卡通', group: 'ILLUSTRATION', description: '轻松亲和，适合生活方式、工具教程与小红书图文', swatches: ['#FFF9F2', '#A8DDE0', '#F5B8CA', '#F4D56A'],
+    prompt: '清新马卡龙编辑卡通；珍珠白底，薄荷青、樱花粉、奶油黄与少量深蓝描边；人物和物件造型简洁、有自然动作与真实使用关系，轮廓圆润但不幼儿化；画面有明确前中后层次和标题安全区；避免廉价贴纸感、过度卖萌、表情包、糖果色过饱和、漂浮装饰和素材库套图感',
+  },
+  {
+    id: 'PIXEL_RETRO', name: '像素复古', group: 'ILLUSTRATION', description: '像素叙事与现代排版，适合科技、游戏、历史回看与轻科普', swatches: ['#F5F0E8', '#345995', '#E86A5A', '#58A88A'],
+    prompt: '现代编辑型像素艺术；使用有限但清新的复古调色板、清晰像素网格和有层次的场景叙事，主体轮廓在手机缩略图中仍然可辨；像素插画与现代留白网格结合，保留标题安全区；避免低清放大截图、霓虹紫蓝渐变、杂乱游戏UI、版权角色、8位素材拼盘和无法辨认的小字',
+  },
+  {
+    id: 'CYBER_TECH', name: '清透赛博', group: 'TECHNOLOGY', description: '高对比数字空间，适合前沿科技、未来产业与数字文化', swatches: ['#0B1020', '#20D9D2', '#F24F8A', '#E8F4FF'],
+    prompt: '清透克制的现代赛博编辑视觉；深墨黑与冷白建立强对比，以电光青和少量玫红作功能强调；使用真实可解释的数字界面层次、透明材质、精确透视和细密光线，主体清楚并保留标题安全区；避免通篇紫蓝渐变、代码雨、发光大脑、廉价HUD堆叠、未来城市套图和过暗细节丢失',
+  },
 ];
 
 const styleCases = {
@@ -172,6 +184,25 @@ const styleCases = {
   WOODCUT_PRINT: { caseLabel: '民俗人物', caseTitle: '土地上生长出的故事', caseMeta: '刀痕块面 · 有限套色' },
   TECH_MEDIA: { caseLabel: '前沿科技', caseTitle: '智能体正在重写工作流', caseMeta: '结构数据 · 明亮冷静' },
   INDUSTRIAL_MEDIA: { caseLabel: '产业现场', caseTitle: '制造业里的新效率', caseMeta: '真实设备 · 工业尺度' },
+  MACARON_CARTOON: { caseLabel: '轻松教程', caseTitle: '每天十分钟，整理自己的信息流', caseMeta: '亲和人物 · 清新套色' },
+  PIXEL_RETRO: { caseLabel: '科技回看', caseTitle: '从工具箱到智能工作流', caseMeta: '像素叙事 · 现代网格' },
+  CYBER_TECH: { caseLabel: '数字前沿', caseTitle: '智能体如何协同完成工作', caseMeta: '透明界面 · 电光强调' },
+};
+
+const featuredStylePreviews = {
+  FRESH_EDITORIAL: '/visual-style-previews/fresh-editorial.png',
+  RETRO_POP: '/visual-style-previews/retro-pop.png',
+  MACARON_CARTOON: '/visual-style-previews/macaron-cartoon.png',
+  SOFT_3D: '/visual-style-previews/soft-3d.png',
+  MINIMAL_KNOWLEDGE: '/visual-style-previews/minimal-knowledge.png',
+  SWISS_GRID: '/visual-style-previews/swiss-grid.png',
+  CYBER_TECH: '/visual-style-previews/cyber-tech.png',
+  PIXEL_RETRO: '/visual-style-previews/pixel-retro.png',
+  PAPER_COLLAGE: '/visual-style-previews/paper-collage.png',
+  HAND_DRAWN_NOTES: '/visual-style-previews/hand-drawn-notes.png',
+  NEW_CHINESE: '/visual-style-previews/new-chinese.png',
+  DATA_VISUAL: '/visual-style-previews/data-visual.png',
+  CINEMATIC_DOCUMENTARY: '/visual-style-previews/cinematic-documentary.png',
 };
 
 const visualTemplates = {
@@ -199,7 +230,13 @@ const visualTemplates = {
 };
 
 export function visualStylePresets() {
-  return stylePresets.map((item) => ({ ...item, ...styleCases[item.id], swatches: [...item.swatches] }));
+  return stylePresets.map((item) => ({
+    ...item,
+    ...styleCases[item.id],
+    previewImage: featuredStylePreviews[item.id] ?? null,
+    featured: Boolean(featuredStylePreviews[item.id]),
+    swatches: [...item.swatches],
+  }));
 }
 
 export function visualTemplatesFor(type) {

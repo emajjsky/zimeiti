@@ -1,9 +1,9 @@
 import { Check, Image, LoaderCircle, Minus, Palette, Plus, RefreshCw, Save, Search, Sparkles, Trash2, Upload, X } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { webCreative } from '../../data/webApi';
-import { platformName, type ContentProject, type CreativeVisualGenerationMode, type CreativeVisualPlanItem, type CreativeVisualReferenceUse, type CreativeVisualSize, type CreativeVisualStylePreset, type CreativeVisualStyleProfile } from '../../domain/content';
+import { platformName, type ContentProject, type CreativeVisualPlanItem, type CreativeVisualReferenceUse, type CreativeVisualStyleProfile } from '../../domain/content';
 import type { CreativePlatform, ProjectReference } from '../../domain/creative';
-import { buildVisualPlan, mergeVisualPlan, replanVisualPlan, resizeVisualPlan, updateVisualPlanItem, visualPlanCountRange, visualStylePresets, visualTemplatesFor, VISUAL_PLAN_VERSION } from '../../domain/visual-plan.mjs';
+import { visualPlanCountRange, visualStylePresets, VISUAL_PLAN_VERSION } from '../../domain/visual-plan.mjs';
 
 type ImageSearchResult = { id: string; title: string; thumbnailUrl: string; imageUrl: string; sourceUrl: string; license: string; attribution: string };
 type SourceView = 'search' | 'generate' | 'library';
@@ -26,7 +26,6 @@ function visualTypeName(type: CreativeVisualPlanItem['visualType']) {
   return ({ NEWS_PHOTO: '新闻资料图', HERO_VISUAL: '主体主视觉', CONCEPT_DIAGRAM: '概念示意图', SCENE: '场景图', MIND_MAP: '思维导图', FLOWCHART: '流程图', TIMELINE: '时间线', COMPARISON: '对比图', DATA_CHART: '数据图', QUOTE_CARD: '引语卡片', INFO_CARD: '信息卡片', CHECKLIST_CARD: '清单卡片' } as const)[type];
 }
 
-const visualTypes = ['NEWS_PHOTO', 'HERO_VISUAL', 'SCENE', 'CONCEPT_DIAGRAM', 'MIND_MAP', 'FLOWCHART', 'TIMELINE', 'COMPARISON', 'DATA_CHART', 'INFO_CARD', 'CHECKLIST_CARD', 'QUOTE_CARD'] as const;
 const referenceModes: { id: string; name: string; uses: CreativeVisualReferenceUse[] }[] = [
   { id: 'COLOR_LAYOUT', name: '色彩与排版', uses: ['COLOR', 'LAYOUT'] },
   { id: 'COMPOSITION', name: '构图', uses: ['COMPOSITION'] },
@@ -34,7 +33,8 @@ const referenceModes: { id: string; name: string; uses: CreativeVisualReferenceU
   { id: 'SUBJECT', name: '人物 / 主体', uses: ['SUBJECT'] },
   { id: 'ALL', name: '全部视觉特征', uses: ['COLOR', 'COMPOSITION', 'LAYOUT', 'TEXTURE', 'SUBJECT'] },
 ];
-const visualStyles = visualStylePresets();
+const allVisualStyles = visualStylePresets();
+const visualStyles = allVisualStyles.filter((style) => style.featured);
 const visualStyleGroupLabels = {
   EDITORIAL: '编辑与纪实', KNOWLEDGE: '知识与信息', ILLUSTRATION: '插画与创意', CULTURAL: '东方与文化', TECHNOLOGY: '科技与产业',
 } as const;
@@ -47,22 +47,37 @@ type VisualStyleGroupId = (typeof visualStyleGroups)[number]['id'];
 type VisualStyleDefinition = (typeof visualStyles)[number];
 
 function VisualStylePreview({ style, large = false }: { style: VisualStyleDefinition; large?: boolean }) {
-  const previewStyle = {
-    '--style-1': style.swatches[0],
-    '--style-2': style.swatches[1],
-    '--style-3': style.swatches[2],
-    '--style-4': style.swatches[3],
-  } as CSSProperties;
-  return <span className={'visual-style-preview' + (large ? ' large' : '')} data-style={style.id} style={previewStyle} aria-hidden="true">
-    <span className="visual-style-case-label">{style.caseLabel}</span>
-    <strong>{style.caseTitle}</strong>
-    <span className="visual-style-case-art"><i/><i/><i/><i/></span>
-    <small>{style.caseMeta}</small>
+  const [failed, setFailed] = useState(false);
+  return <span className={'visual-style-preview' + (large ? ' large' : '')} data-style={style.id}>
+    {!failed && style.previewImage ? <img src={style.previewImage} alt={`${style.name}风格的多平台配图案例`} onError={() => setFailed(true)}/> : <span className="visual-style-preview-missing"><Image size={large ? 26 : 18}/><b>案例图待生成</b></span>}
   </span>;
 }
 
 function referenceModeValue(uses: CreativeVisualReferenceUse[]) {
   return referenceModes.find((mode) => mode.uses.length === uses.length && mode.uses.every((use) => uses.includes(use)))?.id ?? 'COLOR_LAYOUT';
+}
+
+function recommendedBodyItemCount(platform: CreativePlatform, body: string) {
+  const length = String(body ?? '').trim().length;
+  if (platform === 'WEIBO') return 1;
+  if (platform === 'XIAOHONGSHU') return Math.min(8, 5 + Math.floor(length / 900));
+  const range = visualPlanCountRange(platform);
+  return Math.min(range.max, Math.max(range.min, 2 + Math.floor(length / 1_200)));
+}
+
+function safePlan(items: unknown): CreativeVisualPlanItem[] {
+  if (!Array.isArray(items)) return [];
+  return items.filter((item): item is CreativeVisualPlanItem => Boolean(item && typeof item === 'object')).map((item) => ({
+    ...item,
+    avoidConcepts: Array.isArray(item.avoidConcepts) ? item.avoidConcepts : [],
+    searchQueries: Array.isArray(item.searchQueries) ? item.searchQueries.filter(Boolean) : [],
+    informationPoints: Array.isArray(item.informationPoints) ? item.informationPoints.filter(Boolean) : [],
+    sourceExcerpt: String(item.sourceExcerpt ?? ''),
+    contentBlocks: Array.isArray(item.contentBlocks) ? item.contentBlocks : [],
+    references: Array.isArray(item.references) ? item.references : [],
+    prompt: String(item.prompt ?? ''),
+    assetReferenceId: item.assetReferenceId ?? null,
+  }));
 }
 
 export function VisualWorkspace({ project, activePlatform, onProjectChange, onOpenModelSettings }: {
@@ -73,25 +88,16 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
 }) {
   const currentDelivery = project.delivery?.platforms?.[activePlatform];
   const version = project.versions.find((item) => item.platform === activePlatform);
-  const planInput = useMemo(() => ({
-    title: project.planning.title || project.title || version?.title || '未命名内容',
-    body: version?.body || '',
-    category: project.planning.category,
-    coreMessage: project.planning.coreMessage || project.coreViewpoint,
-  }), [project.coreViewpoint, project.planning.category, project.planning.coreMessage, project.planning.title, project.title, version?.body, version?.title]);
-  const persistedBodyItemCount = useMemo(() => {
-    const persisted = currentDelivery?.visual?.plan;
-    if (!Array.isArray(persisted) || currentDelivery?.visual?.planVersion !== VISUAL_PLAN_VERSION) return undefined;
-    return activePlatform === 'WEIBO' ? persisted.length : persisted.filter((item) => item.role === 'BODY' || item.role === 'CARD').length;
-  }, [activePlatform, currentDelivery?.visual?.plan, currentDelivery?.visual?.planVersion]);
-  const generatedPlan = useMemo(() => buildVisualPlan(planInput, activePlatform, { bodyItemCount: persistedBodyItemCount }), [activePlatform, persistedBodyItemCount, planInput]);
   const [plan, setPlan] = useState<CreativeVisualPlanItem[]>([]);
+  const [bodyItemCount, setBodyItemCount] = useState(0);
   const [styleProfile, setStyleProfile] = useState<CreativeVisualStyleProfile>({ preset: 'FRESH_EDITORIAL', customPrompt: '' });
   const [styleDraft, setStyleDraft] = useState<CreativeVisualStyleProfile>({ preset: 'FRESH_EDITORIAL', customPrompt: '' });
   const [styleDialogOpen, setStyleDialogOpen] = useState(false);
   const [activeStyleGroup, setActiveStyleGroup] = useState<VisualStyleGroupId>('EDITORIAL');
-  const [replanDialogOpen, setReplanDialogOpen] = useState(false);
-  const [keepAssignedAssets, setKeepAssignedAssets] = useState(true);
+  const [planBusy, setPlanBusy] = useState(false);
+  const [planNeedsRefresh, setPlanNeedsRefresh] = useState(false);
+  const [itemRequest, setItemRequest] = useState('');
+  const [planningModel, setPlanningModel] = useState('');
   const [hydratedPlanKey, setHydratedPlanKey] = useState('');
   const [activeItemId, setActiveItemId] = useState('');
   const [references, setReferences] = useState<ProjectReference[]>([]);
@@ -114,33 +120,41 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
   const hydratedProjectKey = useRef('');
   const assets = useMemo(() => references.filter(usableVisualReference), [references]);
   const activeItem = plan.find((item) => item.id === activeItemId) ?? plan[0];
+  const activePrompt = String(activeItem?.prompt ?? '').trim();
   const assignedAsset = activeItem?.assetReferenceId ? assets.find((item) => item.id === activeItem.assetReferenceId) : undefined;
   const referenceAssets = activeItem?.references.map((item) => ({ config: item, asset: assets.find((asset) => asset.id === item.referenceId) })).filter((item) => item.asset) ?? [];
   const boundCount = plan.filter((item) => item.assetReferenceId).length;
-  const bodyItemCount = activePlatform === 'WEIBO' ? plan.length : plan.filter((item) => item.role === 'BODY' || item.role === 'CARD').length;
   const countRange = visualPlanCountRange(activePlatform);
   const hasCopy = String(version?.body ?? '').trim().length >= 80;
   const selectedStyle = visualStyles.find((style) => style.id === styleDraft.preset) ?? visualStyles[0];
   const visibleStyleGroup = visualStyleGroups.find((group) => group.id === activeStyleGroup) ?? visualStyleGroups[0];
 
   useEffect(() => {
-    const next = mergeVisualPlan(generatedPlan, currentDelivery?.visual?.plan, currentDelivery?.visual?.assetReferenceIds ?? [], currentDelivery?.visual?.coverReferenceId ?? null, currentDelivery?.visual?.planVersion ?? 0);
     const projectKey = `${project.id}:${activePlatform}`;
     const switchedProject = hydratedProjectKey.current !== projectKey;
+    const persisted = currentDelivery?.visual?.planVersion === VISUAL_PLAN_VERSION ? safePlan(currentDelivery?.visual?.plan) : [];
+    const legacy = safePlan(currentDelivery?.visual?.plan);
+    const persistedCount = currentDelivery?.visual?.planVersion === VISUAL_PLAN_VERSION
+      ? activePlatform === 'WEIBO' ? legacy.length : legacy.filter((item) => item.role === 'BODY' || item.role === 'CARD').length
+      : 0;
+    const nextCount = persistedCount || recommendedBodyItemCount(activePlatform, version?.body ?? '');
     const nextStyleProfile = { preset: currentDelivery?.visual?.styleProfile?.preset ?? 'FRESH_EDITORIAL' as const, customPrompt: currentDelivery?.visual?.styleProfile?.customPrompt ?? '' };
-    setPlan((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
+    setPlan((current) => JSON.stringify(current) === JSON.stringify(persisted) ? current : persisted);
+    setBodyItemCount(nextCount);
     setStyleProfile((current) => JSON.stringify(current) === JSON.stringify(nextStyleProfile) ? current : nextStyleProfile);
-    setActiveItemId((current) => !switchedProject && next.some((item) => item.id === current) ? current : next[0]?.id ?? '');
+    setActiveItemId((current) => !switchedProject && persisted.some((item) => item.id === current) ? current : persisted[0]?.id ?? '');
     if (switchedProject) {
-      setSearchQuery(next[0]?.searchQueries[0] ?? '');
+      setSearchQuery(persisted[0]?.searchQueries[0] ?? '');
       setSearchResults([]);
       setSourceView('search');
       setReferencePickerOpen(false);
+      setPlanNeedsRefresh(false);
+      setPlanningModel('');
     }
     hydratedProjectKey.current = projectKey;
     setHydratedPlanKey(projectKey);
-    lastSavedSignature.current = Array.isArray(currentDelivery?.visual?.plan) && currentDelivery.visual.planVersion === VISUAL_PLAN_VERSION ? JSON.stringify({ plan: next, styleProfile: nextStyleProfile }) : '';
-  }, [activePlatform, currentDelivery?.visual?.updatedAt, generatedPlan, project.id]);
+    lastSavedSignature.current = persisted.length ? JSON.stringify({ plan: persisted, styleProfile: nextStyleProfile }) : '';
+  }, [activePlatform, currentDelivery?.visual?.updatedAt, project.id, version?.body]);
 
   useEffect(() => {
     let cancelled = false;
@@ -167,7 +181,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
   }, [assets, fileUrls]);
 
   useEffect(() => {
-    if (!hasCopy) return;
+    if (!hasCopy || !plan.length) return;
     if (hydratedPlanKey !== `${project.id}:${activePlatform}`) return;
     const signature = JSON.stringify({ plan, styleProfile });
     if (signature === lastSavedSignature.current) return;
@@ -213,35 +227,28 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
     setReferencePickerOpen(false);
   };
 
-  const updateActiveItem = (patch: Partial<CreativeVisualPlanItem>, compile = true) => {
+  const updateActiveItem = (patch: Partial<CreativeVisualPlanItem>, _compile = false) => {
     if (!activeItem) return;
-    setPlan((current) => current.map((item) => {
-      if (item.id !== activeItem.id) return item;
-      return compile ? updateVisualPlanItem(item, patch, { platform: activePlatform, title: planInput.title }, styleProfile) : { ...item, ...patch };
-    }));
-  };
-
-  const changeGenerationMode = (mode: CreativeVisualGenerationMode) => {
-    if (!activeItem || activeItem.generationMode === mode) return;
-    updateActiveItem({ generationMode: mode });
+    setPlan((current) => current.map((item) => item.id === activeItem.id ? { ...item, ...patch } : item));
   };
 
   const changeProjectStyle = (profile: CreativeVisualStyleProfile) => {
     const nextProfile = { preset: profile.preset, customPrompt: profile.customPrompt?.trim() ?? '' };
     setStyleProfile(nextProfile);
-    setPlan((current) => current.map((item) => updateVisualPlanItem(item, {}, { platform: activePlatform, title: planInput.title }, nextProfile)));
+    if (plan.length) setPlanNeedsRefresh(true);
   };
 
   const openStyleDialog = () => {
-    setStyleDraft({ preset: styleProfile.preset, customPrompt: styleProfile.customPrompt ?? '' });
-    setActiveStyleGroup(visualStyles.find((style) => style.id === styleProfile.preset)?.group ?? 'EDITORIAL');
+    const currentStyle = visualStyles.find((style) => style.id === styleProfile.preset) ?? visualStyles[0];
+    setStyleDraft({ preset: currentStyle.id, customPrompt: styleProfile.customPrompt ?? '' });
+    setActiveStyleGroup(currentStyle.group);
     setStyleDialogOpen(true);
   };
 
   const applyProjectStyle = () => {
     changeProjectStyle(styleDraft);
     setStyleDialogOpen(false);
-    setNotice('项目风格已更新，所有跟随项目的生图提示词已同步。');
+    setNotice(plan.length ? '项目风格已更新。点击“更新方案”后应用到全部图片。' : '项目风格已更新。');
   };
 
   const addReference = (reference: ProjectReference) => {
@@ -259,11 +266,6 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
     if (!activeItem) return;
     const uses = referenceModes.find((mode) => mode.id === modeId)?.uses ?? ['COLOR', 'LAYOUT'];
     updateActiveItem({ references: activeItem.references.map((item) => item.referenceId === referenceId ? { ...item, uses } : item) });
-  };
-
-  const changeContentBlock = (index: number, patch: { label?: string; detail?: string }) => {
-    if (!activeItem) return;
-    updateActiveItem({ contentBlocks: activeItem.contentBlocks.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item) });
   };
 
   const assignAsset = (reference: ProjectReference) => {
@@ -296,11 +298,11 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
   };
 
   const generate = async () => {
-    if (!activeItem || activeItem.prompt.trim().length < 4) return;
+    if (!activeItem || activePrompt.length < 4) return;
     setGenerateBusy(true); setError('');
     try {
       const { reference } = await webCreative.generateImage(project.id, {
-        platform: activePlatform, prompt: activeItem.prompt.trim(), size: activeItem.size,
+        platform: activePlatform, prompt: activePrompt, size: activeItem.size,
         referenceImageIds: activeItem.references.map((item) => item.referenceId),
       });
       assignAsset(reference);
@@ -331,27 +333,42 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
     finally { setBusy(null); }
   };
 
-  const regenerate = () => {
-    const assignedBodyCount = plan.filter((item) => item.role !== 'COVER' && item.role !== 'MAIN' && item.assetReferenceId).length;
-    const next = replanVisualPlan(planInput, activePlatform, plan, { bodyItemCount, keepAssignedAssets, styleProfile });
-    setPlan(next);
-    setActiveItemId(next[0]?.id ?? '');
-    setSearchQuery(next[0]?.searchQueries[0] ?? '');
-    setSearchResults([]);
-    setReplanDialogOpen(false);
-    setNotice(keepAssignedAssets
-      ? `已更新配图位置、搜索词和生图提示词，保留 ${next.filter((item) => item.assetReferenceId).length} 张已选图片。`
-      : `已重新规划，${assignedBodyCount} 张正文图片已解除绑定，图片仍在项目素材中。`);
+  const planWithAI = async (currentItemId?: string, request = '') => {
+    if (!hasCopy || planBusy) return;
+    setPlanBusy(true); setError(''); setNotice('');
+    try {
+      const result = await webCreative.planVisual(project.id, {
+        platform: activePlatform,
+        bodyItemCount,
+        styleProfile,
+        request,
+        currentItemId,
+        currentPlan: plan,
+        keepAssignedAssets: true,
+      });
+      const next = safePlan(result.plan);
+      setPlan(next);
+      setPlanningModel(result.model);
+      setPlanNeedsRefresh(false);
+      setActiveItemId((current) => currentItemId && next.some((item) => item.id === currentItemId) ? currentItemId : next.some((item) => item.id === current) ? current : next[0]?.id ?? '');
+      const selected = currentItemId ? next.find((item) => item.id === currentItemId) : next[0];
+      setSearchQuery(selected?.searchQueries[0] ?? '');
+      setSearchResults([]);
+      setItemRequest('');
+      setNotice(currentItemId ? '这一张已按修改意见重新策划。' : `配图方案已由核心 Agent 完成，共 ${next.length} 张。`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '生成配图方案失败。');
+    } finally {
+      setPlanBusy(false);
+    }
   };
 
   const changeBodyItemCount = (delta: number) => {
     const target = Math.max(countRange.min, Math.min(countRange.max, bodyItemCount + delta));
     if (target === bodyItemCount) return;
-    const next = resizeVisualPlan(buildVisualPlan(planInput, activePlatform, { bodyItemCount: target }), plan);
-    setPlan(next);
-    setActiveItemId((current) => next.some((item) => item.id === current) ? current : next.at(-1)?.id ?? '');
-    setSearchResults([]);
-    setNotice(target > bodyItemCount ? '已增加配图位置。' : '已减少配图位置，原图片仍保留在项目素材中。');
+    setBodyItemCount(target);
+    if (plan.length) setPlanNeedsRefresh(true);
+    setNotice(plan.length ? '图片数量已调整。点击“更新方案”后重新安排位置。' : '');
   };
 
   const planCountSummary = activePlatform === 'WEIBO'
@@ -366,19 +383,25 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
     <header className="delivery-workspace-head visual-workspace-head">
       <div><h2>{platformName[activePlatform]}配图</h2><p>{planCountSummary}</p></div>
       <div className="visual-plan-actions">
-        <button className="visual-project-style" type="button" aria-label="设置项目配图风格" onClick={openStyleDialog}><Palette size={15}/><span>项目风格</span><b>{visualStyles.find((style) => style.id === styleProfile.preset)?.name}</b></button>
+        <button className="visual-project-style" type="button" aria-label="设置项目配图风格" onClick={openStyleDialog}><Palette size={15}/><span>项目风格</span><b>{allVisualStyles.find((style) => style.id === styleProfile.preset)?.name ?? visualStyles[0].name}</b></button>
         <div className="visual-count-stepper" aria-label="配图数量">
           <button type="button" aria-label={activePlatform === 'WEIBO' ? '减少主图' : '减少正文插图'} disabled={bodyItemCount <= countRange.min} onClick={() => changeBodyItemCount(-1)}><Minus size={14}/></button>
           <output aria-label={activePlatform === 'WEIBO' ? '主图数量' : '正文插图数量'}>{bodyItemCount}</output>
           <button type="button" aria-label={activePlatform === 'WEIBO' ? '增加主图' : '增加正文插图'} disabled={bodyItemCount >= countRange.max} onClick={() => changeBodyItemCount(1)}><Plus size={14}/></button>
         </div>
-        <button className="button" type="button" onClick={() => { setKeepAssignedAssets(true); setReplanDialogOpen(true); }}><RefreshCw size={15}/>重新规划</button>
+        {plan.length > 0 && <button className="button" type="button" disabled={planBusy || !hasCopy} onClick={() => void planWithAI()}>{planBusy ? <LoaderCircle size={15}/> : <RefreshCw size={15}/>} {planNeedsRefresh ? '更新方案' : '重新策划'}</button>}
       </div>
     </header>
     {error && <div className="delivery-error" role="alert">{error}</div>}
     {notice && <div className="visual-workspace-notice" role="status">{notice}</div>}
 
-    <div className="visual-plan-layout">
+    {!plan.length ? <section className="visual-plan-empty">
+      <div className="visual-plan-empty-mark"><Sparkles size={24}/></div>
+      <h3>让核心 Agent 先读正文，再安排每一张图</h3>
+      <p>它会确定插入位置、画面任务、图内信息、搜索词和最终生图指令。</p>
+      <button className="button primary" type="button" disabled={planBusy || !hasCopy} onClick={() => void planWithAI()}>{planBusy ? <LoaderCircle size={16}/> : <Sparkles size={16}/>}生成配图方案</button>
+      {!hasCopy && <small>当前平台正文完成后即可开始。</small>}
+    </section> : <div className="visual-plan-layout">
       <aside className="visual-plan-panel">
         <header><b>配图方案</b><span>{saveState === 'saving' ? '自动保存中' : saveState === 'error' ? '保存失败' : '已自动保存'}</span></header>
         <div className="visual-plan-list">{plan.map((item, index) => {
@@ -395,7 +418,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
 
       {activeItem && <main className="visual-task-panel">
         <header className="visual-task-head">
-          <div><span>{roleName(activeItem.role)} / {visualTypeName(activeItem.visualType)} / {activeItem.placement}</span><h3>{activeItem.title}</h3><p>{activeItem.purpose}</p></div>
+          <div><span>{roleName(activeItem.role)} / {visualTypeName(activeItem.visualType)} / {activeItem.placement}</span><h3>{activeItem.title}</h3></div>
           {assignedAsset && <div className="visual-assigned-asset"><Check size={17}/><span><b>已绑定</b><small>{assignedAsset.title}</small></span><button type="button" title="移除当前配图" onClick={() => updateActiveItem({ assetReferenceId: null }, false)}><Trash2 size={15}/></button></div>}
         </header>
 
@@ -425,37 +448,25 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
               {assignedAsset && assetSrc(assignedAsset) ? <img src={assetSrc(assignedAsset)} alt={`${activeItem.title}预览`}/> : <div><Image size={28}/><span>尚未生成图片</span></div>}
             </div>
             <div className="visual-generate-sidebar">
-              <div className="visual-director-controls">
-                <label><span>视觉结构</span><select aria-label="视觉结构" value={activeItem.visualType} onChange={(event) => updateActiveItem({ visualType: event.target.value as CreativeVisualPlanItem['visualType'] })}>{visualTypes.map((type) => <option value={type} key={type}>{visualTypeName(type)}</option>)}</select></label>
-                <label><span>版式模板</span><select aria-label="版式模板" value={activeItem.templatePreset} onChange={(event) => updateActiveItem({ templatePreset: event.target.value })}>{visualTemplatesFor(activeItem.visualType).map((template) => <option value={template.id} key={template.id}>{template.name}</option>)}</select></label>
-                <label><span>单图风格</span><select aria-label="单图风格" value={activeItem.stylePreset} onChange={(event) => updateActiveItem({ stylePreset: event.target.value as CreativeVisualPlanItem['stylePreset'] })}><option value="INHERIT">跟随项目 · {visualStyles.find((style) => style.id === styleProfile.preset)?.name}</option>{visualStyleGroups.map((group) => <optgroup label={group.name} key={group.id}>{group.styles.map((style) => <option value={style.id} key={style.id}>{style.name}</option>)}</optgroup>)}</select></label>
-              </div>
-              <div className="visual-generation-modes" role="group" aria-label="图片生成模式">
-                <button type="button" className={activeItem.generationMode === 'ILLUSTRATION' ? 'active' : ''} onClick={() => changeGenerationMode('ILLUSTRATION')}>视觉插图</button>
-                <button type="button" className={activeItem.generationMode === 'INFOGRAPHIC' ? 'active' : ''} onClick={() => changeGenerationMode('INFOGRAPHIC')}>图文信息图</button>
-              </div>
-              <details className="visual-director-details">
-                <summary>查看策划</summary>
-                <div>
-                  <div className="visual-director-source"><b>原文依据</b><p>{activeItem.sourceExcerpt}</p></div>
-                  <div className="visual-director-blocks">{activeItem.contentBlocks.map((block, index) => <div key={`${activeItem.id}-block-${index}`}><input aria-label={`结构标题 ${index + 1}`} value={block.label} onChange={(event) => changeContentBlock(index, { label: event.target.value })}/><textarea aria-label={`结构内容 ${index + 1}`} value={block.detail} onChange={(event) => changeContentBlock(index, { detail: event.target.value })}/></div>)}</div>
-                </div>
-              </details>
+              <section className="visual-director-brief">
+                <div><span>画面任务</span><b>{activeItem.focus}</b></div>
+                <div><span>为什么配</span><p>{activeItem.purpose}</p></div>
+                <div><span>正文依据</span><p>{activeItem.sourceExcerpt}</p></div>
+                {activeItem.generationMode === 'INFOGRAPHIC' && <div className="visual-director-information"><span>图内信息</span><dl>{activeItem.contentBlocks.map((block, index) => <div key={`${activeItem.id}-block-${index}`}><dt>{block.label}</dt><dd>{block.detail}</dd></div>)}</dl></div>}
+              </section>
+              <section className="visual-item-replan">
+                <label htmlFor={`visual-request-${activeItem.id}`}>修改这张图</label>
+                <div><input id={`visual-request-${activeItem.id}`} value={itemRequest} onChange={(event) => setItemRequest(event.target.value)} placeholder="例如：改成上市时间线，突出三个关键年份"/><button className="button" type="button" disabled={planBusy || itemRequest.trim().length < 2} onClick={() => void planWithAI(activeItem.id, itemRequest)}>{planBusy ? <LoaderCircle size={15}/> : <RefreshCw size={15}/>}重新策划</button></div>
+              </section>
               <section className="visual-reference-panel">
                 <header><b>参考图</b><button className="text-button" type="button" disabled={activeItem.references.length >= 3 || !assets.length} onClick={() => setReferencePickerOpen((open) => !open)}><Plus size={14}/>添加参考图</button></header>
                 {referenceAssets.length > 0 && <div className="visual-reference-list">{referenceAssets.map(({ config, asset }) => asset && <article key={config.referenceId}>{assetSrc(asset) ? <img src={assetSrc(asset)} alt=""/> : <span><Image size={16}/></span>}<b>{asset.title}</b><select aria-label="参考方式" value={referenceModeValue(config.uses)} onChange={(event) => changeReferenceMode(config.referenceId, event.target.value)}>{referenceModes.map((mode) => <option value={mode.id} key={mode.id}>{mode.name}</option>)}</select><button type="button" title={`移除参考图 ${asset.title}`} onClick={() => removeReference(config.referenceId)}><X size={14}/></button></article>)}</div>}
                 {referencePickerOpen && <div className="visual-reference-picker">{assets.filter((asset) => !activeItem.references.some((item) => item.referenceId === asset.id)).map((asset) => <button type="button" key={asset.id} onClick={() => addReference(asset)}>{assetSrc(asset) ? <img src={assetSrc(asset)} alt=""/> : <Image size={18}/>}<span>{asset.title}</span></button>)}</div>}
               </section>
               <div className="visual-generate-controls">
-                <label><span>图片比例</span><select value={activeItem.size} onChange={(event) => updateActiveItem({ size: event.target.value as CreativeVisualSize }, false)}><option value="1:1">1:1 方图</option><option value="3:4">3:4 竖图</option><option value="4:3">4:3 横图</option><option value="9:16">9:16 竖版</option><option value="16:9">16:9 横版</option></select></label>
-                <button className="button primary" type="button" disabled={generateBusy || activeItem.prompt.trim().length < 4} onClick={() => void generate()}>{generateBusy ? <LoaderCircle size={16}/> : <Sparkles size={16}/>}生成这一张</button>
+                <span><b>{visualTypeName(activeItem.visualType)}</b><small>{activeItem.size}</small></span>
+                <button className="button primary" type="button" disabled={generateBusy || activePrompt.length < 4} onClick={() => void generate()}>{generateBusy ? <LoaderCircle size={16}/> : <Sparkles size={16}/>}生成这一张</button>
               </div>
-              <details className="visual-generation-details">
-                <summary>高级设置</summary>
-                <div>
-                  <label className="visual-prompt-field"><span>生图提示词</span><textarea value={activeItem.prompt} onChange={(event) => updateActiveItem({ prompt: event.target.value }, false)}/></label>
-                </div>
-              </details>
               <button className="text-button visual-model-link" type="button" onClick={onOpenModelSettings}>文生图模型设置</button>
             </div>
           </div>
@@ -468,9 +479,9 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
           })}</div> : <div className="visual-result-state"><Image size={20}/>还没有图片素材</div>}
         </section>}
       </main>}
-    </div>
+    </div>}
 
-    <footer className="delivery-workspace-footer"><span>{saveState === 'saving' ? '正在自动保存配图方案' : boundCount ? `已绑定 ${boundCount}/${plan.length} 张图片` : '方案已生成，可从第一张开始选图'}</span><div><button className="button" type="button" disabled={busy !== null} onClick={() => void save()}>{busy === 'save' ? <LoaderCircle size={16}/> : <Save size={16}/>}保存</button><button className="button primary" type="button" disabled={busy !== null || !hasCopy} onClick={() => void complete()}>{busy === 'complete' ? <LoaderCircle size={16}/> : null}确认素材，进入排版</button></div></footer>
+    {plan.length > 0 && <footer className="delivery-workspace-footer"><span>{saveState === 'saving' ? '正在自动保存配图方案' : boundCount ? `已绑定 ${boundCount}/${plan.length} 张图片` : planningModel ? `方案由 ${planningModel} 策划` : '方案已生成，可从第一张开始选图'}</span><div><button className="button" type="button" disabled={busy !== null} onClick={() => void save()}>{busy === 'save' ? <LoaderCircle size={16}/> : <Save size={16}/>}保存</button><button className="button primary" type="button" disabled={busy !== null || !hasCopy} onClick={() => void complete()}>{busy === 'complete' ? <LoaderCircle size={16}/> : null}确认素材，进入排版</button></div></footer>}
 
     {styleDialogOpen && <div className="visual-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setStyleDialogOpen(false); }}>
       <section className="visual-style-dialog" role="dialog" aria-modal="true" aria-labelledby="visual-style-dialog-title">
@@ -492,12 +503,5 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
       </section>
     </div>}
 
-    {replanDialogOpen && <div className="visual-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setReplanDialogOpen(false); }}>
-      <section className="visual-replan-dialog" role="dialog" aria-modal="true" aria-labelledby="visual-replan-dialog-title">
-        <header><div><h2 id="visual-replan-dialog-title">重新规划配图方案</h2><span>按当前正文更新</span></div><button className="icon-button" type="button" aria-label="关闭重新规划" onClick={() => setReplanDialogOpen(false)}><X size={18}/></button></header>
-        <div className="visual-replan-body"><dl><div><dt>更新</dt><dd>配图位置、图片类型、搜索词、生图提示词</dd></div><div><dt>保留</dt><dd>项目风格、配图数量、文章封面</dd></div></dl><label><input type="checkbox" checked={keepAssignedAssets} onChange={(event) => setKeepAssignedAssets(event.target.checked)}/><span><b>保留已选图片</b><small>{keepAssignedAssets ? '当前已绑定图片继续用于原位置' : `正文已选图片将解除绑定，但不会删除，仍可在项目素材中使用`}</small></span></label></div>
-        <footer><button className="button" type="button" onClick={() => setReplanDialogOpen(false)}>取消</button><button className="button primary" type="button" onClick={regenerate}>确认重新规划</button></footer>
-      </section>
-    </div>}
   </section>;
 }

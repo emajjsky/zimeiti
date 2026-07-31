@@ -1,0 +1,66 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const { buildVisualPlanningPrompt, parseVisualPlanningContent, mergePlannedItems } = require('../server/services/visual-planning.cjs');
+
+const item = (role, title, placement) => ({
+  role,
+  title,
+  placement,
+  purpose: '帮助普通读者理解中继卫星如何扩大航天器测控覆盖范围',
+  visualType: role === 'COVER' ? 'HERO_VISUAL' : 'CONCEPT_DIAGRAM',
+  focus: '中继卫星位于航天器与地面站之间，转发测控指令和业务数据',
+  searchQueries: ['中继卫星 地面站 通信', '航天器 数据中继 示意图'],
+  generationMode: role === 'COVER' ? 'ILLUSTRATION' : 'INFOGRAPHIC',
+  informationPoints: ['航天器把数据发送给中继卫星', '中继卫星把数据转发到地面站'],
+  sourceExcerpt: '中继卫星承担航天器与地面站之间的数据转发任务，能够扩展测控覆盖范围。',
+  contentBlocks: [
+    { label: '航天器', detail: '产生测控与业务数据' },
+    { label: '中继卫星', detail: '在轨接收并转发数据' },
+    { label: '地面站', detail: '接收数据并发送控制指令' },
+  ],
+  prompt: '为公众号制作一张中继卫星通信图，画面明确展示航天器、中继卫星和地面站三者的空间关系与双向数据链路，采用清新编辑风格，主体清楚，信息层级准确，所有简体中文必须严格使用给定文案，不添加正文没有的数据、标识或结论。',
+  size: role === 'COVER' ? '16:9' : '4:3',
+});
+
+test('配图策划提示词读取完整正文并禁止空泛占位词', () => {
+  const prompt = buildVisualPlanningPrompt({
+    project: { title: '天链三号01星', planning: { title: '天链三号01星', category: '科技', coreMessage: '解释中继卫星的作用' }, versionTitle: '中继卫星有什么用', versionBody: '中继卫星承担航天器与地面站之间的数据转发任务。' },
+    platform: 'WECHAT', bodyItemCount: 2, styleProfile: { preset: 'RETRO_POP', customPrompt: '薄荷绿边框' }, request: '',
+  });
+  assert.match(prompt.system, /禁止用“关键、节点、时间/);
+  assert.match(prompt.message, /中继卫星承担航天器与地面站之间的数据转发任务/);
+  assert.match(prompt.message, /清新波普怀旧/);
+  assert.match(prompt.message, /薄荷绿边框/);
+});
+
+test('模型方案必须返回平台所需数量和具体内容', () => {
+  const parsed = parseVisualPlanningContent(JSON.stringify({
+    strategy: '封面建立主题识别，两张正文图分别解释通信关系和应用价值。',
+    items: [item('COVER', '文章封面', '发布首图'), item('BODY', '通信关系图', '解释通信关系段落后'), item('BODY', '应用场景图', '说明应用价值段落后')],
+  }), { platform: 'WECHAT', bodyItemCount: 2 });
+  assert.equal(parsed.items.length, 3);
+  assert.equal(parsed.items[1].focus, '中继卫星位于航天器与地面站之间，转发测控指令和业务数据');
+});
+
+test('配图方案拒绝关键、节点、时间等空泛内容', () => {
+  const bad = item('BODY', '通信关系图', '正文第一段后');
+  bad.informationPoints = ['关键一二', '节点三四'];
+  assert.throws(() => parseVisualPlanningContent(JSON.stringify({ strategy: '按文章顺序解释具体关系。', items: [bad] }), { platform: 'WECHAT', bodyItemCount: 2, singleItem: true }), /过于空泛/);
+});
+
+test('完整重策划保留已选图片，单图重策划只替换当前项', () => {
+  const current = [
+    { ...item('COVER', '文章封面', '发布首图'), id: 'wechat-cover', references: [], assetReferenceId: '11111111-1111-4111-8111-111111111111' },
+    { ...item('BODY', '正文插图 1', '正文第一段后'), id: 'wechat-body-1', references: [], assetReferenceId: '22222222-2222-4222-8222-222222222222' },
+  ];
+  const full = mergePlannedItems({ platform: 'WECHAT', plannedItems: [item('COVER', '文章封面', '发布首图'), item('BODY', '正文插图 1', '正文第一段后')], currentPlan: current });
+  assert.deepEqual(full.map((entry) => entry.assetReferenceId), current.map((entry) => entry.assetReferenceId));
+  const replacement = { ...item('BODY', '时间线', '正文第一段后'), purpose: '用三个明确年份解释中继卫星系统建设进度' };
+  const single = mergePlannedItems({ platform: 'WECHAT', plannedItems: [replacement], currentPlan: current, currentItemId: 'wechat-body-1' });
+  assert.equal(single[0].title, '文章封面');
+  assert.equal(single[1].title, '时间线');
+  assert.equal(single[1].assetReferenceId, current[1].assetReferenceId);
+});

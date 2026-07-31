@@ -1,5 +1,15 @@
 # 内容引擎技术实施方案
 
+## 2026-07-31 实现：AI 配图导演 v6 与真实案例资产管线
+
+- 新增 `server/services/visual-planning.cjs`。服务优先读取 `AGENT_PLANNER`，未配置时复用 `CONTENT_WRITING`；提示词包含当前平台完整正文、图片数量、规划信息、项目风格和现有配图上下文，文本模型单次输出上限提高到任务级 6000 Token。
+- 新增 `POST /api/v1/creative/projects/:projectId/visual/plan`。接口支持整套策划和 `currentItemId + request` 单图重策划，成功调用记录为 `VISUAL_PLANNING`，并保留参考图和已有素材绑定。
+- 服务端严格验证图片数量、平台角色、正文依据、画面任务、搜图词、信息点和最终生图指令；空泛占位内容直接返回稳定中文错误。`VISUAL_PLAN_VERSION = 6`，前端 `safePlan()` 兼容旧记录缺失数组或 `prompt` 的情况。
+- `VisualWorkspace.tsx` 首次进入显示主动生成入口。页头只保留图片数量和项目风格；当前配图项展示策划结果、参考图、单图自然语言修改、搜图、项目素材和“生成这一张”，不再暴露视觉结构、版式模板、单图风格或原始提示词。
+- `visualStylePresets()` 为 13 个核心风格提供 `previewImage/featured`，并新增马卡龙卡通、清透赛博和像素复古模型提示词。选择器只展示核心案例；旧风格 ID 继续保留在领域层，确保历史项目可读取。
+- `scripts/visual-style-previews.json` 保存同主题风格方向，`scripts/generate-visual-style-previews.ps1` 调用用户指定的 `apimart-imagegen` 脚本，默认使用 `gpt-image-2`、4:3、2k，支持 `-Only`、跳过已有文件和 `-Force` 重做。产物写入 `public/visual-style-previews/`。
+- 前端案例组件优先渲染真实 `<img>`，加载失败显示明确空状态，不再生成抽象几何图冒充模板。密钥未配置时不执行图片调用，也不把未生成资产记为完成。
+
 ## 2026-07-30 实现：研究优先读取项目原始资讯
 
 - `simplified-research.cjs` 新增 `workflowSourceActionsForProject()`：从 `project.sourceSnapshot.intelligence.url` 生成首个 `READ_LINK`，去重后与计划内补充搜索共同限制在自动来源上限内。

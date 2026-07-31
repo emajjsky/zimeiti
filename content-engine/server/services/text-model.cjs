@@ -17,9 +17,11 @@ function parseModelResponse(value) {
 function createTextModelRunner({ runBailianCli = defaultRunBailianCli, fetchImpl = fetch } = {}) {
   return {
     async runText(input) {
+      const maxTokens = Number.isInteger(input.maxTokens) ? Math.max(256, Math.min(input.maxTokens, 8_000)) : 1_800;
+      const temperature = Number.isFinite(input.temperature) ? Math.max(0, Math.min(input.temperature, 1)) : 0.2;
       if (input.provider === 'BAILIAN_CLI') {
         if (!input.apiKey) throw new Error('工作空间未配置百炼 Key。');
-        const output = await runBailianCli(['text', 'chat', '--model', input.model, '--system', input.system, '--message', input.message, '--max-tokens', '1800', '--temperature', '0.2', '--output', 'json'], input.apiKey);
+        const output = await runBailianCli(['text', 'chat', '--model', input.model, '--system', input.system, '--message', input.message, '--max-tokens', String(maxTokens), '--temperature', String(temperature), '--output', 'json'], input.apiKey);
         return parseModelResponse(output);
       }
       if (input.provider !== 'EXTERNAL_API') throw new Error('不支持的文本模型来源。');
@@ -31,7 +33,7 @@ function createTextModelRunner({ runBailianCli = defaultRunBailianCli, fetchImpl
           method: 'POST',
           signal: AbortSignal.timeout(60_000),
           headers: { Authorization: `Bearer ${input.connection.apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: input.model, messages: [{ role: 'system', content: input.system }, { role: 'user', content: input.message }], temperature: 0.2, max_tokens: 1800, response_format: { type: 'json_object' } }),
+          body: JSON.stringify({ model: input.model, messages: [{ role: 'system', content: input.system }, { role: 'user', content: input.message }], temperature, max_tokens: maxTokens, response_format: { type: 'json_object' } }),
         });
       } catch (error) { throw new Error(`外部文本模型请求失败：${error instanceof Error ? error.message : '网络错误'}。`); }
       if (!response.ok) {

@@ -23,6 +23,15 @@ const { accountVoiceInput, accountVoiceCalibrationInput, createAccountVoiceStore
 const { accountVoiceCalibrationDraftInput, buildVoiceCalibrationPrompt, buildVoiceCalibrationRepairPrompt, parseVoiceCalibrationDraft, voiceCalibrationErrorMessage } = require('./services/voiceCalibration.cjs');
 const { createTextModelRunner } = require('./services/text-model.cjs');
 const {
+  VISUAL_PLANNING_SCOPE,
+  VISUAL_PLANNING_FALLBACK_SCOPE,
+  VISUAL_PLANNING_OPERATION,
+  buildVisualPlanningPrompt,
+  buildVisualPlanningRepairPrompt,
+  parseVisualPlanningContent,
+  mergePlannedItems,
+} = require('./services/visual-planning.cjs');
+const {
   confirmProjectPlanning,
   createBlankProject,
   createProjectFromIntelligence,
@@ -84,8 +93,8 @@ const visualGenerationInput = z.object({
 const visualStylePreset = z.enum([
   'FRESH_EDITORIAL', 'BUSINESS_EDITORIAL', 'SWISS_GRID', 'DOCUMENTARY', 'CINEMATIC_DOCUMENTARY', 'MONO_EDITORIAL', 'NEWSPAPER_EDITORIAL', 'LIFESTYLE_PHOTO',
   'MINIMAL_KNOWLEDGE', 'DATA_VISUAL', 'BLUEPRINT_DIAGRAM', 'HAND_DRAWN_NOTES', 'CONSULTING_REPORT', 'SCIENCE_ATLAS',
-  'RETRO_POP', 'PAPER_COLLAGE', 'FLAT_GEOMETRIC', 'SOFT_3D', 'PENCIL_SKETCH',
-  'NEW_CHINESE', 'INK_WASH', 'GUOCHAO_POSTER', 'WOODCUT_PRINT', 'TECH_MEDIA', 'INDUSTRIAL_MEDIA',
+  'RETRO_POP', 'MACARON_CARTOON', 'PAPER_COLLAGE', 'FLAT_GEOMETRIC', 'SOFT_3D', 'PENCIL_SKETCH', 'PIXEL_RETRO',
+  'NEW_CHINESE', 'INK_WASH', 'GUOCHAO_POSTER', 'WOODCUT_PRINT', 'TECH_MEDIA', 'CYBER_TECH', 'INDUSTRIAL_MEDIA',
 ]);
 const visualReferenceUse = z.enum(['COLOR', 'COMPOSITION', 'LAYOUT', 'TEXTURE', 'SUBJECT']);
 const visualPlanItemInput = z.object({
@@ -108,6 +117,18 @@ const visualPlanItemInput = z.object({
   prompt: z.string().trim().min(4).max(8_000),
   size: z.enum(['1:1', '3:4', '4:3', '9:16', '16:9']),
   assetReferenceId: z.string().uuid().nullable(),
+});
+const visualPlanningInput = z.object({
+  platform: creativePlatform,
+  bodyItemCount: z.number().int().min(0).max(8),
+  styleProfile: z.object({
+    preset: visualStylePreset,
+    customPrompt: z.string().trim().max(1_200).default(''),
+  }),
+  request: z.string().trim().max(2_000).default(''),
+  currentItemId: z.string().trim().min(1).max(100).optional(),
+  currentPlan: z.array(z.record(z.string(), z.unknown())).max(10).default([]),
+  keepAssignedAssets: z.boolean().default(true),
 });
 const createProjectInput = z.object({
   originType: z.enum(['MANUAL', 'DRAFT', 'IMPORT']).default('MANUAL'),
@@ -853,6 +874,75 @@ app.get('/api/v1/creative/image-search', { preHandler: authenticate }, async (re
   } catch (error) {
     const messages = error instanceof AggregateError ? error.errors.map((item) => item instanceof Error ? item.message : String(item)) : [error instanceof Error ? error.message : '未知错误'];
     throw new Error(`图片搜索暂时不可用：${messages.join('；')}。`);
+  }
+});
+
+app.post('/api/v1/creative/projects/:projectId/visual/plan', { preHandler: authenticate }, async (request, reply) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const input = visualPlanningInput.parse(request.body ?? {});
+  const workspace = await currentWorkspace(request.user.sub);
+  const project = await creativeProject(workspace.id, projectId);
+  const version = project.versions?.find((item) => item.platform === input.platform);
+  if (!String(version?.body ?? '').trim()) { const error = new Error('请先完成当前渠道正文，再生成配图方案。'); error.statusCode = 400; throw error; }
+  const persistedPlan = project.delivery?.platforms?.[input.platform]?.visual?.plan;
+  const currentPlan = input.currentPlan.length ? input.currentPlan : Array.isArray(persistedPlan) ? persistedPlan : [];
+  const currentItem = input.currentItemId ? currentPlan.find((item) => item.id === input.currentItemId) : undefined;
+  if (input.currentItemId && !currentItem) { const error = new Error('没有找到要重新策划的图片。'); error.statusCode = 404; throw error; }
+
+  const plannerPolicy = await query('SELECT 1 FROM agent_model_policies WHERE workspace_id = $1 AND scope = $2', [workspace.id, VISUAL_PLANNING_SCOPE]);
+  const scope = plannerPolicy.rowCount ? VISUAL_PLANNING_SCOPE : VISUAL_PLANNING_FALLBACK_SCOPE;
+  const route = await textTaskRoute(workspace.id, scope, scope === VISUAL_PLANNING_SCOPE ? '核心 Agent 配图策划' : '配图策划');
+  const connectionInput = await textConnectionInput(workspace.id, route);
+  const prompt = buildVisualPlanningPrompt({
+    project: {
+      ...project,
+      versionTitle: version?.title ?? '',
+      versionBody: version?.body ?? '',
+    },
+    platform: input.platform,
+    bodyItemCount: input.bodyItemCount,
+    styleProfile: input.styleProfile,
+    request: input.request,
+    currentItem,
+  });
+  const startedAt = Date.now();
+  let inputTokens = 0;
+  let outputTokens = 0;
+  try {
+    const result = await textRunner.runText({ provider: route.provider, model: route.model, system: prompt.system, message: prompt.message, maxTokens: 6_000, temperature: 0.15, ...connectionInput });
+    inputTokens += result.inputTokens ?? 0;
+    outputTokens += result.outputTokens ?? 0;
+    let parsed;
+    try {
+      parsed = parseVisualPlanningContent(result.content, { platform: input.platform, bodyItemCount: input.bodyItemCount, singleItem: Boolean(input.currentItemId) });
+    } catch (validationError) {
+      const repaired = await textRunner.runText({
+        provider: route.provider,
+        model: route.model,
+        system: buildVisualPlanningRepairPrompt(prompt.system, validationError instanceof Error ? validationError.message : '输出结构不完整。'),
+        message: result.content,
+        maxTokens: 6_000,
+        temperature: 0.1,
+        ...connectionInput,
+      });
+      inputTokens += repaired.inputTokens ?? 0;
+      outputTokens += repaired.outputTokens ?? 0;
+      parsed = parseVisualPlanningContent(repaired.content, { platform: input.platform, bodyItemCount: input.bodyItemCount, singleItem: Boolean(input.currentItemId) });
+    }
+    const plan = mergePlannedItems({
+      platform: input.platform,
+      plannedItems: parsed.items,
+      currentPlan,
+      currentItemId: input.currentItemId,
+      keepAssignedAssets: input.keepAssignedAssets,
+    });
+    await query(`INSERT INTO api_usage_logs (workspace_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens)
+      VALUES ($1, $2, $3, $4, 'SUCCESS', $5, $6, $7)`, [workspace.id, route.provider, route.model, VISUAL_PLANNING_OPERATION, Date.now() - startedAt, inputTokens || null, outputTokens || null]);
+    reply.code(201).send({ plan, strategy: parsed.strategy, model: route.model, provider: route.provider, scope });
+  } catch (error) {
+    await query(`INSERT INTO api_usage_logs (workspace_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens, error)
+      VALUES ($1, $2, $3, $4, 'ERROR', $5, $6, $7, $8)`, [workspace.id, route.provider, route.model, VISUAL_PLANNING_OPERATION, Date.now() - startedAt, inputTokens || null, outputTokens || null, (error instanceof Error ? error.message : '配图策划失败').slice(0, 2_000)]);
+    throw error;
   }
 });
 

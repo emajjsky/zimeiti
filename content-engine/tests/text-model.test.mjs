@@ -6,9 +6,12 @@ const { createTextModelRunner } = await import('../server/services/text-model.cj
 const payload = JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }], usage: { prompt_tokens: 12, completion_tokens: 8 } });
 
 test('百炼策略通过 CLI 返回标准文本结果', async () => {
-  const runner = createTextModelRunner({ runBailianCli: async () => payload });
-  const result = await runner.runText({ provider: 'BAILIAN_CLI', apiKey: 'secret', model: 'qwen-plus', system: 'system', message: 'message' });
+  let args;
+  const runner = createTextModelRunner({ runBailianCli: async (nextArgs) => { args = nextArgs; return payload; } });
+  const result = await runner.runText({ provider: 'BAILIAN_CLI', apiKey: 'secret', model: 'qwen-plus', system: 'system', message: 'message', maxTokens: 6_000, temperature: 0.15 });
   assert.deepEqual(result, { content: '{"ok":true}', inputTokens: 12, outputTokens: 8 });
+  assert.equal(args[args.indexOf('--max-tokens') + 1], '6000');
+  assert.equal(args[args.indexOf('--temperature') + 1], '0.15');
 });
 
 test('外部策略通过连接的 chat completions 返回标准文本结果', async () => {

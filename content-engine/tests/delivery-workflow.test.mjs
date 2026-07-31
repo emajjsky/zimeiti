@@ -40,7 +40,11 @@ test('创作工作台不再把配图、排版和审核渲染为占位页面', ()
   assert.match(workspace, /<ReviewWorkspace/);
   assert.doesNotMatch(workspace, /配图尚未开始|排版尚未开始|审核尚未开始/);
   assert.match(visual, /确认素材，进入排版/);
-  assert.match(visual, /if \(!hasCopy\) return/);
+  assert.match(visual, /if \(!hasCopy \|\| !plan\.length\) return/);
+  assert.match(visual, /生成配图方案/);
+  assert.match(visual, /修改这张图/);
+  assert.doesNotMatch(visual, />高级设置</);
+  assert.doesNotMatch(visual, /aria-label="视觉结构"/);
   assert.match(workspace, /canOpenChannelView/);
   assert.match(workspace, /disabled=\{!canOpenChannelView/);
   assert.match(layout, /确认排版，进入审核/);
@@ -90,4 +94,7 @@ test('视觉导演保存完整策划字段并支持参考图真实图生图', ()
   assert.match(api, /args\.push\('--image', image\)/);
   assert.match(api, /operation = input\.referenceImageIds\.length \? 'IMAGE_TO_IMAGE' : 'TEXT_TO_IMAGE'/);
   assert.match(client, /referenceImageIds\?: string\[\]/);
+  assert.match(client, /planVisual:/);
+  assert.match(api, /VISUAL_PLANNING_SCOPE/);
+  assert.match(api, /VISUAL_PLANNING_FALLBACK_SCOPE/);
 });
