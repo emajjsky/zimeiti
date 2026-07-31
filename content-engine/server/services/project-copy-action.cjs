@@ -371,8 +371,38 @@ function buildCopyRepairPrompt(system, validationError) {
   return `${system}\n上一次输出未通过结构校验。请只返回修正后的 JSON。校验错误：${validationError}`;
 }
 
+function normalizeQualityReviewIssue(issue) {
+  if (typeof issue === 'string') return issue.trim();
+  if (!issue || typeof issue !== 'object' || Array.isArray(issue)) return '';
+  const preferredKeys = ['problem', 'issue', 'message', 'description', 'reason', 'suggestion'];
+  const values = [];
+  for (const key of preferredKeys) {
+    if (typeof issue[key] === 'string' && issue[key].trim()) values.push(issue[key].trim());
+  }
+  for (const [key, value] of Object.entries(issue)) {
+    if (!preferredKeys.includes(key) && typeof value === 'string' && value.trim()) values.push(value.trim());
+  }
+  return [...new Set(values)].join('；').slice(0, 500);
+}
+
 function parseCopyQualityReview(content) {
-  return copyQualityReviewSchema.parse(parseJson(content, '质量审稿没有返回结果。', '质量审稿返回的不是有效 JSON。'));
+  const value = parseJson(content, '质量审稿没有返回结果。', '质量审稿返回的不是有效 JSON。');
+  const normalized = value && typeof value === 'object' && !Array.isArray(value) && Array.isArray(value.issues)
+    ? { ...value, issues: value.issues.map(normalizeQualityReviewIssue).filter(Boolean) }
+    : value;
+  return copyQualityReviewSchema.parse(normalized);
+}
+
+function parseCopyQualityReviewSafely(content) {
+  try {
+    return { ...parseCopyQualityReview(content), malformed: false };
+  } catch {
+    return {
+      approved: false,
+      issues: ['质量审稿返回格式异常，候选正文已保留，请人工检查。'],
+      malformed: true,
+    };
+  }
 }
 
 function candidateQualityReview(review, voiceIssues = []) {
@@ -392,7 +422,7 @@ function buildCopyQualityReviewPrompt({ action, platform, output, researchContex
     '只允许把 verifiedFacts 中直接支持的内容当作正文事实。cautions 默认是禁止写入区：即使正文使用“通常”“可能”“待确认”等限定语，凡是解释、推演、举例或复述其中主张，都必须拒绝。唯一例外是 allowedExistingCautions：它们来自本次修改前的原稿，可保留但必须同时列在 candidate.factsToVerify；仍不得新增、扩写、推演或包装成确认结论。',
     '审查正文是否存在未获证据支持的技术能力、代际判断、因果影响、数据、人物、机构、时间或应用场景；同时审查是否仍像面向读者的目标平台成稿，而非新闻通稿、百科词条或 Markdown 草稿。',
     `目标平台是 ${platform}。`,
-    '只返回 JSON：{"approved":true,"issues":[]}。若不合格，approved 必须为 false，issues 写出可直接用于重写的具体问题。',
+    '只返回 JSON：{"approved":true,"issues":[]}。若不合格，approved 必须为 false，issues 必须是字符串数组，禁止返回对象；每个字符串写出一项可直接用于重写的具体问题。',
   ].join('\n');
   return {
     system,
@@ -428,6 +458,7 @@ module.exports = {
   buildCopyPrompt,
   buildCopyRepairPrompt,
   parseCopyQualityReview,
+  parseCopyQualityReviewSafely,
   candidateQualityReview,
   buildCopyQualityReviewPrompt,
 };

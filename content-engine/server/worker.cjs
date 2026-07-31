@@ -32,7 +32,7 @@ const {
 } = require('./services/source-verification.cjs');
 const { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, workflowSourceActionsForProject, projectOriginalSource, sourceMatchesProject, buildResearchResult } = require('./services/simplified-research.cjs');
 const { createProjectAgentStore } = require('./services/project-agent.cjs');
-const { buildCopyPrompt, buildCopyRepairPrompt, buildCopyQualityReviewPrompt, candidateQualityReview, detectVoiceViolations, reconcileFactsToVerify, parseCopyOutput, parseCopyQualityReview } = require('./services/project-copy-action.cjs');
+const { buildCopyPrompt, buildCopyRepairPrompt, buildCopyQualityReviewPrompt, candidateQualityReview, detectVoiceViolations, reconcileFactsToVerify, parseCopyOutput, parseCopyQualityReviewSafely } = require('./services/project-copy-action.cjs');
 
 const connection = new IORedis(config.redisUrl, { maxRetriesPerRequest: null });
 const textRunner = createTextModelRunner();
@@ -745,44 +745,54 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
     }
     if (!isOutlineAction) {
       let qualityReview;
+      const pipelineIssues = [];
       const voiceIssues = detectVoiceViolations(output.body, snapshot.accountVoice?.rules);
       if (voiceIssues.length) {
-        const rewritten = await textRunner.runText({
-          provider: route.provider,
-          model: route.model,
-          system: buildCopyRepairPrompt(prompt.system, voiceIssues.map((issue) => issue.message).join('；')),
-          message: JSON.stringify(output),
-          ...connectionInput,
-        });
-        inputTokens = (inputTokens ?? 0) + (rewritten.inputTokens ?? 0);
-        outputTokens = (outputTokens ?? 0) + (rewritten.outputTokens ?? 0);
-        output = parseCopyOutput(rewritten.content, snapshot.action, snapshot);
+        try {
+          const rewritten = await textRunner.runText({
+            provider: route.provider,
+            model: route.model,
+            system: buildCopyRepairPrompt(prompt.system, voiceIssues.map((issue) => issue.message).join('；')),
+            message: JSON.stringify(output),
+            ...connectionInput,
+          });
+          inputTokens = (inputTokens ?? 0) + (rewritten.inputTokens ?? 0);
+          outputTokens = (outputTokens ?? 0) + (rewritten.outputTokens ?? 0);
+          output = parseCopyOutput(rewritten.content, snapshot.action, snapshot);
+        } catch {
+          pipelineIssues.push('账号声音自动修正未完成，已保留修正前正文，请人工检查。');
+        }
       }
-      const reviewPrompt = buildCopyQualityReviewPrompt({ action: snapshot.action, platform: snapshot.platform, output, researchContext: snapshot.researchContext, currentContent: snapshot.currentContent });
-      const reviewed = await textRunner.runText({ provider: route.provider, model: route.model, system: reviewPrompt.system, message: reviewPrompt.message, ...connectionInput });
-      inputTokens = (inputTokens ?? 0) + (reviewed.inputTokens ?? 0);
-      outputTokens = (outputTokens ?? 0) + (reviewed.outputTokens ?? 0);
-      let review = parseCopyQualityReview(reviewed.content);
-      if (!review.approved) {
-        const qualityError = `质量审稿未通过：${review.issues.join('；')}`;
-        const rewritten = await textRunner.runText({
-          provider: route.provider,
-          model: route.model,
-          system: buildCopyRepairPrompt(prompt.system, qualityError),
-          message: JSON.stringify(output),
-          ...connectionInput,
-        });
-        inputTokens = (inputTokens ?? 0) + (rewritten.inputTokens ?? 0);
-        outputTokens = (outputTokens ?? 0) + (rewritten.outputTokens ?? 0);
-        output = parseCopyOutput(rewritten.content, snapshot.action, snapshot);
-        const finalReviewPrompt = buildCopyQualityReviewPrompt({ action: snapshot.action, platform: snapshot.platform, output, researchContext: snapshot.researchContext, currentContent: snapshot.currentContent });
-        const finalReviewed = await textRunner.runText({ provider: route.provider, model: route.model, system: finalReviewPrompt.system, message: finalReviewPrompt.message, ...connectionInput });
-        inputTokens = (inputTokens ?? 0) + (finalReviewed.inputTokens ?? 0);
-        outputTokens = (outputTokens ?? 0) + (finalReviewed.outputTokens ?? 0);
-        review = parseCopyQualityReview(finalReviewed.content);
+      let review = { approved: true, issues: [], malformed: false };
+      try {
+        const reviewPrompt = buildCopyQualityReviewPrompt({ action: snapshot.action, platform: snapshot.platform, output, researchContext: snapshot.researchContext, currentContent: snapshot.currentContent });
+        const reviewed = await textRunner.runText({ provider: route.provider, model: route.model, system: reviewPrompt.system, message: reviewPrompt.message, ...connectionInput });
+        inputTokens = (inputTokens ?? 0) + (reviewed.inputTokens ?? 0);
+        outputTokens = (outputTokens ?? 0) + (reviewed.outputTokens ?? 0);
+        review = parseCopyQualityReviewSafely(reviewed.content);
+        if (!review.approved && !review.malformed) {
+          const qualityError = `质量审稿未通过：${review.issues.join('；')}`;
+          const rewritten = await textRunner.runText({
+            provider: route.provider,
+            model: route.model,
+            system: buildCopyRepairPrompt(prompt.system, qualityError),
+            message: JSON.stringify(output),
+            ...connectionInput,
+          });
+          inputTokens = (inputTokens ?? 0) + (rewritten.inputTokens ?? 0);
+          outputTokens = (outputTokens ?? 0) + (rewritten.outputTokens ?? 0);
+          output = parseCopyOutput(rewritten.content, snapshot.action, snapshot);
+          const finalReviewPrompt = buildCopyQualityReviewPrompt({ action: snapshot.action, platform: snapshot.platform, output, researchContext: snapshot.researchContext, currentContent: snapshot.currentContent });
+          const finalReviewed = await textRunner.runText({ provider: route.provider, model: route.model, system: finalReviewPrompt.system, message: finalReviewPrompt.message, ...connectionInput });
+          inputTokens = (inputTokens ?? 0) + (finalReviewed.inputTokens ?? 0);
+          outputTokens = (outputTokens ?? 0) + (finalReviewed.outputTokens ?? 0);
+          review = parseCopyQualityReviewSafely(finalReviewed.content);
+        }
+      } catch {
+        pipelineIssues.push('质量审稿未完成，候选正文已保留，请人工检查。');
       }
       const finalVoiceIssues = snapshot.accountVoice ? detectVoiceViolations(output.body, snapshot.accountVoice.rules) : [];
-      qualityReview = candidateQualityReview(review, finalVoiceIssues);
+      qualityReview = candidateQualityReview(review, [...finalVoiceIssues, ...pipelineIssues]);
       output.qualityReview = qualityReview;
     }
     // 项目历史核验池不属于本次候选，候选版本只保存正文直接涉及的核验项。

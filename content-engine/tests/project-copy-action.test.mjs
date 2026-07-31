@@ -17,6 +17,7 @@ const {
   reconcileFactsToVerify,
   parseCopyOutput,
   parseCopyQualityReview,
+  parseCopyQualityReviewSafely,
   candidateQualityReview,
   resolveCopyAction,
 } = copyActionModule;
@@ -59,7 +60,7 @@ test('账号声音改写后仍有套话时保留候选并进入正文重写，�
   });
   const worker = fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8');
   assert.doesNotMatch(worker, /throw new Error\(`账号声音检查未通过/);
-  assert.match(worker, /candidateQualityReview\(review, finalVoiceIssues\)/);
+  assert.match(worker, /candidateQualityReview\(review, \[\.\.\.finalVoiceIssues, \.\.\.pipelineIssues\]\)/);
 });
 
 test('文案提示词携带账号声音规则与本篇语气，但不携带校准原文', () => {
@@ -251,8 +252,34 @@ test('文案质量审稿只以已核验事实为准，并返回可执行的重�
     researchContext: { verifiedFacts: [{ claim: '已核验事实' }], cautions: [{ claim: retainedClaim }] },
   });
   assert.match(prompt.system, /不得使用模型已有知识补全事实/);
+  assert.match(prompt.system, /issues 必须是字符串数组/);
   const reviewInput = JSON.parse(prompt.message);
   assert.deepEqual(reviewInput.allowedExistingCautions, [retainedClaim]);
+});
+
+test('质量审稿的对象型问题会归一为文字，完全异常时也保留正文候选', () => {
+  assert.deepEqual(parseCopyQualityReview(JSON.stringify({
+    approved: false,
+    issues: [
+      { problem: '资金用途缺少证据', suggestion: '删除具体用途推演' },
+      { message: '结尾存在主观扩展' },
+    ],
+  })), {
+    approved: false,
+    issues: ['资金用途缺少证据；删除具体用途推演', '结尾存在主观扩展'],
+  });
+
+  assert.deepEqual(parseCopyQualityReviewSafely('{不是有效 JSON'), {
+    approved: false,
+    issues: ['质量审稿返回格式异常，候选正文已保留，请人工检查。'],
+    malformed: true,
+  });
+
+  const worker = fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8');
+  assert.match(worker, /parseCopyQualityReviewSafely\(reviewed\.content\)/);
+  assert.match(worker, /!review\.approved && !review\.malformed/);
+  assert.match(worker, /账号声音自动修正未完成，已保留修正前正文/);
+  assert.match(worker, /质量审稿未完成，候选正文已保留/);
 });
 
 test('017 注册八个需要确认的受控文案动作', () => {
@@ -299,7 +326,7 @@ test('Project Agent Worker 始终创建候选产物，质量风险仅随候选�
   assert.match(execute, /project_artifacts/);
   assert.match(execute, /platform_content_versions/);
   assert.match(execute, /buildCopyQualityReviewPrompt/);
-  assert.match(execute, /candidateQualityReview\(review, finalVoiceIssues\)/);
+  assert.match(execute, /candidateQualityReview\(review, \[\.\.\.finalVoiceIssues, \.\.\.pipelineIssues\]\)/);
   assert.match(execute, /candidateFactsToVerify/);
   assert.doesNotMatch(execute, /snapshot\.project\?\.factChecks[\s\S]*output\.factsToVerify/);
   assert.doesNotMatch(execute, /review\.approved\) throw new Error/);

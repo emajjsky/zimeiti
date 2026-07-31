@@ -855,3 +855,11 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - `worker.cjs` 不再在首次声音修正或质量重写后抛出“账号声音检查未通过”。最终正文统一再次执行声音检查，并将结果传给候选质量状态。
 - `candidateQualityReview(review, voiceIssues)` 对事实审稿问题和账号声音问题去重合并；存在任一问题时保存 `NEEDS_REVIEW` 候选，没有问题时保存 `PASSED`。
 - 该调整不降低采用标准：现有前后端质量门禁继续阻止未通过候选进入正式正文，只改变“丢失结果”为“保留结果供用户审核和重写”。
+
+## 2026-07-31 实现：有效正文不再被异常审稿销毁
+
+- `server/services/project-copy-action.cjs` 新增质量问题归一化：审稿模型返回字符串数组时保持原值，返回对象数组时提取问题、描述、原因和建议并合并为文字。
+- 新增 `parseCopyQualityReviewSafely()`。无法解析审稿 JSON 或无法满足契约时不向上抛错，而是返回 `approved: false`、`malformed: true` 和人工检查提示。
+- `server/worker.cjs` 将账号声音自动修正、首次质量审稿、质量重写和复审视为正文后的次级步骤。任一步骤失败均累计到 `pipelineIssues`，保留最近一次已通过 `parseCopyOutput()` 的正文并继续创建候选产物。
+- 审稿提示词明确要求 `issues` 必须为字符串数组，降低模型再次输出对象数组的概率；解析层仍保留兼容处理，不能依赖提示词保证稳定性。
+- 候选质量状态继续由 `candidateQualityReview()` 汇总审稿、声音与流水线问题。异常候选为 `NEEDS_REVIEW`，不会绕过现有采用门禁。
