@@ -18,7 +18,7 @@ const { runBailianCli } = require('./runner/bailian.cjs');
 const { ANALYSIS_SCOPE, createTemplateStore, prepareAnalysisInput } = require('./services/intelligence-analysis.cjs');
 const { createCreativeSkillStore } = require('./services/creativeSkills.cjs');
 const { writingBriefInput } = require('./services/writing-brief.cjs');
-const { publicErrorMessage } = require('./services/http-errors.cjs');
+const { errorPayload } = require('./services/business-errors.cjs');
 const { accountVoiceInput, accountVoiceCalibrationInput, createAccountVoiceStore } = require('./services/accountVoices.cjs');
 const { accountVoiceCalibrationDraftInput, buildVoiceCalibrationPrompt, buildVoiceCalibrationRepairPrompt, parseVoiceCalibrationDraft, voiceCalibrationErrorMessage } = require('./services/voiceCalibration.cjs');
 const { createTextModelRunner } = require('./services/text-model.cjs');
@@ -210,7 +210,7 @@ app.register(multipart, { limits: { files: 1, fileSize: 50 * 1024 * 1024, fields
 
 app.setErrorHandler((error, _request, reply) => {
   const status = error.statusCode && error.statusCode < 500 ? error.statusCode : 400;
-  reply.code(status).send({ error: { message: publicErrorMessage(error) } });
+  reply.code(status).send({ error: errorPayload(error) });
 });
 
 async function authenticate(request) { await request.jwtVerify(); }
