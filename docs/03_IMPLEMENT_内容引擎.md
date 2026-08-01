@@ -1,5 +1,23 @@
 # 内容引擎技术实施方案
 
+## 2026-08-01 实现：多工作空间与空间素材底座
+
+- `027_workspace_asset_foundation.sql` 新增 `user_workspace_preferences`、`workspace_assets`、`project_asset_links` 和 `storage_deletion_jobs`。当前空间由用户偏好显式保存；素材二进制元数据属于空间，项目只保存素材关系，同一素材可被多个项目复用。
+- `workspaces.cjs` 提供工作空间会话、创建、选择、重命名、删除影响预览和删除申请。空间内请求必须携带 `X-Workspace-Id`；服务端以 JWT 用户和数据库成员关系校验 `OWNER/EDITOR/VIEWER`，不接受客户端自报权限，也不隐式回退到首个空间。
+- 工作空间管理页面支持多空间切换、创建、重命名和删除。删除前读取项目、素材、发布账号、发布记录、指标快照和复盘数量；仅 Owner 可输入完整空间名称确认。进入 `DELETING` 后空间立即不可访问，Worker 再删除物理目录与数据库记录。
+- `assets.cjs` 与 `AssetLibrary.tsx` 建立空间素材库：上传、网络导入和 AI 生图统一进入 `workspace_assets`，按空间内 SHA-256 去重；支持筛选、预览、元数据修改、归档、项目选择和跨项目复用。
+- `project_asset_links` 承担素材在项目中的用途、阶段 Scope、平台和备注。解除一个项目引用只删除关系；有任何项目引用时拒绝素材删除。无引用素材删除使用 `storage_deletion_jobs + STORAGE_DELETE`，Worker 物理删除失败会记录错误，启动恢复逻辑重新投递未完成任务。
+- `project_references` 迁移后只保存公开链接；上传文件、网图和 AI 图片均由 `workspace_assets` 拥有。项目 JSON 中的 `assetReferenceId`、`assetReferenceIds`、`coverReferenceId` 和引用对象已一次性改写为素材 ID，迁移结束后删除非链接旧记录，不保留双写或旧字段兼容入口。
+
+### 真实数据迁移与验收
+
+- 应用迁移前先执行 `pg_dump`，备份为 `F:\zimeitiyunying\backups\workspace-assets-20260801-184718\content-engine.dump`；SHA-256：`DFA1608872225415A54744260245C7120E3981A4288FC77904FE98D34F28330C`。
+- 迁移前有 56 个项目、44 条文件引用、4 条链接引用和 40 个去重文件；引用文件合计 69,109,358 字节。迁移后保持 56 个项目，生成 40 条 `workspace_assets` 和 40 条 `project_asset_links`，素材文件合计 68,701,643 字节。
+- 40 个迁移后物理文件全部存在；逐文件大小不一致 0、SHA-256 不一致 0、断裂素材关系 0、失效项目 JSON 素材引用 0。项目 JSON 中素材 ID 共出现 62 次；旧 `assetReferenceId/coverReferenceId`、非 `LINK` 的 `project_references` 均为 0。
+- `npm test` 368 项、`npm run typecheck`、`npm run build` 全部通过。`workspace-assets.e2e.py`、`creative-workspace.e2e.py`、`visual-workspace.e2e.py` 三套浏览器 E2E 全部通过；新增场景覆盖邮箱注册、多空间创建/切换、素材上传/预览、两项目复用、解除单项目引用、空间隔离、刷新恢复、390px 和空间删除确认。
+- 真实浏览器已打开 `http://127.0.0.1:5173` 并确认登录页正常。浏览器没有现有用户登录态，因此未伪造 JWT、未冒充用户、未创建测试账号污染真实数据库；真实登录后的页面链路验收记录为受登录态限制。
+- 本节只代表阶段 A 已完成。阶段 B 的四平台交付链路、阶段 C 的发布账号管理、发布记录与指标、正式复盘闭环仍未完成。
+
 ## 2026-07-31 实现：AI 配图导演 v6 与真实案例资产管线
 
 - 新增 `server/services/visual-planning.cjs`。服务优先读取 `AGENT_PLANNER`，未配置时复用 `CONTENT_WRITING`；提示词包含当前平台完整正文、图片数量、规划信息、项目风格和现有配图上下文，文本模型单次输出上限提高到任务级 6000 Token。
@@ -120,9 +138,13 @@ Fastify API
 | `credential_vault` | 加密的 Tavily、百炼等凭据；百炼凭据由核心 Agent 与 Worker 复用，不重复保存 |
 | `intelligence_sources` / `intelligence_items` | 资讯来源和情报记录；`matched_keywords` 保存真实命中词；服务端在读取与 RSS 刷新时删除超过 30 天的数据 |
 | `jobs` / `api_usage_logs` | 异步任务、模型调用与错误记录 |
-| `workspace_snapshots` | 从早期原型迁移的临时状态桥 |
+| `workspace_snapshots` | 从早期原型迁移的临时状态桥；正式 Web 不再整份覆盖写入 |
 | `project_inputs` | 项目想法、草稿、笔记和转写；保存使用阶段与适用平台 |
-| `project_references` | 公开链接和上传文件的用途、Scope、元数据与私有存储键 |
+| `project_references` | 公开链接的用途、Scope 与元数据；不再拥有上传文件 |
+| `workspace_assets` | 空间级上传、网图和 AI 素材的二进制元数据、哈希、版权与存储键 |
+| `project_asset_links` | 项目对空间素材的用途、Scope、平台与备注关系 |
+| `user_workspace_preferences` | 用户显式选择的当前工作空间 |
+| `storage_deletion_jobs` | 素材和空间的后台物理删除状态与错误记录 |
 | `project_planning_versions` | 内容项目规划的草稿/确认不可变版本 |
 | `legacy_topic_project_mappings` | 旧选题到统一内容项目的幂等迁移映射 |
 
@@ -157,8 +179,17 @@ Fastify API
 ```text
 POST /api/v1/auth/register
 POST /api/v1/auth/login
+GET/POST /api/v1/workspaces
+PATCH /api/v1/workspaces/:workspaceId
+GET /api/v1/workspaces/:workspaceId/deletion-impact
+DELETE /api/v1/workspaces/:workspaceId
 GET  /api/v1/workspace/state
-PUT  /api/v1/workspace/state
+PATCH /api/v1/workspace/preferences
+GET/POST /api/v1/assets
+POST /api/v1/assets/import
+GET/PATCH/DELETE /api/v1/assets/:assetId
+GET /api/v1/assets/:assetId/content
+POST/DELETE /api/v1/projects/:projectId/assets/:assetId
 GET  /api/v1/settings/credentials/:provider
 PUT  /api/v1/settings/credentials/:provider
 POST /api/v1/intelligence/rss/refresh
@@ -170,9 +201,7 @@ GET  /api/v1/creative/projects/:projectId/materials
 POST /api/v1/creative/projects/:projectId/inputs
 PUT/DELETE /api/v1/creative/project-inputs/:id
 POST /api/v1/creative/projects/:projectId/references
-POST /api/v1/creative/projects/:projectId/files
 PUT/DELETE /api/v1/creative/project-references/:id
-GET /api/v1/creative/project-files/:id/content
 ```
 
 ### 5.2 异步任务
