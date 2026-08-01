@@ -411,7 +411,7 @@ test('Project Agent Worker 首次生成直接落正式正文，主动修改才�
   assert.match(execute, /platform_content_versions/);
   assert.match(execute, /copyActionPersistenceMode\(snapshot\.action\)/);
   assert.match(execute, /status:\s*persistenceMode/);
-  assert.match(execute, /updateCreativeState/);
+  assert.match(execute, /updateCreativeProjects/);
   assert.match(execute, /applyAcceptedCopyToState/);
   assert.match(execute, /accepted_at = now\(\)/);
   assert.doesNotMatch(execute, /qualityReview/);
@@ -497,21 +497,24 @@ test('采用候选时更新正式版本并合并待核验事实', () => {
   assert.deepEqual(mergeFactsToVerify([' A ', '', 'B'], ['B', 'C']), ['A', 'B', 'C']);
 });
 
-test('采用候选、完成平台版本和启用平台都锁定 workspace snapshot 且保持幂等', () => {
+test('采用候选、完成平台版本和启用平台都通过项目仓储串行更新且保持幂等', () => {
   const server = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
+  const repository = fs.readFileSync(new URL('../server/services/project-planning.cjs', import.meta.url), 'utf8');
   const accept = routeSlice(server, "/project-artifacts/:id/accept", "/projects/:projectId/platforms/:platform");
   const enable = routeSlice(server, "/projects/:projectId/platforms/:platform", "/projects/:projectId/platform-versions/complete");
   const complete = routeSlice(server, "/projects/:projectId/platform-versions/complete", "/agent/skills");
-  assert.match(accept, /FOR UPDATE/);
   assert.match(accept, /FOR UPDATE OF a(?!, v)/);
   assert.doesNotMatch(accept, /FOR UPDATE OF a, v/);
-  assert.match(accept, /workspace_snapshots/);
+  assert.match(accept, /updateCreativeProjects/);
+  assert.doesNotMatch(accept, /workspace_snapshots/);
   assert.match(accept, /platform_content_versions/);
   assert.match(accept, /upsertStageSummary/);
-  assert.match(enable, /FOR UPDATE/);
-  assert.match(enable, /existingVersion|find\(/);
+  assert.match(enable, /updateCreativeProjects/);
+  assert.match(enable, /some\(/);
   assert.match(enable, /VIDEO_CHANNEL/);
-  assert.match(complete, /FOR UPDATE/);
+  assert.match(complete, /updateCreativeProjects/);
   assert.match(complete, /PLATFORM_ADAPTATION/);
   assert.match(complete, /\[input\.platform\]: \{ \.\.\.currentPlatform, stage: needsVisual\(input\.platform\) \? 'VISUAL' : 'LAYOUT'/);
+  assert.match(repository, /workspace_snapshots WHERE workspace_id = \$1 FOR UPDATE/);
+  assert.match(repository, /content_projects WHERE workspace_id = \$1 ORDER BY position, updated_at DESC FOR UPDATE/);
 });

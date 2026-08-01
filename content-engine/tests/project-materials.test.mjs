@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { createProjectMaterialStore, deriveProjectInputTitle, inputView, referenceView } from '../server/services/projectMaterials.cjs';
-import { MIME_EXTENSIONS, safePath } from '../server/services/projectUploadStorage.cjs';
+import { MIME_EXTENSIONS, matchesImageSignature, safePath, saveRemoteProjectImage } from '../server/services/projectUploadStorage.cjs';
 import { creativeStages, planningFieldNames } from '../src/domain/creative-flow.mjs';
 
 test('项目资料迁移建立输入、参考和文件元数据表', () => {
@@ -53,11 +54,147 @@ test('上传目录拒绝路径穿越且只开放声明的媒体类型', () => {
   assert.equal(MIME_EXTENSIONS.has('text/html'), false);
 });
 
+test('网络选图经服务端校验格式与体积后保存为项目文件', async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'content-engine-image-'));
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('image-data')]);
+  try {
+    const stored = await saveRemoteProjectImage(root, 'workspace-1', 'project-1', 'https://example.com/image.png', {
+      validateUrl: async (value) => new URL(value),
+      fetchImpl: async () => new Response(png, { status: 200, headers: { 'Content-Type': 'image/png', 'Content-Length': String(png.length) } }),
+    });
+    const saved = await fs.promises.readFile(path.join(root, stored.storageKey));
+    assert.deepEqual(saved, png);
+    assert.equal(stored.mimeType, 'image/png');
+    assert.equal(stored.sizeBytes, png.length);
+    assert.equal(matchesImageSignature(png, 'image/png'), true);
+    assert.equal(matchesImageSignature(Buffer.from('<html>'), 'image/png'), false);
+  } finally {
+    await fs.promises.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('网络图片没有可信体积声明时也会在超过 15MB 后立即停止读取', async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'content-engine-image-limit-'));
+  const chunk = new Uint8Array(1_000_000);
+  chunk.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  let pulls = 0;
+  const body = new ReadableStream({
+    pull(controller) {
+      pulls += 1;
+      controller.enqueue(chunk);
+      if (pulls === 100) controller.close();
+    },
+  });
+  try {
+    await assert.rejects(
+      () => saveRemoteProjectImage(root, 'workspace-1', 'project-1', 'https://example.com/oversized.png', {
+        validateUrl: async (value) => new URL(value),
+        fetchImpl: async () => new Response(body, { status: 200, headers: { 'Content-Type': 'image/png' } }),
+      }),
+      /15MB/,
+    );
+    assert.ok(pulls <= 17, `超过上限后只允许流内部预取一个数据块，实际读取了 ${pulls} 个`);
+  } finally {
+    await fs.promises.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('网络图片拒绝用 image/png 响应头伪装的 HTML 内容', async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'content-engine-image-signature-'));
+  try {
+    await assert.rejects(
+      () => saveRemoteProjectImage(root, 'workspace-1', 'project-1', 'https://example.com/fake.png', {
+        validateUrl: async (value) => new URL(value),
+        fetchImpl: async () => new Response('<html>not an image</html>', { status: 200, headers: { 'Content-Type': 'image/png' } }),
+      }),
+      /格式不一致/,
+    );
+  } finally {
+    await fs.promises.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('网络图片请求禁用内容压缩以避免外站错误压缩响应中断', async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'content-engine-image-encoding-'));
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('image-data')]);
+  let requestHeaders;
+  try {
+    await saveRemoteProjectImage(root, 'workspace-1', 'project-1', 'https://example.com/image.png', {
+      validateUrl: async (value) => new URL(value),
+      fetchImpl: async (_url, options) => {
+        requestHeaders = options.headers;
+        return new Response(png, { status: 200, headers: { 'Content-Type': 'image/png' } });
+      },
+    });
+    assert.equal(requestHeaders['Accept-Encoding'], 'identity');
+  } finally {
+    await fs.promises.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('网络图片缺少 Content-Type 时只按受支持的文件魔数识别', async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'content-engine-image-sniff-'));
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('image-data')]);
+  try {
+    const stored = await saveRemoteProjectImage(root, 'workspace-1', 'project-1', 'https://example.com/no-content-type', {
+      validateUrl: async (value) => new URL(value),
+      fetchImpl: async () => new Response(png, { status: 200 }),
+    });
+    assert.equal(stored.mimeType, 'image/png');
+    assert.equal(stored.sizeBytes, png.length);
+  } finally {
+    await fs.promises.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('网络图片在下载前拒绝本机和局域网地址', async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'content-engine-image-private-'));
+  let fetched = false;
+  try {
+    await assert.rejects(
+      () => saveRemoteProjectImage(root, 'workspace-1', 'project-1', 'http://127.0.0.1/private.png', {
+        fetchImpl: async () => { fetched = true; throw new Error('不应发起请求'); },
+      }),
+      /本机|局域网/,
+    );
+    assert.equal(fetched, false);
+  } finally {
+    await fs.promises.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('网络图片的每一次重定向目标都重新执行公开地址校验', async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'content-engine-image-redirect-'));
+  const validated = [];
+  let fetchCount = 0;
+  try {
+    await assert.rejects(
+      () => saveRemoteProjectImage(root, 'workspace-1', 'project-1', 'https://example.com/image.png', {
+        validateUrl: async (value) => {
+          validated.push(String(value));
+          if (String(value).includes('127.0.0.1')) throw new Error('禁止访问私网重定向目标');
+          return new URL(value);
+        },
+        fetchImpl: async () => {
+          fetchCount += 1;
+          return new Response(null, { status: 302, headers: { Location: 'http://127.0.0.1/private.png' } });
+        },
+      }),
+      /私网重定向目标/,
+    );
+    assert.deepEqual(validated, ['https://example.com/image.png', 'http://127.0.0.1/private.png']);
+    assert.equal(fetchCount, 1);
+  } finally {
+    await fs.promises.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('项目资料 API 提供完整 CRUD、鉴权下载和 50MB 限制', () => {
   const source = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
   assert.match(source, /app\.get\('\/api\/v1\/creative\/projects\/:projectId\/materials'/);
   assert.match(source, /app\.post\('\/api\/v1\/creative\/projects\/:projectId\/inputs'/);
   assert.match(source, /app\.post\('\/api\/v1\/creative\/projects\/:projectId\/references'/);
+  assert.match(source, /app\.post\('\/api\/v1\/creative\/projects\/:projectId\/images\/import'/);
   assert.match(source, /app\.post\('\/api\/v1\/creative\/projects\/:projectId\/files'/);
   assert.match(source, /app\.get\('\/api\/v1\/creative\/project-files\/:id\/content', \{ preHandler: authenticate \}/);
   assert.match(source, /fileSize: 50 \* 1024 \* 1024/);

@@ -37,7 +37,7 @@ export const webAuth = {
 
 export const webState = {
   async load() { return request<{ state: LocalState; revision: number; updatedAt: string }>('/workspace/state'); },
-  async save(state: LocalState) { return request<{ revision: number; updatedAt: string }>('/workspace/state', { method: 'PUT', body: JSON.stringify({ state }) }); },
+  async savePreferences(input: { workspace?: LocalState['workspace']; feishuTemplate?: LocalState['feishuTemplate'] }) { return request<{ revision: number; updatedAt: string }>('/workspace/preferences', { method: 'PATCH', body: JSON.stringify(input) }); },
 };
 
 export const webAccountVoices = {
@@ -69,6 +69,7 @@ export const webProjects = {
 
 export const webCreative = {
   skills: () => request<CreativeSkillDefinition[]>('/creative/skills'),
+  updateVersion: (projectId: string, versionId: string, input: { title: string; body: string }) => request<{ project: ContentProject }>(`/creative/projects/${encodeURIComponent(projectId)}/versions/${encodeURIComponent(versionId)}`, { method: 'PUT', body: JSON.stringify(input) }),
   brief: (projectId: string) => request<{ brief: WritingBrief | null }>(`/creative/projects/${encodeURIComponent(projectId)}/brief`),
   saveBrief: (projectId: string, input: WritingBriefInput) => request<{ brief: WritingBrief }>(`/creative/projects/${encodeURIComponent(projectId)}/brief`, { method: 'PUT', body: JSON.stringify(input) }),
   materials: (projectId: string) => request<{ inputs: ProjectInput[]; references: ProjectReference[] }>(`/creative/projects/${encodeURIComponent(projectId)}/materials`),
@@ -76,6 +77,7 @@ export const webCreative = {
   updateInput: (id: string, input: ProjectInputPayload) => request<ProjectInput>(`/creative/project-inputs/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(input) }),
   removeInput: (id: string) => request<void>(`/creative/project-inputs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   createReference: (projectId: string, input: ProjectReferenceMetadata & { url: string }) => request<ProjectReference>(`/creative/projects/${encodeURIComponent(projectId)}/references`, { method: 'POST', body: JSON.stringify(input) }),
+  importImage: (projectId: string, input: ProjectReferenceMetadata & { url: string }) => request<ProjectReference>(`/creative/projects/${encodeURIComponent(projectId)}/images/import`, { method: 'POST', body: JSON.stringify(input) }),
   searchImages: (query: string) => request<{ provider: string; results: Array<{ id: string; title: string; thumbnailUrl: string; imageUrl: string; sourceUrl: string; license: string; attribution: string }> }>(`/creative/image-search?q=${encodeURIComponent(query)}`),
   planVisual: (projectId: string, input: { platform: CreativePlatform; bodyItemCount: number; styleProfile: import('../domain/content').CreativeVisualStyleProfile; request?: string; currentItemId?: string; currentPlan?: CreativeVisualPlanItem[]; keepAssignedAssets?: boolean }) => request<{ plan: CreativeVisualPlanItem[]; strategy: string; model: string; provider: string; scope: string }>(`/creative/projects/${encodeURIComponent(projectId)}/visual/plan`, { method: 'POST', body: JSON.stringify(input) }),
   generateImage: (projectId: string, input: { platform: CreativePlatform; prompt: string; size: '1:1' | '3:4' | '4:3' | '9:16' | '16:9'; referenceImageIds?: string[] }) => request<{ reference: ProjectReference }>(`/creative/projects/${encodeURIComponent(projectId)}/visual/generate`, { method: 'POST', body: JSON.stringify(input) }),
@@ -145,6 +147,7 @@ export const webIntelligence = {
   updateSource: (sourceId: string, source: Omit<LocalState['sources'][number], 'id' | 'lastSyncedAt' | 'lastError'>) => request<LocalState['sources'][number]>(`/intelligence/sources/${sourceId}`, { method: 'PUT', body: JSON.stringify(source) }),
   removeSource: (sourceId: string) => request<void>(`/intelligence/sources/${sourceId}`, { method: 'DELETE' }),
   listItems: () => request<LocalState['intelligence']>('/intelligence/items'),
+  saveItem: (item: Omit<LocalState['intelligence'][number], 'id' | 'analysis'>) => request<LocalState['intelligence'][number]>('/intelligence/items', { method: 'POST', body: JSON.stringify(item) }),
   refreshRss: () => request<{ items: LocalState['intelligence']; results: { sourceId: string; ok: boolean; count: number; error?: string }[]; sources: LocalState['sources'] }>('/intelligence/rss/refresh', { method: 'POST', body: '{}' }),
   previewLink: (url: string) => request<{ url: string; title: string; summary: string; source: string; category: string; keywords: string[] }>('/intelligence/clip', { method: 'POST', body: JSON.stringify({ url }) }),
   webSearchStatus: () => request<CredentialStatus>('/settings/credentials/TAVILY'),

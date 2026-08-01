@@ -8,4 +8,5 @@ content-engine/*.tsbuildinfo
 content-engine/*.sqlite
 content-engine/*.sqlite-shm
 content-engine/*.sqlite-wal
+/backups/
 *.log

@@ -290,7 +290,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
     try {
       const existing = references.find((item) => item.url?.trim() === result.imageUrl.trim());
       if (existing) { assignAsset(existing); return; }
-      const reference = await webCreative.createReference(project.id, {
+      const reference = await webCreative.importImage(project.id, {
         title: result.title, url: result.imageUrl, role: 'VISUAL', scope: 'IMAGING', platforms: [activePlatform],
         notes: `Wikimedia Commons｜许可：${result.license}｜署名：${result.attribution}｜来源：${result.sourceUrl}`,
       });

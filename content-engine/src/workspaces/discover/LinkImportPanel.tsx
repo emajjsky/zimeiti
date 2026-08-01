@@ -11,7 +11,7 @@ export function LinkImportPanel({
   onShowInbox,
   previewLink,
 }: {
-  onSave: (item: IntelligenceInput) => void;
+  onSave: (item: IntelligenceInput) => Promise<void>;
   onShowInbox: () => void;
   previewLink: (url: string) => Promise<LinkPreview>;
 }) {
@@ -20,6 +20,7 @@ export function LinkImportPanel({
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
   const read = async () => {
@@ -37,22 +38,30 @@ export function LinkImportPanel({
     }
   };
 
-  const save = () => {
+  const save = async () => {
     if (!preview) return;
-    onSave({
-      title: preview.title,
-      summary: preview.summary,
-      source: preview.source || '导入链接',
-      category: preview.category || '其它',
-      keywords: preview.keywords,
-      publishedAt: '刚刚',
-      heat: 0,
-      trust: '待核验',
-      url: preview.url,
-      note: note.trim(),
-      captureMethod: 'MANUAL_LINK',
-    });
-    setSaved(true);
+    setSaving(true);
+    setError('');
+    try {
+      await onSave({
+        title: preview.title,
+        summary: preview.summary,
+        source: preview.source || '导入链接',
+        category: preview.category || '其它',
+        keywords: preview.keywords,
+        publishedAt: new Date().toISOString(),
+        heat: 0,
+        trust: '待核验',
+        url: preview.url,
+        note: note.trim(),
+        captureMethod: 'MANUAL_LINK',
+      });
+      setSaved(true);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '保存链接失败。');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const reset = () => {
@@ -84,7 +93,7 @@ export function LinkImportPanel({
               <h2>{preview.title}</h2>
               <p>{preview.summary}</p>
               <label>备注<input value={note} onChange={(event) => setNote(event.target.value)} /></label>
-              <footer><a href={preview.url} target="_blank" rel="noreferrer">查看原文</a><button className="button primary" type="button" onClick={save}>加入热点池 <ChevronRight size={16} /></button></footer>
+              <footer><a href={preview.url} target="_blank" rel="noreferrer">查看原文</a><button className="button primary" type="button" disabled={saving} onClick={() => void save()}>{saving ? '保存中' : '加入热点池'} <ChevronRight size={16} /></button></footer>
             </section>
           )}
         </>

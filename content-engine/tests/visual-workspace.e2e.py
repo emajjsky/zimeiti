@@ -131,7 +131,7 @@ with sync_playwright() as playwright:
         method = request.method
         if path == "/api/v1/auth/me":
             return respond(route, {"user": SESSION["user"], "workspace": SESSION["workspace"]})
-        if path == "/api/v1/workspace/state":
+        if path == "/api/v1/workspace/state" and method == "GET":
             return respond(route, {"state": {"workspace": {"name": "验收工作空间", "enabledPlatforms": ["WECHAT"], "setupCompleted": True}, "sources": [], "intelligence": [], "topics": [], "projects": [state["project"]]}, "revision": 1, "updatedAt": NOW})
         if path == "/api/v1/creative/projects" and method == "GET":
             return respond(route, {"projects": [state["project"]]})
@@ -198,7 +198,7 @@ with sync_playwright() as playwright:
     assert channel_nav and channel_nav["height"] <= 64, f"桌面渠道导航过高: {channel_nav}, platform={platform_nav}, steps={step_nav}, style={channel_nav_style}"
     assert platform_nav and step_nav and abs(platform_nav["y"] - step_nav["y"]) <= 4, "渠道与步骤导航没有在同一行"
     assert page.locator(".channel-platform-tabs button").count() == 4
-    page.get_by_text("封面 1 张，正文插图 2 张", exact=True).wait_for()
+    page.get_by_text(re.compile(r"^封面 1 张，正文插图 2 张｜任务策略：配图策划（VISUAL_PLANNING）$")).wait_for()
     page.get_by_role("heading", name="让核心 Agent 先读正文，再安排每一张图", exact=True).wait_for()
     assert page.get_by_text("视觉结构", exact=True).count() == 0
     assert page.get_by_text("版式模板", exact=True).count() == 0
@@ -218,7 +218,7 @@ with sync_playwright() as playwright:
     assert state["project"]["delivery"]["platforms"]["WECHAT"]["visual"]["planVersion"] == 7
 
     page.get_by_role("button", name="增加正文插图").click()
-    page.get_by_text("封面 1 张，正文插图 3 张", exact=True).wait_for()
+    page.get_by_text(re.compile(r"^封面 1 张，正文插图 3 张｜任务策略：配图策划（VISUAL_PLANNING）$")).wait_for()
     page.get_by_role("button", name="更新方案", exact=True).click()
     page.get_by_role("button", name=re.compile(r"正文插图 3")).wait_for()
     assert len(state["planning_calls"]) == 2
@@ -253,7 +253,7 @@ with sync_playwright() as playwright:
     page.locator(".visual-style-custom textarea").fill("统一使用薄荷绿边框，避免高饱和紫色")
     page.get_by_role("button", name="应用到项目", exact=True).click()
     page.get_by_role("button", name="更新方案", exact=True).click()
-    page.get_by_text("配图方案已由核心 Agent 完成，共 4 张。", exact=True).wait_for()
+    page.get_by_text("配图方案已由“配图策划”任务策略完成，共 4 张。", exact=True).wait_for()
     assert "统一使用薄荷绿边框" in state["planning_calls"][-1]["styleProfile"]["customPrompt"]
     page.get_by_role("button", name=re.compile(r"正文插图 1")).click()
     page.get_by_role("button", name="AI 生图", exact=True).click()

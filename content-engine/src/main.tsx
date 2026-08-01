@@ -2,8 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { animate, createScope, stagger } from 'animejs';
 import { ArrowLeft, Bell, BrainCircuit, CalendarDays, ChartColumn, CheckCircle2, ChevronRight, CircleAlert, CircleCheck, Compass, FilePenLine, FolderOpen, KeyRound, Lightbulb, Menu, PenLine, Pencil, Plus, RefreshCw, Search, Send, Settings, Trash2 } from 'lucide-react';
-import { intelligenceKey, loadState, persistState, seedState, type FeishuLibraryTemplate, type LocalState, type WorkspaceProfile } from './data/localRepository';
-import { webAgent, webAuth, webIntelligence, webModels, webProjects, webSettings, type CreateProjectInput, type CredentialStatus, type WebSession } from './data/webApi';
+import { intelligenceKey, loadState, seedState, type FeishuLibraryTemplate, type LocalState, type WorkspaceProfile } from './data/localRepository';
+import { webAgent, webAuth, webCreative, webIntelligence, webModels, webProjects, webSettings, webState, type CreateProjectInput, type CredentialStatus, type WebSession } from './data/webApi';
 import { platformName, projectStageName, type ContentProject, type ContentVersion, type IntelligenceSource, type Platform } from './domain/content';
 import { stageRouteForProjectStage } from './domain/creative-flow.mjs';
 import { completedProjects, formatTodayTitle, projectTaskEntries } from './domain/today.mjs';
@@ -63,6 +63,8 @@ function App() {
   const [settingsSection, setSettingsSection] = useState<SettingsSection>(initialRoute.settingsSection);
   const [requestedModelSection, setRequestedModelSection] = useState<ModelSection | null>(initialRoute.modelSection);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const preferenceSaveQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const versionSaveQueues = useRef(new Map<string, Promise<unknown>>());
 
   const selectedIntel = state.intelligence.find((item) => item.id === selectedIntelId) ?? state.intelligence[0];
   const featuredProject = state.projects.find((item) => item.id === selectedProjectId);
@@ -102,9 +104,12 @@ function App() {
 
   const updateState = (next: LocalState) => {
     setState(next);
-    void persistState(next).catch((error) => {
-      console.error('保存本地工作空间失败', error);
-    });
+  };
+  const savePreferences = (input: { workspace?: WorkspaceProfile; feishuTemplate?: FeishuLibraryTemplate }) => {
+    preferenceSaveQueue.current = preferenceSaveQueue.current
+      .catch(() => undefined)
+      .then(() => webState.savePreferences(input))
+      .catch((error) => { console.error('保存工作空间设置失败', error); });
   };
   const openDiscover = (section: DiscoverSection, preset: SearchPreset | null = null) => {
     setView('discover');
@@ -117,7 +122,9 @@ function App() {
     setRequestedModelSection(section === 'models' ? modelSection : null);
   };
   const completeSetup = (workspace: WorkspaceProfile) => {
-    updateState({ ...state, workspace: { ...workspace, setupCompleted: true } });
+    const saved = { ...workspace, setupCompleted: true };
+    updateState({ ...state, workspace: saved });
+    savePreferences({ workspace: saved });
   };
   const openProject = (project: ContentProject) => {
     setSelectedProjectId(project.id);
@@ -146,23 +153,26 @@ function App() {
     setView('create');
   };
   const saveContentVersion = (projectId: string, versionId: string, patch: Pick<ContentVersion, 'title' | 'body'>) => {
-    const updatedAt = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
-    const next: LocalState = {
-      ...state,
-      projects: state.projects.map((project) => project.id !== projectId ? project : {
+    const updatedAt = new Date().toISOString();
+    setState((current) => ({
+      ...current,
+      projects: current.projects.map((project) => project.id !== projectId ? project : {
         ...project,
         status: project.status === 'BRIEF' ? 'WRITING' : project.status,
         updatedAt,
         versions: project.versions.map((version) => version.id === versionId ? { ...version, ...patch, updatedAt } : version),
       }),
-    };
-    updateState(next);
+    }));
+    const key = `${projectId}:${versionId}`;
+    const previous = versionSaveQueues.current.get(key) ?? Promise.resolve();
+    const pending = previous.catch(() => undefined).then(() => webCreative.updateVersion(projectId, versionId, patch)).then((result) => {
+      setState((current) => ({ ...current, projects: current.projects.map((project) => project.id === result.project.id ? result.project : project) }));
+    }).catch((error) => { console.error('保存平台正文失败', error); });
+    versionSaveQueues.current.set(key, pending);
+    void pending.finally(() => { if (versionSaveQueues.current.get(key) === pending) versionSaveQueues.current.delete(key); });
   };
   const acceptProjectFromServer = (acceptedProject: ContentProject) => {
-    updateState({
-      ...state,
-      projects: state.projects.map((project) => project.id === acceptedProject.id ? acceptedProject : project),
-    });
+    setState((current) => ({ ...current, projects: current.projects.map((project) => project.id === acceptedProject.id ? acceptedProject : project) }));
   };
   const refreshRss = async () => {
     if (state.sources.filter((source) => source.enabled).length === 0) {
@@ -207,15 +217,28 @@ function App() {
     await webIntelligence.removeSource(sourceId);
     updateState({ ...state, sources: state.sources.filter((source) => source.id !== sourceId) });
   };
-  const saveFeishuTemplate = (feishuTemplate: FeishuLibraryTemplate) => updateState({ ...state, feishuTemplate });
-  const saveClippedLink = (item: Omit<LocalState['intelligence'][number], 'id'>) => {
-    const id = `clip-${Date.now()}`;
-    updateState({ ...state, intelligence: [{ ...item, id }, ...state.intelligence] });
-    setSelectedIntelId(id); openDiscover('inbox');
+  const saveFeishuTemplate = (feishuTemplate: FeishuLibraryTemplate) => {
+    setState((current) => ({ ...current, feishuTemplate }));
+    savePreferences({ feishuTemplate });
   };
-  const saveSearchCandidate = (item: LocalState['intelligence'][number]) => {
+  const saveClippedLink = async (item: Omit<LocalState['intelligence'][number], 'id'>) => {
+    const { analysis: _analysis, ...payload } = item;
+    const saved = await webIntelligence.saveItem(payload);
+    setState((current) => ({
+      ...current,
+      intelligence: [saved, ...current.intelligence.filter((existing) => existing.id !== saved.id && intelligenceKey(existing) !== intelligenceKey(saved))],
+    }));
+    setSelectedIntelId(saved.id);
+    openDiscover('inbox');
+  };
+  const saveSearchCandidate = async (item: LocalState['intelligence'][number]) => {
     if (state.intelligence.some((current) => intelligenceKey(current) === intelligenceKey(item))) return;
-    updateState({ ...state, intelligence: [{ ...item, id: `search-${Date.now()}` }, ...state.intelligence] });
+    const { id: _id, analysis: _analysis, ...payload } = item;
+    const saved = await webIntelligence.saveItem(payload);
+    setState((current) => ({
+      ...current,
+      intelligence: [saved, ...current.intelligence.filter((existing) => existing.id !== saved.id && intelligenceKey(existing) !== intelligenceKey(saved))],
+    }));
   };
   if (!isLoaded) return <div className="boot-screen"><div className="boot-mark">内容引擎</div><p>正在准备你的编辑部……</p></div>;
   if (!state.workspace.setupCompleted) return <Onboarding initial={state.workspace} onComplete={completeSetup} />;
@@ -239,7 +262,7 @@ function App() {
       {view === 'publish' && <Publish project={featuredProject} onNavigate={setView} />}
       {view === 'review' && <Review projects={state.projects} onOpenProject={(project) => openProject(project)} />}
       {view === 'assets' && <Utility title="素材库" description="素材将按目录、类型和所属项目统一管理。" />}
-      {view === 'settings' && <SettingsWorkspace section={settingsSection} onSectionChange={setSettingsSection} workspace={<WorkspaceProfileSettings workspace={state.workspace} onChange={(workspace) => updateState({ ...state, workspace })} />} sources={<SourceSettings sources={state.sources} onAddSource={addSource} onAddSources={addSources} onUpdateSource={updateSource} onRemoveSource={removeSource} />} voices={<AccountVoiceSettings />} models={<ModelSettingsScreen initialSection={requestedModelSection} onSectionChange={setRequestedModelSection} />} feishu={<WorkspaceSettings template={state.feishuTemplate} onTemplateChange={saveFeishuTemplate} />} accounts={<AccountAuthorizationSettings />} />}
+      {view === 'settings' && <SettingsWorkspace section={settingsSection} onSectionChange={setSettingsSection} workspace={<WorkspaceProfileSettings workspace={state.workspace} onChange={(workspace) => { setState((current) => ({ ...current, workspace })); savePreferences({ workspace }); }} />} sources={<SourceSettings sources={state.sources} onAddSource={addSource} onAddSources={addSources} onUpdateSource={updateSource} onRemoveSource={removeSource} />} voices={<AccountVoiceSettings />} models={<ModelSettingsScreen initialSection={requestedModelSection} onSectionChange={setRequestedModelSection} />} feishu={<WorkspaceSettings template={state.feishuTemplate} onTemplateChange={saveFeishuTemplate} />} accounts={<AccountAuthorizationSettings />} />}
     </main>
   </div>;
 }

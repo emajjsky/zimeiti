@@ -32,7 +32,7 @@ const {
 } = require('./services/source-verification.cjs');
 const { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, workflowSourceActionsForProject, projectOriginalSource, sourceMatchesProject, buildResearchResult } = require('./services/simplified-research.cjs');
 const { createProjectAgentStore } = require('./services/project-agent.cjs');
-const { updateCreativeState } = require('./services/project-planning.cjs');
+const { updateCreativeProjects } = require('./services/project-planning.cjs');
 const { loadContentMasterState } = require('./services/content-master.cjs');
 const { applyAcceptedCopyToState, buildCopyPrompt, buildFinishedCopyPrompt, buildWritingPacket, copyActionPersistenceMode, parseCopyOutput, parseFinishedCopyBody } = require('./services/project-copy-action.cjs');
 
@@ -886,7 +886,7 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
               AND status = 'ACCEPTED' AND id <> $4`, [workspaceId, snapshot.projectId, snapshot.platform, artifact.id]);
           await client.query('UPDATE project_artifacts SET accepted_at = now(), updated_at = now() WHERE id = $1 AND workspace_id = $2', [artifact.id, workspaceId]);
           const updatedAt = new Date().toISOString();
-          await updateCreativeState(client, workspaceId, (state) => {
+          await updateCreativeProjects(client, workspaceId, (state) => {
             const applied = applyAcceptedCopyToState(state, {
               projectId: snapshot.projectId,
               platform: snapshot.platform,

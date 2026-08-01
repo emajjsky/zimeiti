@@ -85,8 +85,9 @@ test('初稿 API 要求已采用大纲，确认后才入队，采用后才写正
   assert.match(prepare, /template: \{ id: template\.id, version: template\.version, body: template\.body \}/);
   assert.doesNotMatch(prepare, /await enqueue/);
   assert.match(confirm, /await enqueue/);
-  assert.match(accept, /version\.body = candidate\.output_json\.body/);
-  assert.match(accept, /UPDATE workspace_snapshots SET state_json/);
+  assert.match(accept, /body: candidate\.output_json\.body/);
+  assert.match(accept, /updateCreativeProjects/);
+  assert.doesNotMatch(accept, /UPDATE workspace_snapshots SET state_json/);
 });
 
 test('Worker 使用任务冻结的提示词模板并只保存候选', () => {

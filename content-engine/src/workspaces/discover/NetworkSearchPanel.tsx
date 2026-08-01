@@ -15,7 +15,7 @@ export function NetworkSearchPanel({
   searchWeb,
 }: {
   preset: SearchPreset | null;
-  onSave: (item: IntelligenceItem) => void;
+  onSave: (item: IntelligenceItem) => Promise<void>;
   onOpenSearchSettings: () => void;
   checkStatus: () => Promise<{ configured?: boolean }>;
   searchWeb: (input: { query: string; category: string; domains: string[] }) => Promise<IntelligenceItem[]>;
@@ -29,6 +29,7 @@ export function NetworkSearchPanel({
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [added, setAdded] = useState<string[]>([]);
+  const [saving, setSaving] = useState<string[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -68,9 +69,17 @@ export function NetworkSearchPanel({
     }
   };
 
-  const addResult = (item: IntelligenceItem) => {
-    onSave(item);
-    setAdded((current) => current.includes(item.id) ? current : [...current, item.id]);
+  const addResult = async (item: IntelligenceItem) => {
+    setSaving((current) => current.includes(item.id) ? current : [...current, item.id]);
+    setNotice('');
+    try {
+      await onSave(item);
+      setAdded((current) => current.includes(item.id) ? current : [...current, item.id]);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : '保存搜索结果失败。');
+    } finally {
+      setSaving((current) => current.filter((id) => id !== item.id));
+    }
   };
 
   return (
@@ -97,7 +106,7 @@ export function NetworkSearchPanel({
               <div className="search-results">{results.map((item) => (
                 <article key={item.id}>
                   <div className="search-result-copy"><b>{item.title}</b><p>{item.summary}</p><small>{item.source} / {item.category}</small></div>
-                  <div className="search-result-actions"><a href={item.url} target="_blank" rel="noreferrer">查看原文</a><button className="button" type="button" disabled={added.includes(item.id)} onClick={() => addResult(item)}>{added.includes(item.id) ? '已加入' : '加入热点池'}</button></div>
+                  <div className="search-result-actions"><a href={item.url} target="_blank" rel="noreferrer">查看原文</a><button className="button" type="button" disabled={added.includes(item.id) || saving.includes(item.id)} onClick={() => void addResult(item)}>{added.includes(item.id) ? '已加入' : saving.includes(item.id) ? '保存中' : '加入热点池'}</button></div>
                 </article>
               ))}</div>
             )}

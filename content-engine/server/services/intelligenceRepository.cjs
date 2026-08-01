@@ -35,6 +35,61 @@ function normalizeSourceInput(source) {
   };
 }
 
+function normalizeSavedItem(input) {
+  const publishedAt = input.publishedAt ? new Date(input.publishedAt) : null;
+  return {
+    title: String(input.title ?? '').trim(),
+    summary: String(input.summary ?? '').trim(),
+    category: String(input.category ?? '').trim() || '其它',
+    keywords: [...new Set((input.keywords ?? []).map((value) => String(value).trim()).filter(Boolean))],
+    source: String(input.source ?? '').trim() || '公开网页',
+    canonicalUrl: normalizeCanonicalUrl(input.url),
+    language: ['zh', 'en', 'other'].includes(input.language) ? input.language : 'other',
+    captureMethod: input.captureMethod === 'SEARCH' ? 'SEARCH' : 'MANUAL_LINK',
+    trust: input.trust === '可信' ? '可信' : '待核验',
+    heat: Math.min(100, Math.max(0, Number(input.heat) || 0)),
+    publishedAt: publishedAt && Number.isFinite(publishedAt.valueOf()) ? publishedAt : null,
+    note: String(input.note ?? '').trim() || null,
+  };
+}
+
+async function saveItem(workspaceId, input) {
+  const item = normalizeSavedItem(input);
+  if (!item.title) throw new Error('资讯标题不能为空。');
+  if (!item.canonicalUrl) throw new Error('资讯链接必须是有效的 HTTP(S) 地址。');
+  const result = await query(`INSERT INTO intelligence_items
+    (workspace_id, title, summary, category, matched_keywords, source_name, canonical_url, language, capture_method, trust, heat, published_at, note)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+    ON CONFLICT (workspace_id, canonical_url) WHERE canonical_url IS NOT NULL DO UPDATE SET
+      title = excluded.title,
+      summary = excluded.summary,
+      category = excluded.category,
+      matched_keywords = excluded.matched_keywords,
+      source_name = excluded.source_name,
+      language = excluded.language,
+      capture_method = CASE WHEN intelligence_items.capture_method = 'RSS' THEN 'RSS' ELSE excluded.capture_method END,
+      trust = excluded.trust,
+      heat = excluded.heat,
+      published_at = COALESCE(excluded.published_at, intelligence_items.published_at),
+      note = COALESCE(excluded.note, intelligence_items.note)
+    RETURNING *`, [
+    workspaceId,
+    item.title,
+    item.summary,
+    item.category,
+    JSON.stringify(item.keywords),
+    item.source,
+    item.canonicalUrl,
+    item.language,
+    item.captureMethod,
+    item.trust,
+    item.heat,
+    item.publishedAt,
+    item.note,
+  ]);
+  return itemDto(result.rows[0]);
+}
+
 async function listSources(workspaceId) {
   const result = await query('SELECT * FROM intelligence_sources WHERE workspace_id = $1 ORDER BY created_at ASC', [workspaceId]);
   return result.rows.map(sourceDto);
@@ -137,4 +192,4 @@ function isExpired(value) {
 
 function normalize(value) { return String(value).replace(/\s+/g, ' ').trim().toLowerCase(); }
 
-module.exports = { listSources, createSources, updateSource, removeSource, listItems, refreshWorkspaceRss, purgeExpiredItems, itemDto, normalizeSourceInput };
+module.exports = { listSources, createSources, updateSource, removeSource, listItems, saveItem, refreshWorkspaceRss, purgeExpiredItems, itemDto, normalizeSourceInput, normalizeSavedItem };

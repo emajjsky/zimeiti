@@ -11,7 +11,7 @@ const { query, transaction } = require('./db.cjs');
 const { encrypt, decrypt, hashPassword, verifyPassword } = require('./crypto.cjs');
 const { clipPublicLink, readPublicArticle } = require('./services/public-web.cjs');
 const { searchTavily, searchTavilyImages } = require('./services/tavily.cjs');
-const { listSources, createSources, updateSource, removeSource, listItems, refreshWorkspaceRss } = require('./services/intelligenceRepository.cjs');
+const { listSources, createSources, updateSource, removeSource, listItems, saveItem, refreshWorkspaceRss } = require('./services/intelligenceRepository.cjs');
 const { enqueue } = require('./queue.cjs');
 const { listAvailableSkills } = require('./agent/skillRegistry.cjs');
 const { runBailianCli } = require('./runner/bailian.cjs');
@@ -34,15 +34,17 @@ const {
   confirmProjectPlanning,
   createBlankProject,
   createProjectFromIntelligence,
-  migrateLegacyCreativeState,
+  loadCreativeState,
+  normalizeProject,
   saveProjectPlanning,
-  updateCreativeState,
+  saveWorkspacePreferences,
+  updateCreativeProjects,
   writePlanningVersion,
 } = require('./services/project-planning.cjs');
 const { createProjectMaterialStore } = require('./services/projectMaterials.cjs');
 const { createProjectAgentStore, artifactView, runView } = require('./services/project-agent.cjs');
 const { loadContentMasterState } = require('./services/content-master.cjs');
-const { saveProjectUpload, removeProjectUpload, openProjectUpload, readProjectUploadText } = require('./services/projectUploadStorage.cjs');
+const { saveProjectUpload, saveRemoteProjectImage, removeProjectUpload, openProjectUpload, readProjectUploadText } = require('./services/projectUploadStorage.cjs');
 const { PROJECT_RESEARCH_ACTION_VERSION, PROJECT_RESEARCH_SCOPE, researchRunView, researchPlanView } = require('./services/project-research.cjs');
 const { PROJECT_RESEARCH_SOURCES_VERSION, researchSourceActions } = require('./services/project-research-sources.cjs');
 const { SOURCE_VERIFICATION_SCOPE, SOURCE_VERIFICATION_VERSION, defaultSourceVerificationTemplate, validateSourceVerificationTemplate } = require('./services/source-verification.cjs');
@@ -258,15 +260,35 @@ app.get('/api/v1/auth/me', { preHandler: authenticate }, async (request) => {
 
 app.get('/api/v1/workspace/state', { preHandler: authenticate }, async (request) => {
   const workspace = await currentWorkspace(request.user.sub);
-  const result = await query('SELECT state_json, revision, updated_at FROM workspace_snapshots WHERE workspace_id = $1', [workspace.id]);
-  return { workspace, state: migrateLegacyCreativeState(result.rows[0]?.state_json ?? defaultState(workspace.name)), revision: result.rows[0]?.revision ?? 1, updatedAt: result.rows[0]?.updated_at ?? new Date().toISOString() };
+  const [snapshot, state] = await Promise.all([
+    query('SELECT revision, updated_at FROM workspace_snapshots WHERE workspace_id = $1', [workspace.id]),
+    loadCreativeState({ query }, workspace.id),
+  ]);
+  return { workspace, state: { ...defaultState(workspace.name), ...state }, revision: snapshot.rows[0]?.revision ?? 1, updatedAt: snapshot.rows[0]?.updated_at ?? new Date().toISOString() };
 });
 
-app.put('/api/v1/workspace/state', { preHandler: authenticate }, async (request) => {
-  const body = z.object({ state: z.record(z.string(), z.unknown()) }).parse(request.body);
+app.patch('/api/v1/workspace/preferences', { preHandler: authenticate }, async (request) => {
+  const body = z.object({
+    workspace: z.object({
+      name: z.string().trim().min(1).max(80),
+      materialRoot: z.string().max(1_000),
+      primaryTopics: z.array(z.string().trim().min(1).max(80)).max(30),
+      accountPositioning: z.string().max(2_000).optional(),
+      targetAudience: z.string().max(2_000).optional(),
+      enabledPlatforms: z.array(analysisPlatform).min(1).max(5),
+      setupCompleted: z.boolean(),
+    }).optional(),
+    feishuTemplate: z.object({
+      name: z.string().trim().min(1).max(120),
+      topicStorage: z.enum(['ONE_TABLE', 'BY_CATEGORY']),
+      includeSchedule: z.boolean(),
+      includeReview: z.boolean(),
+      status: z.enum(['DRAFT', 'READY_TO_CREATE', 'CREATED']),
+    }).optional(),
+  }).refine((value) => value.workspace || value.feishuTemplate, { message: '请提交要保存的工作空间设置。' }).parse(request.body);
   const workspace = await currentWorkspace(request.user.sub);
-  const result = await query(`INSERT INTO workspace_snapshots (workspace_id, state_json) VALUES ($1, $2) ON CONFLICT (workspace_id) DO UPDATE SET state_json = excluded.state_json, revision = workspace_snapshots.revision + 1, updated_at = now() RETURNING revision, updated_at`, [workspace.id, JSON.stringify(migrateLegacyCreativeState(body.state))]);
-  return { revision: result.rows[0].revision, updatedAt: result.rows[0].updated_at };
+  const result = await transaction((client) => saveWorkspacePreferences(client, workspace.id, body));
+  return { revision: result.revision, updatedAt: result.updated_at };
 });
 
 app.get('/api/v1/settings/credentials', { preHandler: authenticate }, async (request) => {
@@ -605,12 +627,29 @@ app.put('/api/v1/intelligence/sources/:id', { preHandler: authenticate }, async 
 });
 app.delete('/api/v1/intelligence/sources/:id', { preHandler: authenticate }, async (request, reply) => { await removeSource((await currentWorkspace(request.user.sub)).id, request.params.id); reply.code(204).send(); });
 app.get('/api/v1/intelligence/items', { preHandler: authenticate }, async (request) => listItems((await currentWorkspace(request.user.sub)).id));
+app.post('/api/v1/intelligence/items', { preHandler: authenticate }, async (request, reply) => {
+  const input = z.object({
+    title: z.string().trim().min(1).max(500),
+    summary: z.string().max(20_000).default(''),
+    category: z.string().trim().min(1).max(120),
+    keywords: z.array(z.string().trim().min(1).max(120)).max(50).default([]),
+    source: z.string().trim().min(1).max(200),
+    publishedAt: z.string().max(80).optional(),
+    heat: z.number().int().min(0).max(100).default(0),
+    trust: z.enum(['可信', '待核验']).default('待核验'),
+    url: z.string().url().max(2_000).refine((value) => /^https?:\/\//i.test(value), '只支持 HTTP(S) 公开链接。'),
+    captureMethod: z.enum(['MANUAL_LINK', 'SEARCH']),
+    language: z.enum(['zh', 'en', 'other']).optional(),
+    note: z.string().max(4_000).optional(),
+  }).parse(request.body);
+  const workspace = await currentWorkspace(request.user.sub);
+  reply.code(201).send(await saveItem(workspace.id, input));
+});
 app.post('/api/v1/intelligence/rss/refresh', { preHandler: authenticate }, async (request) => refreshWorkspaceRss((await currentWorkspace(request.user.sub)).id));
 
 app.get('/api/v1/creative/projects', { preHandler: authenticate }, async (request) => {
   const workspace = await currentWorkspace(request.user.sub);
-  const result = await query('SELECT state_json FROM workspace_snapshots WHERE workspace_id = $1', [workspace.id]);
-  const state = migrateLegacyCreativeState(result.rows[0]?.state_json ?? defaultState(workspace.name));
+  const state = await loadCreativeState({ query }, workspace.id);
   return { projects: [...state.projects].sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt)) };
 });
 
@@ -618,7 +657,7 @@ app.post('/api/v1/creative/projects', { preHandler: authenticate }, async (reque
   const input = createProjectInput.parse(request.body ?? {});
   const workspace = await currentWorkspace(request.user.sub);
   const project = createBlankProject(input);
-  await transaction(async (client) => updateCreativeState(client, workspace.id, (state) => ({ ...state, projects: [project, ...state.projects] })));
+  await transaction(async (client) => updateCreativeProjects(client, workspace.id, (state) => ({ ...state, projects: [project, ...state.projects] })));
   reply.code(201).send({ project, created: true });
 });
 
@@ -645,7 +684,7 @@ app.post('/api/v1/creative/projects/from-intelligence/:itemId', { preHandler: au
   let project;
   let created = false;
   await transaction(async (client) => {
-    await updateCreativeState(client, workspace.id, (state) => {
+    await updateCreativeProjects(client, workspace.id, (state) => {
       const existing = state.projects.find((item) => item.originType === 'HOTSPOT' && item.originReferenceId === itemId);
       if (existing) { project = existing; return state; }
       project = createProjectFromIntelligence(analysisItem(itemResult.rows[0]), analysis, input.angleIndex);
@@ -663,13 +702,38 @@ app.get('/api/v1/creative/projects/:projectId/planning', { preHandler: authentic
   return { project, planning: project.planning };
 });
 
+app.put('/api/v1/creative/projects/:projectId/versions/:versionId', { preHandler: authenticate }, async (request) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const versionId = z.string().min(1).max(240).parse(request.params.versionId);
+  const input = z.object({ title: z.string().trim().min(1).max(240), body: z.string().max(200_000) }).parse(request.body);
+  const workspace = await currentWorkspace(request.user.sub);
+  let project;
+  await transaction(async (client) => {
+    await updateCreativeProjects(client, workspace.id, (state) => {
+      const projectIndex = state.projects.findIndex((item) => item.id === projectId);
+      if (projectIndex < 0) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
+      const current = state.projects[projectIndex];
+      const versionIndex = current.versions.findIndex((item) => item.id === versionId);
+      if (versionIndex < 0) { const error = new Error('未找到这个平台版本。'); error.statusCode = 404; throw error; }
+      const updatedAt = new Date().toISOString();
+      const versions = [...current.versions];
+      versions[versionIndex] = { ...versions[versionIndex], title: input.title, body: input.body, updatedAt };
+      project = { ...current, status: current.status === 'BRIEF' ? 'WRITING' : current.status, versions, updatedAt };
+      const projects = [...state.projects];
+      projects[projectIndex] = project;
+      return { ...state, projects };
+    });
+  });
+  return { project };
+});
+
 app.put('/api/v1/creative/projects/:projectId/planning', { preHandler: authenticate }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = projectPlanningInput.parse(request.body);
   const workspace = await currentWorkspace(request.user.sub);
   let project;
   await transaction(async (client) => {
-    await updateCreativeState(client, workspace.id, async (state) => {
+    await updateCreativeProjects(client, workspace.id, async (state) => {
       const index = state.projects.findIndex((item) => item.id === projectId);
       if (index < 0) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
       project = saveProjectPlanning(state.projects[index], input);
@@ -687,7 +751,7 @@ app.post('/api/v1/creative/projects/:projectId/planning/complete', { preHandler:
   const workspace = await currentWorkspace(request.user.sub);
   let project;
   await transaction(async (client) => {
-    await updateCreativeState(client, workspace.id, async (state) => {
+    await updateCreativeProjects(client, workspace.id, async (state) => {
       const index = state.projects.findIndex((item) => item.id === projectId);
       if (index < 0) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
       project = confirmProjectPlanning(state.projects[index], state.projects[index].planning);
@@ -791,8 +855,8 @@ app.put('/api/v1/creative/projects/:projectId/brief', { preHandler: authenticate
 });
 
 async function creativeProject(workspaceId, projectId) {
-  const result = await query('SELECT state_json FROM workspace_snapshots WHERE workspace_id = $1', [workspaceId]);
-  const project = migrateLegacyCreativeState(result.rows[0]?.state_json ?? {}).projects.find((item) => item.id === projectId);
+  const result = await query('SELECT project_json FROM content_projects WHERE workspace_id = $1 AND project_id = $2', [workspaceId, projectId]);
+  const project = result.rows[0]?.project_json ? normalizeProject(result.rows[0].project_json, new Date().toISOString()) : null;
   if (!project) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
   return project;
 }
@@ -1012,6 +1076,30 @@ app.post('/api/v1/creative/projects/:projectId/references', { preHandler: authen
   reply.code(201).send(await projectMaterialStore.createReference(workspace.id, projectId, { ...input, sourceType: 'LINK' }));
 });
 
+app.post('/api/v1/creative/projects/:projectId/images/import', { preHandler: authenticate }, async (request, reply) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const input = projectReferenceMetadata.extend({
+    url: z.string().url().max(2_000).refine((value) => /^https?:\/\//i.test(value), '只支持 HTTP(S) 公开图片。'),
+  }).parse(request.body);
+  const workspace = await currentWorkspace(request.user.sub);
+  await creativeProject(workspace.id, projectId);
+  const stored = await saveRemoteProjectImage(config.uploadRoot, workspace.id, projectId, input.url);
+  try {
+    const notes = [input.notes?.trim(), `原图链接：${stored.sourceUrl}`].filter(Boolean).join('\n');
+    const reference = await projectMaterialStore.createReference(workspace.id, projectId, {
+      ...input,
+      ...stored,
+      url: null,
+      notes,
+      sourceType: 'FILE',
+    });
+    reply.code(201).send(reference);
+  } catch (error) {
+    await removeProjectUpload(config.uploadRoot, stored.storageKey).catch(() => {});
+    throw error;
+  }
+});
+
 app.post('/api/v1/creative/projects/:projectId/files', { preHandler: authenticate }, async (request, reply) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const queryInput = z.object({
@@ -1212,7 +1300,7 @@ app.post('/api/v1/creative/research-results/:artifactId/accept', { preHandler: a
       JSON.stringify([candidate.id]),
       JSON.stringify({ action: 'RESEARCH_RESULT_ACCEPTED' }),
     ]);
-    const state = await updateCreativeState(client, workspace.id, (current) => advanceProjectToMasterWriting(current, candidate.project_id, now), now);
+    const state = await updateCreativeProjects(client, workspace.id, (current) => advanceProjectToMasterWriting(current, candidate.project_id, now), now);
     const project = state.projects.find((item) => item.id === candidate.project_id);
     await projectAgentStore.upsertStageSummary(client, {
       workspaceId: workspace.id,
@@ -1234,7 +1322,7 @@ app.post('/api/v1/creative/projects/:projectId/research/skip', { preHandler: aut
   await creativeProject(workspace.id, projectId);
   return transaction(async (client) => {
     const now = new Date().toISOString();
-    const state = await updateCreativeState(client, workspace.id, (current) => advanceProjectToMasterWriting(current, projectId, now), now);
+    const state = await updateCreativeProjects(client, workspace.id, (current) => advanceProjectToMasterWriting(current, projectId, now), now);
     const project = state.projects.find((item) => item.id === projectId);
     const message = await client.query(`INSERT INTO project_agent_messages
       (workspace_id, project_id, role, content, stage, message_type, metadata_json)
@@ -1843,18 +1931,21 @@ app.post('/api/v1/creative/outline-candidates/:id/accept', { preHandler: authent
     if (!candidateResult.rowCount) { const error = new Error('该大纲候选当前不能接受。'); error.statusCode = 409; throw error; }
     const candidate = candidateResult.rows[0];
     if (!candidate.output_json.titleOptions.includes(input.selectedTitle)) throw new Error('请选择候选中提供的标题。');
-    const snapshotResult = await client.query('SELECT state_json FROM workspace_snapshots WHERE workspace_id = $1 FOR UPDATE', [workspace.id]);
-    let state = snapshotResult.rows[0]?.state_json;
-    const project = state?.projects?.find((item) => item.id === candidate.project_id);
-    const version = project?.versions?.find((item) => item.platform === candidate.platform);
-    if (!project || !version) throw new Error('正式文案版本已不存在，无法接受大纲。');
-    const updatedAt = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
-    version.title = input.selectedTitle;
-    version.status = 'DRAFT';
-    version.updatedAt = updatedAt;
-    project.status = 'WRITING';
-    project.updatedAt = updatedAt;
-    await client.query('UPDATE workspace_snapshots SET state_json = $2, revision = revision + 1, updated_at = now() WHERE workspace_id = $1', [workspace.id, JSON.stringify(state)]);
+    const updatedAt = new Date().toISOString();
+    let project;
+    await updateCreativeProjects(client, workspace.id, (state) => {
+      const projectIndex = state.projects.findIndex((item) => item.id === candidate.project_id);
+      if (projectIndex < 0) throw new Error('正式文案版本已不存在，无法接受大纲。');
+      const current = state.projects[projectIndex];
+      const versionIndex = current.versions.findIndex((item) => item.platform === candidate.platform);
+      if (versionIndex < 0) throw new Error('正式文案版本已不存在，无法接受大纲。');
+      const versions = [...current.versions];
+      versions[versionIndex] = { ...versions[versionIndex], title: input.selectedTitle, status: 'DRAFT', updatedAt };
+      project = { ...current, versions, status: 'WRITING', updatedAt };
+      const projects = [...state.projects];
+      projects[projectIndex] = project;
+      return { ...state, projects };
+    }, updatedAt);
     const superseded = await client.query("UPDATE creative_outline_candidates SET status = 'REJECTED', updated_at = now() WHERE workspace_id = $1 AND project_id = $2 AND platform = $3 AND status = 'ACCEPTED' AND id <> $4 RETURNING id", [workspace.id, candidate.project_id, candidate.platform, candidate.id]);
     const supersededIds = superseded.rows.map((row) => row.id);
     if (supersededIds.length) await client.query("UPDATE creative_draft_candidates SET status = 'REJECTED', updated_at = now() WHERE workspace_id = $1 AND outline_candidate_id = ANY($2::uuid[]) AND status IN ('CANDIDATE', 'ACCEPTED')", [workspace.id, supersededIds]);
@@ -1959,20 +2050,27 @@ app.post('/api/v1/creative/draft-candidates/:id/accept', { preHandler: authentic
       WHERE c.id = $1 AND c.workspace_id = $2 AND c.status = 'CANDIDATE' FOR UPDATE OF c`, [candidateId, workspace.id]);
     if (!candidateResult.rowCount) { const error = new Error('该初稿候选当前不能接受。'); error.statusCode = 409; throw error; }
     const candidate = candidateResult.rows[0];
-    const snapshotResult = await client.query('SELECT state_json FROM workspace_snapshots WHERE workspace_id = $1 FOR UPDATE', [workspace.id]);
-    const state = snapshotResult.rows[0]?.state_json;
-    const project = state?.projects?.find((item) => item.id === candidate.project_id);
-    const version = project?.versions?.find((item) => item.platform === candidate.platform);
-    if (!project || !version) throw new Error('正式文案版本已不存在，无法接受初稿。');
-    const updatedAt = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
-    version.title = candidate.output_json.title;
-    version.body = candidate.output_json.body;
-    version.status = 'DRAFT';
-    version.updatedAt = updatedAt;
-    project.status = 'WRITING';
-    project.factChecks = [...new Set([...(project.factChecks ?? []), ...(candidate.output_json.factsToVerify ?? [])])];
-    project.updatedAt = updatedAt;
-    await client.query('UPDATE workspace_snapshots SET state_json = $2, revision = revision + 1, updated_at = now() WHERE workspace_id = $1', [workspace.id, JSON.stringify(state)]);
+    const updatedAt = new Date().toISOString();
+    let project;
+    await updateCreativeProjects(client, workspace.id, (state) => {
+      const projectIndex = state.projects.findIndex((item) => item.id === candidate.project_id);
+      if (projectIndex < 0) throw new Error('正式文案版本已不存在，无法接受初稿。');
+      const current = state.projects[projectIndex];
+      const versionIndex = current.versions.findIndex((item) => item.platform === candidate.platform);
+      if (versionIndex < 0) throw new Error('正式文案版本已不存在，无法接受初稿。');
+      const versions = [...current.versions];
+      versions[versionIndex] = { ...versions[versionIndex], title: candidate.output_json.title, body: candidate.output_json.body, status: 'DRAFT', updatedAt };
+      project = {
+        ...current,
+        versions,
+        status: 'WRITING',
+        factChecks: [...new Set([...(current.factChecks ?? []), ...(candidate.output_json.factsToVerify ?? [])])],
+        updatedAt,
+      };
+      const projects = [...state.projects];
+      projects[projectIndex] = project;
+      return { ...state, projects };
+    }, updatedAt);
     await client.query("UPDATE creative_draft_candidates SET status = 'REJECTED', updated_at = now() WHERE workspace_id = $1 AND outline_candidate_id = $2 AND id <> $3 AND status IN ('CANDIDATE', 'ACCEPTED')", [workspace.id, candidate.outline_candidate_id, candidate.id]);
     const accepted = await client.query("UPDATE creative_draft_candidates SET status = 'ACCEPTED', accepted_at = now(), updated_at = now() WHERE id = $1 AND workspace_id = $2 RETURNING *", [candidate.id, workspace.id]);
     return { candidate: draftCandidateView({ ...accepted.rows[0], model: candidate.model, prompt_version: candidate.prompt_version }), project };
@@ -1995,31 +2093,36 @@ app.post('/api/v1/creative/project-artifacts/:id/accept', { preHandler: authenti
       FOR UPDATE OF a`, [artifactId, workspace.id]);
     if (!candidateResult.rowCount) { const error = new Error('该候选产物当前不能采用。'); error.statusCode = 409; throw error; }
     const candidate = candidateResult.rows[0];
-    const snapshotResult = await client.query('SELECT state_json FROM workspace_snapshots WHERE workspace_id = $1 FOR UPDATE', [workspace.id]);
-    let state = snapshotResult.rows[0]?.state_json;
-    const updatedAt = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
+    const updatedAt = new Date().toISOString();
     let project;
     let summary;
-    if (candidate.artifact_type === 'OUTLINE') {
-      const payload = candidate.metadata_json?.payload ?? {};
-      const selectedTitle = input.selectedTitle ?? payload.titleOptions?.[0];
-      if (!selectedTitle || (payload.titleOptions?.length && !payload.titleOptions.includes(selectedTitle))) throw new Error('请选择候选大纲中提供的标题。');
-      const currentProject = state?.projects?.find((item) => item.id === candidate.project_id);
-      const currentVersion = currentProject?.versions?.find((item) => item.platform === candidate.platform);
-      if (!currentProject || !currentVersion) throw new Error('正式文案版本已不存在，无法采用候选。');
-      currentVersion.title = selectedTitle;
-      currentVersion.status = 'DRAFT';
-      currentVersion.updatedAt = updatedAt;
-      currentProject.status = 'WRITING';
-      currentProject.factChecks = mergeFactsToVerify(currentProject.factChecks ?? [], payload.factsToVerify ?? []);
-      currentProject.updatedAt = updatedAt;
-      project = currentProject;
-      summary = payload.summary || `已采用${creativePlatformNames[candidate.platform]}大纲。`;
-    } else {
+    await updateCreativeProjects(client, workspace.id, async (state) => {
+      if (candidate.artifact_type === 'OUTLINE') {
+        const payload = candidate.metadata_json?.payload ?? {};
+        const selectedTitle = input.selectedTitle ?? payload.titleOptions?.[0];
+        if (!selectedTitle || (payload.titleOptions?.length && !payload.titleOptions.includes(selectedTitle))) throw new Error('请选择候选大纲中提供的标题。');
+        const projectIndex = state.projects.findIndex((item) => item.id === candidate.project_id);
+        const currentProject = state.projects[projectIndex];
+        const versionIndex = currentProject?.versions?.findIndex((item) => item.platform === candidate.platform) ?? -1;
+        if (!currentProject || versionIndex < 0) throw new Error('正式文案版本已不存在，无法采用候选。');
+        const versions = [...currentProject.versions];
+        versions[versionIndex] = { ...versions[versionIndex], title: selectedTitle, status: 'DRAFT', updatedAt };
+        project = {
+          ...currentProject,
+          versions,
+          status: 'WRITING',
+          factChecks: mergeFactsToVerify(currentProject.factChecks ?? [], payload.factsToVerify ?? []),
+          updatedAt,
+        };
+        const projects = [...state.projects];
+        projects[projectIndex] = project;
+        summary = payload.summary || `已采用${creativePlatformNames[candidate.platform]}大纲。`;
+        return { ...state, projects };
+      }
+
       if (!candidate.content_version_id) throw new Error('候选文案内容已不存在。');
       const masterState = await loadContentMasterState(client, workspace.id, candidate.project_id);
       let masterId = masterState.acceptedMasterId;
-      // 项目核验池已在快照中保留；采用候选时仅追加候选正文直接关联的项。
       const candidateFacts = mergeFactsToVerify(candidate.facts_to_verify_json ?? []);
       if (!masterId) {
         const masterArtifact = await projectAgentStore.createArtifact(client, {
@@ -2055,11 +2158,10 @@ app.post('/api/v1/creative/project-artifacts/:id/accept', { preHandler: authenti
         factsToVerify: candidateFacts,
         updatedAt,
       });
-      state = applied.state;
       project = applied.project;
       summary = candidate.change_summary || `已采用${creativePlatformNames[candidate.platform]}文案候选。`;
-    }
-    await client.query('UPDATE workspace_snapshots SET state_json = $2, revision = revision + 1, updated_at = now() WHERE workspace_id = $1', [workspace.id, JSON.stringify(state)]);
+      return applied.state;
+    }, updatedAt);
     await client.query(`UPDATE project_artifacts SET status = 'REJECTED', updated_at = now()
       WHERE workspace_id = $1 AND project_id = $2 AND platform = $3 AND artifact_type = $4
         AND status = 'ACCEPTED' AND id <> $5`, [workspace.id, candidate.project_id, candidate.platform, candidate.artifact_type, candidate.id]);
@@ -2107,19 +2209,23 @@ app.post('/api/v1/creative/projects/:projectId/platforms/:platform', { preHandle
   const platform = creativePlatform.parse(platformValue);
   const workspace = await currentWorkspace(request.user.sub);
   return transaction(async (client) => {
-    const snapshotResult = await client.query('SELECT state_json FROM workspace_snapshots WHERE workspace_id = $1 FOR UPDATE', [workspace.id]);
-    const state = snapshotResult.rows[0]?.state_json;
-    const project = state?.projects?.find((item) => item.id === projectId);
-    if (!project) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
-    const existingVersion = project.versions?.find((version) => version.platform === platform);
     await client.query(`INSERT INTO platform_strategies (workspace_id, project_id, platform)
       VALUES ($1, $2, $3) ON CONFLICT (workspace_id, project_id, platform) DO NOTHING`, [workspace.id, projectId, platform]);
-    if (existingVersion) return { project, platform, created: false };
-    const updatedAt = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
-    project.versions = [...(project.versions ?? []), { id: randomUUID(), platform, status: 'DRAFT', title: '', body: '', updatedAt }];
-    project.updatedAt = updatedAt;
-    await client.query('UPDATE workspace_snapshots SET state_json = $2, revision = revision + 1, updated_at = now() WHERE workspace_id = $1', [workspace.id, JSON.stringify(state)]);
-    return { project, platform, created: true };
+    const updatedAt = new Date().toISOString();
+    let project;
+    let created = false;
+    await updateCreativeProjects(client, workspace.id, (state) => {
+      const projectIndex = state.projects.findIndex((item) => item.id === projectId);
+      if (projectIndex < 0) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
+      const current = state.projects[projectIndex];
+      if (current.versions?.some((version) => version.platform === platform)) { project = current; return state; }
+      created = true;
+      project = { ...current, versions: [...(current.versions ?? []), { id: randomUUID(), platform, status: 'DRAFT', title: '', body: '', updatedAt }], updatedAt };
+      const projects = [...state.projects];
+      projects[projectIndex] = project;
+      return { ...state, projects };
+    }, updatedAt);
+    return { project, platform, created };
   });
 });
 
@@ -2128,21 +2234,28 @@ app.post('/api/v1/creative/projects/:projectId/platform-versions/complete', { pr
   const input = z.object({ platform: creativePlatform }).parse(request.body);
   const workspace = await currentWorkspace(request.user.sub);
   return transaction(async (client) => {
-    const snapshotResult = await client.query('SELECT state_json FROM workspace_snapshots WHERE workspace_id = $1 FOR UPDATE', [workspace.id]);
-    const state = snapshotResult.rows[0]?.state_json;
-    const project = state?.projects?.find((item) => item.id === projectId);
-    if (!project) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
-    if (!['MASTER_WRITING', 'PLATFORM_ADAPTATION'].includes(project.stage)) { const error = new Error('当前项目不在创作阶段。'); error.statusCode = 409; throw error; }
-    const version = project.versions?.find((item) => item.platform === input.platform);
-    if (!version || String(version.body ?? '').trim().length < 80) { const error = new Error(`请先完成${creativePlatformNames[input.platform] ?? input.platform}的正文。`); error.statusCode = 409; throw error; }
-    const updatedAt = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
-    const delivery = deliveryOf(project);
-    const currentPlatform = platformDelivery(delivery, input.platform);
-    project.delivery = { ...delivery, platforms: { ...delivery.platforms, [input.platform]: { ...currentPlatform, stage: needsVisual(input.platform) ? 'VISUAL' : 'LAYOUT' } } };
-    project.stage = 'PLATFORM_ADAPTATION';
-    project.status = 'WRITING';
-    project.updatedAt = updatedAt;
-    await client.query('UPDATE workspace_snapshots SET state_json = $2, revision = revision + 1, updated_at = now() WHERE workspace_id = $1', [workspace.id, JSON.stringify(state)]);
+    const updatedAt = new Date().toISOString();
+    let project;
+    await updateCreativeProjects(client, workspace.id, (state) => {
+      const projectIndex = state.projects.findIndex((item) => item.id === projectId);
+      if (projectIndex < 0) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
+      const current = state.projects[projectIndex];
+      if (!['MASTER_WRITING', 'PLATFORM_ADAPTATION'].includes(current.stage)) { const error = new Error('当前项目不在创作阶段。'); error.statusCode = 409; throw error; }
+      const version = current.versions?.find((item) => item.platform === input.platform);
+      if (!version || String(version.body ?? '').trim().length < 80) { const error = new Error(`请先完成${creativePlatformNames[input.platform] ?? input.platform}的正文。`); error.statusCode = 409; throw error; }
+      const delivery = deliveryOf(current);
+      const currentPlatform = platformDelivery(delivery, input.platform);
+      project = {
+        ...current,
+        delivery: { ...delivery, platforms: { ...delivery.platforms, [input.platform]: { ...currentPlatform, stage: needsVisual(input.platform) ? 'VISUAL' : 'LAYOUT' } } },
+        stage: 'PLATFORM_ADAPTATION',
+        status: 'WRITING',
+        updatedAt,
+      };
+      const projects = [...state.projects];
+      projects[projectIndex] = project;
+      return { ...state, projects };
+    }, updatedAt);
     return { project };
   });
 });
@@ -2249,7 +2362,7 @@ app.put('/api/v1/creative/projects/:projectId/visual', { preHandler: authenticat
     if (new Set(assignedKeys).size !== assignedKeys.length) { const error = new Error('同一张图片不能绑定到多个配图位置。'); error.statusCode = 400; throw error; }
     const now = new Date().toISOString();
     let project;
-    await updateCreativeState(client, workspace.id, (state) => {
+    await updateCreativeProjects(client, workspace.id, (state) => {
       const index = state.projects.findIndex((item) => item.id === projectId);
       if (index < 0) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
       const current = state.projects[index];
@@ -2300,7 +2413,7 @@ app.post('/api/v1/creative/projects/:projectId/visual/complete', { preHandler: a
   const workspace = await currentWorkspace(request.user.sub);
   return transaction(async (client) => {
     const now = new Date().toISOString(); let project;
-    await updateCreativeState(client, workspace.id, (state) => {
+    await updateCreativeProjects(client, workspace.id, (state) => {
       const index = state.projects.findIndex((item) => item.id === projectId);
       if (index < 0) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
       const current = state.projects[index];
@@ -2320,7 +2433,7 @@ app.post('/api/v1/creative/projects/:projectId/layout/generate', { preHandler: a
   const workspace = await currentWorkspace(request.user.sub);
   return transaction(async (client) => {
     const now = new Date().toISOString(); let project;
-    await updateCreativeState(client, workspace.id, (state) => {
+    await updateCreativeProjects(client, workspace.id, (state) => {
       const index = state.projects.findIndex((item) => item.id === projectId);
       if (index < 0) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
       const current = state.projects[index];
@@ -2342,7 +2455,7 @@ app.post('/api/v1/creative/projects/:projectId/layout/complete', { preHandler: a
   const workspace = await currentWorkspace(request.user.sub);
   return transaction(async (client) => {
     const now = new Date().toISOString(); let project;
-    await updateCreativeState(client, workspace.id, (state) => {
+    await updateCreativeProjects(client, workspace.id, (state) => {
       const index = state.projects.findIndex((item) => item.id === projectId);
       if (index < 0) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
       const current = state.projects[index]; const delivery = deliveryOf(current); const currentPlatform = platformDelivery(delivery, input.platform);
@@ -2362,7 +2475,7 @@ app.post('/api/v1/creative/projects/:projectId/review/complete', { preHandler: a
   const workspace = await currentWorkspace(request.user.sub);
   return transaction(async (client) => {
     const now = new Date().toISOString(); let project;
-    await updateCreativeState(client, workspace.id, (state) => {
+    await updateCreativeProjects(client, workspace.id, (state) => {
       const index = state.projects.findIndex((item) => item.id === projectId);
       if (index < 0) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
       const current = state.projects[index]; const delivery = deliveryOf(current); const currentPlatform = platformDelivery(delivery, input.platform);

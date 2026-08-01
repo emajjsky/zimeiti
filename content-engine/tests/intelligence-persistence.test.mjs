@@ -7,7 +7,7 @@ import publicWeb from '../server/services/public-web.cjs';
 import tavilyService from '../server/services/tavily.cjs';
 
 const { rssEntryToItem } = rssService;
-const { itemDto, normalizeSourceInput } = repository;
+const { itemDto, normalizeSavedItem, normalizeSourceInput } = repository;
 const { normalizeCanonicalUrl } = urlService;
 const { buildPublicPreview } = publicWeb;
 const { tavilyResultToItem } = tavilyService;
@@ -93,4 +93,27 @@ test('来源更新会规范化可编辑字段和刷新频率', () => {
     refreshMinutes: 5,
     trust: '可信',
   });
+});
+
+test('手工链接与搜索收藏统一规范化为可持久化情报', () => {
+  const item = normalizeSavedItem({
+    title: '  一条公开资讯  ',
+    summary: ' 摘要 ',
+    category: ' 科技 ',
+    keywords: [' AI ', 'AI', ''],
+    source: ' 示例站点 ',
+    url: 'https://example.com/news?utm_source=test&id=1#top',
+    language: 'zh',
+    captureMethod: 'SEARCH',
+    trust: '待核验',
+    heat: 120,
+    publishedAt: '2026-07-28T08:00:00.000Z',
+  });
+
+  assert.equal(item.title, '一条公开资讯');
+  assert.equal(item.canonicalUrl, 'https://example.com/news?id=1');
+  assert.deepEqual(item.keywords, ['AI']);
+  assert.equal(item.captureMethod, 'SEARCH');
+  assert.equal(item.heat, 100);
+  assert.equal(item.publishedAt.toISOString(), '2026-07-28T08:00:00.000Z');
 });

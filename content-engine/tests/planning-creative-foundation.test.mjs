@@ -6,7 +6,8 @@ import {
   confirmProjectPlanning,
   migrateLegacyCreativeState,
   saveProjectPlanning,
-  updateCreativeState,
+  saveWorkspacePreferences,
+  updateCreativeProjects,
 } from '../server/services/project-planning.cjs';
 
 test('旧选题被幂等迁移为规划阶段项目且不再保留 topics', () => {
@@ -118,22 +119,64 @@ test('空白创作项目只建立规划工作稿，不伪造正文', () => {
   assert.equal(project.sourceSnapshot.draftText, '这是我自己记录的草稿片段。');
 });
 
-test('项目状态更新在事务锁内迁移并写回 snapshot', async () => {
+test('项目状态更新锁定工作空间且空变更不会写项目或快照', async () => {
   const calls = [];
   const client = {
     query: async (sql, params) => {
       calls.push({ sql, params });
-      if (/SELECT state_json/.test(sql)) return { rows: [{ state_json: { topics: [], projects: [] } }] };
+      if (/SELECT state_json/.test(sql)) return { rowCount: 1, rows: [{ state_json: { topics: [], projects: [] } }] };
       return { rows: [] };
     },
   };
 
-  const next = await updateCreativeState(client, 'workspace-1', (state) => ({ ...state, projects: [] }), '2026-07-28T08:00:00.000Z');
+  const next = await updateCreativeProjects(client, 'workspace-1', (state) => ({ ...state, projects: [] }), '2026-07-28T08:00:00.000Z');
 
   assert.match(calls[0].sql, /FOR UPDATE/);
-  assert.match(calls.at(-1).sql, /UPDATE workspace_snapshots/);
-  assert.equal(calls.at(-1).params[0], 'workspace-1');
+  assert.equal(calls.some(({ sql }) => /INSERT INTO content_projects/.test(sql)), false);
+  assert.equal(calls.some(({ sql }) => /UPDATE workspace_snapshots/.test(sql)), false);
   assert.deepEqual(next.projects, []);
+});
+
+test('单项目更新不会改写其他项目', async () => {
+  const now = '2026-07-28T08:00:00.000Z';
+  const first = createBlankProject({ title: '项目一', targetPlatforms: ['WECHAT'] }, now);
+  const second = createBlankProject({ title: '项目二', targetPlatforms: ['WECHAT'] }, now);
+  const calls = [];
+  const client = {
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      if (/SELECT state_json/.test(sql)) return { rowCount: 1, rows: [{ state_json: {} }] };
+      if (/SELECT project_json, position/.test(sql)) return { rows: [{ project_json: first, position: 0 }, { project_json: second, position: 1 }] };
+      return { rows: [] };
+    },
+  };
+
+  await updateCreativeProjects(client, 'workspace-1', (state) => ({
+    ...state,
+    projects: state.projects.map((project) => project.id === first.id ? { ...project, title: '项目一已更新', updatedAt: '2026-07-28T09:00:00.000Z' } : project),
+  }), '2026-07-28T09:00:00.000Z');
+
+  const writes = calls.filter(({ sql }) => /INSERT INTO content_projects/.test(sql));
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].params[1], first.id);
+});
+
+test('工作空间偏好保存只写允许的偏好字段', async () => {
+  const calls = [];
+  const client = {
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      if (/SELECT state_json.*FOR UPDATE/.test(sql)) return { rowCount: 1, rows: [{ state_json: { workspace: { name: '旧名称' }, projects: [{ id: 'danger' }], sources: [{ id: 'source' }], intelligence: [{ id: 'item' }] } }] };
+      if (/UPDATE workspace_snapshots/.test(sql)) return { rowCount: 1, rows: [{ revision: 3, updated_at: '2026-07-28T09:00:00.000Z' }] };
+      return { rowCount: 0, rows: [] };
+    },
+  };
+
+  await saveWorkspacePreferences(client, 'workspace-1', { workspace: { name: '新名称' } });
+
+  const saved = JSON.parse(calls.find(({ sql }) => /UPDATE workspace_snapshots/.test(sql)).params[1]);
+  assert.deepEqual(saved, { workspace: { name: '新名称' } });
+  assert.equal(calls.some(({ sql }) => /content_projects/.test(sql)), false);
 });
 
 test('保存规划只更新工作稿，确认规划才推进研究并建立平台版本', () => {

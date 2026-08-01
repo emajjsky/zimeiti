@@ -72,7 +72,7 @@ test('Agent 动作迁移保留旧 Skill 系统并建立动作执行引用', () =
   assert.match(platformActionMigration, /status = 'CANCELLED'/);
 });
 
-test('大纲 API 仅在确认后入队，采用候选时才更新正式快照', () => {
+test('大纲 API 仅在确认后入队，采用候选时才更新目标项目', () => {
   const server = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
   const prepareStart = server.indexOf("/outline/prepare");
   const confirmStart = server.indexOf("/outline-runs/:id/confirm");
@@ -82,7 +82,8 @@ test('大纲 API 仅在确认后入队，采用候选时才更新正式快照', 
   assert.match(server.slice(prepareStart, confirmStart), /textTaskRoute\(workspace\.id, OUTLINE_SCOPE, '文案生成'\)/);
   assert.doesNotMatch(server.slice(prepareStart, confirmStart), /await enqueue/);
   assert.match(server.slice(confirmStart, acceptStart), /await enqueue/);
-  assert.match(server.slice(acceptStart, acceptEnd), /UPDATE workspace_snapshots SET state_json/);
+  assert.match(server.slice(acceptStart, acceptEnd), /updateCreativeProjects/);
+  assert.doesNotMatch(server.slice(acceptStart, acceptEnd), /UPDATE workspace_snapshots SET state_json/);
   assert.match(server.slice(acceptStart, acceptEnd), /status = 'ACCEPTED'/);
   assert.doesNotMatch(server.slice(acceptStart, acceptEnd), /version\.body\s*=/);
 });

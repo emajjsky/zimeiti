@@ -54,11 +54,6 @@ export const seedState: LocalState = {
 };
 
 export async function loadState(): Promise<LocalState> {
-  if (window.contentEngine?.state) {
-    const result = await window.contentEngine.state.load();
-    if (result?.state) return normalizeState(result.state);
-  }
-
   if (window.localStorage.getItem('content-engine-web-session-v1')) {
     const result = await webState.load();
     const [sources, intelligence] = await Promise.all([webIntelligence.listSources(), webIntelligence.listItems()]);
@@ -69,19 +64,6 @@ export async function loadState(): Promise<LocalState> {
   const value = window.localStorage.getItem(key);
   if (!value) return seedState;
   try { return normalizeState(JSON.parse(value) as LocalState); } catch { return seedState; }
-}
-
-export async function persistState(state: LocalState): Promise<void> {
-  if (window.contentEngine?.state) {
-    await window.contentEngine.state.save(state);
-    window.localStorage.removeItem(key);
-    return;
-  }
-  if (window.localStorage.getItem('content-engine-web-session-v1')) {
-    await webState.save(state);
-    return;
-  }
-  window.localStorage.setItem(key, JSON.stringify(state));
 }
 
 function normalizeState(state: LocalState): LocalState {

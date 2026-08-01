@@ -586,7 +586,7 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 
 ## 2026-07-27 实现记录：项目资料与参考 Scope
 
-- 迁移 `013_project_materials.sql` 新增 `project_inputs` 和 `project_references`。当前项目主体仍位于 `workspace_snapshots`，所以两表先使用 `project_id text` 并在 API 写入前调用 `creativeProject()` 校验项目归属；正式 `content_projects` 表建立后再补外键迁移。
+- 迁移 `013_project_materials.sql` 新增 `project_inputs` 和 `project_references`。项目主体已由 `025_normalized_content_projects.sql` 迁移到独立 `content_projects` 表；资料表继续使用 `project_id text`，API 写入前通过 `creativeProject()` 同时校验工作空间与项目归属。
 - `projectMaterials.cjs` 提供输入与参考资料的工作空间隔离 CRUD，返回 DTO 主动移除 `storage_key`。
 - `projectUploadStorage.cjs` 使用相对存储键、随机文件名、项目 ID 哈希目录和 `safePath()` 防止路径穿越；写入时计算 SHA-256，失败时清理半成品。
 - Fastify 注册 `@fastify/multipart`，单文件上限 50MB。MIME 白名单只允许 JPEG、PNG、WebP、GIF、PDF、纯文本、Markdown、MP3、WAV、M4A、MP4 和 WebM。
@@ -820,7 +820,7 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 
 ## 2026-07-30 实现：图文交付后半段
 
-- 项目快照新增 `delivery`：保存选中的视觉素材、各渠道发布稿和审核确认记录。它随 `ContentProject` 返回并在刷新后恢复。
+- `ContentProject.delivery` 保存选中的视觉素材、各渠道发布稿和审核确认记录；项目整体存入独立 `content_projects.project_json`，不再写回工作空间快照。
 - `PUT /creative/projects/:projectId/visual` 保存封面与素材选择；`POST /visual/complete` 将项目推进至 `LAYOUT`。
 - `POST /layout/generate` 以项目当前正文和已选素材生成渠道发布稿。公众号、知乎为 HTML，小红书、微博为 Markdown；`POST /layout/complete` 才进入审核。
 - `POST /review/complete` 只接受项目当前待核验项的人工确认，并将项目推进为 `COMPLETED/SCHEDULED`。前端使用浏览器 Blob 下载对应 HTML 或 Markdown，未把私有素材文件错误地伪造成公开 URL。
@@ -879,7 +879,15 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - `server/services/project-copy-action.cjs` 新增 `buildWritingPacket()`、`buildFinishedCopyPrompt()`、`parseFinishedCopyBody()` 和 `copyActionPersistenceMode()`。资料包只保留作者材料、平台规则、账号声音、Skill、顶层已核验主张和禁止主张，不复制 evidence quote 或参考文章原文。
 - `server/worker.cjs` 的 `GENERATE_DRAFT` 先调用 `prepareCopyResearchContext()`。它优先复用已采用研究或作者材料，必要时复用研究计划、来源抓取和事实核验函数；研究用量与最终写作用量归到同一 `PROJECT_COPY` 任务。
 - 最终成稿使用纯文本契约并只调用一次写作模型。Worker 不再导入或调用 `buildCopyRepairPrompt()`、`buildCopyQualityReviewPrompt()`、`detectVoiceViolations()`、`candidateQualityReview()` 或 `parseCopyQualityReviewSafely()`。
-- 首次正文事务创建 `ACCEPTED` 的 `PLATFORM_COPY`，必要时创建 `CONTENT_MASTER`，写入 `platform_content_versions`，并通过 `updateCreativeState()` 与 `applyAcceptedCopyToState()` 更新正式项目快照和阶段摘要。
+- 首次正文事务创建 `ACCEPTED` 的 `PLATFORM_COPY`，必要时创建 `CONTENT_MASTER`，写入 `platform_content_versions`，并通过 `updateCreativeProjects()` 与 `applyAcceptedCopyToState()` 只更新目标项目行和阶段摘要。
+
+## 2026-08-01 修复：工作空间与项目存储边界
+
+- `025_normalized_content_projects.sql` 将项目从 `workspace_snapshots` 迁移到 `content_projects`；`026_normalize_content_project_timestamps.sql` 将历史短时间字段统一为 ISO 时间。
+- 正式 Web 删除整份 `PUT /workspace/state` 覆盖写入，只保留 `PATCH /workspace/preferences` 保存工作空间偏好。项目、来源、情报和正文分别通过各自业务接口持久化。
+- `updateCreativeProjects()` 锁定工作空间和项目行，拒绝重复项目 ID 与隐式删除，只写实际变化的项目；单纯排序只更新 `position`，不会增加项目 revision。
+- 手工链接与网络搜索收藏统一写入 `intelligence_items`，按规范化 URL 幂等保存，不再用前端临时 ID 冒充持久化成功。
+- 网络选图通过服务端下载为 `FILE` 素材：每次重定向重新执行 SSRF 校验，限制 15MB，流式截断，校验 JPEG/PNG/WebP/GIF 魔数并保存 SHA-256；前端预览和后续使用不再依赖外站 URL。
 - 非首次动作仍使用现有结构化修改契约，但每个用户动作只调用一次模型并保存 `CANDIDATE`，不覆盖正式正文。
 - `ProjectAgent.tsx` 监听首次任务完成，读取最新项目后通知 `CopyWorkspace` 更新编辑器；候选不再自动弹出。`CopyCandidateDialog.tsx` 删除 AI 质量问题和发布前核验门禁，只保留全文、段落差异与用户采用/放弃操作。
 - `023_finished_copy_workflow.sql` 将历史 `PLATFORM_COPY + CANDIDATE + NEEDS_REVIEW` 产物更新为 `REJECTED`，不删除正文、审稿或运行记录。

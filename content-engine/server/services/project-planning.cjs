@@ -240,34 +240,112 @@ function createProjectFromIntelligence(item, analysis, angleIndex = 0, now = new
   }, timestamp);
 }
 
-async function updateCreativeState(client, workspaceId, mutate, now = new Date().toISOString()) {
+async function loadCreativeState(client, workspaceId, now = new Date().toISOString()) {
+  const snapshot = await client.query(
+    'SELECT state_json FROM workspace_snapshots WHERE workspace_id = $1',
+    [workspaceId],
+  );
+  const projectRows = await client.query(
+    'SELECT project_json FROM content_projects WHERE workspace_id = $1 ORDER BY position, updated_at DESC',
+    [workspaceId],
+  );
+  const base = migrateLegacyCreativeState(snapshot.rows[0]?.state_json ?? {}, now);
+  return { ...base, projects: projectRows.rows.map((row) => normalizeProject(row.project_json, now)) };
+}
+
+async function lockedCreativeState(client, workspaceId, now) {
+  const snapshot = await client.query(
+    'SELECT state_json FROM workspace_snapshots WHERE workspace_id = $1 FOR UPDATE',
+    [workspaceId],
+  );
+  if (!snapshot.rowCount) throw new Error('工作空间状态不存在。');
+  const projectRows = await client.query(
+    'SELECT project_json, position FROM content_projects WHERE workspace_id = $1 ORDER BY position, updated_at DESC FOR UPDATE',
+    [workspaceId],
+  );
+  const base = migrateLegacyCreativeState(snapshot.rows[0].state_json ?? {}, now);
+  return {
+    state: { ...base, projects: projectRows.rows.map((row) => normalizeProject(row.project_json, now)) },
+    positions: new Map(projectRows.rows.map((row) => [String(row.project_json.id), Number(row.position)])),
+  };
+}
+
+async function updateCreativeProjects(client, workspaceId, mutate, now = new Date().toISOString()) {
+  const locked = await lockedCreativeState(client, workspaceId, now);
+  const current = locked.state;
+  const next = await mutate(current);
+  if (!next || !Array.isArray(next.projects)) throw new Error('项目状态更新结果无效。');
+  const normalizedProjects = next.projects.map((project) => normalizeProject(project, now));
+  const currentById = new Map(current.projects.map((project) => [project.id, project]));
+  const currentIds = new Set(currentById.keys());
+  const nextIds = normalizedProjects.map((project) => project.id);
+  if (new Set(nextIds).size !== nextIds.length) throw new Error('项目状态包含重复 ID。');
+  const missingIds = [...currentIds].filter((id) => !nextIds.includes(id));
+  if (missingIds.length) throw new Error('禁止通过状态更新删除项目。');
+
+  for (const [position, normalized] of normalizedProjects.entries()) {
+    const currentProject = currentById.get(normalized.id);
+    const projectChanged = !currentProject || JSON.stringify(currentProject) !== JSON.stringify(normalized);
+    const positionChanged = locked.positions.get(normalized.id) !== position;
+    if (!projectChanged && !positionChanged) continue;
+    if (!projectChanged) {
+      await client.query(
+        'UPDATE content_projects SET position = $3 WHERE workspace_id = $1 AND project_id = $2',
+        [workspaceId, normalized.id, position],
+      );
+      continue;
+    }
+    await client.query(
+      `INSERT INTO content_projects (workspace_id, project_id, project_json, position, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (workspace_id, project_id) DO UPDATE SET
+          project_json = excluded.project_json,
+          position = excluded.position,
+          revision = content_projects.revision + CASE
+            WHEN content_projects.project_json IS DISTINCT FROM excluded.project_json THEN 1
+            ELSE 0
+          END,
+          updated_at = excluded.updated_at`,
+      [workspaceId, normalized.id, JSON.stringify(normalized), position, normalized.createdAt, normalized.updatedAt],
+    );
+    if (normalized.legacyTopicId) {
+      await client.query(
+        `INSERT INTO legacy_topic_project_mappings (workspace_id, legacy_topic_id, project_id)
+          VALUES ($1, $2, $3)
+          ON CONFLICT (workspace_id, legacy_topic_id) DO UPDATE SET project_id = excluded.project_id`,
+        [workspaceId, normalized.legacyTopicId, normalized.id],
+      );
+    }
+  }
+  return { ...current, ...next, projects: normalizedProjects };
+}
+
+async function saveWorkspacePreferences(client, workspaceId, patch) {
   const result = await client.query(
     'SELECT state_json FROM workspace_snapshots WHERE workspace_id = $1 FOR UPDATE',
     [workspaceId],
   );
-  const migrated = migrateLegacyCreativeState(result.rows[0]?.state_json ?? {}, now);
-  const next = await mutate(migrated);
-  if (result.rows.length) {
-    await client.query(
-      'UPDATE workspace_snapshots SET state_json = $2, revision = revision + 1, updated_at = now() WHERE workspace_id = $1',
-      [workspaceId, JSON.stringify(next)],
-    );
-  } else {
-    await client.query(
-      'INSERT INTO workspace_snapshots (workspace_id, state_json) VALUES ($1, $2)',
-      [workspaceId, JSON.stringify(next)],
-    );
-  }
-  for (const project of next.projects ?? []) {
-    if (!project.legacyTopicId) continue;
-    await client.query(
-      `INSERT INTO legacy_topic_project_mappings (workspace_id, legacy_topic_id, project_id)
-        VALUES ($1, $2, $3)
-        ON CONFLICT (workspace_id, legacy_topic_id) DO UPDATE SET project_id = excluded.project_id`,
-      [workspaceId, project.legacyTopicId, project.id],
-    );
-  }
-  return next;
+  if (!result.rowCount) throw new Error('工作空间状态不存在。');
+  const current = result.rows[0].state_json ?? {};
+  const preferences = {
+    ...(current.workspace ? { workspace: current.workspace } : {}),
+    ...(current.feishuTemplate ? { feishuTemplate: current.feishuTemplate } : {}),
+    ...(patch.workspace ? { workspace: patch.workspace } : {}),
+    ...(patch.feishuTemplate ? { feishuTemplate: patch.feishuTemplate } : {}),
+  };
+  const updated = await client.query(
+    `UPDATE workspace_snapshots
+      SET state_json = $2, revision = revision + 1, updated_at = now()
+      WHERE workspace_id = $1 AND state_json IS DISTINCT FROM $2::jsonb
+      RETURNING revision, updated_at`,
+    [workspaceId, JSON.stringify(preferences)],
+  );
+  if (updated.rowCount) return updated.rows[0];
+  const unchanged = await client.query(
+    'SELECT revision, updated_at FROM workspace_snapshots WHERE workspace_id = $1',
+    [workspaceId],
+  );
+  return unchanged.rows[0];
 }
 
 function saveProjectPlanning(project, input, now = new Date().toISOString()) {
@@ -368,7 +446,9 @@ module.exports = {
   planningDraft,
   planningWithDefaults,
   saveProjectPlanning,
-  updateCreativeState,
+  saveWorkspacePreferences,
+  loadCreativeState,
+  updateCreativeProjects,
   validatePlanningForConfirmation,
   writePlanningVersion,
 };

@@ -153,8 +153,6 @@ with sync_playwright() as playwright:
             return respond(route, {"user": SESSION["user"], "workspace": SESSION["workspace"]})
         if path == "/api/v1/workspace/state" and method == "GET":
             return respond(route, {"state": {"workspace": {"name": "验收工作空间", "enabledPlatforms": ["WECHAT"], "setupCompleted": True}, "sources": [], "intelligence": [], "topics": [], "projects": [state["project"]]}, "revision": 1, "updatedAt": NOW})
-        if path == "/api/v1/workspace/state" and method == "PUT":
-            return respond(route, {"revision": 2, "updatedAt": NOW})
         if path == "/api/v1/creative/projects" and method == "GET":
             return respond(route, {"projects": [state["project"]]})
         if path == f"/api/v1/creative/projects/{PROJECT_ID}/materials" and method == "GET":
@@ -227,6 +225,7 @@ with sync_playwright() as playwright:
     assert page.get_by_role("button", name="排版", exact=True).is_disabled()
     assert page.get_by_role("button", name="审核", exact=True).is_disabled()
     assert state["brief_writes"] == 1, {"brief_writes": state["brief_writes"], "requests": state["requests"]}
+    assert "PUT /api/v1/workspace/state" not in state["requests"], state["requests"]
     assert "stage=master" in page.url
     assert not state["unexpected"], state["unexpected"]
     assert not state["console_errors"], state["console_errors"]
