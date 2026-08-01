@@ -1097,3 +1097,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .visual-style-preview-missing{display:grid;place-items:center;gap:7px;color:#7b8799;text-align:center}
 .visual-style-preview-missing b{font-size:9px;letter-spacing:0}
 .visual-style-preview.large .visual-style-preview-missing b{font-size:11px}
+
+/* 当前绑定素材在搜图、生图、项目素材三个页签中共用同一大图预览。 */
+.visual-selected-preview{display:grid;grid-template-columns:minmax(180px,320px) minmax(0,1fr);align-items:center;gap:14px;padding:14px 16px;border-bottom:1px solid var(--line);background:#f7fbff}.visual-selected-preview>img,.visual-selected-preview>span{display:grid;width:100%;max-height:220px;aspect-ratio:4/3;overflow:hidden;place-items:center;border:1px solid var(--ink);border-radius:var(--radius-control);background:#eef2f7;color:var(--muted);object-fit:contain}.visual-selected-preview>div{display:grid;min-width:0;gap:5px}.visual-selected-preview b{font-size:13px}.visual-selected-preview small{overflow:hidden;color:var(--muted);font-size:11px;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:790px){.visual-selected-preview{grid-template-columns:1fr}.visual-selected-preview>img,.visual-selected-preview>span{max-height:none}}

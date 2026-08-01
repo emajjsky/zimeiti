@@ -215,7 +215,7 @@ with sync_playwright() as playwright:
             break
         page.wait_for_timeout(100)
     assert state["visual_writes"] >= 1, "AI 配图方案没有自动保存"
-    assert state["project"]["delivery"]["platforms"]["WECHAT"]["visual"]["planVersion"] == 6
+    assert state["project"]["delivery"]["platforms"]["WECHAT"]["visual"]["planVersion"] == 7
 
     page.get_by_role("button", name="增加正文插图").click()
     page.get_by_text("封面 1 张，正文插图 3 张", exact=True).wait_for()
@@ -268,6 +268,9 @@ with sync_playwright() as playwright:
     assert state["generations"] == 1
     assert state["generation_payloads"][0]["referenceImageIds"] == [BODY_ID]
     assert "统一使用薄荷绿边框" in state["generation_payloads"][0]["prompt"]
+    page.get_by_role("button", name="搜图", exact=True).click()
+    page.get_by_label("当前选中图片预览", exact=True).locator("img").wait_for()
+    assert page.get_by_text("当前选中图片", exact=True).is_visible(), "搜图页签没有展示已绑定素材的大图预览"
     page.wait_for_timeout(900)
     page.reload()
     page.wait_for_load_state("networkidle")

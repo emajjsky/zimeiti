@@ -51,9 +51,10 @@ test('小红书内容页默认生成带中文信息层级的图文信息图', ()
   assert.ok(card);
   assert.equal(card.generationMode, 'INFOGRAPHIC');
   assert.ok(card.informationPoints.length >= 3 && card.informationPoints.length <= 5);
-  assert.match(card.prompt, /主标题：/);
-  assert.match(card.prompt, /核心结论：/);
-  assert.match(card.prompt, /信息点：/);
+  assert.match(card.prompt, /画面内容优先/);
+  assert.match(card.prompt, /只允许一个短标题/);
+  assert.match(card.prompt, /必要短标签/);
+  assert.match(card.prompt, /不生成正文段落/);
   assert.doesNotMatch(card.prompt, /不在图片内生成文字/);
   assert.match(card.prompt, /错别字/);
   assert.match(card.prompt, /乱码/);
@@ -69,13 +70,27 @@ test('视觉插图与图文信息图切换时生成各自正确的提示词约�
   };
   const illustration = buildVisualGenerationSpec(item, { platform: 'WECHAT', title: '普通人怎样使用AI工具' }, 'ILLUSTRATION');
   assert.match(illustration.prompt, /不在图片内生成文字/);
+  assert.match(illustration.prompt, /图片内容必须占主导/);
+  assert.match(illustration.prompt, /不做文字型 PPT/);
   assert.ok(!Object.hasOwn(illustration, 'negativePrompt'));
 
   const infographic = buildVisualGenerationSpec(item, { platform: 'WECHAT', title: '普通人怎样使用AI工具' }, 'INFOGRAPHIC');
-  assert.match(infographic.prompt, /主标题：普通人使用AI工具/);
-  assert.match(infographic.prompt, /先确认任务目标/);
+  assert.match(infographic.prompt, /不要文章标题/);
+  assert.match(infographic.prompt, /图内文字必须极少/);
   assert.doesNotMatch(infographic.prompt, /不在图片内生成文字/);
   assert.ok(!Object.hasOwn(infographic, 'negativePrompt'));
+});
+
+test('搜索词描述文章主体和可见场景，不再描述模板字体和图标', () => {
+  const plan = buildVisualPlan({
+    title: '宇树科技上市进展：初步询价日为8月5日',
+    category: '财经',
+    coreMessage: '解释宇树科技IPO时间节点、股权结构和募资投向',
+    body: '宇树科技进入IPO询价阶段。公司披露股权结构与募集资金用途，并展示人形机器人产品和研发场景。',
+  }, 'WECHAT');
+  const queries = plan.flatMap((entry) => entry.searchQueries);
+  assert.ok(queries.some((query) => query.includes('宇树科技')));
+  assert.ok(queries.every((query) => !/(模板|矢量|图标|字体|PPT|信息卡|知识卡|图表)/i.test(query)));
 });
 
 test('没有旧方案时只迁移历史封面，正文素材留在项目素材库', () => {
@@ -191,7 +206,7 @@ test('项目风格默认继承且单张图片可以独立覆盖', () => {
   const inherited = updateVisualPlanItem(item, { visualType: 'MIND_MAP', templatePreset: 'RADIAL_BRANCH' }, { platform: 'WECHAT', title: article.title }, { preset: 'RETRO_POP' });
   assert.equal(inherited.stylePreset, 'INHERIT');
   assert.match(inherited.prompt, /波普怀旧/);
-  assert.match(inherited.prompt, /放射分支/);
+  assert.match(inherited.prompt, /向四周展开一级分支/);
 
   const overridden = updateVisualPlanItem(inherited, { stylePreset: 'TECH_MEDIA' }, { platform: 'WECHAT', title: article.title }, { preset: 'RETRO_POP' });
   assert.match(overridden.prompt, /科技媒体/);
@@ -301,7 +316,7 @@ test('第三版方案升级视觉导演字段时保留用户内容和最终图�
     assetReferenceId: `asset-${index}`,
   }));
   const upgraded = mergeVisualPlan(generated, oldPlan, [], null, 3);
-  assert.equal(VISUAL_PLAN_VERSION, 6);
+  assert.equal(VISUAL_PLAN_VERSION, 7);
   assert.deepEqual(upgraded.map((item) => item.assetReferenceId), oldPlan.map((item) => item.assetReferenceId));
   assert.deepEqual(upgraded.map((item) => item.purpose), oldPlan.map((item) => item.purpose));
   assert.deepEqual(upgraded.map((item) => item.informationPoints), oldPlan.map((item) => item.informationPoints));

@@ -108,7 +108,7 @@ const visualPlanItemInput = z.object({
   avoidConcepts: z.array(z.string().trim().min(1).max(100)).max(12).default([]),
   searchQueries: z.array(z.string().trim().min(2).max(120)).min(1).max(5),
   generationMode: z.enum(['ILLUSTRATION', 'INFOGRAPHIC']),
-  informationPoints: z.array(z.string().trim().min(1).max(160)).min(1).max(5),
+  informationPoints: z.array(z.string().trim().min(1).max(160)).min(1).max(6),
   stylePreset: z.union([z.literal('INHERIT'), visualStylePreset]),
   templatePreset: z.string().trim().min(1).max(80),
   sourceExcerpt: z.string().trim().max(4_000).default(''),

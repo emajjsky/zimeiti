@@ -50,6 +50,7 @@ const visualPlanSchema = z.object({
 });
 
 const genericOnly = /^(关键|节点|时间|重点|核心|内容|信息|主题|场景|要点|结论|背景|价值|问题|方法|流程|数据|人物|事件|图片|配图)[一二三四五六七八九十\d\s、，：:.-]*$/;
+const searchNoise = /(模板|矢量|图标|字体|字效|排版|版式|PPT|信息卡|知识卡|海报|素材|图表)/i;
 
 function assertSpecificPlan(plan) {
   const fields = [];
@@ -58,6 +59,8 @@ function assertSpecificPlan(plan) {
     item.informationPoints.forEach((value, pointIndex) => fields.push([`第 ${index + 1} 张图的信息点 ${pointIndex + 1}`, value]));
     item.contentBlocks.forEach((block, blockIndex) => fields.push([`第 ${index + 1} 张图的内容块 ${blockIndex + 1}`, `${block.label}${block.detail}`]));
     item.searchQueries.forEach((value, queryIndex) => fields.push([`第 ${index + 1} 张图的搜索词 ${queryIndex + 1}`, value]));
+    const noisyQuery = item.searchQueries.find((value) => searchNoise.test(value));
+    if (noisyQuery) throw new Error(`第 ${index + 1} 张图的搜索词在描述设计形式而不是画面内容：${noisyQuery}。`);
   }
   const invalid = fields.find(([, value]) => genericOnly.test(String(value).trim()));
   if (invalid) throw new Error(`${invalid[0]}过于空泛：${invalid[1]}。`);
@@ -96,11 +99,11 @@ function buildVisualPlanningPrompt({ project, platform, bodyItemCount, styleProf
   const roles = expectedRoles(platform, bodyItemCount);
   const system = [
     '你是资深内容视觉导演。你的工作不是罗列设计参数，而是把已完成正文转成可直接执行的配图方案。',
-    '先理解文章叙事和每一段的传播任务，再决定真实场景图、资料图、结构图、数据图、时间线、对比图或信息卡片。',
+    '先理解文章叙事和每一段的传播任务，再决定真实场景图、资料图、主体主视觉或确有必要的结构图。整套方案必须以图片内容为主、文字为辅，不能做成文字型 PPT、课程卡片或大段文字海报。',
     '每张图只能完成一个明确任务，必须绑定正文中的具体事实、关系、场景或结论。禁止用“关键、节点、时间、重点、核心、内容、信息”等空词代替具体内容。',
-    '只有正文存在明确数据、时间顺序、对比关系或流程时，才能使用数据图、时间线、对比图或流程图。不得编造任何数据、事实、机构、人物、引语或新闻现场。',
-    '搜索词必须是可用于公开图库或搜索引擎的具体中文短语，不得使用完整句子。',
-    'prompt 是直接交给图片模型的最终中文指令，必须写清主体、动作或结构、信息层级、构图、项目风格、平台比例和准确的图内文案。不要单独输出负面提示词字段。',
+    '只有正文存在明确数据、时间顺序、对比关系或流程时，才能使用数据图、时间线、对比图或流程图；即便如此也应以可视化关系为主，只保留不可缺少的短标签。不得编造任何数据、事实、机构、人物、引语或新闻现场。',
+    '搜索词必须描述能在图片中直接看到的主体、动作、地点、器物或真实场景，优先“专有主体 + 可见动作/场景”。禁止把模板、矢量、图标、字体、排版、PPT、信息卡、知识卡、海报、素材、图表当作搜索词。不得使用完整句子。',
+    'prompt 是直接交给图片模型的最终中文指令，必须先写清画面主体、动作、环境、镜头与构图，再写项目风格和平台比例。默认不生成文字；确需图解时只允许一个短标题和最多四个必要短标签，禁止正文段落、说明文字和 PPT 式模块堆叠。不要单独输出负面提示词字段。',
     '只返回 JSON，不要代码围栏、解释或备选方案。',
   ].join('\n');
   const message = JSON.stringify({

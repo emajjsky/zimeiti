@@ -122,6 +122,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
   const activeItem = plan.find((item) => item.id === activeItemId) ?? plan[0];
   const activePrompt = String(activeItem?.prompt ?? '').trim();
   const assignedAsset = activeItem?.assetReferenceId ? assets.find((item) => item.id === activeItem.assetReferenceId) : undefined;
+  const assignedAssetSrc = assignedAsset?.url ?? (assignedAsset ? fileUrls[assignedAsset.id] : undefined);
   const referenceAssets = activeItem?.references.map((item) => ({ config: item, asset: assets.find((asset) => asset.id === item.referenceId) })).filter((item) => item.asset) ?? [];
   const boundCount = plan.filter((item) => item.assetReferenceId).length;
   const countRange = visualPlanCountRange(activePlatform);
@@ -421,6 +422,11 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
           <div><span>{roleName(activeItem.role)} / {visualTypeName(activeItem.visualType)} / {activeItem.placement}</span><h3>{activeItem.title}</h3></div>
           {assignedAsset && <div className="visual-assigned-asset"><Check size={17}/><span><b>已绑定</b><small>{assignedAsset.title}</small></span><button type="button" title="移除当前配图" onClick={() => updateActiveItem({ assetReferenceId: null }, false)}><Trash2 size={15}/></button></div>}
         </header>
+
+        {assignedAsset && sourceView !== 'generate' && <section className="visual-selected-preview" aria-label="当前选中图片预览">
+          {assignedAssetSrc ? <img src={assignedAssetSrc} alt={`${activeItem.title}当前选中图片`}/> : <span><Image size={24}/>图片预览加载中</span>}
+          <div><b>当前选中图片</b><small>{assignedAsset.title}</small></div>
+        </section>}
 
         <nav className="visual-source-tabs" aria-label="当前配图获取方式">
           <button type="button" className={sourceView === 'search' ? 'active' : ''} onClick={() => setSourceView('search')}><Search size={15}/>搜图</button>

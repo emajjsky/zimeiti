@@ -1,4 +1,4 @@
-export const VISUAL_PLAN_VERSION = 6;
+export const VISUAL_PLAN_VERSION = 7;
 
 const platformLabels = {
   WECHAT: '公众号',
@@ -361,7 +361,7 @@ function visualTypeFor(section, role, platform) {
 }
 
 function defaultGenerationMode(role, visualType) {
-  return role === 'CARD' || ['CONCEPT_DIAGRAM', 'MIND_MAP', 'FLOWCHART', 'TIMELINE', 'COMPARISON', 'DATA_CHART', 'QUOTE_CARD', 'INFO_CARD', 'CHECKLIST_CARD'].includes(visualType) ? 'INFOGRAPHIC' : 'ILLUSTRATION';
+  return role === 'CARD' || ['FLOWCHART', 'TIMELINE', 'COMPARISON', 'DATA_CHART', 'QUOTE_CARD', 'INFO_CARD', 'CHECKLIST_CARD'].includes(visualType) ? 'INFOGRAPHIC' : 'ILLUSTRATION';
 }
 
 function informationPointsFor(section, focus, purpose) {
@@ -411,10 +411,10 @@ function structureInstruction(item) {
 }
 
 function infographicStyle(platform) {
-  if (platform === 'XIAOHONGSHU') return '3:4 竖版高密度知识卡片，适配手机阅读，标题醒目，信息模块自上而下，重点色块清晰，四周留出安全边距';
-  if (platform === 'WEIBO') return '1:1 方形信息图，标题与核心结论在缩略图状态仍清晰可读，信息不超过四组';
-  if (platform === 'ZHIHU') return '4:3 横版知识图解，理性克制，先结论后解释，适合正文阅读';
-  return '公众号正文横版信息图，中文编辑设计感，标题、核心结论与信息点层级清楚，留白充足，适合手机长文阅读';
+  if (platform === 'XIAOHONGSHU') return '3:4 竖版视觉图解，主画面占主要面积，少量短标签贴近对应对象，四周留出安全边距';
+  if (platform === 'WEIBO') return '1:1 方形视觉图解，核心对象在缩略图状态仍可辨认，关系节点不超过四组';
+  if (platform === 'ZHIHU') return '4:3 横版视觉图解，理性克制，以对象和关系为主，适合正文阅读';
+  return '公众号正文横版视觉图解，主画面清楚，关系一眼可辨，少量标签辅助理解并保留充足留白';
 }
 
 export function buildVisualGenerationSpec(item, context, mode = item.generationMode ?? defaultGenerationMode(item.role, item.visualType), styleProfile = { preset: 'FRESH_EDITORIAL' }) {
@@ -429,16 +429,16 @@ export function buildVisualGenerationSpec(item, context, mode = item.generationM
   const reference = referenceInstruction(item.references);
   if (mode === 'INFOGRAPHIC') {
     const headline = item.role === 'COVER' || item.role === 'MAIN' ? title : clean(item.focus).replace(/、/g, '与');
-    const points = (item.informationPoints?.length ? item.informationPoints : informationPointsFor(item.purpose, item.focus, item.purpose)).slice(0, 5);
-    const pointText = points.map((point, index) => `${index + 1}. ${point}`).join('；');
+    const labels = (item.contentBlocks ?? []).map((block) => clean(block.label)).filter(Boolean).slice(0, 4);
+    const labelText = labels.join('、');
     return {
       generationMode: mode,
-      prompt: `为${platformLabel}内容《${title}》制作一张${roleLabel}${visualTypeLabels[item.visualType]}。视觉风格：${style}。版式模板：${template.name}，${template.prompt}。${structure}请在图片内准确生成简体中文，并严格使用以下文案：主标题：${headline}；核心结论：${item.purpose}；信息点：${pointText}。平台版式：${infographicStyle(platform)}；阅读顺序明确，字号清晰，留白充足；不得出现错别字、乱码、拼写错误、文字变形、信息拥挤、层级混乱、水印、Logo、二维码或低清晰度内容。${reference}${avoid}不得自行添加数据、机构、人物引语或未经正文支持的结论；涉及新闻事件时不伪造新闻现场，不虚构具体机构标识。`,
+      prompt: `为${platformLabel}内容《${title}》制作一张${roleLabel}${visualTypeLabels[item.visualType]}。画面内容优先：${item.focus}。用图形、对象、空间关系、时间顺序或数据形态直接讲清楚“${item.purpose}”，不要做成文字型 PPT、课程卡片或大段文字海报。视觉风格：${style}。构图参考：${template.prompt}。${structure}图内文字必须极少：${item.role === 'COVER' || item.role === 'MAIN' || item.role === 'CARD' ? `只允许一个短标题“${headline}”` : '不要文章标题'}${labelText ? `，以及必要短标签“${labelText}”` : ''}；不生成正文段落、解释句、序号清单或装饰性文字。平台版式：${infographicStyle(platform)}。${reference}${avoid}不得出现错别字、乱码、文字变形、水印、Logo、二维码；不得自行添加数据、机构、人物引语或未经正文支持的结论。`,
     };
   }
   return {
     generationMode: mode,
-    prompt: `为${platformLabel}内容《${title}》制作一张${roleLabel}${visualTypeLabels[item.visualType]}。视觉风格：${style}。版式模板：${template.name}，${template.prompt}。核心画面：${item.focus}。表达目的：${item.purpose}。${structure}${visualStyle(platform, item.role)}。${reference}${avoid}画面真实、准确、干净，细节清晰；只生成视觉素材，不在图片内生成文字、Logo、二维码或水印。涉及新闻事件时采用概念视觉，不伪造新闻现场，不虚构具体机构标识。`,
+    prompt: `为${platformLabel}内容《${title}》制作一张${roleLabel}${visualTypeLabels[item.visualType]}。画面主体：${item.focus}。先表现可见的主体、动作、环境和关键关系，让读者不看文字也能理解“${item.purpose}”。视觉风格：${style}。构图参考：${template.prompt}。${visualStyle(platform, item.role)}。${reference}${avoid}图片内容必须占主导，不做文字型 PPT、信息卡片或大段文字海报；只生成视觉素材，不在图片内生成文字、Logo、二维码或水印。画面真实、准确、干净，细节清晰；涉及新闻事件时采用概念视觉，不伪造新闻现场，不虚构具体机构标识。`,
   };
 }
 
@@ -473,12 +473,12 @@ function searchQueriesFor({ title, focus, category, role, visualType }) {
       unique([category, subject, '主题图片']).slice(0, 3).join(' '),
     ]).filter((query) => query.length >= 2 && query.length <= 60).slice(0, 3);
   }
-  const typeSuffix = visualType === 'CONCEPT_DIAGRAM' ? '工作原理' : visualType === 'DATA_CHART' ? '数据图表' : visualType === 'INFO_CARD' ? '知识图解' : '应用场景';
-  const primaryTerms = unique(focusTerms).slice(0, 2);
+  const sceneHint = visualType === 'NEWS_PHOTO' ? '新闻现场' : visualType === 'SCENE' ? '真实场景' : visualType === 'HERO_VISUAL' ? '主体实拍' : '现场照片';
+  const primaryTerms = unique([subject, ...focusTerms]).slice(0, 3);
   return unique([
-    unique([...primaryTerms, typeSuffix]).slice(0, 3).join(' '),
-    unique([focusTerms[0], focusTerms[2], visualType === 'CONCEPT_DIAGRAM' ? '关系示意' : '真实场景']).slice(0, 3).join(' '),
-    unique([subject, focusTerms[0], category]).slice(0, 3).join(' '),
+    primaryTerms.join(' '),
+    unique([subject, focusTerms[0], sceneHint]).slice(0, 3).join(' '),
+    unique([subject, category, focusTerms[1] || action || '']).slice(0, 3).join(' '),
   ]).filter((query) => query.length >= 2 && query.length <= 60).slice(0, 3);
 }
 

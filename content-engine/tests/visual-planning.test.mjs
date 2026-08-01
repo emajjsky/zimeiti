@@ -34,6 +34,9 @@ test('配图策划提示词读取完整正文并禁止空泛占位词', () => {
   assert.match(prompt.message, /中继卫星承担航天器与地面站之间的数据转发任务/);
   assert.match(prompt.message, /清新波普怀旧/);
   assert.match(prompt.message, /薄荷绿边框/);
+  assert.match(prompt.system, /图片内容为主、文字为辅/);
+  assert.match(prompt.system, /禁止把模板、矢量、图标/);
+  assert.match(prompt.system, /最多四个必要短标签/);
 });
 
 test('模型方案必须返回平台所需数量和具体内容', () => {
@@ -49,6 +52,12 @@ test('配图方案拒绝关键、节点、时间等空泛内容', () => {
   const bad = item('BODY', '通信关系图', '正文第一段后');
   bad.informationPoints = ['关键一二', '节点三四'];
   assert.throws(() => parseVisualPlanningContent(JSON.stringify({ strategy: '按文章顺序解释具体关系。', items: [bad] }), { platform: 'WECHAT', bodyItemCount: 2, singleItem: true }), /过于空泛/);
+});
+
+test('配图方案拒绝描述模板和字体的伪搜索词', () => {
+  const bad = item('BODY', '股权结构图', '正文第一段后');
+  bad.searchQueries = ['饼图 图表 极简', '人民币 符号 图标'];
+  assert.throws(() => parseVisualPlanningContent(JSON.stringify({ strategy: '用真实主体和场景解释正文。', items: [bad] }), { platform: 'WECHAT', bodyItemCount: 2, singleItem: true }), /描述设计形式/);
 });
 
 test('完整重策划保留已选图片，单图重策划只替换当前项', () => {
