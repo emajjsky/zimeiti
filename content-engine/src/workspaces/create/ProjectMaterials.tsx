@@ -4,6 +4,8 @@ import { webAssets, webCreative } from '../../data/webApi';
 import { platformName, type ContentProject } from '../../domain/content';
 import type { CreativePlatform, ProjectInput, ProjectInputKind, ProjectInputPayload, ProjectMaterialScope, ProjectReference, ProjectReferenceMetadata, ProjectReferenceRole } from '../../domain/creative';
 import type { ProjectAsset } from '../../domain/assets';
+import { AssetPreviewDialog } from '../../components/assets/AssetPreviewDialog';
+import { AssetPickerDialog } from '../../components/assets/AssetPickerDialog';
 
 type MaterialTab = 'INPUTS' | 'LINKS' | 'ASSETS';
 type Editor = { type: 'INPUT'; item?: ProjectInput } | { type: 'LINK'; item?: ProjectReference } | { type: 'ASSET' };
@@ -49,6 +51,8 @@ export function ProjectMaterials({ project, platforms }: { project: ContentProje
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [previewAsset, setPreviewAsset] = useState<ProjectAsset | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const links = useMemo(() => references.filter((item) => item.sourceType === 'LINK'), [references]);
 
   useEffect(() => {
@@ -78,20 +82,18 @@ export function ProjectMaterials({ project, platforms }: { project: ContentProje
     try { await webAssets.unlink(projectId, item.id); setAssets((current) => current.filter((value) => value.id !== item.id)); } catch (reason) { setError(reason instanceof Error ? reason.message : '解除素材引用失败。'); }
   };
   const openLink = (item: ProjectReference) => { if (item.url) window.open(item.url, '_blank', 'noopener,noreferrer'); };
-  const openAsset = async (item: ProjectAsset) => {
-    try { const blob = await webAssets.content(item.id); const url = URL.createObjectURL(blob); window.open(url, '_blank', 'noopener,noreferrer'); window.setTimeout(() => URL.revokeObjectURL(url), 60_000); } catch (reason) { setError(reason instanceof Error ? reason.message : '打开素材失败。'); }
-  };
-
   return <section className="project-material-workspace"><section className="project-materials">
-    <header className="materials-head"><div><h2>资料与研究</h2><div className="materials-counts"><span>{inputs.length} 条内容</span><span>{links.length} 条参考</span><span>{assets.length} 个素材</span></div></div><button className="button primary" type="button" onClick={() => setEditor(tab === 'INPUTS' ? { type: 'INPUT' } : tab === 'LINKS' ? { type: 'LINK' } : { type: 'ASSET' })}>{tab === 'ASSETS' ? <Upload size={16}/> : <Plus size={16}/>} {tab === 'INPUTS' ? '新增内容' : tab === 'LINKS' ? '新增参考' : '上传素材'}</button></header>
+    <header className="materials-head"><div><h2>资料与研究</h2><div className="materials-counts"><span>{inputs.length} 条内容</span><span>{links.length} 条参考</span><span>{assets.length} 个素材</span></div></div><div className="materials-head-actions">{tab === 'ASSETS' && <button className="button" type="button" onClick={() => setPickerOpen(true)}><Image size={16}/>从素材库选择</button>}<button className="button primary" type="button" onClick={() => setEditor(tab === 'INPUTS' ? { type: 'INPUT' } : tab === 'LINKS' ? { type: 'LINK' } : { type: 'ASSET' })}>{tab === 'ASSETS' ? <Upload size={16}/> : <Plus size={16}/>} {tab === 'INPUTS' ? '新增内容' : tab === 'LINKS' ? '新增参考' : '上传新素材'}</button></div></header>
     <nav className="materials-tabs" aria-label="项目资料分类"><button type="button" className={tab === 'INPUTS' ? 'active' : ''} onClick={() => setTab('INPUTS')}>我的内容 <span>{inputs.length}</span></button><button type="button" className={tab === 'LINKS' ? 'active' : ''} onClick={() => setTab('LINKS')}>参考链接 <span>{links.length}</span></button><button type="button" className={tab === 'ASSETS' ? 'active' : ''} onClick={() => setTab('ASSETS')}>项目素材 <span>{assets.length}</span></button></nav>
     {error && <div className="materials-error" role="alert">{error}</div>}
     {loading ? <div className="materials-loading"><LoaderCircle size={19}/><span>读取项目资料</span></div> : <div className="materials-list">
       {tab === 'INPUTS' && (inputs.length ? inputs.map((item) => <article className="material-row input-row" key={item.id}><div className="material-row-main"><div className="material-row-title"><span className={`material-role role-${item.kind.toLowerCase()}`}>{inputKindName[item.kind]}</span><h3>{item.title}</h3></div><p>{item.body}</p><small>{scopeText(item.scope, item.platforms)}</small></div><div className="material-row-actions"><button className="icon-button" type="button" title="编辑" aria-label={`编辑 ${item.title}`} onClick={() => setEditor({ type: 'INPUT', item })}><Pencil size={16}/></button><button className="icon-button danger-icon" type="button" title="删除" aria-label={`删除 ${item.title}`} onClick={() => void removeInput(item)}><Trash2 size={16}/></button></div></article>) : <div className="materials-empty">还没有项目内容</div>)}
       {tab === 'LINKS' && (links.length ? links.map((item) => <article className="material-row" key={item.id}><div className="material-source-icon"><Link2 size={18}/></div><div className="material-row-main"><div className="material-row-title"><span className={`material-role role-${item.role.toLowerCase()}`}>{referenceRoleName[item.role]}</span><h3>{item.title}</h3></div><p>{item.notes || item.url}</p><small>{scopeText(item.scope, item.platforms)} · 未读取</small></div><div className="material-row-actions"><button className="icon-button" type="button" title="打开" aria-label={`打开 ${item.title}`} onClick={() => openLink(item)}><ExternalLink size={16}/></button><button className="icon-button" type="button" title="编辑" aria-label={`编辑 ${item.title}`} onClick={() => setEditor({ type: 'LINK', item })}><Pencil size={16}/></button><button className="icon-button danger-icon" type="button" title="删除" aria-label={`删除 ${item.title}`} onClick={() => void removeReference(item)}><Trash2 size={16}/></button></div></article>) : <div className="materials-empty">还没有参考链接</div>)}
-      {tab === 'ASSETS' && (assets.length ? assets.map((item) => <article className="material-row" key={item.id}><div className="material-source-icon">{fileIcon(item.mimeType)}</div><div className="material-row-main"><div className="material-row-title"><span className="material-role role-visual">素材</span><h3>{item.title}</h3></div><p>{item.originalFilename} · {formatBytes(item.sizeBytes)}</p><small>{scopeText(item.scope, item.platforms)} · {item.origin}</small></div><div className="material-row-actions"><button className="icon-button" type="button" title="预览" aria-label={`预览 ${item.title}`} onClick={() => void openAsset(item)}><Image size={16}/></button><button className="icon-button danger-icon" type="button" title="解除引用" aria-label={`解除引用 ${item.title}`} onClick={() => void removeAsset(item)}><Trash2 size={16}/></button></div></article>) : <div className="materials-empty">还没有项目素材</div>)}
+      {tab === 'ASSETS' && (assets.length ? assets.map((item) => <article className="material-row" key={item.id}><div className="material-source-icon">{fileIcon(item.mimeType)}</div><div className="material-row-main"><div className="material-row-title"><span className="material-role role-visual">素材</span><h3>{item.title}</h3></div><p>{item.originalFilename} · {formatBytes(item.sizeBytes)}</p><small>{scopeText(item.scope, item.platforms)} · {item.origin}</small></div><div className="material-row-actions"><button className="icon-button" type="button" title="预览" aria-label={`预览 ${item.title}`} onClick={() => setPreviewAsset(item)}><Image size={16}/></button><button className="icon-button danger-icon" type="button" title="解除引用" aria-label={`解除引用 ${item.title}`} onClick={() => void removeAsset(item)}><Trash2 size={16}/></button></div></article>) : <div className="materials-empty">还没有项目素材</div>)}
     </div>}
     {editor && <MaterialDialog editor={editor} projectId={projectId} availablePlatforms={platforms} busy={busy} onBusy={setBusy} onClose={() => !busy && setEditor(null)} onError={setError} onInput={upsertInput} onReference={upsertReference} onAsset={upsertAsset}/>}
+    {previewAsset && <AssetPreviewDialog asset={previewAsset} onClose={() => setPreviewAsset(null)}/>} 
+    {pickerOpen && <AssetPickerDialog projectId={projectId} role="VISUAL" scope="PROJECT" platforms={[]} excludedAssetIds={assets.map((asset) => asset.id)} onLinked={upsertAsset} onClose={() => setPickerOpen(false)}/>} 
   </section></section>;
 }
 

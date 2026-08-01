@@ -3,7 +3,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { webAssets, webCreative } from '../../data/webApi';
 import { platformName, type ContentProject, type CreativeVisualPlanItem, type CreativeVisualReferenceUse, type CreativeVisualStyleProfile } from '../../domain/content';
 import type { CreativePlatform } from '../../domain/creative';
-import type { ProjectAsset } from '../../domain/assets';
+import type { ProjectAsset, WorkspaceAsset } from '../../domain/assets';
+import { AssetPreviewDialog } from '../../components/assets/AssetPreviewDialog';
+import { AssetPickerDialog } from '../../components/assets/AssetPickerDialog';
 import { visualPlanCountRange, visualStylePresets, VISUAL_PLAN_VERSION } from '../../domain/visual-plan.mjs';
 
 type ImageSearchResult = { id: string; title: string; thumbnailUrl: string; imageUrl: string; sourceUrl: string; license: string; attribution: string };
@@ -115,6 +117,8 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
   const [importingId, setImportingId] = useState<string | null>(null);
   const [generateBusy, setGenerateBusy] = useState(false);
   const [referencePickerOpen, setReferencePickerOpen] = useState(false);
+  const [previewAsset, setPreviewAsset] = useState<WorkspaceAsset | null>(null);
+  const [assetPickerOpen, setAssetPickerOpen] = useState(false);
   const [fileUrls, setFileUrls] = useState<Record<string, string>>({});
   const lastSavedSignature = useRef('');
   const saveRevision = useRef(0);
@@ -450,7 +454,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
           {searchBusy && !searchResults.length && <div className="visual-result-state"><LoaderCircle size={18}/>正在搜索公开许可图片</div>}
           {!searchBusy && searchResults.length === 0 && !error && <div className="visual-result-state">选择推荐词或输入关键词后搜索</div>}
           {searchResults.length > 0 && <div className="visual-search-grid">{searchResults.map((result) => <article className="visual-search-card" key={result.id}>
-            <img src={result.thumbnailUrl} alt=""/><div><b>{result.title}</b><small>{result.license}</small></div>
+            <button className="visual-search-preview-button" type="button" onClick={() => setPreviewAsset({ id: '', kind: 'IMAGE', origin: 'WEB_IMPORT', status: 'ACTIVE', title: result.title, originalFilename: result.title, mimeType: 'image/jpeg', sizeBytes: 0, sha256: '', sourceUrl: result.imageUrl, sourceNote: result.sourceUrl, copyrightStatus: 'OPEN_LICENSE', projectCount: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() })}><img src={result.thumbnailUrl} alt=""/></button><div><b>{result.title}</b><small>{result.license}</small></div>
             <footer><a href={result.sourceUrl} target="_blank" rel="noreferrer">查看来源</a><button className="button" type="button" disabled={importingId !== null} onClick={() => void importResult(result)}>{importingId === result.id ? <LoaderCircle size={15}/> : <Check size={15}/>}用于此处</button></footer>
           </article>)}</div>}
         </section>}
@@ -486,9 +490,10 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
         </section>}
 
         {sourceView === 'library' && <section className="visual-source-workspace">
+          <div className="visual-library-actions"><button className="button" type="button" onClick={() => setAssetPickerOpen(true)}><Upload size={15}/>从素材库选择</button></div>
           {loading ? <div className="visual-result-state"><LoaderCircle size={18}/>读取项目素材</div> : visualAssets.length ? <div className="visual-library-grid">{visualAssets.map((asset) => {
             const src = assetSrc(asset); const checked = activeItem.assetId === asset.id;
-            return <article className={`visual-library-card${checked ? ' selected' : ''}`} key={asset.id}>{src ? <img src={src} alt=""/> : <span><Image size={20}/></span>}<div><b>{asset.title}</b><small>{asset.origin === 'WEB_IMPORT' ? '网络图片' : asset.origin === 'AI_GENERATED' ? 'AI 生图' : '上传素材'}</small></div><button className="button" type="button" onClick={() => assignAsset(asset)}>{checked ? <><Check size={14}/>已用于此处</> : '用于此处'}</button></article>;
+            return <article className={`visual-library-card${checked ? ' selected' : ''}`} key={asset.id}><button className="visual-library-preview" type="button" onClick={() => setPreviewAsset(asset)}>{src ? <img src={src} alt=""/> : <Image size={20}/>}</button><div><b>{asset.title}</b><small>{asset.origin === 'WEB_IMPORT' ? '网络图片' : asset.origin === 'AI_GENERATED' ? 'AI 生图' : '上传素材'}</small></div><button className="button" type="button" onClick={() => assignAsset(asset)}>{checked ? <><Check size={14}/>已用于此处</> : '用于此处'}</button></article>;
           })}</div> : <div className="visual-result-state"><Image size={20}/>还没有图片素材</div>}
         </section>}
       </main>}
@@ -516,5 +521,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
       </section>
     </div>}
 
+    {previewAsset && <AssetPreviewDialog asset={previewAsset} externalUrl={previewAsset.id ? undefined : previewAsset.sourceUrl ?? undefined} onClose={() => setPreviewAsset(null)}/>} 
+    {assetPickerOpen && <AssetPickerDialog projectId={project.id} role="VISUAL" scope="IMAGING" platforms={[activePlatform]} imageOnly excludedAssetIds={visualAssets.map((asset) => asset.id)} onLinked={(asset) => { setAssets((current) => [asset, ...current]); assignAsset(asset); }} onClose={() => setAssetPickerOpen(false)}/>} 
   </section>;
 }

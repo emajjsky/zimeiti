@@ -24,6 +24,7 @@ import { AccountVoiceSettings } from './workspaces/settings/AccountVoiceSettings
 import { PromptTemplateSettings } from './workspaces/settings/PromptTemplateSettings';
 import { CreateWorkspace } from './workspaces/create/CreateWorkspace';
 import { CreativeProjectCenter } from './workspaces/create/CreativeProjectCenter';
+import { AssetLibrary } from './workspaces/assets/AssetLibrary';
 import './styles.css';
 
 function displayError(error: unknown, fallback: string) {
@@ -268,7 +269,7 @@ function App({ session, onSessionChange }: { session: WebSession; onSessionChang
       {view === 'create' && selectedProjectId && featuredProject && <CreateWorkspace project={featuredProject} stage={createStage} onStage={setCreateStage} onExitProject={() => { setSelectedProjectId(''); setCreateStage('planning'); }} activePlatform={activePlatform} onPlatform={setActivePlatform} onSaveVersion={saveContentVersion} onProjectAccepted={acceptProjectFromServer} onOpenModelSettings={() => openSettings('models', 'policies')} onOpenAgentSettings={() => openSettings('models', 'agent')} onOpenSearchSettings={() => openSettings('models', 'search')} onOpenVoiceSettings={() => openSettings('voices')} />}
       {view === 'publish' && <Publish project={featuredProject} onNavigate={setView} />}
       {view === 'review' && <Review projects={state.projects} onOpenProject={(project) => openProject(project)} />}
-      {view === 'assets' && <Utility title="素材库" description="素材将按目录、类型和所属项目统一管理。" />}
+      {view === 'assets' && <AssetLibrary/>}
       {view === 'settings' && <SettingsWorkspace section={settingsSection} onSectionChange={setSettingsSection} workspace={<div className="workspace-settings-stack"><WorkspaceManagementSettings session={session} onSessionChange={onSessionChange} onBeforeSwitch={flushPendingSaves} /><WorkspaceProfileSettings workspace={state.workspace} onChange={(workspace) => { setState((current) => ({ ...current, workspace })); savePreferences({ workspace }); }} /></div>} sources={<SourceSettings sources={state.sources} onAddSource={addSource} onAddSources={addSources} onUpdateSource={updateSource} onRemoveSource={removeSource} />} voices={<AccountVoiceSettings />} models={<ModelSettingsScreen initialSection={requestedModelSection} onSectionChange={setRequestedModelSection} />} feishu={<WorkspaceSettings template={state.feishuTemplate} onTemplateChange={saveFeishuTemplate} />} accounts={<AccountAuthorizationSettings />} />}
     </main>
   </div>;
