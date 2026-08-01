@@ -97,4 +97,7 @@ test('视觉导演保存完整策划字段并支持参考图真实图生图', ()
   assert.match(client, /planVisual:/);
   assert.match(api, /VISUAL_PLANNING_SCOPE/);
   assert.match(api, /VISUAL_PLANNING_FALLBACK_SCOPE/);
+  assert.match(api, /bodyItemCount:\s*z\.number\(\)\.int\(\)\.min\(0\)\.max\(11\)/);
+  assert.match(api, /currentPlan:\s*z\.array\(z\.record[\s\S]*?\.max\(12\)/);
+  assert.match(api, /plan:\s*z\.array\(visualPlanItemInput\)\.max\(12\)/);
 });

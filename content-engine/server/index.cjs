@@ -120,7 +120,7 @@ const visualPlanItemInput = z.object({
 });
 const visualPlanningInput = z.object({
   platform: creativePlatform,
-  bodyItemCount: z.number().int().min(0).max(8),
+  bodyItemCount: z.number().int().min(0).max(11),
   styleProfile: z.object({
     preset: visualStylePreset,
     customPrompt: z.string().trim().max(1_200).default(''),
