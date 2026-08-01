@@ -13,7 +13,6 @@ export function WorkspaceProfileSettings({
   workspace: WorkspaceProfile;
   onChange: (workspace: WorkspaceProfile) => void;
 }) {
-  const [name, setName] = useState(workspace.name);
   const [topics, setTopics] = useState(workspace.primaryTopics.join('、'));
   const [accountPositioning, setAccountPositioning] = useState(workspace.accountPositioning ?? '');
   const [targetAudience, setTargetAudience] = useState(workspace.targetAudience ?? '');
@@ -21,7 +20,6 @@ export function WorkspaceProfileSettings({
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    setName(workspace.name);
     setTopics(workspace.primaryTopics.join('、'));
     setAccountPositioning(workspace.accountPositioning ?? '');
     setTargetAudience(workspace.targetAudience ?? '');
@@ -34,10 +32,9 @@ export function WorkspaceProfileSettings({
   };
 
   const save = () => {
-    if (!name.trim() || !platforms.length) return;
+    if (!platforms.length) return;
     onChange({
       ...workspace,
-      name: name.trim(),
       primaryTopics: topics.split(/[、,，\n]/).map((item) => item.trim()).filter(Boolean),
       accountPositioning: accountPositioning.trim(),
       targetAudience: targetAudience.trim(),
@@ -48,14 +45,13 @@ export function WorkspaceProfileSettings({
 
   return (
     <div className="workspace-profile-settings">
-      <PageHeader title="工作空间" feedback={saved ? <span className="success-text">已保存</span> : undefined} />
+      <PageHeader title="当前空间内容偏好" subtitle="这些偏好只影响当前工作空间的选题、受众和内容平台。" feedback={saved ? <span className="success-text">已保存</span> : undefined} />
       <section className="settings-form-section">
-        <label>工作空间名称<input value={name} onChange={(event) => { setName(event.target.value); setSaved(false); }} /></label>
         <label>默认题材<input value={topics} onChange={(event) => { setTopics(event.target.value); setSaved(false); }} /></label>
         <label>账号定位<input value={accountPositioning} onChange={(event) => { setAccountPositioning(event.target.value); setSaved(false); }} /></label>
         <label>目标受众<input value={targetAudience} onChange={(event) => { setTargetAudience(event.target.value); setSaved(false); }} /></label>
         <fieldset><legend>内容平台</legend><div className="platform-options">{supportedPlatforms.map((platform) => <button type="button" key={platform} className={platforms.includes(platform) ? 'chosen' : ''} onClick={() => togglePlatform(platform)}>{platformName[platform]}</button>)}</div></fieldset>
-        <footer><button className="button primary" type="button" disabled={!name.trim() || !platforms.length} onClick={save}><Save size={16} />保存</button></footer>
+        <footer><button className="button primary" type="button" disabled={!platforms.length} onClick={save}><Save size={16} />保存偏好</button></footer>
       </section>
     </div>
   );

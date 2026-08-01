@@ -1,15 +1,16 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { animate, createScope, stagger } from 'animejs';
-import { ArrowLeft, Bell, BrainCircuit, CalendarDays, ChartColumn, CheckCircle2, ChevronRight, CircleAlert, CircleCheck, Compass, FilePenLine, FolderOpen, KeyRound, Lightbulb, Menu, PenLine, Pencil, Plus, RefreshCw, Search, Send, Settings, Trash2 } from 'lucide-react';
+import { ArrowLeft, Bell, BrainCircuit, CalendarDays, ChartColumn, CheckCircle2, ChevronRight, CircleAlert, CircleCheck, Compass, FilePenLine, FolderOpen, KeyRound, Lightbulb, LoaderCircle, Menu, PenLine, Pencil, Plus, RefreshCw, Search, Send, Settings, Trash2 } from 'lucide-react';
 import { intelligenceKey, loadState, seedState, type FeishuLibraryTemplate, type LocalState, type WorkspaceProfile } from './data/localRepository';
-import { webAgent, webAuth, webCreative, webIntelligence, webModels, webProjects, webSettings, webState, type CreateProjectInput, type CredentialStatus, type WebSession } from './data/webApi';
+import { webAgent, webAuth, webCreative, webIntelligence, webModels, webProjects, webSettings, webState, webWorkspaces, type CreateProjectInput, type CredentialStatus, type WebSession } from './data/webApi';
 import { platformName, projectStageName, type ContentProject, type ContentVersion, type IntelligenceSource, type Platform } from './domain/content';
 import { stageRouteForProjectStage } from './domain/creative-flow.mjs';
 import { completedProjects, formatTodayTitle, projectTaskEntries } from './domain/today.mjs';
 import type { ApiUsageLog, ApiUsageSummary, ApiUsageTask, ModelCapability, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelOperation, ModelProvider, ModelTask, ModelTaskPolicy } from './domain/integrations';
 import { navigationGroups, readWorkspaceLocation, replaceWorkspaceLocation, resetViewport, type CreateStageRoute, type DiscoverSection, type ModelSection, type SearchPreset, type SettingsSection, type View } from './app/navigation.mjs';
 import { PageHeader } from './components/workspace/PageHeader';
+import { WorkspaceSwitcher } from './components/workspace/WorkspaceSwitcher';
 import { DiscoverWorkspace } from './workspaces/DiscoverWorkspace';
 import { SettingsWorkspace } from './workspaces/SettingsWorkspace';
 import { SourceSettings, type NewSourceInput } from './workspaces/settings/SourceSettings';
@@ -17,6 +18,7 @@ import { NetworkSearchPanel } from './workspaces/discover/NetworkSearchPanel';
 import { LinkImportPanel } from './workspaces/discover/LinkImportPanel';
 import { IntelligenceInbox } from './workspaces/discover/IntelligenceInbox';
 import { WorkspaceProfileSettings } from './workspaces/settings/WorkspaceProfileSettings';
+import { WorkspaceManagementSettings } from './workspaces/settings/WorkspaceManagementSettings';
 import { AccountAuthorizationSettings } from './workspaces/settings/AccountAuthorizationSettings';
 import { AccountVoiceSettings } from './workspaces/settings/AccountVoiceSettings';
 import { PromptTemplateSettings } from './workspaces/settings/PromptTemplateSettings';
@@ -47,7 +49,7 @@ const navigationIcons: Record<View, typeof CalendarDays> = {
   settings: Settings,
 };
 
-function App() {
+function App({ session, onSessionChange }: { session: WebSession; onSessionChange: (session: WebSession) => void }) {
   const initialRoute = useRef(readWorkspaceLocation()).current;
   const [view, setView] = useState<View>(initialRoute.view);
   const [state, setState] = useState<LocalState>(seedState);
@@ -110,6 +112,10 @@ function App() {
       .catch(() => undefined)
       .then(() => webState.savePreferences(input))
       .catch((error) => { console.error('保存工作空间设置失败', error); });
+  };
+  const flushPendingSaves = async () => {
+    await preferenceSaveQueue.current;
+    await Promise.all([...versionSaveQueues.current.values()]);
   };
   const openDiscover = (section: DiscoverSection, preset: SearchPreset | null = null) => {
     setView('discover');
@@ -247,6 +253,7 @@ function App() {
     <header className="topbar">
       <button className="mobile-menu-button" type="button" aria-label="打开导航" onClick={() => setSidebarOpen(true)}><Menu size={20} /></button>
       <div className="wordmark">知行<span>内容</span>实验室</div>
+      <WorkspaceSwitcher session={session} onSessionChange={onSessionChange} onBeforeSwitch={flushPendingSaves} onManage={() => openSettings('workspace')} />
       <label className="global-search"><Search size={17}/><input placeholder="搜索热点、项目、内容、素材" /></label>
       <div className="top-actions"><button className="button primary" onClick={requestNewCreation}><Plus size={16}/>新建创作</button><button className="icon-button" aria-label="通知"><Bell size={20}/></button><button className="icon-button" aria-label="同步"><RefreshCw size={20}/></button><span className="avatar" /></div>
     </header>
@@ -262,22 +269,19 @@ function App() {
       {view === 'publish' && <Publish project={featuredProject} onNavigate={setView} />}
       {view === 'review' && <Review projects={state.projects} onOpenProject={(project) => openProject(project)} />}
       {view === 'assets' && <Utility title="素材库" description="素材将按目录、类型和所属项目统一管理。" />}
-      {view === 'settings' && <SettingsWorkspace section={settingsSection} onSectionChange={setSettingsSection} workspace={<WorkspaceProfileSettings workspace={state.workspace} onChange={(workspace) => { setState((current) => ({ ...current, workspace })); savePreferences({ workspace }); }} />} sources={<SourceSettings sources={state.sources} onAddSource={addSource} onAddSources={addSources} onUpdateSource={updateSource} onRemoveSource={removeSource} />} voices={<AccountVoiceSettings />} models={<ModelSettingsScreen initialSection={requestedModelSection} onSectionChange={setRequestedModelSection} />} feishu={<WorkspaceSettings template={state.feishuTemplate} onTemplateChange={saveFeishuTemplate} />} accounts={<AccountAuthorizationSettings />} />}
+      {view === 'settings' && <SettingsWorkspace section={settingsSection} onSectionChange={setSettingsSection} workspace={<div className="workspace-settings-stack"><WorkspaceManagementSettings session={session} onSessionChange={onSessionChange} onBeforeSwitch={flushPendingSaves} /><WorkspaceProfileSettings workspace={state.workspace} onChange={(workspace) => { setState((current) => ({ ...current, workspace })); savePreferences({ workspace }); }} /></div>} sources={<SourceSettings sources={state.sources} onAddSource={addSource} onAddSources={addSources} onUpdateSource={updateSource} onRemoveSource={removeSource} />} voices={<AccountVoiceSettings />} models={<ModelSettingsScreen initialSection={requestedModelSection} onSectionChange={setRequestedModelSection} />} feishu={<WorkspaceSettings template={state.feishuTemplate} onTemplateChange={saveFeishuTemplate} />} accounts={<AccountAuthorizationSettings />} />}
     </main>
   </div>;
 }
 
 function Onboarding({ initial, onComplete }: { initial: WorkspaceProfile; onComplete: (workspace: WorkspaceProfile) => void }) {
-  const [name, setName] = useState(initial.name);
   const [topics, setTopics] = useState(initial.primaryTopics.join('、'));
   const [platforms, setPlatforms] = useState<Platform[]>(initial.enabledPlatforms);
   const togglePlatform = (platform: Platform) => setPlatforms((current) => current.includes(platform) ? current.filter((item) => item !== platform) : [...current, platform]);
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!name.trim() || platforms.length === 0) return;
+    if (platforms.length === 0) return;
     onComplete({
-      name: name.trim(),
-      materialRoot: initial.materialRoot,
       primaryTopics: topics.split(/[、,，\n]/).map((item) => item.trim()).filter(Boolean),
       enabledPlatforms: platforms,
       setupCompleted: true,
@@ -287,10 +291,9 @@ function Onboarding({ initial, onComplete }: { initial: WorkspaceProfile; onComp
     <section className="onboarding-poster"><div className="poster-stamp">NO.01</div><div><span>CONTENT ENGINE</span><h1>把灵感，<br/>变成稳定产出。</h1></div><p>先设置你的内容工作室。后续热点、素材与草稿都将在这里统一管理。</p><div className="poster-dots">● ● ●</div></section>
     <form className="onboarding-form" onSubmit={submit}>
       <div className="eyebrow">FIRST RUN / 首次设置</div><h2>建立你的编辑部</h2><p>只需一分钟；飞书、模型和账号授权都可以稍后连接。</p>
-      <label>工作空间名称<input value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：知行内容实验室" autoFocus /></label>
-      <label>你最常做的题材<input value={topics} onChange={(event) => setTopics(event.target.value)} placeholder="例如：AI 工具、国学、财经" /><small>用顿号或逗号分隔，之后可随时调整。</small></label>
+      <label>你最常做的题材<input value={topics} onChange={(event) => setTopics(event.target.value)} placeholder="例如：AI 工具、国学、财经" autoFocus /><small>用顿号或逗号分隔，之后可随时调整。</small></label>
       <fieldset><legend>首发平台</legend><div className="platform-options">{(['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO', 'VIDEO_CHANNEL'] as Platform[]).map((platform) => <button type="button" key={platform} className={platforms.includes(platform) ? 'chosen' : ''} onClick={() => togglePlatform(platform)}>{platforms.includes(platform) ? '✓ ' : '+ '}{platformName[platform]}</button>)}</div></fieldset>
-      <button className="button primary setup-submit" type="submit" disabled={!name.trim() || platforms.length === 0}>进入内容引擎 <ChevronRight size={17}/></button>
+      <button className="button primary setup-submit" type="submit" disabled={platforms.length === 0}>进入内容引擎 <ChevronRight size={17}/></button>
     </form>
   </main>;
 }
@@ -666,14 +669,61 @@ function CoreAgentSettings({ catalog, onSynced }: { catalog: ModelCatalogItem[];
 function Utility({ title, description }: { title: string; description: string }) { return <><PageHeader eyebrow="UTILITY / 辅助能力" title={title}/><section className="utility"><Lightbulb size={24}/><h2>该模块已预留</h2><p>{description}</p></section></>; }
 
 function WebEntry() {
-  const [session, setSession] = useState<WebSession | null>(() => webAuth.session());
-  const [checking, setChecking] = useState(Boolean(webAuth.session()));
+  const initialSession = useRef(webAuth.session()).current;
+  const [session, setSession] = useState<WebSession | null>(initialSession);
+  const [checking, setChecking] = useState(Boolean(initialSession));
   useEffect(() => {
-    if (!webAuth.session()) return;
-    void webAuth.me().catch(() => { webAuth.clear(); setSession(null); }).finally(() => setChecking(false));
+    if (!initialSession) return;
+    void webAuth.me().then(setSession).catch(() => { webAuth.clear(); setSession(null); }).finally(() => setChecking(false));
   }, []);
   if (checking) return <section className="web-entry-loading">正在连接工作空间</section>;
-  return session ? <App /> : <WebAuthScreen onAuthenticated={setSession} />;
+  if (!session) return <WebAuthScreen onAuthenticated={setSession} />;
+  return session.activeWorkspaceId ? <App key={session.activeWorkspaceId} session={session} onSessionChange={setSession} /> : <WorkspaceGate session={session} onSessionChange={setSession} />;
+}
+
+function WorkspaceGate({ session, onSessionChange }: { session: WebSession; onSessionChange: (session: WebSession) => void }) {
+  const [name, setName] = useState('');
+  const [busyAction, setBusyAction] = useState('');
+  const [error, setError] = useState('');
+  const workspaces = session.workspaces.filter(({ status }) => status === 'ACTIVE');
+
+  const selectWorkspace = async (workspaceId: string) => {
+    if (busyAction) return;
+    setBusyAction(`select:${workspaceId}`);
+    setError('');
+    try {
+      onSessionChange(await webWorkspaces.select(workspaceId));
+    } catch (reason) {
+      setError(displayError(reason, '切换工作空间失败。'));
+      setBusyAction('');
+    }
+  };
+
+  const createWorkspace = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const nextName = name.trim();
+    if (!nextName || busyAction) return;
+    setBusyAction('create');
+    setError('');
+    try {
+      onSessionChange(await webWorkspaces.create(nextName));
+    } catch (reason) {
+      setError(displayError(reason, '创建工作空间失败。'));
+      setBusyAction('');
+    }
+  };
+
+  return (
+    <main className="workspace-gate">
+      <section className="workspace-gate-panel">
+        <header><div className="wordmark">知行<span>内容</span>实验室</div><p>{session.user.email}</p></header>
+        <div className="workspace-gate-copy"><h1>选择工作空间</h1><p>项目、素材、账号配置和发布数据按空间隔离。请选择要进入的空间，或创建一个新空间。</p></div>
+        {workspaces.length ? <div className="workspace-gate-list">{workspaces.map((workspace) => <button type="button" key={workspace.id} disabled={Boolean(busyAction)} onClick={() => void selectWorkspace(workspace.id)}><span><b>{workspace.name}</b><small>{workspace.role}</small></span>{busyAction === `select:${workspace.id}` ? <LoaderCircle className="spin" size={18} /> : <ChevronRight size={18} />}</button>)}</div> : <div className="workspace-gate-empty"><FolderOpen size={24} /><b>还没有可用的工作空间</b><span>创建后会立即进入，之后可在顶部随时切换。</span></div>}
+        <form className="workspace-gate-create" onSubmit={createWorkspace}><label><span>新工作空间名称</span><input value={name} onChange={(event) => setName(event.target.value)} maxLength={80} /></label><button className="button primary" type="submit" disabled={!name.trim() || Boolean(busyAction)}>{busyAction === 'create' ? <LoaderCircle className="spin" size={16} /> : <Plus size={16} />}{busyAction === 'create' ? '创建中' : '创建并进入'}</button></form>
+        {error && <p className="workspace-gate-error" role="alert">{error}</p>}
+      </section>
+    </main>
+  );
 }
 
 function WebAuthScreen({ onAuthenticated }: { onAuthenticated: (session: WebSession) => void }) {

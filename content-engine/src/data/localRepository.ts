@@ -11,8 +11,6 @@ export interface LocalState {
 }
 
 export interface WorkspaceProfile {
-  name: string;
-  materialRoot: string;
   primaryTopics: string[];
   accountPositioning?: string;
   targetAudience?: string;
@@ -30,8 +28,6 @@ export interface FeishuLibraryTemplate {
 
 export const seedState: LocalState = {
   workspace: {
-    name: '我的内容工作室',
-    materialRoot: '',
     primaryTopics: ['AI 工具实战'],
     accountPositioning: '',
     targetAudience: '',

@@ -76,10 +76,7 @@ export const webWorkspaces = {
 export const webState = {
   async load() { return request<{ state: LocalState; revision: number; updatedAt: string }>('/workspace/state'); },
   async savePreferences(input: { workspace?: LocalState['workspace']; feishuTemplate?: LocalState['feishuTemplate'] }) {
-    const workspace = input.workspace
-      ? (({ name: _name, materialRoot: _materialRoot, ...preferences }) => preferences)(input.workspace)
-      : undefined;
-    return request<{ revision: number; updatedAt: string }>('/workspace/preferences', { method: 'PATCH', body: JSON.stringify({ ...input, workspace }) });
+    return request<{ revision: number; updatedAt: string }>('/workspace/preferences', { method: 'PATCH', body: JSON.stringify(input) });
   },
 };
 
