@@ -10,6 +10,12 @@ const article = {
   body: '天链三号01星由运载火箭送入预定轨道。\n\n中继卫星承担天地通信与数据中继任务。\n\n本次任务还需要关注公开技术资料与后续应用。',
 };
 
+test('配图方案只保存空间素材 ID', () => {
+  const plan = buildVisualPlan(article, 'WECHAT');
+  assert.ok(plan.every((item) => Object.hasOwn(item, 'assetId')));
+  assert.ok(plan.every((item) => !Object.hasOwn(item, 'assetReferenceId')));
+});
+
 test('公众号配图方案自动包含封面、正文位置、搜索词和生图提示词', () => {
   const plan = buildVisualPlan(article, 'WECHAT');
   assert.ok(plan.length >= 3 && plan.length <= 5);
@@ -66,7 +72,7 @@ test('视觉插图与图文信息图切换时生成各自正确的提示词约�
     id: 'scene-1', role: 'BODY', title: '正文插图 1', placement: '正文第一段后', purpose: '解释普通人的实际使用场景',
     visualType: 'SCENE', focus: '普通人使用AI工具', avoidConcepts: [], searchQueries: ['AI 工具 使用场景'],
     informationPoints: ['先确认任务目标', '再选择合适工具', '最后人工检查结果'], prompt: '',
-    generationMode: 'ILLUSTRATION', size: '4:3', assetReferenceId: null,
+    generationMode: 'ILLUSTRATION', size: '4:3', assetId: null,
   };
   const illustration = buildVisualGenerationSpec(item, { platform: 'WECHAT', title: '普通人怎样使用AI工具' }, 'ILLUSTRATION');
   assert.match(illustration.prompt, /不在图片内生成文字/);
@@ -93,11 +99,10 @@ test('搜索词描述文章主体和可见场景，不再描述模板字体和�
   assert.ok(queries.every((query) => !/(模板|矢量|图标|字体|PPT|信息卡|知识卡|图表)/i.test(query)));
 });
 
-test('没有旧方案时只迁移历史封面，正文素材留在项目素材库', () => {
+test('没有已保存方案时所有配图位保持未绑定', () => {
   const generated = buildVisualPlan(article, 'WECHAT');
-  const merged = mergeVisualPlan(generated, null, ['body-id', 'cover-id'], 'cover-id');
-  assert.equal(merged[0].assetReferenceId, 'cover-id');
-  assert.ok(merged.slice(1).every((item) => item.assetReferenceId === null));
+  const merged = mergeVisualPlan(generated, null);
+  assert.ok(merged.every((item) => item.assetId === null));
 });
 
 test('旧版方案自动升级搜索词并清空正文错误绑定', () => {
@@ -105,11 +110,11 @@ test('旧版方案自动升级搜索词并清空正文错误绑定', () => {
   const oldPlan = generated.map((item, index) => ({
     ...item,
     searchQueries: ['天链三号01星 发射'],
-    assetReferenceId: index === 0 ? 'cover-id' : `body-${index}`,
+    assetId: index === 0 ? 'cover-id' : `body-${index}`,
   }));
-  const upgraded = mergeVisualPlan(generated, oldPlan, [], null, 1);
-  assert.equal(upgraded[0].assetReferenceId, 'cover-id');
-  assert.ok(upgraded.slice(1).every((item) => item.assetReferenceId === null));
+  const upgraded = mergeVisualPlan(generated, oldPlan, 1);
+  assert.equal(upgraded[0].assetId, 'cover-id');
+  assert.ok(upgraded.slice(1).every((item) => item.assetId === null));
   assert.equal(new Set(upgraded.map((item) => item.searchQueries[0])).size, upgraded.length);
 });
 
@@ -121,23 +126,23 @@ test('第二版方案升级图文模式时保留已有图片绑定并替换旧�
     informationPoints: undefined,
     prompt: '只生成视觉素材，不在图片内生成文字',
     negativePrompt: '文字、水印',
-    assetReferenceId: `asset-${index}`,
+    assetId: `asset-${index}`,
   }));
-  const upgraded = mergeVisualPlan(generated, oldPlan, [], null, 2);
-  assert.deepEqual(upgraded.map((item) => item.assetReferenceId), oldPlan.map((item) => item.assetReferenceId));
+  const upgraded = mergeVisualPlan(generated, oldPlan, 2);
+  assert.deepEqual(upgraded.map((item) => item.assetId), oldPlan.map((item) => item.assetId));
   assert.equal(upgraded[1].generationMode, 'INFOGRAPHIC');
   assert.doesNotMatch(upgraded[1].prompt, /不在图片内生成文字/);
 });
 
 test('当前版本方案保留用户已经编辑的内容和绑定', () => {
   const generated = buildVisualPlan(article, 'WECHAT');
-  const persisted = generated.map((item, index) => ({ ...item, purpose: `自定义 ${index}`, assetReferenceId: index ? `body-${index}` : 'cover-id' }));
-  assert.deepEqual(mergeVisualPlan(generated, persisted, [], null, VISUAL_PLAN_VERSION), persisted);
+  const persisted = generated.map((item, index) => ({ ...item, purpose: `自定义 ${index}`, assetId: index ? `body-${index}` : 'cover-id' }));
+  assert.deepEqual(mergeVisualPlan(generated, persisted, VISUAL_PLAN_VERSION), persisted);
 });
 
 test('微博当前版本的空方案会被保留，不会在刷新后重新生成主图', () => {
   const generated = buildVisualPlan(article, 'WEIBO');
-  assert.deepEqual(mergeVisualPlan(generated, [], [], null, VISUAL_PLAN_VERSION), []);
+  assert.deepEqual(mergeVisualPlan(generated, [], VISUAL_PLAN_VERSION), []);
 });
 
 test('公众号支持指定正文插图数量，封面单独计算', () => {
@@ -166,18 +171,18 @@ test('调整配图数量时保留现有项和素材绑定，新项目保持未�
   const initial = buildVisualPlan(article, 'WECHAT', { bodyItemCount: 3 }).map((item, index) => ({
     ...item,
     purpose: `用户调整 ${index}`,
-    assetReferenceId: `asset-${index}`,
+    assetId: `asset-${index}`,
   }));
   const expanded = resizeVisualPlan(buildVisualPlan(article, 'WECHAT', { bodyItemCount: 5 }), initial);
   assert.equal(expanded.length, 6);
-  assert.deepEqual(expanded.slice(0, 4).map((item) => item.assetReferenceId), ['asset-0', 'asset-1', 'asset-2', 'asset-3']);
-  assert.ok(expanded.slice(4).every((item) => item.assetReferenceId === null));
+  assert.deepEqual(expanded.slice(0, 4).map((item) => item.assetId), ['asset-0', 'asset-1', 'asset-2', 'asset-3']);
+  assert.ok(expanded.slice(4).every((item) => item.assetId === null));
   assert.equal(expanded[1].purpose, '用户调整 1');
 
   const reduced = resizeVisualPlan(buildVisualPlan(article, 'WECHAT', { bodyItemCount: 2 }), expanded);
   assert.equal(reduced.length, 3);
-  assert.deepEqual(reduced.map((item) => item.assetReferenceId), ['asset-0', 'asset-1', 'asset-2']);
-  assert.ok(reduced.every((item) => !['asset-3', 'asset-4', 'asset-5'].includes(item.assetReferenceId)));
+  assert.deepEqual(reduced.map((item) => item.assetId), ['asset-0', 'asset-1', 'asset-2']);
+  assert.ok(reduced.every((item) => !['asset-3', 'asset-4', 'asset-5'].includes(item.assetId)));
 });
 
 test('视觉导演按正文表达任务选择思维导图、流程图、时间线和对比图', () => {
@@ -269,19 +274,19 @@ test('项目统一补充要求会进入每张图的提示词', () => {
 });
 
 test('重新规划默认保留已选图片，用户明确取消时只解除正文图绑定', () => {
-  const current = buildVisualPlan(article, 'WECHAT', { bodyItemCount: 3 }).map((item, index) => ({ ...item, assetReferenceId: `asset-${index}` }));
+  const current = buildVisualPlan(article, 'WECHAT', { bodyItemCount: 3 }).map((item, index) => ({ ...item, assetId: `asset-${index}` }));
   const kept = replanVisualPlan({ ...article, body: `新的正文先解释普通人使用中继卫星服务的实际场景。\n\n${article.body}` }, 'WECHAT', current, {
     bodyItemCount: 3,
     styleProfile: { preset: 'RETRO_POP', customPrompt: '统一使用薄荷绿边框' },
   });
-  assert.deepEqual(kept.map((item) => item.assetReferenceId), current.map((item) => item.assetReferenceId));
+  assert.deepEqual(kept.map((item) => item.assetId), current.map((item) => item.assetId));
   assert.notEqual(kept[1].prompt, current[1].prompt);
   assert.match(kept[1].prompt, /清新波普怀旧/);
   assert.match(kept[1].prompt, /统一使用薄荷绿边框/);
 
   const cleared = replanVisualPlan(article, 'WECHAT', current, { bodyItemCount: 3, keepAssignedAssets: false });
-  assert.equal(cleared[0].assetReferenceId, 'asset-0');
-  assert.ok(cleared.slice(1).every((item) => item.assetReferenceId === null));
+  assert.equal(cleared[0].assetId, 'asset-0');
+  assert.ok(cleared.slice(1).every((item) => item.assetId === null));
 });
 
 test('视觉提示词包含结构内容和参考图用途但不暴露项目文件名', () => {
@@ -293,7 +298,7 @@ test('视觉提示词包含结构内容和参考图用途但不暴露项目文�
       { label: '传统方式', detail: '手工整理，启动快但容易遗漏' },
       { label: '智能方式', detail: '自动归类，需要人工复核' },
     ],
-    references: [{ referenceId: '11111111-1111-4111-8111-111111111111', uses: ['COLOR', 'LAYOUT'] }],
+    references: [{ assetId: '11111111-1111-4111-8111-111111111111', uses: ['COLOR', 'LAYOUT'] }],
   }, { platform: 'WECHAT', title: article.title }, { preset: 'FRESH_EDITORIAL' });
   assert.match(updated.prompt, /传统方式：手工整理/);
   assert.match(updated.prompt, /参考图只用于参考色彩、排版/);
@@ -317,11 +322,11 @@ test('第三版方案升级视觉导演字段时保留用户内容和最终图�
     prompt: '旧提示词',
     negativePrompt: '旧负面提示词',
     size: item.size,
-    assetReferenceId: `asset-${index}`,
+    assetId: `asset-${index}`,
   }));
-  const upgraded = mergeVisualPlan(generated, oldPlan, [], null, 3);
+  const upgraded = mergeVisualPlan(generated, oldPlan, 3);
   assert.equal(VISUAL_PLAN_VERSION, 7);
-  assert.deepEqual(upgraded.map((item) => item.assetReferenceId), oldPlan.map((item) => item.assetReferenceId));
+  assert.deepEqual(upgraded.map((item) => item.assetId), oldPlan.map((item) => item.assetId));
   assert.deepEqual(upgraded.map((item) => item.purpose), oldPlan.map((item) => item.purpose));
   assert.deepEqual(upgraded.map((item) => item.informationPoints), oldPlan.map((item) => item.informationPoints));
   assert.ok(upgraded.every((item) => item.stylePreset === 'INHERIT' && Array.isArray(item.references) && item.templatePreset));
@@ -334,10 +339,10 @@ test('第四版方案升级时移除独立负面提示词并保留图片绑定',
   const oldPlan = generated.map((item, index) => ({
     ...item,
     negativePrompt: '文字、水印、低清晰度',
-    assetReferenceId: `asset-${index}`,
+    assetId: `asset-${index}`,
   }));
-  const upgraded = mergeVisualPlan(generated, oldPlan, [], null, 4);
+  const upgraded = mergeVisualPlan(generated, oldPlan, 4);
   assert.ok(upgraded.every((item) => !Object.hasOwn(item, 'negativePrompt')));
-  assert.deepEqual(upgraded.map((item) => item.assetReferenceId), oldPlan.map((item) => item.assetReferenceId));
+  assert.deepEqual(upgraded.map((item) => item.assetId), oldPlan.map((item) => item.assetId));
   assert.ok(upgraded.every((item) => item.prompt.includes('水印')));
 });

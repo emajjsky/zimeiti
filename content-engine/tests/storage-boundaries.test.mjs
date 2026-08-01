@@ -38,8 +38,11 @@ test('项目迁移移出快照且恢复脚本默认只预演并拒绝覆盖', ()
   assert.match(timestampMigration, /jsonb_array_elements\(COALESCE\(project\.project_json->'versions'/);
   assert.match(recovery, /const apply = process\.argv\.includes\('--apply'\)/);
   assert.match(recovery, /目标工作空间已有项目，拒绝覆盖恢复/);
-  assert.match(recovery, /uniqueVisualReferences\(references\)/);
-  assert.match(recovery, /item\.assetReferenceId = assignableReferences\[index\]\?\.id \?\? null/);
+  assert.match(recovery, /uniqueVisualAssets\(assets\)/);
+  assert.match(recovery, /item\.assetId = assignableAssets\[index\]\?\.asset_id \?\? null/);
+  assert.match(recovery, /project_asset_links/);
+  assert.match(recovery, /workspace_assets/);
+  assert.doesNotMatch(recovery, /assetReferenceId|coverReferenceId|assetReferenceIds/);
 });
 
 test('空间素材成为文件唯一所有者且项目只保留引用关系', () => {

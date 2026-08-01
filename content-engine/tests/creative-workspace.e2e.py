@@ -140,7 +140,7 @@ with sync_playwright() as playwright:
             "summaries": [],
             "activeRun": active_run,
             "artifacts": artifacts,
-            "usedMaterialIds": {"inputIds": [], "referenceIds": []},
+            "usedMaterialIds": {"inputIds": [], "referenceIds": [], "assetIds": []},
         }
 
     def handle_api(route):
@@ -160,7 +160,8 @@ with sync_playwright() as playwright:
         if path == f"/api/v1/creative/projects/{PROJECT_ID}/materials" and method == "GET":
             return respond(route, {
                 "inputs": [{"id": "input-1", "kind": "IDEA", "title": "我的测试", "body": "我实际用过这个工具。", "scope": "PROJECT", "platforms": [], "createdAt": NOW, "updatedAt": NOW}],
-                "references": [{"id": "reference-1", "sourceType": "LINK", "role": "FACT", "scope": "RESEARCH", "title": "官方说明", "url": "https://example.com/docs", "notes": "", "platforms": ["WECHAT"], "mimeType": None, "originalFilename": None, "sizeBytes": None, "createdAt": NOW, "updatedAt": NOW}],
+                "references": [{"id": "reference-1", "sourceType": "LINK", "role": "FACT", "scope": "RESEARCH", "title": "官方说明", "url": "https://example.com/docs", "notes": "", "platforms": ["WECHAT"], "createdAt": NOW, "updatedAt": NOW}],
+                "assets": [],
             })
         if path == f"/api/v1/creative/projects/{PROJECT_ID}/agent" and method == "GET":
             return respond(route, agent_context())

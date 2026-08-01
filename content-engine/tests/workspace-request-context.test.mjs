@@ -48,8 +48,8 @@ test('Web API 为全部空间内请求注入当前空间', () => {
   assert.match(webApi, /workspaceScoped = true/);
   assert.match(webApi, /auth\/me[\s\S]*workspaceScoped: false/);
   assert.match(webApi, /requestWorkspaceContent[\s\S]*'X-Workspace-Id'/);
-  assert.match(webApi, /projectFile[\s\S]*requestWorkspaceContent\(`\/creative\/project-files/);
   assert.match(webApi, /content\(assetId[\s\S]*requestWorkspaceContent\(`\/assets/);
+  assert.doesNotMatch(webApi, /projectFile|project-files/);
 });
 
 test('客户端会话只保存空间列表和当前空间 ID', () => {

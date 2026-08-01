@@ -31,6 +31,7 @@ const {
   buildVisualPlanningRepairPrompt,
   parseVisualPlanningContent,
   mergePlannedItems,
+  validateVisualPlanImageCount,
 } = require('./services/visual-planning.cjs');
 const {
   confirmProjectPlanning,
@@ -46,9 +47,8 @@ const {
 const { createProjectMaterialStore } = require('./services/projectMaterials.cjs');
 const { createProjectAgentStore, artifactView, runView } = require('./services/project-agent.cjs');
 const { loadContentMasterState } = require('./services/content-master.cjs');
-const { saveProjectUpload, saveRemoteProjectImage, removeProjectUpload, openProjectUpload, readProjectUploadText } = require('./services/projectUploadStorage.cjs');
 const { createAssetStore } = require('./services/assets.cjs');
-const { saveUploadedAsset, saveRemoteImageAsset, openAsset, removeAssetFile } = require('./services/assetStorage.cjs');
+const { detectFileType, safePath, saveUploadedAsset, saveRemoteImageAsset, openAsset, readAssetText, removeAssetFile } = require('./services/assetStorage.cjs');
 const { PROJECT_RESEARCH_ACTION_VERSION, PROJECT_RESEARCH_SCOPE, researchRunView, researchPlanView } = require('./services/project-research.cjs');
 const { PROJECT_RESEARCH_SOURCES_VERSION, researchSourceActions } = require('./services/project-research-sources.cjs');
 const { SOURCE_VERIFICATION_SCOPE, SOURCE_VERIFICATION_VERSION, defaultSourceVerificationTemplate, validateSourceVerificationTemplate } = require('./services/source-verification.cjs');
@@ -93,7 +93,7 @@ const visualGenerationInput = z.object({
   platform: creativePlatform,
   prompt: z.string().trim().min(4).max(8_000),
   size: z.enum(['1:1', '3:4', '4:3', '9:16', '16:9']).default('3:4'),
-  referenceImageIds: z.array(z.string().uuid()).max(3).default([]),
+  assetIds: z.array(z.string().uuid()).max(3).default([]),
 });
 const visualStylePreset = z.enum([
   'FRESH_EDITORIAL', 'BUSINESS_EDITORIAL', 'SWISS_GRID', 'DOCUMENTARY', 'CINEMATIC_DOCUMENTARY', 'MONO_EDITORIAL', 'NEWSPAPER_EDITORIAL', 'LIFESTYLE_PHOTO',
@@ -118,10 +118,10 @@ const visualPlanItemInput = z.object({
   templatePreset: z.string().trim().min(1).max(80),
   sourceExcerpt: z.string().trim().max(4_000).default(''),
   contentBlocks: z.array(z.object({ label: z.string().trim().min(1).max(80), detail: z.string().trim().min(1).max(300) })).min(1).max(8),
-  references: z.array(z.object({ referenceId: z.string().uuid(), uses: z.array(visualReferenceUse).min(1).max(5) })).max(3).default([]),
+  references: z.array(z.object({ assetId: z.string().uuid(), uses: z.array(visualReferenceUse).min(1).max(5) })).max(3).default([]),
   prompt: z.string().trim().min(4).max(8_000),
   size: z.enum(['1:1', '3:4', '4:3', '9:16', '16:9']),
-  assetReferenceId: z.string().uuid().nullable(),
+  assetId: z.string().uuid().nullable(),
 });
 const visualPlanningInput = z.object({
   platform: creativePlatform,
@@ -184,9 +184,11 @@ const projectResearchInput = z.object({
   request: z.string().trim().min(1).max(2_000),
   inputIds: z.array(z.string().uuid()).max(20).default([]),
   referenceIds: z.array(z.string().uuid()).max(20).default([]),
+  assetIds: z.array(z.string().uuid()).max(20).default([]),
 }).superRefine((value, context) => {
-  if (value.inputIds.length + value.referenceIds.length === 0) context.addIssue({ code: 'custom', path: ['inputIds'], message: '请至少选择一条项目资料。' });
-  if (value.inputIds.length + value.referenceIds.length > 20) context.addIssue({ code: 'custom', path: ['inputIds'], message: '单次最多选择 20 条项目资料。' });
+  const materialCount = value.inputIds.length + value.referenceIds.length + value.assetIds.length;
+  if (materialCount === 0) context.addIssue({ code: 'custom', path: ['inputIds'], message: '请至少选择一条项目资料。' });
+  if (materialCount > 20) context.addIssue({ code: 'custom', path: ['inputIds'], message: '单次最多选择 20 条项目资料。' });
 });
 const projectAgentQuery = z.object({
   stage: z.enum(['RESEARCH', 'COPY', 'VISUAL', 'LAYOUT', 'REVIEW']),
@@ -204,6 +206,7 @@ const agentPrepareInput = z.object({
   }).refine((value) => value.end > value.start, '选区结束位置必须大于开始位置。').optional(),
   inputIds: z.array(z.string().uuid()).max(20).default([]),
   referenceIds: z.array(z.string().uuid()).max(20).default([]),
+  assetIds: z.array(z.string().uuid()).max(20).default([]),
 });
 const simplifiedResearchStartInput = z.object({
   request: z.string().trim().max(2_000).optional(),
@@ -1159,27 +1162,27 @@ app.post('/api/v1/creative/projects/:projectId/visual/generate', { preHandler: w
   const input = visualGenerationInput.parse(request.body);
   const workspace = request.workspace;
   await creativeProject(workspace.id, projectId);
-  const operation = input.referenceImageIds.length ? 'IMAGE_TO_IMAGE' : 'TEXT_TO_IMAGE';
+  const operation = input.assetIds.length ? 'IMAGE_TO_IMAGE' : 'TEXT_TO_IMAGE';
   let policy = await query('SELECT provider, model FROM agent_model_policies WHERE workspace_id = $1 AND scope = $2', [workspace.id, operation]);
   if (!policy.rowCount && operation === 'IMAGE_TO_IMAGE') policy = await query("SELECT provider, model FROM agent_model_policies WHERE workspace_id = $1 AND scope = 'TEXT_TO_IMAGE'", [workspace.id]);
   if (!policy.rowCount) { const error = new Error(`请先在“模型与 API”中为${operation === 'IMAGE_TO_IMAGE' ? '图生图' : '文生图'}选择模型。`); error.statusCode = 400; throw error; }
   if (policy.rows[0].provider !== 'BAILIAN_CLI') { const error = new Error('当前版本的 AI 生图仅支持已配置的百炼 CLI 文生图模型。'); error.statusCode = 400; throw error; }
   const model = policy.rows[0].model;
   const apiKey = await credentialSecret(workspace.id, 'BAILIAN');
-  const snapshot = input.referenceImageIds.length
-    ? await projectMaterialStore.researchSnapshot(workspace.id, projectId, [], input.referenceImageIds)
-    : { references: [] };
-  const referenceImages = snapshot.references.map((item) => {
-    if (!item.mime_type?.startsWith('image/') && !/\.(?:png|jpe?g|webp|gif)$/i.test(item.url ?? item.original_filename ?? '')) {
-      const error = new Error(`“${item.title}”不是可用的参考图片。`); error.statusCode = 400; throw error;
-    }
-    return item.storage_key ? path.join(config.uploadRoot, item.storage_key) : item.url;
-  }).filter(Boolean);
+  const linkedAssets = input.assetIds.length ? await assetStore.listProject(workspace.id, projectId) : [];
+  const linkedAssetIds = new Set(linkedAssets.map((asset) => asset.id));
+  if (input.assetIds.some((assetId) => !linkedAssetIds.has(assetId))) throw businessError(400, 'PROJECT_ASSET_REQUIRED', '参考图必须先关联到当前项目。');
+  const referenceAssets = await Promise.all(input.assetIds.map((assetId) => assetStore.getStored(workspace.id, assetId)));
+  const referenceImages = referenceAssets.map((asset) => {
+    if (!asset.mime_type?.startsWith('image/')) throw businessError(400, 'ASSET_NOT_IMAGE', `“${asset.title}”不是可用的参考图片。`);
+    return safePath(config.uploadRoot, asset.storage_key);
+  });
   const jobFolder = path.join(config.uploadRoot, workspace.id, createHash('sha256').update(projectId).digest('hex').slice(0, 20), 'generated', randomUUID());
   const startedAt = Date.now();
+  let assetPersisted = false;
   try {
     await fs.mkdir(jobFolder, { recursive: true });
-    const command = input.referenceImageIds.length ? 'edit' : 'generate';
+    const command = input.assetIds.length ? 'edit' : 'generate';
     const args = ['image', command, '--prompt', input.prompt, '--model', model, '--size', input.size, '--n', '1', '--out-dir', jobFolder, '--out-prefix', 'visual', '--output', 'json', '--quiet'];
     for (const image of referenceImages) args.push('--image', image);
     await runBailianCli(args, apiKey, 180_000);
@@ -1188,17 +1191,33 @@ app.post('/api/v1/creative/projects/:projectId/visual/generate', { preHandler: w
     if (!image) throw new Error('模型未返回可保存的图片文件。');
     const absolutePath = path.join(jobFolder, image.name);
     const content = await fs.readFile(absolutePath);
-    const reference = await projectMaterialStore.createReference(workspace.id, projectId, {
-      sourceType: 'FILE', role: 'VISUAL', title: `AI 配图 · ${input.prompt.slice(0, 38)}`,
-      notes: `AI 生图｜模型：${model}｜比例：${input.size}${referenceImages.length ? `｜参考图：${referenceImages.length} 张` : ''}`, scope: 'IMAGING', platforms: [input.platform],
-      storageKey: path.relative(config.uploadRoot, absolutePath).split(path.sep).join('/'), originalFilename: image.name,
-      mimeType: generatedImageMime(image.name), sizeBytes: content.length, sha256: createHash('sha256').update(content).digest('hex'),
+    const detected = detectFileType(content, generatedImageMime(image.name));
+    if (detected.kind !== 'IMAGE') throw businessError(400, 'ASSET_TYPE_MISMATCH', '模型返回的文件不是可用图片。');
+    const stored = {
+      kind: detected.kind,
+      storageKey: path.relative(config.uploadRoot, absolutePath).split(path.sep).join('/'),
+      originalFilename: image.name,
+      mimeType: detected.mimeType,
+      sizeBytes: content.length,
+      sha256: createHash('sha256').update(content).digest('hex'),
+      sourceUrl: null,
+    };
+    const created = await assetStore.createFromStoredFile(workspace.id, request.user.sub, stored, {
+      origin: 'AI_GENERATED',
+      title: `AI 配图 · ${input.prompt.slice(0, 38)}`,
+      sourceNote: `AI 生图｜模型：${model}｜比例：${input.size}${referenceImages.length ? `｜参考图：${referenceImages.length} 张` : ''}`,
+      copyrightStatus: 'OWNED',
+    });
+    assetPersisted = true;
+    if (!created.created) await fs.rm(jobFolder, { recursive: true, force: true });
+    const projectAsset = await assetStore.linkToProject(workspace.id, projectId, created.asset.id, {
+      role: 'VISUAL', scope: 'IMAGING', title: created.asset.title, notes: created.asset.sourceNote, platforms: [input.platform],
     });
     await query(`INSERT INTO api_usage_logs (workspace_id, provider, model, operation, status, duration_ms)
       VALUES ($1, 'BAILIAN_CLI', $2, $3, 'SUCCESS', $4)`, [workspace.id, model, operation, Date.now() - startedAt]);
-    reply.code(201).send({ reference });
+    reply.code(created.created ? 201 : 200).send({ asset: created.asset, projectAsset });
   } catch (error) {
-    await fs.rm(jobFolder, { recursive: true, force: true }).catch(() => {});
+    if (!assetPersisted) await fs.rm(jobFolder, { recursive: true, force: true }).catch(() => {});
     await query(`INSERT INTO api_usage_logs (workspace_id, provider, model, operation, status, duration_ms, error)
       VALUES ($1, 'BAILIAN_CLI', $2, $3, 'ERROR', $4, $5)`, [workspace.id, model, operation, Date.now() - startedAt, (error instanceof Error ? error.message : '图片生成失败').slice(0, 2_000)]);
     throw error;
@@ -1213,58 +1232,6 @@ app.post('/api/v1/creative/projects/:projectId/references', { preHandler: worksp
   reply.code(201).send(await projectMaterialStore.createReference(workspace.id, projectId, { ...input, sourceType: 'LINK' }));
 });
 
-app.post('/api/v1/creative/projects/:projectId/images/import', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
-  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
-  const input = projectReferenceMetadata.extend({
-    url: z.string().url().max(2_000).refine((value) => /^https?:\/\//i.test(value), '只支持 HTTP(S) 公开图片。'),
-  }).parse(request.body);
-  const workspace = request.workspace;
-  await creativeProject(workspace.id, projectId);
-  const stored = await saveRemoteProjectImage(config.uploadRoot, workspace.id, projectId, input.url);
-  try {
-    const notes = [input.notes?.trim(), `原图链接：${stored.sourceUrl}`].filter(Boolean).join('\n');
-    const reference = await projectMaterialStore.createReference(workspace.id, projectId, {
-      ...input,
-      ...stored,
-      url: null,
-      notes,
-      sourceType: 'FILE',
-    });
-    reply.code(201).send(reference);
-  } catch (error) {
-    await removeProjectUpload(config.uploadRoot, stored.storageKey).catch(() => {});
-    throw error;
-  }
-});
-
-app.post('/api/v1/creative/projects/:projectId/files', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
-  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
-  const queryInput = z.object({
-    title: z.string().trim().max(200).optional(),
-    role: projectReferenceRole,
-    scope: projectScope,
-    platforms: z.string().max(80).optional(),
-    notes: z.string().max(4_000).optional(),
-  }).parse(request.query);
-  const platforms = queryInput.platforms ? queryInput.platforms.split(',').filter(Boolean) : [];
-  projectPlatforms.parse(platforms);
-  const workspace = request.workspace;
-  await creativeProject(workspace.id, projectId);
-  const part = await request.file();
-  if (!part) throw new Error('请选择要上传的文件。');
-  const stored = await saveProjectUpload(config.uploadRoot, workspace.id, projectId, part);
-  try {
-    const created = await projectMaterialStore.createReference(workspace.id, projectId, {
-      sourceType: 'FILE', role: queryInput.role, title: queryInput.title || stored.originalFilename,
-      notes: queryInput.notes ?? '', scope: queryInput.scope, platforms, ...stored,
-    });
-    reply.code(201).send(created);
-  } catch (error) {
-    await removeProjectUpload(config.uploadRoot, stored.storageKey).catch(() => {});
-    throw error;
-  }
-});
-
 app.put('/api/v1/creative/project-references/:id', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const id = z.string().uuid().parse(request.params.id);
   const workspace = request.workspace;
@@ -1274,19 +1241,8 @@ app.put('/api/v1/creative/project-references/:id', { preHandler: workspaceAccess
 app.delete('/api/v1/creative/project-references/:id', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const id = z.string().uuid().parse(request.params.id);
   const workspace = request.workspace;
-  const removed = await projectMaterialStore.removeReference(workspace.id, id);
-  if (removed.storage_key) await removeProjectUpload(config.uploadRoot, removed.storage_key).catch((error) => request.log.warn({ error }, '清理项目素材文件失败'));
+  await projectMaterialStore.removeReference(workspace.id, id);
   reply.code(204).send();
-});
-
-app.get('/api/v1/creative/project-files/:id/content', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request, reply) => {
-  const id = z.string().uuid().parse(request.params.id);
-  const workspace = request.workspace;
-  const reference = await projectMaterialStore.getReference(workspace.id, id);
-  if (reference.source_type !== 'FILE' || !reference.storage_key) { const error = new Error('这条参考资料没有文件内容。'); error.statusCode = 404; throw error; }
-  const filename = encodeURIComponent(reference.original_filename || 'project-material');
-  reply.type(reference.mime_type).header('Content-Length', reference.size_bytes).header('Cache-Control', 'private, max-age=3600').header('X-Content-Type-Options', 'nosniff').header('Content-Security-Policy', 'sandbox').header('Content-Disposition', `inline; filename*=UTF-8''${filename}`);
-  return reply.send(openProjectUpload(config.uploadRoot, reference.storage_key));
 });
 
 async function projectResearchMaterialSnapshot(rows) {
@@ -1302,10 +1258,10 @@ async function projectResearchMaterialSnapshot(rows) {
     platforms: row.platforms_json ?? [], content: take(row.body),
   }));
   const references = [];
-  for (const row of rows.references) {
+  for (const row of [...rows.references, ...rows.assets]) {
     let extractedText = '';
-    if (remaining > 0 && row.source_type === 'FILE' && ['text/plain', 'text/markdown'].includes(row.mime_type)) {
-      extractedText = take(await readProjectUploadText(config.uploadRoot, row.storage_key, Math.min(3_000, remaining)));
+    if (remaining > 0 && row.source_type === 'ASSET' && ['text/plain', 'text/markdown'].includes(row.mime_type)) {
+      extractedText = take(await readAssetText(config.uploadRoot, row.storage_key, Math.min(3_000, remaining)));
     }
     references.push({
       id: row.id, type: row.source_type, role: row.role, title: row.title, notes: row.notes,
@@ -1319,11 +1275,12 @@ async function projectResearchMaterialSnapshot(rows) {
 }
 
 async function researchMaterialIds(runId) {
-  if (!runId) return { inputIds: [], referenceIds: [] };
-  const result = await query('SELECT input_id, reference_id FROM project_research_materials WHERE generation_run_id = $1', [runId]);
+  if (!runId) return { inputIds: [], referenceIds: [], assetIds: [] };
+  const result = await query('SELECT input_id, reference_id, asset_link_id FROM project_research_materials WHERE generation_run_id = $1', [runId]);
   return {
     inputIds: result.rows.flatMap((row) => row.input_id ? [row.input_id] : []),
     referenceIds: result.rows.flatMap((row) => row.reference_id ? [row.reference_id] : []),
+    assetIds: result.rows.flatMap((row) => row.asset_link_id ? [row.asset_link_id] : []),
   };
 }
 
@@ -1354,7 +1311,8 @@ app.post('/api/v1/creative/projects/:projectId/research/start', { preHandler: wo
   if (!policy.rowCount) { const error = new Error('请先在“核心 Agent”配置可用的规划模型。'); error.statusCode = 400; throw error; }
   const inputIds = listed.inputs.filter((item) => item.scope === 'PROJECT' || item.scope === 'RESEARCH').map((item) => item.id);
   const referenceIds = listed.references.filter((item) => item.scope === 'PROJECT' || item.scope === 'RESEARCH').map((item) => item.id);
-  const materialRows = await projectMaterialStore.researchSnapshot(workspace.id, projectId, inputIds, referenceIds);
+  const assetIds = listed.assets.filter((item) => item.scope === 'PROJECT' || item.scope === 'RESEARCH').map((item) => item.linkId);
+  const materialRows = await projectMaterialStore.researchSnapshot(workspace.id, projectId, inputIds, referenceIds, assetIds);
   const materials = await projectResearchMaterialSnapshot(materialRows);
   const route = { provider: 'BAILIAN_CLI', model: policy.rows[0].model };
   const verificationRoute = verificationPolicy.rowCount ? { provider: 'BAILIAN_CLI', model: verificationPolicy.rows[0].model } : null;
@@ -1379,6 +1337,7 @@ app.post('/api/v1/creative/projects/:projectId/research/start', { preHandler: wo
     ]);
     for (const id of inputIds) await client.query('INSERT INTO project_research_materials (generation_run_id, input_id) VALUES ($1, $2)', [created.rows[0].id, id]);
     for (const id of referenceIds) await client.query('INSERT INTO project_research_materials (generation_run_id, reference_id) VALUES ($1, $2)', [created.rows[0].id, id]);
+    for (const id of assetIds) await client.query('INSERT INTO project_research_materials (generation_run_id, asset_link_id) VALUES ($1, $2)', [created.rows[0].id, id]);
     const job = await client.query("INSERT INTO jobs (workspace_id, job_type, payload_json) VALUES ($1, 'PROJECT_RESEARCH_WORKFLOW', $2) RETURNING *", [workspace.id, JSON.stringify({ runId: created.rows[0].id })]);
     return { run: created.rows[0], job: job.rows[0] };
   });
@@ -1487,7 +1446,7 @@ app.post('/api/v1/creative/projects/:projectId/agent/prepare', { preHandler: wor
       query(`SELECT p.model FROM agent_model_policies p
         JOIN credential_vault c ON c.workspace_id = p.workspace_id AND c.provider = 'BAILIAN' AND c.status = 'READY'
         WHERE p.workspace_id = $1 AND p.scope = $2 AND p.provider = 'BAILIAN_CLI'`, [workspace.id, PROJECT_RESEARCH_SCOPE]),
-      projectMaterialStore.researchSnapshot(workspace.id, projectId, input.inputIds, input.referenceIds),
+      projectMaterialStore.researchSnapshot(workspace.id, projectId, input.inputIds, input.referenceIds, input.assetIds),
     ]);
     if (!policy.rowCount) throw new Error('请先在“核心 Agent”配置可用的规划模型。');
     const materials = await projectResearchMaterialSnapshot(materialRows);
@@ -1512,6 +1471,7 @@ app.post('/api/v1/creative/projects/:projectId/agent/prepare', { preHandler: wor
       ]);
       for (const id of input.inputIds) await client.query('INSERT INTO project_research_materials (generation_run_id, input_id) VALUES ($1, $2)', [created.rows[0].id, id]);
       for (const id of input.referenceIds) await client.query('INSERT INTO project_research_materials (generation_run_id, reference_id) VALUES ($1, $2)', [created.rows[0].id, id]);
+      for (const id of input.assetIds) await client.query('INSERT INTO project_research_materials (generation_run_id, asset_link_id) VALUES ($1, $2)', [created.rows[0].id, id]);
       return created.rows[0];
     });
     reply.code(201).send(runView(run));
@@ -1522,7 +1482,7 @@ app.post('/api/v1/creative/projects/:projectId/agent/prepare', { preHandler: wor
   const [project, context, materialRows, summaries, masterResult, acceptedVersion, acceptedResearch] = await Promise.all([
     creativeProject(workspace.id, projectId),
     creativeSkillStore.getContext(workspace.id, projectId, input.platform),
-    projectMaterialStore.researchSnapshot(workspace.id, projectId, input.inputIds, input.referenceIds),
+    projectMaterialStore.researchSnapshot(workspace.id, projectId, input.inputIds, input.referenceIds, input.assetIds),
     query(`SELECT stage, platform, summary, version FROM project_stage_summaries
       WHERE workspace_id = $1 AND project_id = $2 AND (platform IS NULL OR platform = $3)
       ORDER BY created_at DESC LIMIT 10`, [workspace.id, projectId, input.platform]),
@@ -1932,7 +1892,7 @@ app.post('/api/v1/creative/projects/:projectId/research/prepare', { preHandler: 
     query(`SELECT p.model FROM agent_model_policies p
       JOIN credential_vault c ON c.workspace_id = p.workspace_id AND c.provider = 'BAILIAN' AND c.status = 'READY'
       WHERE p.workspace_id = $1 AND p.scope = $2 AND p.provider = 'BAILIAN_CLI'`, [workspace.id, PROJECT_RESEARCH_SCOPE]),
-    projectMaterialStore.researchSnapshot(workspace.id, projectId, input.inputIds, input.referenceIds),
+    projectMaterialStore.researchSnapshot(workspace.id, projectId, input.inputIds, input.referenceIds, input.assetIds),
   ]);
   if (!policy.rowCount) { const error = new Error('请先在“核心 Agent”配置可用的规划模型。'); error.statusCode = 400; throw error; }
   const materials = await projectResearchMaterialSnapshot(materialRows);
@@ -1949,9 +1909,10 @@ app.post('/api/v1/creative/projects/:projectId/research/prepare', { preHandler: 
     await client.query('INSERT INTO project_agent_messages (workspace_id, project_id, action_run_id, role, content) VALUES ($1, $2, $3, $4, $5)', [workspace.id, projectId, created.rows[0].id, 'USER', input.request]);
     for (const id of input.inputIds) await client.query('INSERT INTO project_research_materials (generation_run_id, input_id) VALUES ($1, $2)', [created.rows[0].id, id]);
     for (const id of input.referenceIds) await client.query('INSERT INTO project_research_materials (generation_run_id, reference_id) VALUES ($1, $2)', [created.rows[0].id, id]);
+    for (const id of input.assetIds) await client.query('INSERT INTO project_research_materials (generation_run_id, asset_link_id) VALUES ($1, $2)', [created.rows[0].id, id]);
     return created.rows[0];
   });
-  reply.code(201).send(researchRunView(run, { inputIds: input.inputIds, referenceIds: input.referenceIds }));
+  reply.code(201).send(researchRunView(run, { inputIds: input.inputIds, referenceIds: input.referenceIds, assetIds: input.assetIds }));
 });
 
 app.post('/api/v1/creative/research-runs/:id/confirm', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
@@ -2431,7 +2392,7 @@ function documentForPlatform(project, platform, visual, now) {
   const paragraphs = String(version?.body ?? '').split(/\n\s*\n|\r?\n/).map((item) => item.trim()).filter(Boolean);
   const assets = visual?.assets ?? [];
   const coverAsset = assets.find((asset) => asset.role === 'COVER');
-  const bodyAssets = assets.filter((asset) => asset.referenceId !== coverAsset?.referenceId);
+  const bodyAssets = assets.filter((asset) => asset.assetId !== coverAsset?.assetId);
   const assetBlock = (asset) => asset.url
     ? `<figure data-placement="${escapeDeliveryHtml(asset.placement ?? '')}"><img src="${escapeDeliveryHtml(asset.url)}" alt="${escapeDeliveryHtml(asset.title)}"/><figcaption>${escapeDeliveryHtml(asset.title)}</figcaption></figure>`
     : `<p>【配图素材：${escapeDeliveryHtml(asset.title)}】</p>`;
@@ -2446,8 +2407,8 @@ function documentForPlatform(project, platform, visual, now) {
     if (asset && (index + 1) % interval === 0) blocks.push(assetBlock(asset));
     return blocks;
   });
-  const used = new Set(bodyAssets.slice(0, Math.floor(paragraphs.length / interval)).map((asset) => asset.referenceId));
-  const remaining = bodyAssets.filter((asset) => !used.has(asset.referenceId)).map(assetBlock);
+  const used = new Set(bodyAssets.slice(0, Math.floor(paragraphs.length / interval)).map((asset) => asset.assetId));
+  const remaining = bodyAssets.filter((asset) => !used.has(asset.assetId)).map(assetBlock);
   const content = `<article>\n<h1>${escapeDeliveryHtml(title)}</h1>\n${coverAsset ? assetBlock(coverAsset) : ''}\n${[...articleBlocks, ...remaining].join('\n')}\n</article>`;
   return { platform, format: 'HTML', content, generatedAt: now };
 }
@@ -2467,12 +2428,17 @@ app.put('/api/v1/creative/projects/:projectId/visual', { preHandler: workspaceAc
       preset: visualStylePreset,
       customPrompt: z.string().trim().max(1_200).default(''),
     }).default({ preset: 'FRESH_EDITORIAL', customPrompt: '' }),
-    coverReferenceId: z.string().uuid().nullable(),
-    assetReferenceIds: z.array(z.string().uuid()).max(12),
+    coverAssetId: z.string().uuid().nullable(),
+    assetIds: z.array(z.string().uuid()).max(12),
     plan: z.array(visualPlanItemInput).max(12).default([]),
   }).superRefine((value, context) => {
-    const assigned = value.plan.map((item) => item.assetReferenceId).filter(Boolean);
+    const assigned = value.plan.map((item) => item.assetId).filter(Boolean);
     if (new Set(assigned).size !== assigned.length) context.addIssue({ code: 'custom', path: ['plan'], message: '同一张图片不能绑定到多个配图位置。' });
+    try {
+      validateVisualPlanImageCount(value.platform, Math.max(value.assetIds.length, value.plan.length));
+    } catch (error) {
+      context.addIssue({ code: 'custom', path: ['assetIds'], message: error instanceof Error ? error.message : '配图数量超过平台上限。' });
+    }
   }).parse(request.body);
   const workspace = request.workspace;
   const existingProject = await creativeProject(workspace.id, projectId);
@@ -2484,17 +2450,17 @@ app.put('/api/v1/creative/projects/:projectId/visual', { preHandler: workspaceAc
   }
   return transaction(async (client) => {
     const listed = await projectMaterialStore.list(workspace.id, projectId);
-    const requested = [...new Set([...input.assetReferenceIds, ...input.plan.map((item) => item.assetReferenceId).filter(Boolean)])];
-    if (input.coverReferenceId && !requested.includes(input.coverReferenceId)) requested.unshift(input.coverReferenceId);
-    const references = listed.references.filter((item) => requested.includes(item.id));
-    if (references.length !== requested.length) { const error = new Error('存在不属于当前项目的素材。'); error.statusCode = 400; throw error; }
-    const invalid = references.find((item) => item.role !== 'VISUAL' && !item.mimeType?.startsWith('image/'));
+    const requested = [...new Set([...input.assetIds, ...input.plan.map((item) => item.assetId).filter(Boolean)])];
+    if (input.coverAssetId && !requested.includes(input.coverAssetId)) requested.unshift(input.coverAssetId);
+    const assets = listed.assets.filter((item) => requested.includes(item.id));
+    if (assets.length !== requested.length) { const error = new Error('存在不属于当前项目的素材。'); error.statusCode = 400; throw error; }
+    const invalid = assets.find((item) => item.kind !== 'IMAGE' || !item.mimeType?.startsWith('image/'));
     if (invalid) { const error = new Error(`“${invalid.title}”不是可用的视觉素材。`); error.statusCode = 400; throw error; }
-    const referenceById = new Map(references.map((item) => [item.id, item]));
+    const assetById = new Map(assets.map((item) => [item.id, item]));
     const assignedKeys = input.plan.flatMap((item) => {
-      if (!item.assetReferenceId) return [];
-      const reference = referenceById.get(item.assetReferenceId);
-      return [reference?.url?.trim() || item.assetReferenceId];
+      if (!item.assetId) return [];
+      const asset = assetById.get(item.assetId);
+      return [asset?.sha256 || item.assetId];
     });
     if (new Set(assignedKeys).size !== assignedKeys.length) { const error = new Error('同一张图片不能绑定到多个配图位置。'); error.statusCode = 400; throw error; }
     const now = new Date().toISOString();
@@ -2505,21 +2471,21 @@ app.put('/api/v1/creative/projects/:projectId/visual', { preHandler: workspaceAc
       const current = state.projects[index];
       const delivery = deliveryOf(current); const currentPlatform = platformDelivery(delivery, input.platform);
       const plannedAssets = input.plan.flatMap((item) => {
-        const reference = item.assetReferenceId ? referenceById.get(item.assetReferenceId) : null;
-        if (!reference) return [];
+        const asset = item.assetId ? assetById.get(item.assetId) : null;
+        if (!asset) return [];
         return [{
-          referenceId: reference.id,
-          title: reference.title,
+          assetId: asset.id,
+          title: asset.title,
           role: item.role === 'COVER' || item.role === 'MAIN' ? 'COVER' : 'BODY',
-          url: reference.url ?? null,
+          url: null,
           planItemId: item.id,
           placement: item.placement,
           purpose: item.purpose,
         }];
       });
-      const plannedIds = new Set(plannedAssets.map((item) => item.referenceId));
-      const unplannedAssets = references.filter((item) => !plannedIds.has(item.id)).map((item) => ({
-        referenceId: item.id, title: item.title, role: item.id === input.coverReferenceId ? 'COVER' : 'BODY', url: item.url ?? null,
+      const plannedIds = new Set(plannedAssets.map((item) => item.assetId));
+      const unplannedAssets = assets.filter((item) => !plannedIds.has(item.id)).map((item) => ({
+        assetId: item.id, title: item.title, role: item.id === input.coverAssetId ? 'COVER' : 'BODY', url: null,
       }));
       project = {
         ...current,
@@ -2528,8 +2494,8 @@ app.put('/api/v1/creative/projects/:projectId/visual', { preHandler: workspaceAc
           platforms: { ...delivery.platforms, [input.platform]: { ...currentPlatform, visual: {
             planVersion: input.planVersion,
             styleProfile: input.styleProfile,
-            coverReferenceId: input.coverReferenceId,
-            assetReferenceIds: requested,
+            coverAssetId: input.coverAssetId,
+            assetIds: requested,
             assets: [...plannedAssets, ...unplannedAssets],
             plan: input.plan,
             updatedAt: now,

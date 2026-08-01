@@ -1,3 +1,5 @@
+const { projectAssetView } = require('./assets.cjs');
+
 function inputView(row) {
   return {
     id: row.id,
@@ -21,10 +23,6 @@ function referenceView(row) {
     title: row.title,
     notes: row.notes,
     url: row.url ?? null,
-    originalFilename: row.original_filename ?? null,
-    mimeType: row.mime_type ?? null,
-    sizeBytes: row.size_bytes === null || row.size_bytes === undefined ? null : Number(row.size_bytes),
-    sha256: row.sha256 ?? null,
     scope: row.scope,
     platforms: row.platforms_json ?? [],
     createdAt: row.created_at,
@@ -50,11 +48,17 @@ function deriveProjectInputTitle(body, kind) {
 
 function createProjectMaterialStore({ query }) {
   async function list(workspaceId, projectId) {
-    const [inputs, references] = await Promise.all([
+    const [inputs, references, assets] = await Promise.all([
       query('SELECT * FROM project_inputs WHERE workspace_id = $1 AND project_id = $2 ORDER BY updated_at DESC', [workspaceId, projectId]),
-      query('SELECT * FROM project_references WHERE workspace_id = $1 AND project_id = $2 ORDER BY updated_at DESC', [workspaceId, projectId]),
+      query("SELECT * FROM project_references WHERE workspace_id = $1 AND project_id = $2 AND source_type = 'LINK' ORDER BY updated_at DESC", [workspaceId, projectId]),
+      query(`SELECT asset.*, link.id AS link_id, link.project_id, link.role, link.scope, link.platforms_json, link.notes,
+        (SELECT count(*) FROM project_asset_links usage WHERE usage.workspace_id = asset.workspace_id AND usage.asset_id = asset.id)::int AS project_count
+        FROM project_asset_links link
+        JOIN workspace_assets asset ON asset.workspace_id = link.workspace_id AND asset.id = link.asset_id
+        WHERE link.workspace_id = $1 AND link.project_id = $2
+        ORDER BY link.sort_order, link.updated_at DESC`, [workspaceId, projectId]),
     ]);
-    return { inputs: inputs.rows.map(inputView), references: references.rows.map(referenceView) };
+    return { inputs: inputs.rows.map(inputView), references: references.rows.map(referenceView), assets: assets.rows.map(projectAssetView) };
   }
 
   async function createInput(workspaceId, projectId, input) {
@@ -82,9 +86,9 @@ function createProjectMaterialStore({ query }) {
 
   async function createReference(workspaceId, projectId, input) {
     const result = await query(`INSERT INTO project_references
-      (workspace_id, project_id, source_type, role, title, notes, url, storage_key, original_filename, mime_type, size_bytes, sha256, scope, platforms_json)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-      RETURNING *`, [workspaceId, projectId, input.sourceType, input.role, input.title.trim(), input.notes?.trim() ?? '', input.url ?? null, input.storageKey ?? null, input.originalFilename ?? null, input.mimeType ?? null, input.sizeBytes ?? null, input.sha256 ?? null, input.scope, JSON.stringify(input.platforms)]);
+      (workspace_id, project_id, source_type, role, title, notes, url, scope, platforms_json)
+      VALUES ($1, $2, 'LINK', $3, $4, $5, $6, $7, $8)
+      RETURNING *`, [workspaceId, projectId, input.role, input.title.trim(), input.notes?.trim() ?? '', input.url, input.scope, JSON.stringify(input.platforms)]);
     return referenceView(result.rows[0]);
   }
 
@@ -108,15 +112,21 @@ function createProjectMaterialStore({ query }) {
     return result.rows[0];
   }
 
-  async function researchSnapshot(workspaceId, projectId, inputIds, referenceIds) {
-    const [inputs, references] = await Promise.all([
+  async function researchSnapshot(workspaceId, projectId, inputIds, referenceIds, assetIds = []) {
+    const [inputs, references, assets] = await Promise.all([
       inputIds.length ? query('SELECT * FROM project_inputs WHERE workspace_id = $1 AND project_id = $2 AND id = ANY($3::uuid[]) ORDER BY updated_at DESC', [workspaceId, projectId, inputIds]) : { rows: [] },
-      referenceIds.length ? query('SELECT * FROM project_references WHERE workspace_id = $1 AND project_id = $2 AND id = ANY($3::uuid[]) ORDER BY updated_at DESC', [workspaceId, projectId, referenceIds]) : { rows: [] },
+      referenceIds.length ? query("SELECT * FROM project_references WHERE workspace_id = $1 AND project_id = $2 AND source_type = 'LINK' AND id = ANY($3::uuid[]) ORDER BY updated_at DESC", [workspaceId, projectId, referenceIds]) : { rows: [] },
+      assetIds.length ? query(`SELECT link.id, asset.id AS asset_id, 'ASSET' AS source_type, link.role, link.scope, link.title, link.notes,
+        asset.mime_type, asset.storage_key, asset.original_filename
+        FROM project_asset_links link
+        JOIN workspace_assets asset ON asset.workspace_id = link.workspace_id AND asset.id = link.asset_id
+        WHERE link.workspace_id = $1 AND link.project_id = $2 AND link.id = ANY($3::uuid[])
+        ORDER BY link.updated_at DESC`, [workspaceId, projectId, assetIds]) : { rows: [] },
     ]);
-    if (inputs.rows.length !== inputIds.length || references.rows.length !== referenceIds.length) {
+    if (inputs.rows.length !== inputIds.length || references.rows.length !== referenceIds.length || assets.rows.length !== assetIds.length) {
       const error = new Error('部分项目资料不存在或不属于当前项目。'); error.statusCode = 400; throw error;
     }
-    return { inputs: inputs.rows, references: references.rows };
+    return { inputs: inputs.rows, references: references.rows, assets: assets.rows };
   }
 
   return { list, createInput, updateInput, removeInput, createReference, updateReference, getReference, removeReference, researchSnapshot };

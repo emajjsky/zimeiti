@@ -532,7 +532,7 @@ export function buildVisualPlan(input, platform, options = {}) {
     generationMode: defaultGenerationMode(coverRole, coverType), informationPoints: coverPurposePoints,
     stylePreset: 'INHERIT', templatePreset: visualTemplatesFor(coverType)[0].id,
     sourceExcerpt: clean(coreMessage || title), contentBlocks: contentBlocksFor(coverType, coreMessage || title, coverFocus, coverPurpose), references: [],
-    size: sizeFor(platform, coverRole), assetReferenceId: null,
+    size: sizeFor(platform, coverRole), assetId: null,
   };
   plan.push({ ...coverItem, ...buildVisualGenerationSpec(coverItem, { platform, title }) });
 
@@ -563,7 +563,7 @@ export function buildVisualPlan(input, platform, options = {}) {
       generationMode: defaultGenerationMode(role, visualType), informationPoints,
       stylePreset: 'INHERIT', templatePreset: visualTemplatesFor(visualType)[0].id,
       sourceExcerpt: clean(section), contentBlocks: contentBlocksFor(visualType, section, focus, purpose), references: [],
-      size: sizeFor(platform, role), assetReferenceId: null,
+      size: sizeFor(platform, role), assetId: null,
     };
     plan.push({ ...item, ...buildVisualGenerationSpec(item, { platform, title }) });
   }
@@ -584,12 +584,12 @@ export function replanVisualPlan(input, platform, current = [], options = {}) {
     const isCover = item.role === 'COVER' || item.role === 'MAIN';
     return {
       ...item,
-      assetReferenceId: isCover || keepAssignedAssets ? previous?.assetReferenceId ?? null : null,
+      assetId: isCover || keepAssignedAssets ? previous?.assetId ?? null : null,
     };
   });
 }
 
-export function mergeVisualPlan(generated, persisted, legacyAssetIds = [], legacyCoverId = null, persistedVersion = 0) {
+export function mergeVisualPlan(generated, persisted, persistedVersion = 0) {
   if (Array.isArray(persisted) && persistedVersion >= VISUAL_PLAN_VERSION) return persisted;
   if (Array.isArray(persisted) && persistedVersion >= 3) {
     const persistedById = new Map(persisted.map((item) => [item.id, item]));
@@ -604,7 +604,7 @@ export function mergeVisualPlan(generated, persisted, legacyAssetIds = [], legac
         searchQueries: previous.searchQueries ?? item.searchQueries,
         informationPoints: previous.informationPoints ?? item.informationPoints,
         size: previous.size ?? item.size,
-        assetReferenceId: previous.assetReferenceId ?? null,
+        assetId: previous.assetId ?? null,
       };
       return updateVisualPlanItem(merged, {}, { platform: item.id.split('-')[0].toUpperCase(), title: generated[0]?.sourceExcerpt || generated[0]?.focus || '未命名内容' });
     });
@@ -613,16 +613,15 @@ export function mergeVisualPlan(generated, persisted, legacyAssetIds = [], legac
     const persistedById = new Map(persisted.map((item) => [item.id, item]));
     return generated.map((item) => {
       const previous = persistedById.get(item.id);
-      return previous ? { ...item, size: previous.size ?? item.size, assetReferenceId: previous.assetReferenceId ?? null } : item;
+      return previous ? { ...item, size: previous.size ?? item.size, assetId: previous.assetId ?? null } : item;
     });
   }
-  const persistedCoverId = Array.isArray(persisted)
-    ? persisted.find((item) => item.role === 'COVER' || item.role === 'MAIN')?.assetReferenceId
+  const coverId = Array.isArray(persisted)
+    ? persisted.find((item) => item.role === 'COVER' || item.role === 'MAIN')?.assetId ?? null
     : null;
-  const coverId = persistedCoverId ?? legacyCoverId ?? legacyAssetIds[0] ?? null;
   return generated.map((item) => ({
     ...item,
-    assetReferenceId: item.role === 'COVER' || item.role === 'MAIN' ? coverId : null,
+    assetId: item.role === 'COVER' || item.role === 'MAIN' ? coverId : null,
   }));
 }
 

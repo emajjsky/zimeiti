@@ -3,7 +3,7 @@ import test from 'node:test';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { buildVisualPlanningPrompt, buildVisualPlanningRepairPrompt, parseVisualPlanningContent, mergePlannedItems } = require('../server/services/visual-planning.cjs');
+const { buildVisualPlanningPrompt, buildVisualPlanningRepairPrompt, parseVisualPlanningContent, mergePlannedItems, validateVisualPlanImageCount } = require('../server/services/visual-planning.cjs');
 
 const item = (role, title, placement) => ({
   role,
@@ -59,6 +59,17 @@ test('微博九张方案使用一张主图加八张后续配图', () => {
   assert.match(prompt.message, /"totalImageCount":9/);
 });
 
+test('保存配图时按平台限制图片总数', () => {
+  assert.doesNotThrow(() => validateVisualPlanImageCount('WECHAT', 12));
+  assert.doesNotThrow(() => validateVisualPlanImageCount('ZHIHU', 12));
+  assert.doesNotThrow(() => validateVisualPlanImageCount('XIAOHONGSHU', 9));
+  assert.doesNotThrow(() => validateVisualPlanImageCount('WEIBO', 9));
+  assert.throws(() => validateVisualPlanImageCount('WECHAT', 13), /公众号最多保存 12 张图片/);
+  assert.throws(() => validateVisualPlanImageCount('ZHIHU', 13), /知乎最多保存 12 张图片/);
+  assert.throws(() => validateVisualPlanImageCount('XIAOHONGSHU', 10), /小红书最多保存 9 张图片/);
+  assert.throws(() => validateVisualPlanImageCount('WEIBO', 10), /微博最多保存 9 张图片/);
+});
+
 test('模型方案必须返回平台所需数量和具体内容', () => {
   const parsed = parseVisualPlanningContent(JSON.stringify({
     strategy: '封面建立主题识别，两张正文图分别解释通信关系和应用价值。',
@@ -82,14 +93,14 @@ test('配图方案拒绝描述模板和字体的伪搜索词', () => {
 
 test('完整重策划保留已选图片，单图重策划只替换当前项', () => {
   const current = [
-    { ...item('COVER', '文章封面', '发布首图'), id: 'wechat-cover', references: [], assetReferenceId: '11111111-1111-4111-8111-111111111111' },
-    { ...item('BODY', '正文插图 1', '正文第一段后'), id: 'wechat-body-1', references: [], assetReferenceId: '22222222-2222-4222-8222-222222222222' },
+    { ...item('COVER', '文章封面', '发布首图'), id: 'wechat-cover', references: [], assetId: '11111111-1111-4111-8111-111111111111' },
+    { ...item('BODY', '正文插图 1', '正文第一段后'), id: 'wechat-body-1', references: [], assetId: '22222222-2222-4222-8222-222222222222' },
   ];
   const full = mergePlannedItems({ platform: 'WECHAT', plannedItems: [item('COVER', '文章封面', '发布首图'), item('BODY', '正文插图 1', '正文第一段后')], currentPlan: current });
-  assert.deepEqual(full.map((entry) => entry.assetReferenceId), current.map((entry) => entry.assetReferenceId));
+  assert.deepEqual(full.map((entry) => entry.assetId), current.map((entry) => entry.assetId));
   const replacement = { ...item('BODY', '时间线', '正文第一段后'), purpose: '用三个明确年份解释中继卫星系统建设进度' };
   const single = mergePlannedItems({ platform: 'WECHAT', plannedItems: [replacement], currentPlan: current, currentItemId: 'wechat-body-1' });
   assert.equal(single[0].title, '文章封面');
   assert.equal(single[1].title, '时间线');
-  assert.equal(single[1].assetReferenceId, current[1].assetReferenceId);
+  assert.equal(single[1].assetId, current[1].assetId);
 });

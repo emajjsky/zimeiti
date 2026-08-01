@@ -10,6 +10,15 @@ const platformNames = {
   WEIBO: '微博',
 };
 
+const visualPlanImageLimits = Object.freeze({ WECHAT: 12, XIAOHONGSHU: 9, ZHIHU: 12, WEIBO: 9 });
+
+function validateVisualPlanImageCount(platform, imageCount) {
+  const limit = visualPlanImageLimits[platform];
+  if (!limit) throw new Error(`不支持的平台：${platform}`);
+  if (!Number.isInteger(imageCount) || imageCount < 0) throw new Error('配图数量必须是非负整数。');
+  if (imageCount > limit) throw new Error(`${platformNames[platform]}最多保存 ${limit} 张图片。`);
+}
+
 const styleNames = {
   FRESH_EDITORIAL: '清新编辑', BUSINESS_EDITORIAL: '商业编辑', SWISS_GRID: '瑞士网格', DOCUMENTARY: '纪实摄影',
   CINEMATIC_DOCUMENTARY: '电影纪实', MONO_EDITORIAL: '黑白编辑', NEWSPAPER_EDITORIAL: '报刊编辑', LIFESTYLE_PHOTO: '生活方式摄影',
@@ -180,7 +189,7 @@ function mergePlannedItems({ platform, plannedItems, currentPlan = [], currentIt
       stylePreset: 'INHERIT',
       templatePreset: 'AI_DIRECTED',
       references: Array.isArray(item.references) ? item.references : [],
-      assetReferenceId: item.assetReferenceId ?? null,
+      assetId: item.assetId ?? null,
     } : item);
   }
   return plannedItems.map((item, zeroIndex) => {
@@ -194,7 +203,7 @@ function mergePlannedItems({ platform, plannedItems, currentPlan = [], currentIt
       stylePreset: 'INHERIT',
       templatePreset: 'AI_DIRECTED',
       references: Array.isArray(previous?.references) ? previous.references : [],
-      assetReferenceId: keepAsset ? previous?.assetReferenceId ?? null : null,
+      assetId: keepAsset ? previous?.assetId ?? null : null,
     };
   });
 }
@@ -207,4 +216,5 @@ module.exports = {
   buildVisualPlanningRepairPrompt,
   parseVisualPlanningContent,
   mergePlannedItems,
+  validateVisualPlanImageCount,
 };

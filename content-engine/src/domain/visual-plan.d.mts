@@ -55,5 +55,5 @@ export function buildVisualGenerationSpec(item: CreativeVisualPlanItem, context:
 export function updateVisualPlanItem(item: CreativeVisualPlanItem, patch: Partial<CreativeVisualPlanItem>, context: VisualGenerationContext, styleProfile?: CreativeVisualStyleProfile): CreativeVisualPlanItem;
 export function buildVisualPlan(input: VisualPlanInput, platform: Exclude<Platform, 'VIDEO_CHANNEL'>, options?: VisualPlanOptions): CreativeVisualPlanItem[];
 export function replanVisualPlan(input: VisualPlanInput, platform: Exclude<Platform, 'VIDEO_CHANNEL'>, current: CreativeVisualPlanItem[], options?: VisualPlanOptions & { keepAssignedAssets?: boolean; styleProfile?: CreativeVisualStyleProfile }): CreativeVisualPlanItem[];
-export function mergeVisualPlan(generated: CreativeVisualPlanItem[], persisted?: CreativeVisualPlanItem[] | null, legacyAssetIds?: string[], legacyCoverId?: string | null, persistedVersion?: number): CreativeVisualPlanItem[];
+export function mergeVisualPlan(generated: CreativeVisualPlanItem[], persisted?: CreativeVisualPlanItem[] | null, persistedVersion?: number): CreativeVisualPlanItem[];
 export function resizeVisualPlan(generated: CreativeVisualPlanItem[], current?: CreativeVisualPlanItem[]): CreativeVisualPlanItem[];

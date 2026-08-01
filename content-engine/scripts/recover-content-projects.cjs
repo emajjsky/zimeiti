@@ -21,14 +21,14 @@ function latestByPlatform(rows) {
   return [...latest.values()];
 }
 
-function visualStyle(references) {
-  return references.some((reference) => String(reference.title).includes('纸张拼贴')) ? 'PAPER_COLLAGE' : 'FRESH_EDITORIAL';
+function visualStyle(assets) {
+  return assets.some((asset) => String(asset.title).includes('纸张拼贴')) ? 'PAPER_COLLAGE' : 'FRESH_EDITORIAL';
 }
 
-function uniqueVisualReferences(references) {
+function uniqueVisualAssets(assets) {
   const seen = new Set();
-  return references.filter((reference) => {
-    const key = String(reference.url || reference.storage_key || reference.id).trim();
+  return assets.filter((asset) => {
+    const key = String(asset.sha256 || asset.asset_id).trim();
     if (!key || seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -36,7 +36,7 @@ function uniqueVisualReferences(references) {
 }
 
 async function recoverProject(workspaceId, projectId, buildVisualPlan, visualPlanVersion) {
-  const [planningRows, briefRows, platformRows, artifactRows, referenceRows, masterRows] = await Promise.all([
+  const [planningRows, briefRows, platformRows, artifactRows, referenceRows, assetRows, masterRows] = await Promise.all([
     query(`SELECT version_number, status, planning_json, source_snapshot_json, created_at, confirmed_at
       FROM project_planning_versions WHERE workspace_id = $1 AND project_id = $2 ORDER BY version_number DESC`, [workspaceId, projectId]),
     query(`SELECT objective, target_audience, core_message, source_requirements, length_target,
@@ -46,8 +46,14 @@ async function recoverProject(workspaceId, projectId, buildVisualPlan, visualPla
       FROM platform_content_versions WHERE workspace_id = $1 AND project_id = $2 ORDER BY platform, version_number DESC`, [workspaceId, projectId]),
     query(`SELECT artifact_type, stage, platform, status, title, metadata_json, created_at, updated_at
       FROM project_artifacts WHERE workspace_id = $1 AND project_id = $2 ORDER BY created_at DESC`, [workspaceId, projectId]),
-    query(`SELECT id, source_type, role, title, notes, url, storage_key, platforms_json, created_at, updated_at
+    query(`SELECT id, source_type, role, title, notes, url, platforms_json, created_at, updated_at
       FROM project_references WHERE workspace_id = $1 AND project_id = $2 ORDER BY created_at`, [workspaceId, projectId]),
+    query(`SELECT link.id AS link_id, asset.id AS asset_id, link.role, link.scope, link.title, link.notes, link.platforms_json,
+        asset.kind, asset.origin, asset.original_filename, asset.mime_type, asset.size_bytes, asset.sha256, asset.created_at, asset.updated_at
+      FROM project_asset_links link
+      JOIN workspace_assets asset ON asset.workspace_id = link.workspace_id AND asset.id = link.asset_id
+      WHERE link.workspace_id = $1 AND link.project_id = $2 AND asset.status = 'ACTIVE'
+      ORDER BY link.sort_order, link.created_at`, [workspaceId, projectId]),
     query(`SELECT thesis, facts_to_verify_json, created_at FROM content_master_versions
       WHERE workspace_id = $1 AND project_id = $2 ORDER BY version_number DESC`, [workspaceId, projectId]),
   ]);
@@ -80,6 +86,7 @@ async function recoverProject(workspaceId, projectId, buildVisualPlan, visualPla
     ...platformRows.rows.map((row) => row.created_at),
     ...artifactRows.rows.flatMap((row) => [row.created_at, row.updated_at]),
     ...referenceRows.rows.flatMap((row) => [row.created_at, row.updated_at]),
+    ...assetRows.rows.flatMap((row) => [row.created_at, row.updated_at]),
     ...masterRows.rows.map((row) => row.created_at),
   ].filter(Boolean).map((value) => new Date(value).getTime());
   const createdAt = new Date(Math.min(...allTimes)).toISOString();
@@ -99,27 +106,27 @@ async function recoverProject(workspaceId, projectId, buildVisualPlan, visualPla
 
   const delivery = { platforms: {} };
   for (const version of versions.filter((item) => item.platform !== 'VIDEO_CHANNEL')) {
-    const references = referenceRows.rows.filter((reference) => reference.platforms_json?.includes(version.platform));
-    if (!references.length) {
+    const assets = assetRows.rows.filter((asset) => asset.kind === 'IMAGE' && (!asset.platforms_json?.length || asset.platforms_json.includes(version.platform)));
+    if (!assets.length) {
       delivery.platforms[version.platform] = { stage: 'COPY', visual: null, review: null };
       continue;
     }
-    const assignableReferences = uniqueVisualReferences(references);
-    const bodyItemCount = version.platform === 'WEIBO' ? references.length : Math.max(0, references.length - 1);
+    const assignableAssets = uniqueVisualAssets(assets);
+    const bodyItemCount = version.platform === 'WEIBO' ? assets.length : Math.max(0, assets.length - 1);
     const plan = buildVisualPlan({ title: version.title || title, body: version.body, category: planning.category, coreMessage: planning.coreMessage }, version.platform, { bodyItemCount });
-    for (const [index, item] of plan.entries()) item.assetReferenceId = assignableReferences[index]?.id ?? null;
-    const assigned = plan.filter((item) => item.assetReferenceId);
-    const coverReferenceId = assigned.find((item) => item.role === 'COVER' || item.role === 'MAIN')?.assetReferenceId ?? assigned[0]?.assetReferenceId ?? null;
+    for (const [index, item] of plan.entries()) item.assetId = assignableAssets[index]?.asset_id ?? null;
+    const assigned = plan.filter((item) => item.assetId);
+    const coverAssetId = assigned.find((item) => item.role === 'COVER' || item.role === 'MAIN')?.assetId ?? assigned[0]?.assetId ?? null;
     delivery.platforms[version.platform] = {
       stage: 'VISUAL',
       visual: {
         planVersion: visualPlanVersion,
-        styleProfile: { preset: visualStyle(references), customPrompt: '' },
-        coverReferenceId,
-        assetReferenceIds: assigned.map((item) => item.assetReferenceId),
+        styleProfile: { preset: visualStyle(assets), customPrompt: '' },
+        coverAssetId,
+        assetIds: assigned.map((item) => item.assetId),
         assets: assigned.map((item) => {
-          const reference = assignableReferences.find((candidate) => candidate.id === item.assetReferenceId);
-          return { referenceId: item.assetReferenceId, title: reference?.title ?? item.title, role: item.role === 'COVER' || item.role === 'MAIN' ? 'COVER' : 'BODY', url: reference?.url ?? null, planItemId: item.id, placement: item.placement, purpose: item.purpose };
+          const asset = assignableAssets.find((candidate) => candidate.asset_id === item.assetId);
+          return { assetId: item.assetId, title: asset?.title ?? item.title, role: item.role === 'COVER' || item.role === 'MAIN' ? 'COVER' : 'BODY', url: null, planItemId: item.id, placement: item.placement, purpose: item.purpose };
         }),
         plan,
         updatedAt,
@@ -128,7 +135,7 @@ async function recoverProject(workspaceId, projectId, buildVisualPlan, visualPla
     };
   }
 
-  const hasVisuals = referenceRows.rows.length > 0;
+  const hasVisuals = assetRows.rows.some((asset) => asset.kind === 'IMAGE');
   const hasVersions = platformVersions.some((version) => String(version.body).trim());
   const stage = hasVisuals ? 'PLATFORM_ADAPTATION' : hasVersions ? 'PLATFORM_ADAPTATION' : confirmedAt ? 'RESEARCH' : latestBrief ? 'MASTER_WRITING' : 'PLANNING';
   const status = hasVisuals ? 'VISUAL' : hasVersions || latestBrief ? 'WRITING' : 'BRIEF';
@@ -168,12 +175,13 @@ async function main() {
     UNION SELECT project_id FROM platform_content_versions WHERE workspace_id = $1
     UNION SELECT project_id FROM project_artifacts WHERE workspace_id = $1
     UNION SELECT project_id FROM project_references WHERE workspace_id = $1
+    UNION SELECT project_id FROM project_asset_links WHERE workspace_id = $1
     UNION SELECT project_id FROM content_master_versions WHERE workspace_id = $1
   ) SELECT project_id FROM ids ORDER BY project_id`, [workspaceId]);
   const projects = [];
   for (const row of ids.rows) projects.push(await recoverProject(workspaceId, row.project_id, buildVisualPlan, VISUAL_PLAN_VERSION));
   projects.sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
-  const summary = projects.map((project) => ({ id: project.id, title: project.title, stage: project.stage, versions: project.versions.length, visuals: Object.values(project.delivery?.platforms ?? {}).reduce((count, item) => count + (item.visual?.assetReferenceIds.length ?? 0), 0) }));
+  const summary = projects.map((project) => ({ id: project.id, title: project.title, stage: project.stage, versions: project.versions.length, visuals: Object.values(project.delivery?.platforms ?? {}).reduce((count, item) => count + (item.visual?.assetIds.length ?? 0), 0) }));
   if (!apply) {
     console.log(JSON.stringify({ apply: false, workspaceId, projects: summary }, null, 2));
     return;
@@ -193,4 +201,4 @@ if (require.main === module) {
   main().catch((error) => { console.error(error); process.exitCode = 1; }).finally(close);
 }
 
-module.exports = { recoverProject, uniqueVisualReferences };
+module.exports = { recoverProject, uniqueVisualAssets };

@@ -156,30 +156,21 @@ export const webCreative = {
   updateVersion: (projectId: string, versionId: string, input: { title: string; body: string }) => request<{ project: ContentProject }>(`/creative/projects/${encodeURIComponent(projectId)}/versions/${encodeURIComponent(versionId)}`, { method: 'PUT', body: JSON.stringify(input) }),
   brief: (projectId: string) => request<{ brief: WritingBrief | null }>(`/creative/projects/${encodeURIComponent(projectId)}/brief`),
   saveBrief: (projectId: string, input: WritingBriefInput) => request<{ brief: WritingBrief }>(`/creative/projects/${encodeURIComponent(projectId)}/brief`, { method: 'PUT', body: JSON.stringify(input) }),
-  materials: (projectId: string) => request<{ inputs: ProjectInput[]; references: ProjectReference[] }>(`/creative/projects/${encodeURIComponent(projectId)}/materials`),
+  materials: (projectId: string) => request<{ inputs: ProjectInput[]; references: ProjectReference[]; assets: ProjectAsset[] }>(`/creative/projects/${encodeURIComponent(projectId)}/materials`),
   createInput: (projectId: string, input: ProjectInputPayload) => request<ProjectInput>(`/creative/projects/${encodeURIComponent(projectId)}/inputs`, { method: 'POST', body: JSON.stringify(input) }),
   updateInput: (id: string, input: ProjectInputPayload) => request<ProjectInput>(`/creative/project-inputs/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(input) }),
   removeInput: (id: string) => request<void>(`/creative/project-inputs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   createReference: (projectId: string, input: ProjectReferenceMetadata & { url: string }) => request<ProjectReference>(`/creative/projects/${encodeURIComponent(projectId)}/references`, { method: 'POST', body: JSON.stringify(input) }),
-  importImage: (projectId: string, input: ProjectReferenceMetadata & { url: string }) => request<ProjectReference>(`/creative/projects/${encodeURIComponent(projectId)}/images/import`, { method: 'POST', body: JSON.stringify(input) }),
   searchImages: (query: string) => request<{ provider: string; results: Array<{ id: string; title: string; thumbnailUrl: string; imageUrl: string; sourceUrl: string; license: string; attribution: string }> }>(`/creative/image-search?q=${encodeURIComponent(query)}`),
   planVisual: (projectId: string, input: { platform: CreativePlatform; bodyItemCount: number; styleProfile: import('../domain/content').CreativeVisualStyleProfile; request?: string; currentItemId?: string; currentPlan?: CreativeVisualPlanItem[]; keepAssignedAssets?: boolean }) => request<{ plan: CreativeVisualPlanItem[]; strategy: string; model: string; provider: string; scope: string }>(`/creative/projects/${encodeURIComponent(projectId)}/visual/plan`, { method: 'POST', body: JSON.stringify(input) }),
-  generateImage: (projectId: string, input: { platform: CreativePlatform; prompt: string; size: '1:1' | '3:4' | '4:3' | '9:16' | '16:9'; referenceImageIds?: string[] }) => request<{ reference: ProjectReference }>(`/creative/projects/${encodeURIComponent(projectId)}/visual/generate`, { method: 'POST', body: JSON.stringify(input) }),
+  generateImage: (projectId: string, input: { platform: CreativePlatform; prompt: string; size: '1:1' | '3:4' | '4:3' | '9:16' | '16:9'; assetIds?: string[] }) => request<{ asset: WorkspaceAsset; projectAsset: ProjectAsset }>(`/creative/projects/${encodeURIComponent(projectId)}/visual/generate`, { method: 'POST', body: JSON.stringify(input) }),
   updateReference: (id: string, input: ProjectReferenceMetadata) => request<ProjectReference>(`/creative/project-references/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(input) }),
   removeReference: (id: string) => request<void>(`/creative/project-references/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  uploadFile: (projectId: string, file: File, input: ProjectReferenceMetadata) => {
-    const params = new URLSearchParams({ title: input.title, role: input.role, scope: input.scope, notes: input.notes, platforms: input.platforms.join(',') });
-    const body = new FormData(); body.append('file', file);
-    return request<ProjectReference>(`/creative/projects/${encodeURIComponent(projectId)}/files?${params}`, { method: 'POST', body });
-  },
-  async projectFile(id: string) {
-    return (await requestWorkspaceContent(`/creative/project-files/${encodeURIComponent(id)}/content`, '读取文件失败')).blob();
-  },
   research: (projectId: string) => request<ProjectResearchContext>(`/creative/projects/${encodeURIComponent(projectId)}/research`),
   startResearch: (projectId: string, input: { request?: string } = {}) => request<ProjectAgentRun>(`/creative/projects/${encodeURIComponent(projectId)}/research/start`, { method: 'POST', body: JSON.stringify(input) }),
   acceptResearchResult: (artifactId: string) => request<{ artifact: ProjectArtifact; project: ContentProject }>(`/creative/research-results/${encodeURIComponent(artifactId)}/accept`, { method: 'POST', body: '{}' }),
   skipResearch: (projectId: string) => request<{ project: ContentProject }>(`/creative/projects/${encodeURIComponent(projectId)}/research/skip`, { method: 'POST', body: '{}' }),
-  prepareResearch: (projectId: string, input: { request: string; inputIds: string[]; referenceIds: string[] }) => request<ProjectResearchRun>(`/creative/projects/${encodeURIComponent(projectId)}/research/prepare`, { method: 'POST', body: JSON.stringify(input) }),
+  prepareResearch: (projectId: string, input: { request: string; inputIds: string[]; referenceIds: string[]; assetIds: string[] }) => request<ProjectResearchRun>(`/creative/projects/${encodeURIComponent(projectId)}/research/prepare`, { method: 'POST', body: JSON.stringify(input) }),
   confirmResearch: (runId: string) => request<{ id: string; status: 'QUEUED'; jobId: string }>(`/creative/research-runs/${encodeURIComponent(runId)}/confirm`, { method: 'POST', body: '{}' }),
   cancelResearch: (runId: string) => request<{ id: string; status: 'CANCELLED' }>(`/creative/research-runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST', body: '{}' }),
   agentContext: (projectId: string, input: { stage: ProjectAgentContext['stage']; platform?: CreativePlatform; history: ProjectAgentHistory }) => {
@@ -202,7 +193,7 @@ export const webCreative = {
   enableProjectPlatform: (projectId: string, platform: CreativePlatform) => request<{ project: ContentProject; platform: CreativePlatform; created: boolean }>(`/creative/projects/${encodeURIComponent(projectId)}/platforms/${encodeURIComponent(platform)}`, { method: 'POST', body: '{}' }),
   completePlatformVersions: (projectId: string, platform: CreativePlatform) => request<{ project: ContentProject }>(`/creative/projects/${encodeURIComponent(projectId)}/platform-versions/complete`, { method: 'POST', body: JSON.stringify({ platform }) }),
   delivery: (projectId: string) => request<{ delivery: CreativeDelivery }>(`/creative/projects/${encodeURIComponent(projectId)}/delivery`),
-  saveVisual: (projectId: string, input: { platform: CreativePlatform; planVersion: number; styleProfile: import('../domain/content').CreativeVisualStyleProfile; coverReferenceId: string | null; assetReferenceIds: string[]; plan: CreativeVisualPlanItem[] }) => request<{ project: ContentProject }>(`/creative/projects/${encodeURIComponent(projectId)}/visual`, { method: 'PUT', body: JSON.stringify(input) }),
+  saveVisual: (projectId: string, input: { platform: CreativePlatform; planVersion: number; styleProfile: import('../domain/content').CreativeVisualStyleProfile; coverAssetId: string | null; assetIds: string[]; plan: CreativeVisualPlanItem[] }) => request<{ project: ContentProject }>(`/creative/projects/${encodeURIComponent(projectId)}/visual`, { method: 'PUT', body: JSON.stringify(input) }),
   completeVisual: (projectId: string, platform: CreativePlatform) => request<{ project: ContentProject }>(`/creative/projects/${encodeURIComponent(projectId)}/visual/complete`, { method: 'POST', body: JSON.stringify({ platform }) }),
   generateLayout: (projectId: string, platform: CreativePlatform) => request<{ project: ContentProject; delivery: CreativeDelivery }>(`/creative/projects/${encodeURIComponent(projectId)}/layout/generate`, { method: 'POST', body: JSON.stringify({ platform }) }),
   completeLayout: (projectId: string, platform: CreativePlatform) => request<{ project: ContentProject }>(`/creative/projects/${encodeURIComponent(projectId)}/layout/complete`, { method: 'POST', body: JSON.stringify({ platform }) }),

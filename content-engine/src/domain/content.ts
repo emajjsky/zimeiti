@@ -125,7 +125,7 @@ export interface ProjectPlanning {
 }
 
 export interface CreativeVisualAsset {
-  referenceId: string;
+  assetId: string;
   title: string;
   role: 'COVER' | 'BODY';
   url?: string | null;
@@ -151,7 +151,7 @@ export interface CreativeVisualStyleProfile {
 }
 
 export interface CreativeVisualReference {
-  referenceId: string;
+  assetId: string;
   uses: CreativeVisualReferenceUse[];
 }
 
@@ -174,14 +174,14 @@ export interface CreativeVisualPlanItem {
   references: CreativeVisualReference[];
   prompt: string;
   size: CreativeVisualSize;
-  assetReferenceId: string | null;
+  assetId: string | null;
 }
 
 export interface CreativeVisualDelivery {
   planVersion?: number;
   styleProfile?: CreativeVisualStyleProfile;
-  coverReferenceId: string | null;
-  assetReferenceIds: string[];
+  coverAssetId: string | null;
+  assetIds: string[];
   assets: CreativeVisualAsset[];
   plan?: CreativeVisualPlanItem[];
   updatedAt: string;

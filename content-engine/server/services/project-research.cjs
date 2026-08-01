@@ -99,7 +99,7 @@ function buildResearchPlanRepairPrompt(system, validationError) {
   return `${system}\n上一次输出未通过结构校验。请只返回修正后的 JSON。校验错误：${validationError}`;
 }
 
-function researchRunView(row, materialIds = { inputIds: [], referenceIds: [] }) {
+function researchRunView(row, materialIds = { inputIds: [], referenceIds: [], assetIds: [] }) {
   if (!row) return null;
   return {
     id: row.id,
@@ -108,7 +108,7 @@ function researchRunView(row, materialIds = { inputIds: [], referenceIds: [] }) 
     model: row.model,
     actionVersion: row.action_version_id,
     materialIds,
-    materialCount: materialIds.inputIds.length + materialIds.referenceIds.length,
+    materialCount: materialIds.inputIds.length + materialIds.referenceIds.length + materialIds.assetIds.length,
     error: row.error ?? undefined,
     jobId: row.job_id ?? undefined,
     createdAt: row.created_at,

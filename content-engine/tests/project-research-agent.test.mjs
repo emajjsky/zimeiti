@@ -1,8 +1,5 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import fsp from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
 import test from 'node:test';
 import { createProjectMaterialStore } from '../server/services/projectMaterials.cjs';
 import {
@@ -12,7 +9,6 @@ import {
 import simplifiedResearch from '../server/services/simplified-research.cjs';
 
 const { workflowSourceActions } = simplifiedResearch;
-import { readProjectUploadText } from '../server/services/projectUploadStorage.cjs';
 
 const validPlan = {
   title: '公众号选题研究计划',
@@ -117,14 +113,17 @@ test('研究资料选择按工作空间和项目隔离', async () => {
   const calls = [];
   const inputId = '11111111-1111-4111-8111-111111111111';
   const referenceId = '22222222-2222-4222-8222-222222222222';
+  const assetLinkId = '33333333-3333-4333-8333-333333333333';
   const store = createProjectMaterialStore({ query: async (sql, params) => {
     calls.push({ sql, params });
     if (/project_inputs/.test(sql)) return { rows: [{ id: inputId }] };
-    return { rows: [{ id: referenceId }] };
+    if (/project_references/.test(sql)) return { rows: [{ id: referenceId }] };
+    return { rows: [{ id: assetLinkId, asset_id: '44444444-4444-4444-8444-444444444444', source_type: 'ASSET', title: '参考图' }] };
   } });
-  await store.researchSnapshot('workspace-a', 'project-a', [inputId], [referenceId]);
-  assert.equal(calls.length, 2);
-  assert.ok(calls.every(({ sql }) => /workspace_id = \$1 AND project_id = \$2/.test(sql)));
+  const snapshot = await store.researchSnapshot('workspace-a', 'project-a', [inputId], [referenceId], [assetLinkId]);
+  assert.equal(calls.length, 3);
+  assert.equal(snapshot.assets[0].source_type, 'ASSET');
+  assert.ok(calls.every(({ sql }) => /workspace_id/.test(sql) && /project_id/.test(sql)));
   assert.ok(calls.every(({ params }) => params[0] === 'workspace-a' && params[1] === 'project-a'));
 
   const missingStore = createProjectMaterialStore({ query: async () => ({ rows: [] }) });
@@ -132,18 +131,10 @@ test('研究资料选择按工作空间和项目隔离', async () => {
     () => missingStore.researchSnapshot('workspace-a', 'project-a', [inputId], []),
     (error) => error.statusCode === 400 && /不属于当前项目/.test(error.message),
   );
-});
-
-test('文本资料读取遵守字节上限并拒绝越界路径', async () => {
-  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'content-engine-research-'));
-  try {
-    await fsp.mkdir(path.join(root, 'workspace'), { recursive: true });
-    await fsp.writeFile(path.join(root, 'workspace', 'notes.txt'), '1234567890更多内容', 'utf8');
-    assert.equal(await readProjectUploadText(root, 'workspace/notes.txt', 10), '1234567890');
-    await assert.rejects(() => readProjectUploadText(root, '../outside.txt', 10), /路径无效/);
-  } finally {
-    await fsp.rm(root, { recursive: true, force: true });
-  }
+  await assert.rejects(
+    () => missingStore.researchSnapshot('workspace-a', 'project-a', [], [], [assetLinkId]),
+    (error) => error.statusCode === 400 && /不属于当前项目/.test(error.message),
+  );
 });
 
 test('研究计划先准备确认卡，用户确认后才入队', () => {
@@ -166,7 +157,7 @@ test('统一 Agent 研究准备接口接受空资料并继续冻结空快照', (
   const researchPrepare = server.slice(start, end);
   assert.ok(start > -1 && end > start);
   assert.doesNotMatch(researchPrepare, /至少选择一条项目资料/);
-  assert.match(researchPrepare, /researchSnapshot\(workspace\.id, projectId, input\.inputIds, input\.referenceIds\)/);
+  assert.match(researchPrepare, /researchSnapshot\(workspace\.id, projectId, input\.inputIds, input\.referenceIds, input\.assetIds\)/);
   assert.match(researchPrepare, /materials, stage: 'RESEARCH'/);
 });
 
@@ -175,8 +166,8 @@ test('项目资料管理与统一研究结果在界面上分离', () => {
   const agent = fs.readFileSync(new URL('../src/workspaces/create/ProjectAgent.tsx', import.meta.url), 'utf8');
   const workspace = fs.readFileSync(new URL('../src/workspaces/create/CreateWorkspace.tsx', import.meta.url), 'utf8');
   const styles = fs.readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
-  assert.match(materials, /我的内容[\s\S]*参考链接[\s\S]*素材文件/);
-  assert.match(materials, /webCreative\.createInput[\s\S]*webCreative\.createReference[\s\S]*webCreative\.uploadFile/);
+  assert.match(materials, /我的内容[\s\S]*参考链接[\s\S]*项目素材/);
+  assert.match(materials, /webCreative\.createInput[\s\S]*webCreative\.createReference[\s\S]*webAssets\.upload[\s\S]*webAssets\.link/);
   assert.doesNotMatch(materials, /selectedInputIds|selectedReferenceIds|webCreative\.agentContext/);
   assert.match(agent, /SimplifiedResearchAgent[\s\S]*ResearchResultPreview/);
   assert.match(agent, /startResearch[\s\S]*skipResearch[\s\S]*acceptResearchResult/);

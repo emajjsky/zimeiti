@@ -148,7 +148,7 @@ function createProjectAgentStore({ query, transaction }) {
         WHERE a.workspace_id = $1 AND a.project_id = $2
           AND ($3::text IS NULL OR a.platform IS NULL OR a.platform = $3)
         ORDER BY a.created_at DESC LIMIT 20`, [workspaceId, projectId, platform]),
-      query(`SELECT m.input_id, m.reference_id
+      query(`SELECT m.input_id, m.reference_id, m.asset_link_id
         FROM project_research_materials m
         JOIN project_research_plans p ON p.generation_run_id = m.generation_run_id
         WHERE p.workspace_id = $1 AND p.project_id = $2
@@ -169,6 +169,7 @@ function createProjectAgentStore({ query, transaction }) {
       usedMaterialIds: {
         inputIds: materials.rows.flatMap((row) => row.input_id ? [row.input_id] : []),
         referenceIds: materials.rows.flatMap((row) => row.reference_id ? [row.reference_id] : []),
+        assetIds: materials.rows.flatMap((row) => row.asset_link_id ? [row.asset_link_id] : []),
       },
     };
   }

@@ -82,15 +82,11 @@ export type ProjectInputPayload = Pick<ProjectInput, 'kind' | 'body' | 'scope' |
 export interface ProjectReference {
   id: string;
   projectId: string;
-  sourceType: 'LINK' | 'FILE';
+  sourceType: 'LINK';
   role: ProjectReferenceRole;
   title: string;
   notes: string;
   url: string | null;
-  originalFilename: string | null;
-  mimeType: string | null;
-  sizeBytes: number | null;
-  sha256: string | null;
   scope: ProjectMaterialScope;
   platforms: CreativePlatform[];
   createdAt: string;
@@ -189,7 +185,7 @@ export interface ProjectAgentContext {
   summaries: ProjectStageSummary[];
   activeRun: ProjectAgentRun | null;
   artifacts: ProjectArtifact[];
-  usedMaterialIds: { inputIds: string[]; referenceIds: string[] };
+  usedMaterialIds: { inputIds: string[]; referenceIds: string[]; assetIds: string[] };
 }
 
 export interface ProjectAgentPrepareInput {
@@ -199,6 +195,7 @@ export interface ProjectAgentPrepareInput {
   selection?: { text: string; start: number; end: number };
   inputIds: string[];
   referenceIds: string[];
+  assetIds: string[];
 }
 
 export type ProjectAgentPrepareResult = ProjectAgentRun | { needsClarification: true; message: ProjectAgentMessage };
@@ -209,7 +206,7 @@ export interface ProjectResearchRun {
   request: string;
   model: string;
   actionVersion: string;
-  materialIds: { inputIds: string[]; referenceIds: string[] };
+  materialIds: { inputIds: string[]; referenceIds: string[]; assetIds: string[] };
   materialCount: number;
   error?: string;
   jobId?: string;
@@ -231,7 +228,7 @@ export interface ProjectResearchContext {
   messages: ProjectAgentMessage[];
   run: ProjectResearchRun | null;
   plan: ProjectResearchPlan | null;
-  usedMaterialIds: { inputIds: string[]; referenceIds: string[] };
+  usedMaterialIds: { inputIds: string[]; referenceIds: string[]; assetIds: string[] };
 }
 
 export interface CreativeSkillDefinition {

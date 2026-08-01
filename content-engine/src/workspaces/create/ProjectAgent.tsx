@@ -10,7 +10,7 @@ type ProjectAgentProps = {
   projectId: string;
   stage: 'RESEARCH' | 'COPY';
   platform?: CreativePlatform;
-  selectedMaterials?: { inputIds: string[]; referenceIds: string[] };
+  selectedMaterials?: { inputIds: string[]; referenceIds: string[]; assetIds: string[] };
   selection?: { text: string; start: number; end: number };
   hasAcceptedCopy?: boolean;
   blockedReason?: string;
@@ -226,6 +226,7 @@ function CopyProjectAgent({ projectId, stage, platform, selectedMaterials, selec
         ...(selection ? { selection } : {}),
         inputIds: selectedMaterials?.inputIds ?? [],
         referenceIds: selectedMaterials?.referenceIds ?? [],
+        assetIds: selectedMaterials?.assetIds ?? [],
       });
       if ('needsClarification' in prepared) throw new Error(prepared.message.content);
       await webCreative.confirmAgentRun(prepared.id);

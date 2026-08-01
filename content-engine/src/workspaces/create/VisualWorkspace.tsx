@@ -1,22 +1,23 @@
 import { Check, Image, LoaderCircle, Minus, Palette, Plus, RefreshCw, Save, Search, Sparkles, Trash2, Upload, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { webCreative } from '../../data/webApi';
+import { webAssets, webCreative } from '../../data/webApi';
 import { platformName, type ContentProject, type CreativeVisualPlanItem, type CreativeVisualReferenceUse, type CreativeVisualStyleProfile } from '../../domain/content';
-import type { CreativePlatform, ProjectReference } from '../../domain/creative';
+import type { CreativePlatform } from '../../domain/creative';
+import type { ProjectAsset } from '../../domain/assets';
 import { visualPlanCountRange, visualStylePresets, VISUAL_PLAN_VERSION } from '../../domain/visual-plan.mjs';
 
 type ImageSearchResult = { id: string; title: string; thumbnailUrl: string; imageUrl: string; sourceUrl: string; license: string; attribution: string };
 type SourceView = 'search' | 'generate' | 'library';
 type PlanningRoute = { scope: string; provider: string; model: string };
 
-function usableVisualReference(item: ProjectReference) {
-  return item.role === 'VISUAL' || item.mimeType?.startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(item.url ?? '');
+function usableVisualReference(item: ProjectAsset) {
+  return item.kind === 'IMAGE' && item.mimeType.startsWith('image/');
 }
 
 function visualPayload(platform: CreativePlatform, plan: CreativeVisualPlanItem[], styleProfile: CreativeVisualStyleProfile) {
-  const assetReferenceIds = [...new Set(plan.map((item) => item.assetReferenceId).filter((id): id is string => Boolean(id)))];
-  const coverReferenceId = plan.find((item) => item.role === 'COVER' || item.role === 'MAIN')?.assetReferenceId ?? assetReferenceIds[0] ?? null;
-  return { platform, planVersion: VISUAL_PLAN_VERSION, styleProfile, coverReferenceId, assetReferenceIds, plan };
+  const assetIds = [...new Set(plan.map((item) => item.assetId).filter((id): id is string => Boolean(id)))];
+  const coverAssetId = plan.find((item) => item.role === 'COVER' || item.role === 'MAIN')?.assetId ?? assetIds[0] ?? null;
+  return { platform, planVersion: VISUAL_PLAN_VERSION, styleProfile, coverAssetId, assetIds, plan };
 }
 
 function roleName(role: CreativeVisualPlanItem['role']) {
@@ -77,7 +78,7 @@ function safePlan(items: unknown): CreativeVisualPlanItem[] {
     contentBlocks: Array.isArray(item.contentBlocks) ? item.contentBlocks : [],
     references: Array.isArray(item.references) ? item.references : [],
     prompt: String(item.prompt ?? ''),
-    assetReferenceId: item.assetReferenceId ?? null,
+    assetId: item.assetId ?? null,
   }));
 }
 
@@ -101,7 +102,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
   const [planningRoute, setPlanningRoute] = useState<PlanningRoute | null>(null);
   const [hydratedPlanKey, setHydratedPlanKey] = useState('');
   const [activeItemId, setActiveItemId] = useState('');
-  const [references, setReferences] = useState<ProjectReference[]>([]);
+  const [assets, setAssets] = useState<ProjectAsset[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<'save' | 'complete' | null>(null);
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
@@ -119,13 +120,14 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
   const saveRevision = useRef(0);
   const searchRevision = useRef(0);
   const hydratedProjectKey = useRef('');
-  const assets = useMemo(() => references.filter(usableVisualReference), [references]);
+  const fileUrlsRef = useRef<Record<string, string>>({});
+  const visualAssets = useMemo(() => assets.filter(usableVisualReference), [assets]);
   const activeItem = plan.find((item) => item.id === activeItemId) ?? plan[0];
   const activePrompt = String(activeItem?.prompt ?? '').trim();
-  const assignedAsset = activeItem?.assetReferenceId ? assets.find((item) => item.id === activeItem.assetReferenceId) : undefined;
-  const assignedAssetSrc = assignedAsset?.url ?? (assignedAsset ? fileUrls[assignedAsset.id] : undefined);
-  const referenceAssets = activeItem?.references.map((item) => ({ config: item, asset: assets.find((asset) => asset.id === item.referenceId) })).filter((item) => item.asset) ?? [];
-  const boundCount = plan.filter((item) => item.assetReferenceId).length;
+  const assignedAsset = activeItem?.assetId ? visualAssets.find((item) => item.id === activeItem.assetId) : undefined;
+  const assignedAssetSrc = assignedAsset ? fileUrls[assignedAsset.id] : undefined;
+  const referenceAssets = activeItem?.references.map((item) => ({ config: item, asset: visualAssets.find((asset) => asset.id === item.assetId) })).filter((item) => item.asset) ?? [];
+  const boundCount = plan.filter((item) => item.assetId).length;
   const countRange = visualPlanCountRange(activePlatform);
   const hasCopy = String(version?.body ?? '').trim().length >= 80;
   const selectedStyle = visualStyles.find((style) => style.id === styleDraft.preset) ?? visualStyles[0];
@@ -162,7 +164,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
     let cancelled = false;
     setLoading(true);
     webCreative.materials(project.id).then((result) => {
-      if (!cancelled) setReferences(result.references);
+      if (!cancelled) setAssets(result.assets);
     }).catch((reason) => { if (!cancelled) setError(reason instanceof Error ? reason.message : '读取素材失败。'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -170,17 +172,26 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
 
   useEffect(() => {
     let cancelled = false;
-    const localAssets = assets.filter((asset) => asset.sourceType === 'FILE' && !fileUrls[asset.id]);
+    const localAssets = visualAssets.filter((asset) => !fileUrls[asset.id]);
     if (!localAssets.length) return;
     void Promise.all(localAssets.map(async (asset) => {
-      const blob = await webCreative.projectFile(asset.id);
+      const blob = await webAssets.content(asset.id);
       return [asset.id, URL.createObjectURL(blob)] as const;
     })).then((items) => {
       if (cancelled) { items.forEach(([, url]) => URL.revokeObjectURL(url)); return; }
-      setFileUrls((current) => ({ ...current, ...Object.fromEntries(items) }));
-    }).catch(() => { /* 素材仍可绑定，预览失败不阻塞工作流。 */ });
+      const loaded = Object.fromEntries(items);
+      fileUrlsRef.current = { ...fileUrlsRef.current, ...loaded };
+      setFileUrls((current) => ({ ...current, ...loaded }));
+    }).catch((reason) => {
+      if (!cancelled) setError(reason instanceof Error ? reason.message : '素材预览加载失败。');
+    });
     return () => { cancelled = true; };
-  }, [assets, fileUrls]);
+  }, [visualAssets, fileUrls]);
+
+  useEffect(() => () => {
+    Object.values(fileUrlsRef.current).forEach((url) => URL.revokeObjectURL(url));
+    fileUrlsRef.current = {};
+  }, []);
 
   useEffect(() => {
     if (!hasCopy || !plan.length) return;
@@ -253,33 +264,30 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
     setNotice(plan.length ? '项目风格已更新。点击“更新方案”后应用到全部图片。' : '项目风格已更新。');
   };
 
-  const addReference = (reference: ProjectReference) => {
-    if (!activeItem || activeItem.references.some((item) => item.referenceId === reference.id) || activeItem.references.length >= 3) return;
-    updateActiveItem({ references: [...activeItem.references, { referenceId: reference.id, uses: ['COLOR', 'LAYOUT'] }] });
+  const addReference = (reference: ProjectAsset) => {
+    if (!activeItem || activeItem.references.some((item) => item.assetId === reference.id) || activeItem.references.length >= 3) return;
+    updateActiveItem({ references: [...activeItem.references, { assetId: reference.id, uses: ['COLOR', 'LAYOUT'] }] });
     setReferencePickerOpen(false);
   };
 
-  const removeReference = (referenceId: string) => {
+  const removeReference = (assetId: string) => {
     if (!activeItem) return;
-    updateActiveItem({ references: activeItem.references.filter((item) => item.referenceId !== referenceId) });
+    updateActiveItem({ references: activeItem.references.filter((item) => item.assetId !== assetId) });
   };
 
-  const changeReferenceMode = (referenceId: string, modeId: string) => {
+  const changeReferenceMode = (assetId: string, modeId: string) => {
     if (!activeItem) return;
     const uses = referenceModes.find((mode) => mode.id === modeId)?.uses ?? ['COLOR', 'LAYOUT'];
-    updateActiveItem({ references: activeItem.references.map((item) => item.referenceId === referenceId ? { ...item, uses } : item) });
+    updateActiveItem({ references: activeItem.references.map((item) => item.assetId === assetId ? { ...item, uses } : item) });
   };
 
-  const assignAsset = (reference: ProjectReference) => {
-    setReferences((current) => current.some((item) => item.id === reference.id) ? current : [reference, ...current]);
+  const assignAsset = (reference: ProjectAsset) => {
+    setAssets((current) => current.some((item) => item.id === reference.id) ? current : [reference, ...current]);
     if (!activeItem) return;
-    const normalizedUrl = reference.url?.trim();
-    const previous = plan.find((item) => item.id !== activeItem.id && item.assetReferenceId && (
-      item.assetReferenceId === reference.id || (normalizedUrl && assets.find((asset) => asset.id === item.assetReferenceId)?.url?.trim() === normalizedUrl)
-    ));
+    const previous = plan.find((item) => item.id !== activeItem.id && item.assetId === reference.id);
     setPlan((current) => current.map((item) => {
-      if (item.id === activeItem.id) return { ...item, assetReferenceId: reference.id };
-      if (previous && item.id === previous.id) return { ...item, assetReferenceId: null };
+      if (item.id === activeItem.id) return { ...item, assetId: reference.id };
+      if (previous && item.id === previous.id) return { ...item, assetId: null };
       return item;
     }));
     setNotice(previous ? `这张图已从“${previous.title}”移动到“${activeItem.title}”。` : '图片已绑定到当前配图位置。');
@@ -288,13 +296,11 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
   const importResult = async (result: ImageSearchResult) => {
     setImportingId(result.id); setError('');
     try {
-      const existing = references.find((item) => item.url?.trim() === result.imageUrl.trim());
+      const existing = assets.find((item) => item.sourceUrl?.trim() === result.imageUrl.trim());
       if (existing) { assignAsset(existing); return; }
-      const reference = await webCreative.importImage(project.id, {
-        title: result.title, url: result.imageUrl, role: 'VISUAL', scope: 'IMAGING', platforms: [activePlatform],
-        notes: `Wikimedia Commons｜许可：${result.license}｜署名：${result.attribution}｜来源：${result.sourceUrl}`,
-      });
-      assignAsset(reference);
+      const imported = await webAssets.import({ title: result.title, url: result.imageUrl, sourceNote: `Wikimedia Commons｜许可：${result.license}｜署名：${result.attribution}｜来源：${result.sourceUrl}`, copyrightStatus: 'OPEN_LICENSE' });
+      const linked = await webAssets.link(project.id, imported.asset.id, { role: 'VISUAL', scope: 'IMAGING', title: imported.asset.title, notes: imported.asset.sourceNote, platforms: [activePlatform] });
+      assignAsset(linked);
     } catch (reason) { setError(reason instanceof Error ? reason.message : '导入图片失败。'); }
     finally { setImportingId(null); }
   };
@@ -303,11 +309,11 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
     if (!activeItem || activePrompt.length < 4) return;
     setGenerateBusy(true); setError('');
     try {
-      const { reference } = await webCreative.generateImage(project.id, {
+      const { projectAsset } = await webCreative.generateImage(project.id, {
         platform: activePlatform, prompt: activePrompt, size: activeItem.size,
-        referenceImageIds: activeItem.references.map((item) => item.referenceId),
+        assetIds: activeItem.references.map((item) => item.assetId),
       });
-      assignAsset(reference);
+      assignAsset(projectAsset);
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'AI 生图失败。'); }
     finally { setGenerateBusy(false); }
   };
@@ -379,7 +385,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
       ? `封面 1 张，内容页 ${bodyItemCount} 张`
       : `封面 1 张，正文插图 ${bodyItemCount} 张`;
 
-  const assetSrc = (asset: ProjectReference | undefined) => asset?.url ?? (asset ? fileUrls[asset.id] : undefined);
+  const assetSrc = (asset: ProjectAsset | undefined) => asset ? fileUrls[asset.id] : undefined;
 
   return <section className="visual-workspace">
     <header className="delivery-workspace-head visual-workspace-head">
@@ -407,13 +413,13 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
       <aside className="visual-plan-panel">
         <header><b>配图方案</b><span>{saveState === 'saving' ? '自动保存中' : saveState === 'error' ? '保存失败' : '已自动保存'}</span></header>
         <div className="visual-plan-list">{plan.map((item, index) => {
-          const asset = item.assetReferenceId ? assets.find((candidate) => candidate.id === item.assetReferenceId) : undefined;
+          const asset = item.assetId ? visualAssets.find((candidate) => candidate.id === item.assetId) : undefined;
           const src = assetSrc(asset);
           return <button type="button" className={`visual-plan-item${item.id === activeItem?.id ? ' active' : ''}`} key={item.id} onClick={() => selectPlanItem(item)}>
             <span className="visual-plan-number">{String(index + 1).padStart(2, '0')}</span>
             <span className="visual-plan-thumb">{src ? <img src={src} alt=""/> : <Image size={18}/>}</span>
             <span className="visual-plan-copy"><b>{item.title}</b><small>{item.placement}</small></span>
-            <span className={`visual-plan-state${item.assetReferenceId ? ' done' : ''}`}>{item.assetReferenceId ? '已绑定' : '待选图'}</span>
+            <span className={`visual-plan-state${item.assetId ? ' done' : ''}`}>{item.assetId ? '已绑定' : '待选图'}</span>
           </button>;
         })}</div>
       </aside>
@@ -421,7 +427,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
       {activeItem && <main className="visual-task-panel">
         <header className="visual-task-head">
           <div><span>{roleName(activeItem.role)} / {visualTypeName(activeItem.visualType)} / {activeItem.placement}</span><h3>{activeItem.title}</h3></div>
-          {assignedAsset && <div className="visual-assigned-asset"><Check size={17}/><span><b>已绑定</b><small>{assignedAsset.title}</small></span><button type="button" title="移除当前配图" onClick={() => updateActiveItem({ assetReferenceId: null }, false)}><Trash2 size={15}/></button></div>}
+          {assignedAsset && <div className="visual-assigned-asset"><Check size={17}/><span><b>已绑定</b><small>{assignedAsset.title}</small></span><button type="button" title="移除当前配图" onClick={() => updateActiveItem({ assetId: null }, false)}><Trash2 size={15}/></button></div>}
         </header>
 
         {assignedAsset && sourceView !== 'generate' && <section className="visual-selected-preview" aria-label="当前选中图片预览">
@@ -466,9 +472,9 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
                 <div><input id={`visual-request-${activeItem.id}`} value={itemRequest} onChange={(event) => setItemRequest(event.target.value)} placeholder="例如：改成上市时间线，突出三个关键年份"/><button className="button" type="button" disabled={planBusy || itemRequest.trim().length < 2} onClick={() => void planWithAI(activeItem.id, itemRequest)}>{planBusy ? <LoaderCircle size={15}/> : <RefreshCw size={15}/>}重新策划</button></div>
               </section>
               <section className="visual-reference-panel">
-                <header><b>参考图</b><button className="text-button" type="button" disabled={activeItem.references.length >= 3 || !assets.length} onClick={() => setReferencePickerOpen((open) => !open)}><Plus size={14}/>添加参考图</button></header>
-                {referenceAssets.length > 0 && <div className="visual-reference-list">{referenceAssets.map(({ config, asset }) => asset && <article key={config.referenceId}>{assetSrc(asset) ? <img src={assetSrc(asset)} alt=""/> : <span><Image size={16}/></span>}<b>{asset.title}</b><select aria-label="参考方式" value={referenceModeValue(config.uses)} onChange={(event) => changeReferenceMode(config.referenceId, event.target.value)}>{referenceModes.map((mode) => <option value={mode.id} key={mode.id}>{mode.name}</option>)}</select><button type="button" title={`移除参考图 ${asset.title}`} onClick={() => removeReference(config.referenceId)}><X size={14}/></button></article>)}</div>}
-                {referencePickerOpen && <div className="visual-reference-picker">{assets.filter((asset) => !activeItem.references.some((item) => item.referenceId === asset.id)).map((asset) => <button type="button" key={asset.id} onClick={() => addReference(asset)}>{assetSrc(asset) ? <img src={assetSrc(asset)} alt=""/> : <Image size={18}/>}<span>{asset.title}</span></button>)}</div>}
+                <header><b>参考图</b><button className="text-button" type="button" disabled={activeItem.references.length >= 3 || !visualAssets.length} onClick={() => setReferencePickerOpen((open) => !open)}><Plus size={14}/>添加参考图</button></header>
+                {referenceAssets.length > 0 && <div className="visual-reference-list">{referenceAssets.map(({ config, asset }) => asset && <article key={config.assetId}>{assetSrc(asset) ? <img src={assetSrc(asset)} alt=""/> : <span><Image size={16}/></span>}<b>{asset.title}</b><select aria-label="参考方式" value={referenceModeValue(config.uses)} onChange={(event) => changeReferenceMode(config.assetId, event.target.value)}>{referenceModes.map((mode) => <option value={mode.id} key={mode.id}>{mode.name}</option>)}</select><button type="button" title={`移除参考图 ${asset.title}`} onClick={() => removeReference(config.assetId)}><X size={14}/></button></article>)}</div>}
+                {referencePickerOpen && <div className="visual-reference-picker">{visualAssets.filter((asset) => !activeItem.references.some((item) => item.assetId === asset.id)).map((asset) => <button type="button" key={asset.id} onClick={() => addReference(asset)}>{assetSrc(asset) ? <img src={assetSrc(asset)} alt=""/> : <Image size={18}/>}<span>{asset.title}</span></button>)}</div>}
               </section>
               <div className="visual-generate-controls">
                 <span><b>{visualTypeName(activeItem.visualType)}</b><small>{activeItem.size}</small></span>
@@ -480,9 +486,9 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
         </section>}
 
         {sourceView === 'library' && <section className="visual-source-workspace">
-          {loading ? <div className="visual-result-state"><LoaderCircle size={18}/>读取项目素材</div> : assets.length ? <div className="visual-library-grid">{assets.map((asset) => {
-            const src = assetSrc(asset); const checked = activeItem.assetReferenceId === asset.id;
-            return <article className={`visual-library-card${checked ? ' selected' : ''}`} key={asset.id}>{src ? <img src={src} alt=""/> : <span><Image size={20}/></span>}<div><b>{asset.title}</b><small>{asset.sourceType === 'FILE' ? '项目文件' : '网络图片'}</small></div><button className="button" type="button" onClick={() => assignAsset(asset)}>{checked ? <><Check size={14}/>已用于此处</> : '用于此处'}</button></article>;
+          {loading ? <div className="visual-result-state"><LoaderCircle size={18}/>读取项目素材</div> : visualAssets.length ? <div className="visual-library-grid">{visualAssets.map((asset) => {
+            const src = assetSrc(asset); const checked = activeItem.assetId === asset.id;
+            return <article className={`visual-library-card${checked ? ' selected' : ''}`} key={asset.id}>{src ? <img src={src} alt=""/> : <span><Image size={20}/></span>}<div><b>{asset.title}</b><small>{asset.origin === 'WEB_IMPORT' ? '网络图片' : asset.origin === 'AI_GENERATED' ? 'AI 生图' : '上传素材'}</small></div><button className="button" type="button" onClick={() => assignAsset(asset)}>{checked ? <><Check size={14}/>已用于此处</> : '用于此处'}</button></article>;
           })}</div> : <div className="visual-result-state"><Image size={20}/>还没有图片素材</div>}
         </section>}
       </main>}

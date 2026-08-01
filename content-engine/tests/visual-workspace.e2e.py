@@ -66,7 +66,7 @@ def planned_items(count, current=None, style_requirement=""):
             "sourceExcerpt": "中继卫星承担航天器与地面站之间的数据转发任务，能够扩展测控覆盖范围。",
             "contentBlocks": [{"label": "航天器", "detail": "产生测控与业务数据"}, {"label": "中继卫星", "detail": "在轨接收并转发数据"}, {"label": "地面站", "detail": "接收数据并发送控制指令"}],
             "references": previous.get("references", []), "prompt": prompt, "size": "16:9" if role == "COVER" else "4:3",
-            "assetReferenceId": previous.get("assetReferenceId") if previous.get("assetReferenceId") else (COVER_ID if role == "COVER" else None),
+            "assetId": previous.get("assetId") if previous.get("assetId") else (COVER_ID if role == "COVER" else None),
         })
     return result
 
@@ -101,12 +101,12 @@ def project():
         "sourceSnapshot": {},
         "delivery": {"platforms": {"WECHAT": {"stage": "VISUAL", "visual": {
             "planVersion": 1,
-            "coverReferenceId": COVER_ID,
-            "assetReferenceIds": [COVER_ID, BODY_ID],
+            "coverAssetId": COVER_ID,
+            "assetIds": [COVER_ID, BODY_ID],
             "assets": [],
             "plan": [
-                {"id": "old-cover", "role": "COVER", "assetReferenceId": COVER_ID},
-                {"id": "old-body", "role": "BODY", "assetReferenceId": BODY_ID},
+                {"id": "old-cover", "role": "COVER", "assetId": COVER_ID},
+                {"id": "old-body", "role": "BODY", "assetId": BODY_ID},
             ],
             "updatedAt": NOW,
         }, "review": None}}},
@@ -118,9 +118,12 @@ def project():
 with sync_playwright() as playwright:
     browser = playwright.chromium.launch(headless=True, **({"executable_path": chrome_path()} if chrome_path() else {}))
     page = browser.new_page(viewport={"width": 1440, "height": 1000})
-    state = {"project": project(), "searches": [], "planning_calls": [], "visual_writes": 0, "generations": 0, "generation_payloads": [], "unexpected": [], "console_errors": [], "references": [
-        {"id": COVER_ID, "title": "旧封面", "url": f"data:image/gif;base64,{ONE_PIXEL_GIF}", "role": "VISUAL", "scope": "IMAGING", "platforms": ["WECHAT"], "sourceType": "LINK", "mimeType": "image/gif", "notes": "", "createdAt": NOW, "updatedAt": NOW},
-        {"id": BODY_ID, "title": "旧正文火箭图", "url": f"data:image/gif;base64,{ONE_PIXEL_GIF}", "role": "VISUAL", "scope": "IMAGING", "platforms": ["WECHAT"], "sourceType": "LINK", "mimeType": "image/gif", "notes": "", "createdAt": NOW, "updatedAt": NOW},
+    def project_asset(asset_id, link_id, title, origin="UPLOAD", filename="image.gif", mime_type="image/gif", notes=""):
+        return {"id": asset_id, "linkId": link_id, "projectId": PROJECT_ID, "kind": "IMAGE", "origin": origin, "status": "ACTIVE", "title": title, "originalFilename": filename, "mimeType": mime_type, "sizeBytes": 35, "sha256": asset_id.replace("-", "") * 2, "sourceUrl": None, "sourceNote": notes, "copyrightStatus": "OWNED", "projectCount": 1, "role": "VISUAL", "scope": "IMAGING", "platforms": ["WECHAT"], "notes": notes, "createdAt": NOW, "updatedAt": NOW}
+
+    state = {"project": project(), "searches": [], "planning_calls": [], "visual_writes": 0, "generations": 0, "generation_payloads": [], "unexpected": [], "console_errors": [], "assets": [
+        project_asset(COVER_ID, "44444444-4444-4444-8444-444444444444", "旧封面"),
+        project_asset(BODY_ID, "55555555-5555-4555-8555-555555555555", "旧正文火箭图"),
     ]}
     page.on("console", lambda message: state["console_errors"].append(message.text) if message.type == "error" else None)
     page.on("pageerror", lambda error: state["console_errors"].append(str(error)))
@@ -144,7 +147,7 @@ with sync_playwright() as playwright:
         if path in ("/api/v1/settings/account-voices", "/api/v1/account-voices"):
             return respond(route, {"voices": []})
         if path == f"/api/v1/creative/projects/{PROJECT_ID}/materials":
-            return respond(route, {"inputs": [], "references": state["references"]})
+            return respond(route, {"inputs": [], "references": [], "assets": state["assets"]})
         if path == f"/api/v1/creative/projects/{PROJECT_ID}/visual/plan" and method == "POST":
             payload = json.loads(request.post_data or "{}")
             state["planning_calls"].append(payload)
@@ -162,11 +165,14 @@ with sync_playwright() as playwright:
         if path == f"/api/v1/creative/projects/{PROJECT_ID}/visual/generate" and method == "POST":
             state["generations"] += 1
             state["generation_payloads"].append(json.loads(request.post_data or "{}"))
-            reference = {"id": GENERATED_ID, "title": "AI 图文信息图", "url": None, "role": "VISUAL", "scope": "IMAGING", "platforms": ["WECHAT"], "sourceType": "FILE", "mimeType": "image/svg+xml", "notes": "AI 生图", "createdAt": NOW, "updatedAt": NOW}
-            state["references"] = [reference, *[item for item in state["references"] if item["id"] != GENERATED_ID]]
-            return respond(route, {"reference": reference}, status=201)
-        if path == f"/api/v1/creative/project-files/{GENERATED_ID}/content" and method == "GET":
+            project_asset_value = project_asset(GENERATED_ID, "66666666-6666-4666-8666-666666666666", "AI 图文信息图", "AI_GENERATED", "generated.svg", "image/svg+xml", "AI 生图")
+            state["assets"] = [project_asset_value, *[item for item in state["assets"] if item["id"] != GENERATED_ID]]
+            workspace_asset = {key: value for key, value in project_asset_value.items() if key not in ("linkId", "projectId", "role", "scope", "platforms", "notes")}
+            return respond(route, {"asset": workspace_asset, "projectAsset": project_asset_value}, status=201)
+        if path == f"/api/v1/assets/{GENERATED_ID}/content" and method == "GET":
             return route.fulfill(status=200, content_type="image/svg+xml", body=GENERATED_SVG)
+        if re.fullmatch(r"/api/v1/assets/[0-9a-f-]+/content", path) and method == "GET":
+            return route.fulfill(status=200, content_type="image/gif", body=bytes.fromhex("47494638396101000100800000ffffff00000021f90401000000002c00000000010001000002024401003b"))
         if path == "/api/v1/creative/image-search":
             query = request.url.split("q=", 1)[-1]
             state["searches"].append(query)
@@ -180,7 +186,7 @@ with sync_playwright() as playwright:
             state["project"]["delivery"]["platforms"]["WECHAT"]["visual"] = {
                 "planVersion": payload["planVersion"],
                 "styleProfile": payload["styleProfile"],
-                "coverReferenceId": payload["coverReferenceId"], "assetReferenceIds": payload["assetReferenceIds"],
+                "coverAssetId": payload["coverAssetId"], "assetIds": payload["assetIds"],
                 "assets": [], "plan": payload["plan"], "updatedAt": NOW,
             }
             return respond(route, {"project": state["project"]})
@@ -268,7 +274,7 @@ with sync_playwright() as playwright:
     preview = page.locator(".visual-generated-preview").bounding_box()
     assert preview and preview["width"] >= 360 and preview["height"] >= 240, f"生成结果预览尺寸不足: {preview}"
     assert state["generations"] == 1
-    assert state["generation_payloads"][0]["referenceImageIds"] == [BODY_ID]
+    assert state["generation_payloads"][0]["assetIds"] == [BODY_ID]
     assert "统一使用薄荷绿边框" in state["generation_payloads"][0]["prompt"]
     page.get_by_role("button", name="搜图", exact=True).click()
     page.get_by_label("当前选中图片预览", exact=True).locator("img").wait_for()
