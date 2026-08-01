@@ -3,6 +3,7 @@ import type { ApiUsageLog, ApiUsageSummary, ModelCatalogItem, ModelConnection, M
 import type { ContentProject, CreativeDelivery, CreativeVisualPlanItem, IntelligenceAnalysis, Platform, ProjectOriginType, ProjectPlanning } from '../domain/content';
 import type { AccountVoiceCalibrationDraft, AccountVoiceInput, AccountVoiceProfile, CreativeDraftCandidate, CreativeDraftPreparation, CreativeDraftRun, CreativeOutlineCandidate, CreativeOutlinePreparation, CreativeOutlineRun, CreativePlatform, CreativeSkillDefinition, ProjectAgentContext, ProjectAgentHistory, ProjectAgentPrepareInput, ProjectAgentPrepareResult, ProjectAgentRun, ProjectArtifact, ProjectInput, ProjectInputPayload, ProjectReference, ProjectReferenceMetadata, ProjectResearchContext, ProjectResearchRun, WritingBrief, WritingBriefInput } from '../domain/creative';
 import type { WebSession, WorkspaceSession, WorkspaceSummary } from '../domain/workspace';
+import type { AssetFilters, AssetMetadataInput, AssetUpdateInput, ProjectAsset, ProjectAssetLinkInput, WorkspaceAsset } from '../domain/assets';
 import { sessionStore } from './sessionStore';
 
 const apiBase = import.meta.env.VITE_API_BASE ?? '/api/v1';
@@ -29,6 +30,17 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload?.error?.message || `请求失败（HTTP ${response.status}）。`);
   return payload as T;
+}
+
+async function requestWorkspaceContent(path: string, fallback: string) {
+  const session = sessionStore.read();
+  if (!session?.activeWorkspaceId) throw new Error('请选择工作空间后再继续。');
+  const response = await fetch(`${apiBase}${path}`, { headers: { Authorization: `Bearer ${session.accessToken}`, 'X-Workspace-Id': session.activeWorkspaceId } });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload?.error?.message || `${fallback}（HTTP ${response.status}）。`);
+  }
+  return response;
 }
 
 export const webAuth = {
@@ -71,6 +83,38 @@ export const webWorkspaces = {
     const session = sessionStore.read();
     return session?.workspaces.find(({ id }) => id === session.activeWorkspaceId) ?? null;
   },
+};
+
+export const webAssets = {
+  list(filters: AssetFilters = {}) {
+    const params = new URLSearchParams();
+    if (filters.status) params.set('status', filters.status);
+    if (filters.kind) params.set('kind', filters.kind);
+    if (filters.origin) params.set('origin', filters.origin);
+    if (filters.query?.trim()) params.set('query', filters.query.trim());
+    const suffix = params.size ? `?${params}` : '';
+    return request<{ assets: WorkspaceAsset[] }>(`/assets${suffix}`);
+  },
+  upload(file: File, input: Partial<AssetMetadataInput> = {}) {
+    const params = new URLSearchParams();
+    if (input.title?.trim()) params.set('title', input.title.trim());
+    if (input.sourceNote !== undefined) params.set('sourceNote', input.sourceNote);
+    if (input.copyrightStatus) params.set('copyrightStatus', input.copyrightStatus);
+    const body = new FormData();
+    body.append('file', file);
+    const suffix = params.size ? `?${params}` : '';
+    return request<{ created: boolean; asset: WorkspaceAsset }>(`/assets${suffix}`, { method: 'POST', body });
+  },
+  import(input: AssetMetadataInput & { url: string }) {
+    return request<{ created: boolean; asset: WorkspaceAsset }>('/assets/import', { method: 'POST', body: JSON.stringify(input) });
+  },
+  get: (assetId: string) => request<WorkspaceAsset>(`/assets/${encodeURIComponent(assetId)}`),
+  async content(assetId: string) {
+    return (await requestWorkspaceContent(`/assets/${encodeURIComponent(assetId)}/content`, '读取素材失败')).blob();
+  },
+  update: (assetId: string, input: AssetUpdateInput) => request<WorkspaceAsset>(`/assets/${encodeURIComponent(assetId)}`, { method: 'PATCH', body: JSON.stringify(input) }),
+  link: (projectId: string, assetId: string, input: ProjectAssetLinkInput) => request<ProjectAsset>(`/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`, { method: 'POST', body: JSON.stringify(input) }),
+  unlink: (projectId: string, assetId: string) => request<void>(`/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`, { method: 'DELETE' }),
 };
 
 export const webState = {
@@ -129,11 +173,7 @@ export const webCreative = {
     return request<ProjectReference>(`/creative/projects/${encodeURIComponent(projectId)}/files?${params}`, { method: 'POST', body });
   },
   async projectFile(id: string) {
-    const session = sessionStore.read();
-    if (!session?.activeWorkspaceId) throw new Error('请选择工作空间后再继续。');
-    const response = await fetch(`${apiBase}/creative/project-files/${encodeURIComponent(id)}/content`, { headers: { Authorization: `Bearer ${session.accessToken}`, 'X-Workspace-Id': session.activeWorkspaceId } });
-    if (!response.ok) { const payload = await response.json().catch(() => ({})); throw new Error(payload?.error?.message || `读取文件失败（HTTP ${response.status}）。`); }
-    return response.blob();
+    return (await requestWorkspaceContent(`/creative/project-files/${encodeURIComponent(id)}/content`, '读取文件失败')).blob();
   },
   research: (projectId: string) => request<ProjectResearchContext>(`/creative/projects/${encodeURIComponent(projectId)}/research`),
   startResearch: (projectId: string, input: { request?: string } = {}) => request<ProjectAgentRun>(`/creative/projects/${encodeURIComponent(projectId)}/research/start`, { method: 'POST', body: JSON.stringify(input) }),

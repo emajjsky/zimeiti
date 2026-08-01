@@ -47,6 +47,8 @@ const { createProjectMaterialStore } = require('./services/projectMaterials.cjs'
 const { createProjectAgentStore, artifactView, runView } = require('./services/project-agent.cjs');
 const { loadContentMasterState } = require('./services/content-master.cjs');
 const { saveProjectUpload, saveRemoteProjectImage, removeProjectUpload, openProjectUpload, readProjectUploadText } = require('./services/projectUploadStorage.cjs');
+const { createAssetStore } = require('./services/assets.cjs');
+const { saveUploadedAsset, saveRemoteImageAsset, openAsset, removeAssetFile } = require('./services/assetStorage.cjs');
 const { PROJECT_RESEARCH_ACTION_VERSION, PROJECT_RESEARCH_SCOPE, researchRunView, researchPlanView } = require('./services/project-research.cjs');
 const { PROJECT_RESEARCH_SOURCES_VERSION, researchSourceActions } = require('./services/project-research-sources.cjs');
 const { SOURCE_VERIFICATION_SCOPE, SOURCE_VERIFICATION_VERSION, defaultSourceVerificationTemplate, validateSourceVerificationTemplate } = require('./services/source-verification.cjs');
@@ -223,6 +225,7 @@ function defaultState(name) {
 
 const workspaceStore = createWorkspaceStore({ query, transaction, defaultState });
 const workspaceAccess = createWorkspaceAccess({ query, authenticate });
+const assetStore = createAssetStore({ query, transaction, removeStoredFile: (storageKey) => removeAssetFile(config.uploadRoot, storageKey) });
 
 const authInput = z.object({ email: z.string().email().max(320), password: z.string().min(8).max(200), displayName: z.string().min(1).max(80).optional(), workspaceName: z.string().min(1).max(80).optional() });
 
@@ -315,6 +318,114 @@ app.patch('/api/v1/workspace/preferences', { preHandler: workspaceAccess.forRole
   const workspace = request.workspace;
   const result = await transaction((client) => saveWorkspacePreferences(client, workspace.id, body));
   return { revision: result.revision, updatedAt: result.updated_at };
+});
+
+const assetKind = z.enum(['IMAGE', 'DOCUMENT', 'AUDIO', 'VIDEO', 'OTHER']);
+const assetOrigin = z.enum(['UPLOAD', 'AI_GENERATED', 'WEB_IMPORT']);
+const assetStatus = z.enum(['ACTIVE', 'ARCHIVED']);
+const assetCopyrightStatus = z.enum(['PENDING', 'OWNED', 'LICENSED', 'OPEN_LICENSE', 'PROHIBITED']);
+const assetMetadata = z.object({
+  title: z.string().trim().min(1).max(200),
+  sourceNote: z.string().max(4_000).default(''),
+  copyrightStatus: assetCopyrightStatus.default('PENDING'),
+});
+const assetLinkInput = z.object({
+  role: projectReferenceRole,
+  scope: projectScope,
+  title: z.string().trim().max(200).default(''),
+  notes: z.string().max(4_000).default(''),
+  platforms: projectPlatforms.default([]),
+});
+
+function encodedDispositionFilename(value) {
+  return encodeURIComponent(String(value || 'asset')).replace(/['()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+async function persistStoredAsset(workspace, userId, stored, metadata) {
+  try {
+    return await assetStore.createFromStoredFile(workspace.id, userId, stored, metadata);
+  } catch (error) {
+    await removeAssetFile(config.uploadRoot, stored.storageKey).catch(() => {});
+    throw error;
+  }
+}
+
+app.get('/api/v1/assets', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
+  const filters = z.object({
+    status: assetStatus.optional(),
+    kind: assetKind.optional(),
+    origin: assetOrigin.optional(),
+    query: z.string().trim().max(200).optional(),
+  }).parse(request.query);
+  return { assets: await assetStore.list(request.workspace.id, filters) };
+});
+
+app.post('/api/v1/assets', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
+  const queryInput = assetMetadata.partial({ title: true }).parse(request.query);
+  const part = await request.file();
+  if (!part) throw businessError(400, 'ASSET_FILE_REQUIRED', '请选择要上传的文件。');
+  const stored = await saveUploadedAsset(config.uploadRoot, request.workspace.id, part);
+  const result = await persistStoredAsset(request.workspace, request.user.sub, stored, {
+    origin: 'UPLOAD',
+    title: queryInput.title || stored.originalFilename,
+    sourceNote: queryInput.sourceNote,
+    copyrightStatus: queryInput.copyrightStatus,
+  });
+  reply.code(result.created ? 201 : 200).send(result);
+});
+
+app.post('/api/v1/assets/import', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
+  const input = assetMetadata.extend({
+    url: z.string().url().max(2_000).refine((value) => /^https?:\/\//i.test(value), '只支持 HTTP(S) 公开图片。'),
+  }).parse(request.body);
+  const stored = await saveRemoteImageAsset(config.uploadRoot, request.workspace.id, input.url);
+  const result = await persistStoredAsset(request.workspace, request.user.sub, stored, {
+    origin: 'WEB_IMPORT',
+    title: input.title,
+    sourceUrl: stored.sourceUrl,
+    sourceNote: input.sourceNote,
+    copyrightStatus: input.copyrightStatus,
+  });
+  reply.code(result.created ? 201 : 200).send(result);
+});
+
+app.get('/api/v1/assets/:assetId', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
+  const assetId = z.string().uuid().parse(request.params.assetId);
+  return assetStore.get(request.workspace.id, assetId);
+});
+
+app.get('/api/v1/assets/:assetId/content', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request, reply) => {
+  const assetId = z.string().uuid().parse(request.params.assetId);
+  const asset = await assetStore.getStored(request.workspace.id, assetId);
+  if (asset.status === 'DELETING') throw businessError(404, 'ASSET_NOT_FOUND', '没有找到可读取的素材。');
+  reply
+    .type(asset.mime_type)
+    .header('Content-Length', asset.size_bytes)
+    .header('Cache-Control', 'private, max-age=3600')
+    .header('X-Content-Type-Options', 'nosniff')
+    .header('Content-Security-Policy', 'sandbox')
+    .header('Content-Disposition', `inline; filename*=UTF-8''${encodedDispositionFilename(asset.original_filename)}`);
+  return reply.send(openAsset(config.uploadRoot, asset.storage_key));
+});
+
+app.patch('/api/v1/assets/:assetId', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
+  const assetId = z.string().uuid().parse(request.params.assetId);
+  const input = assetMetadata.extend({ status: assetStatus }).parse(request.body);
+  return assetStore.update(request.workspace.id, assetId, input);
+});
+
+app.post('/api/v1/projects/:projectId/assets/:assetId', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const assetId = z.string().uuid().parse(request.params.assetId);
+  const linked = await assetStore.linkToProject(request.workspace.id, projectId, assetId, assetLinkInput.parse(request.body));
+  reply.code(201).send(linked);
+});
+
+app.delete('/api/v1/projects/:projectId/assets/:assetId', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const assetId = z.string().uuid().parse(request.params.assetId);
+  await assetStore.unlinkFromProject(request.workspace.id, projectId, assetId);
+  reply.code(204).send();
 });
 
 app.get('/api/v1/settings/credentials', { preHandler: workspaceAccess.forRole('OWNER') }, async (request) => {
