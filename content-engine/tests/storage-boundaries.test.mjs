@@ -2,13 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const [server, projectRepository, webApi, main, migration, timestampMigration, recovery] = await Promise.all([
+const [server, projectRepository, webApi, main, migration, timestampMigration, assetMigration, recovery] = await Promise.all([
   readFile(new URL('../server/index.cjs', import.meta.url), 'utf8'),
   readFile(new URL('../server/services/project-planning.cjs', import.meta.url), 'utf8'),
   readFile(new URL('../src/data/webApi.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/main.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../server/migrations/025_normalized_content_projects.sql', import.meta.url), 'utf8'),
   readFile(new URL('../server/migrations/026_normalize_content_project_timestamps.sql', import.meta.url), 'utf8'),
+  readFile(new URL('../server/migrations/027_workspace_asset_foundation.sql', import.meta.url), 'utf8'),
   readFile(new URL('../scripts/recover-content-projects.cjs', import.meta.url), 'utf8'),
 ]);
 
@@ -39,4 +40,13 @@ test('项目迁移移出快照且恢复脚本默认只预演并拒绝覆盖', ()
   assert.match(recovery, /目标工作空间已有项目，拒绝覆盖恢复/);
   assert.match(recovery, /uniqueVisualReferences\(references\)/);
   assert.match(recovery, /item\.assetReferenceId = assignableReferences\[index\]\?\.id \?\? null/);
+});
+
+test('空间素材成为文件唯一所有者且项目只保留引用关系', () => {
+  assert.match(assetMigration, /CREATE TABLE workspace_assets/);
+  assert.match(assetMigration, /CREATE TABLE project_asset_links/);
+  assert.match(assetMigration, /DELETE FROM project_references[\s\S]*source_type = 'FILE'/);
+  assert.match(assetMigration, /ALTER TABLE project_references[\s\S]*DROP COLUMN storage_key/);
+  const projectAssetTable = assetMigration.match(/CREATE TABLE project_asset_links \(([\s\S]*?)\n\);/)?.[1] ?? '';
+  assert.doesNotMatch(projectAssetTable, /storage_key/);
 });
