@@ -1,7 +1,6 @@
 const { z } = require('zod');
 
-const VISUAL_PLANNING_SCOPE = 'AGENT_PLANNER';
-const VISUAL_PLANNING_FALLBACK_SCOPE = 'CONTENT_WRITING';
+const VISUAL_PLANNING_SCOPE = 'VISUAL_PLANNING';
 const VISUAL_PLANNING_OPERATION = 'VISUAL_PLANNING';
 
 const platformNames = {
@@ -202,7 +201,6 @@ function mergePlannedItems({ platform, plannedItems, currentPlan = [], currentIt
 
 module.exports = {
   VISUAL_PLANNING_SCOPE,
-  VISUAL_PLANNING_FALLBACK_SCOPE,
   VISUAL_PLANNING_OPERATION,
   visualPlanSchema,
   buildVisualPlanningPrompt,

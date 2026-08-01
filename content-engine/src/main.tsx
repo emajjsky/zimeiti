@@ -339,6 +339,7 @@ const modelTaskNames: Record<ModelTask, string> = {
   CONTENT_WRITING: '文案生成',
   CONTENT_REWRITE: '改写与解读',
   CONTENT_LAYOUT: '公众号排版',
+  VISUAL_PLANNING: '配图策划',
   TEXT_TO_IMAGE: '文生图',
   IMAGE_TO_IMAGE: '图生图 / 图片编辑',
   SPEECH_SYNTHESIS: '配音与口播',
@@ -491,12 +492,12 @@ function UsageOverview({ usage }: { usage: ApiUsageSummary }) {
 
 
 const taskRequirements: Record<ModelTask, { capability: ModelCapability; operation?: ModelOperation; flow: string }> = {
-  INTELLIGENCE_ANALYSIS: { capability: 'TEXT', flow: '资讯 → 分析结果' }, SOURCE_VERIFICATION: { capability: 'TEXT', flow: '研究来源 → 事实结论' }, TOPIC_RECOMMENDATION: { capability: 'TEXT', flow: '资讯 → 选题' }, VOICE_CALIBRATION: { capability: 'TEXT', flow: '授权文章 → 表达规则' }, CONTENT_WRITING: { capability: 'TEXT', flow: '素材 → 文案' }, CONTENT_REWRITE: { capability: 'TEXT', flow: '原文 → 改写' }, CONTENT_LAYOUT: { capability: 'TEXT', flow: '正文 → 排版稿' },
+  INTELLIGENCE_ANALYSIS: { capability: 'TEXT', flow: '资讯 → 分析结果' }, SOURCE_VERIFICATION: { capability: 'TEXT', flow: '研究来源 → 事实结论' }, TOPIC_RECOMMENDATION: { capability: 'TEXT', flow: '资讯 → 选题' }, VOICE_CALIBRATION: { capability: 'TEXT', flow: '授权文章 → 表达规则' }, CONTENT_WRITING: { capability: 'TEXT', flow: '素材 → 文案' }, CONTENT_REWRITE: { capability: 'TEXT', flow: '原文 → 改写' }, CONTENT_LAYOUT: { capability: 'TEXT', flow: '正文 → 排版稿' }, VISUAL_PLANNING: { capability: 'TEXT', flow: '正文 → 配图方案' },
   TEXT_TO_IMAGE: { capability: 'IMAGE', operation: 'TEXT_TO_IMAGE', flow: '文本 → 图片' }, IMAGE_TO_IMAGE: { capability: 'IMAGE', operation: 'IMAGE_TO_IMAGE', flow: '图片 + 文本 → 图片' }, SPEECH_SYNTHESIS: { capability: 'AUDIO', flow: '文本 → 音频' }, SPEECH_RECOGNITION: { capability: 'ASR', flow: '音频 / 视频 → 文本' },
   TEXT_TO_VIDEO: { capability: 'VIDEO', operation: 'TEXT_TO_VIDEO', flow: '文本 → 视频' }, IMAGE_TO_VIDEO: { capability: 'VIDEO', operation: 'IMAGE_TO_VIDEO', flow: '首帧 + 文本 → 视频' }, FIRST_LAST_FRAME_TO_VIDEO: { capability: 'VIDEO', operation: 'FIRST_LAST_FRAME_TO_VIDEO', flow: '首帧 + 尾帧 + 文本 → 视频' }, REFERENCE_TO_VIDEO: { capability: 'VIDEO', operation: 'REFERENCE_TO_VIDEO', flow: '参考图 / 视频 + 文本 → 视频' }, VIDEO_EDIT: { capability: 'VIDEO', operation: 'VIDEO_EDIT', flow: '视频 + 指令 → 视频' },
 };
 const modelTaskGroups: { label: string; tasks: ModelTask[] }[] = [
-  { label: '情报与内容', tasks: ['INTELLIGENCE_ANALYSIS', 'SOURCE_VERIFICATION', 'TOPIC_RECOMMENDATION', 'VOICE_CALIBRATION', 'CONTENT_WRITING', 'CONTENT_REWRITE', 'CONTENT_LAYOUT'] },
+  { label: '情报与内容', tasks: ['INTELLIGENCE_ANALYSIS', 'SOURCE_VERIFICATION', 'TOPIC_RECOMMENDATION', 'VOICE_CALIBRATION', 'CONTENT_WRITING', 'CONTENT_REWRITE', 'CONTENT_LAYOUT', 'VISUAL_PLANNING'] },
   { label: '图片', tasks: ['TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE'] },
   { label: '音频', tasks: ['SPEECH_SYNTHESIS', 'SPEECH_RECOGNITION'] },
   { label: '视频', tasks: ['TEXT_TO_VIDEO', 'IMAGE_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO', 'REFERENCE_TO_VIDEO', 'VIDEO_EDIT'] },

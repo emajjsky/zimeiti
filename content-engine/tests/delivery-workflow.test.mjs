@@ -96,8 +96,23 @@ test('视觉导演保存完整策划字段并支持参考图真实图生图', ()
   assert.match(client, /referenceImageIds\?: string\[\]/);
   assert.match(client, /planVisual:/);
   assert.match(api, /VISUAL_PLANNING_SCOPE/);
-  assert.match(api, /VISUAL_PLANNING_FALLBACK_SCOPE/);
+  assert.doesNotMatch(api, /VISUAL_PLANNING_FALLBACK_SCOPE/);
+  assert.match(api, /'VISUAL_PLANNING'/);
   assert.match(api, /bodyItemCount:\s*z\.number\(\)\.int\(\)\.min\(0\)\.max\(11\)/);
   assert.match(api, /currentPlan:\s*z\.array\(z\.record[\s\S]*?\.max\(12\)/);
   assert.match(api, /plan:\s*z\.array\(visualPlanItemInput\)\.max\(12\)/);
+});
+
+test('配图策划使用独立可见任务策略，不静默回退到文案模型', () => {
+  const api = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
+  const service = fs.readFileSync(new URL('../server/services/visual-planning.cjs', import.meta.url), 'utf8');
+  const client = fs.readFileSync(new URL('../src/main.tsx', import.meta.url), 'utf8');
+  const workspace = fs.readFileSync(new URL('../src/workspaces/create/VisualWorkspace.tsx', import.meta.url), 'utf8');
+  const migration = fs.readFileSync(new URL('../server/migrations/024_visible_visual_planning_policy.sql', import.meta.url), 'utf8');
+  assert.match(service, /VISUAL_PLANNING_SCOPE = 'VISUAL_PLANNING'/);
+  assert.doesNotMatch(service, /CONTENT_WRITING/);
+  assert.match(api, /const scope = VISUAL_PLANNING_SCOPE;[\s\S]*?textTaskRoute\(workspace\.id, scope, '配图策划'\)/);
+  assert.match(client, /VISUAL_PLANNING: '配图策划'/);
+  assert.match(workspace, /实际策略：配图策划/);
+  assert.match(migration, /SELECT workspace_id, 'VISUAL_PLANNING'/);
 });

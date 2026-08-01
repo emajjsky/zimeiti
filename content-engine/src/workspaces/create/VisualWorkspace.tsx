@@ -7,6 +7,7 @@ import { visualPlanCountRange, visualStylePresets, VISUAL_PLAN_VERSION } from '.
 
 type ImageSearchResult = { id: string; title: string; thumbnailUrl: string; imageUrl: string; sourceUrl: string; license: string; attribution: string };
 type SourceView = 'search' | 'generate' | 'library';
+type PlanningRoute = { scope: string; provider: string; model: string };
 
 function usableVisualReference(item: ProjectReference) {
   return item.role === 'VISUAL' || item.mimeType?.startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(item.url ?? '');
@@ -97,7 +98,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
   const [planBusy, setPlanBusy] = useState(false);
   const [planNeedsRefresh, setPlanNeedsRefresh] = useState(false);
   const [itemRequest, setItemRequest] = useState('');
-  const [planningModel, setPlanningModel] = useState('');
+  const [planningRoute, setPlanningRoute] = useState<PlanningRoute | null>(null);
   const [hydratedPlanKey, setHydratedPlanKey] = useState('');
   const [activeItemId, setActiveItemId] = useState('');
   const [references, setReferences] = useState<ProjectReference[]>([]);
@@ -150,7 +151,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
       setSourceView('search');
       setReferencePickerOpen(false);
       setPlanNeedsRefresh(false);
-      setPlanningModel('');
+      setPlanningRoute(null);
     }
     hydratedProjectKey.current = projectKey;
     setHydratedPlanKey(projectKey);
@@ -349,14 +350,14 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
       });
       const next = safePlan(result.plan);
       setPlan(next);
-      setPlanningModel(result.model);
+      setPlanningRoute({ scope: result.scope, provider: result.provider, model: result.model });
       setPlanNeedsRefresh(false);
       setActiveItemId((current) => currentItemId && next.some((item) => item.id === currentItemId) ? currentItemId : next.some((item) => item.id === current) ? current : next[0]?.id ?? '');
       const selected = currentItemId ? next.find((item) => item.id === currentItemId) : next[0];
       setSearchQuery(selected?.searchQueries[0] ?? '');
       setSearchResults([]);
       setItemRequest('');
-      setNotice(currentItemId ? '这一张已按修改意见重新策划。' : `配图方案已由核心 Agent 完成，共 ${next.length} 张。`);
+      setNotice(currentItemId ? '这一张已按修改意见重新策划。' : `配图方案已由“配图策划”任务策略完成，共 ${next.length} 张。`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '生成配图方案失败。');
     } finally {
@@ -382,7 +383,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
 
   return <section className="visual-workspace">
     <header className="delivery-workspace-head visual-workspace-head">
-      <div><h2>{platformName[activePlatform]}配图</h2><p>{planCountSummary}</p></div>
+      <div><h2>{platformName[activePlatform]}配图</h2><p>{planCountSummary}｜任务策略：配图策划（VISUAL_PLANNING）</p></div>
       <div className="visual-plan-actions">
         <button className="visual-project-style" type="button" aria-label="设置项目配图风格" onClick={openStyleDialog}><Palette size={15}/><span>项目风格</span><b>{allVisualStyles.find((style) => style.id === styleProfile.preset)?.name ?? visualStyles[0].name}</b></button>
         <div className="visual-count-stepper" aria-label="配图数量">
@@ -487,7 +488,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
       </main>}
     </div>}
 
-    {plan.length > 0 && <footer className="delivery-workspace-footer"><span>{saveState === 'saving' ? '正在自动保存配图方案' : boundCount ? `已绑定 ${boundCount}/${plan.length} 张图片` : planningModel ? `方案由 ${planningModel} 策划` : '方案已生成，可从第一张开始选图'}</span><div><button className="button" type="button" disabled={busy !== null} onClick={() => void save()}>{busy === 'save' ? <LoaderCircle size={16}/> : <Save size={16}/>}保存</button><button className="button primary" type="button" disabled={busy !== null || !hasCopy} onClick={() => void complete()}>{busy === 'complete' ? <LoaderCircle size={16}/> : null}确认素材，进入排版</button></div></footer>}
+    {plan.length > 0 && <footer className="delivery-workspace-footer"><span>{saveState === 'saving' ? '正在自动保存配图方案' : planningRoute ? `实际策略：配图策划（${planningRoute.scope}） · ${planningRoute.provider} / ${planningRoute.model}` : boundCount ? `已绑定 ${boundCount}/${plan.length} 张图片｜策略：配图策划（VISUAL_PLANNING）` : '策略：配图策划（VISUAL_PLANNING）｜可从第一张开始选图'}</span><div><button className="text-button" type="button" onClick={onOpenModelSettings}>查看任务策略</button><button className="button" type="button" disabled={busy !== null} onClick={() => void save()}>{busy === 'save' ? <LoaderCircle size={16}/> : <Save size={16}/>}保存</button><button className="button primary" type="button" disabled={busy !== null || !hasCopy} onClick={() => void complete()}>{busy === 'complete' ? <LoaderCircle size={16}/> : null}确认素材，进入排版</button></div></footer>}
 
     {styleDialogOpen && <div className="visual-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setStyleDialogOpen(false); }}>
       <section className="visual-style-dialog" role="dialog" aria-modal="true" aria-labelledby="visual-style-dialog-title">

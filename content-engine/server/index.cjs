@@ -24,7 +24,6 @@ const { accountVoiceCalibrationDraftInput, buildVoiceCalibrationPrompt, buildVoi
 const { createTextModelRunner } = require('./services/text-model.cjs');
 const {
   VISUAL_PLANNING_SCOPE,
-  VISUAL_PLANNING_FALLBACK_SCOPE,
   VISUAL_PLANNING_OPERATION,
   buildVisualPlanningPrompt,
   buildVisualPlanningRepairPrompt,
@@ -65,7 +64,7 @@ const {
 
 const app = Fastify({ logger: true, bodyLimit: 5 * 1024 * 1024 });
 const credentials = new Set(['TAVILY', 'BAILIAN']);
-const modelTasks = ['INTELLIGENCE_ANALYSIS', 'SOURCE_VERIFICATION', 'TOPIC_RECOMMENDATION', 'VOICE_CALIBRATION', 'CONTENT_WRITING', 'CONTENT_REWRITE', 'CONTENT_LAYOUT', 'TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE', 'SPEECH_SYNTHESIS', 'SPEECH_RECOGNITION', 'TEXT_TO_VIDEO', 'IMAGE_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO', 'REFERENCE_TO_VIDEO', 'VIDEO_EDIT'];
+const modelTasks = ['INTELLIGENCE_ANALYSIS', 'SOURCE_VERIFICATION', 'TOPIC_RECOMMENDATION', 'VOICE_CALIBRATION', 'CONTENT_WRITING', 'CONTENT_REWRITE', 'CONTENT_LAYOUT', 'VISUAL_PLANNING', 'TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE', 'SPEECH_SYNTHESIS', 'SPEECH_RECOGNITION', 'TEXT_TO_VIDEO', 'IMAGE_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO', 'REFERENCE_TO_VIDEO', 'VIDEO_EDIT'];
 const externalProviders = new Set(['DASHSCOPE', 'SILICONFLOW', 'VOLCENGINE_ARK', 'KIMI', 'ZHIPU', 'OPENAI', 'OPENAI_COMPATIBLE']);
 const creativePlatform = z.enum(['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO']);
 const analysisPlatform = z.enum(['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO', 'VIDEO_CHANNEL']);
@@ -889,9 +888,8 @@ app.post('/api/v1/creative/projects/:projectId/visual/plan', { preHandler: authe
   const currentItem = input.currentItemId ? currentPlan.find((item) => item.id === input.currentItemId) : undefined;
   if (input.currentItemId && !currentItem) { const error = new Error('没有找到要重新策划的图片。'); error.statusCode = 404; throw error; }
 
-  const plannerPolicy = await query('SELECT 1 FROM agent_model_policies WHERE workspace_id = $1 AND scope = $2', [workspace.id, VISUAL_PLANNING_SCOPE]);
-  const scope = plannerPolicy.rowCount ? VISUAL_PLANNING_SCOPE : VISUAL_PLANNING_FALLBACK_SCOPE;
-  const route = await textTaskRoute(workspace.id, scope, scope === VISUAL_PLANNING_SCOPE ? '核心 Agent 配图策划' : '配图策划');
+  const scope = VISUAL_PLANNING_SCOPE;
+  const route = await textTaskRoute(workspace.id, scope, '配图策划');
   const connectionInput = await textConnectionInput(workspace.id, route);
   const prompt = buildVisualPlanningPrompt({
     project: {
