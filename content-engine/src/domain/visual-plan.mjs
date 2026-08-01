@@ -483,10 +483,10 @@ function searchQueriesFor({ title, focus, category, role, visualType }) {
 }
 
 export function visualPlanCountRange(platform) {
-  if (platform === 'WEIBO') return { min: 0, max: 1 };
+  if (platform === 'WEIBO') return { min: 1, max: 9 };
   if (platform === 'XIAOHONGSHU') return { min: 5, max: 8 };
-  if (platform === 'ZHIHU') return { min: 2, max: 4 };
-  return { min: 2, max: 5 };
+  if (platform === 'ZHIHU') return { min: 2, max: 11 };
+  return { min: 2, max: 11 };
 }
 
 function desiredItemCount(platform, body, requestedBodyItemCount) {

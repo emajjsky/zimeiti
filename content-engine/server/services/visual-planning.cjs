@@ -46,7 +46,7 @@ const plannedItemSchema = z.object({
 
 const visualPlanSchema = z.object({
   strategy: z.string().trim().min(8).max(500),
-  items: z.array(plannedItemSchema).min(1).max(10),
+  items: z.array(plannedItemSchema).min(1).max(12),
 });
 
 const genericOnly = /^(关键|节点|时间|重点|核心|内容|信息|主题|场景|要点|结论|背景|价值|问题|方法|流程|数据|人物|事件|图片|配图)[一二三四五六七八九十\d\s、，：:.-]*$/;
@@ -72,8 +72,24 @@ function stripCodeFence(content) {
 }
 
 function expectedRoles(platform, bodyItemCount) {
-  if (platform === 'WEIBO') return bodyItemCount === 0 ? [] : ['MAIN'];
+  if (platform === 'WEIBO') return bodyItemCount === 0 ? [] : ['MAIN', ...Array.from({ length: Math.max(0, bodyItemCount - 1) }, () => 'BODY')];
   return [platform === 'XIAOHONGSHU' ? 'COVER' : 'COVER', ...Array.from({ length: bodyItemCount }, () => platform === 'XIAOHONGSHU' ? 'CARD' : 'BODY')];
+}
+
+function quantityInstruction(platform, bodyItemCount, singleItem = false) {
+  if (singleItem) return { bodyImageCount: null, totalImageCount: 1, exactRoleSequence: ['当前图片角色'], instruction: 'items 数组必须且只能包含 1 项。' };
+  const roles = expectedRoles(platform, bodyItemCount);
+  const bodyName = platform === 'XIAOHONGSHU' ? '内容页' : platform === 'WEIBO' ? '配图' : '正文插图';
+  const coverCount = platform === 'WEIBO' ? 0 : 1;
+  return {
+    coverImageCount: coverCount,
+    bodyImageCount: bodyItemCount,
+    totalImageCount: roles.length,
+    exactRoleSequence: roles,
+    instruction: platform === 'WEIBO'
+      ? `items 数组必须恰好包含 ${roles.length} 项：首张角色为 MAIN，其余 ${Math.max(0, roles.length - 1)} 张角色为 BODY。`
+      : `items 数组必须恰好包含 ${roles.length} 项：封面 ${coverCount} 张 + ${bodyName} ${bodyItemCount} 张。bodyItemCount 不是总数。`,
+  };
 }
 
 function parseVisualPlanningContent(content, { platform, bodyItemCount, singleItem = false } = {}) {
@@ -82,7 +98,10 @@ function parseVisualPlanningContent(content, { platform, bodyItemCount, singleIt
   catch { throw new Error('模型返回的配图方案不是有效 JSON。'); }
   const parsed = assertSpecificPlan(visualPlanSchema.parse(value));
   const expected = singleItem ? 1 : expectedRoles(platform, bodyItemCount).length;
-  if (parsed.items.length !== expected) throw new Error(`配图数量不正确，应返回 ${expected} 张，实际返回 ${parsed.items.length} 张。`);
+  if (parsed.items.length !== expected) {
+    const quantity = quantityInstruction(platform, bodyItemCount, singleItem);
+    throw new Error(`配图数量不正确，${quantity.instruction}实际返回 ${parsed.items.length} 张。`);
+  }
   if (!singleItem) {
     const roles = expectedRoles(platform, bodyItemCount);
     parsed.items.forEach((item, index) => {
@@ -97,6 +116,7 @@ function buildVisualPlanningPrompt({ project, platform, bodyItemCount, styleProf
   const styleName = styleNames[styleProfile?.preset] ?? styleProfile?.preset ?? '清新编辑';
   const singleItem = Boolean(currentItem);
   const roles = expectedRoles(platform, bodyItemCount);
+  const quantity = quantityInstruction(platform, bodyItemCount, singleItem);
   const system = [
     '你是资深内容视觉导演。你的工作不是罗列设计参数，而是把已完成正文转成可直接执行的配图方案。',
     '先理解文章叙事和每一段的传播任务，再决定真实场景图、资料图、主体主视觉或确有必要的结构图。整套方案必须以图片内容为主、文字为辅，不能做成文字型 PPT、课程卡片或大段文字海报。',
@@ -115,7 +135,7 @@ function buildVisualPlanningPrompt({ project, platform, bodyItemCount, styleProf
     allowedVisualTypes: visualType.options,
     platform: { code: platform, name: platformName },
     requiredRoles: singleItem ? [currentItem.role] : roles,
-    bodyItemCount,
+    quantity,
     project: {
       title: project.planning?.title || project.title,
       category: project.planning?.category,
@@ -140,8 +160,9 @@ function buildVisualPlanningPrompt({ project, platform, bodyItemCount, styleProf
   return { system, message };
 }
 
-function buildVisualPlanningRepairPrompt(system, validationError) {
-  return `${system}\n上一次输出未通过校验。请修正具体性、数量、角色和 JSON 结构，只返回完整 JSON。校验错误：${validationError}`;
+function buildVisualPlanningRepairPrompt(system, validationError, { platform, bodyItemCount, singleItem = false } = {}) {
+  const quantity = quantityInstruction(platform, bodyItemCount, singleItem);
+  return `${system}\n上一次输出未通过校验。请重新返回一份完整 JSON，不要只补缺失项。${quantity.instruction}角色顺序必须严格为：${quantity.exactRoleSequence.join(' → ')}。校验错误：${validationError}`;
 }
 
 function itemId(platform, item, index) {

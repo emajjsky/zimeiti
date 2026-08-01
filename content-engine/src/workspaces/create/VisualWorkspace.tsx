@@ -373,7 +373,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
   };
 
   const planCountSummary = activePlatform === 'WEIBO'
-    ? `主图 ${bodyItemCount} 张`
+    ? `配图 ${bodyItemCount} 张`
     : activePlatform === 'XIAOHONGSHU'
       ? `封面 1 张，内容页 ${bodyItemCount} 张`
       : `封面 1 张，正文插图 ${bodyItemCount} 张`;
@@ -386,9 +386,9 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
       <div className="visual-plan-actions">
         <button className="visual-project-style" type="button" aria-label="设置项目配图风格" onClick={openStyleDialog}><Palette size={15}/><span>项目风格</span><b>{allVisualStyles.find((style) => style.id === styleProfile.preset)?.name ?? visualStyles[0].name}</b></button>
         <div className="visual-count-stepper" aria-label="配图数量">
-          <button type="button" aria-label={activePlatform === 'WEIBO' ? '减少主图' : '减少正文插图'} disabled={bodyItemCount <= countRange.min} onClick={() => changeBodyItemCount(-1)}><Minus size={14}/></button>
-          <output aria-label={activePlatform === 'WEIBO' ? '主图数量' : '正文插图数量'}>{bodyItemCount}</output>
-          <button type="button" aria-label={activePlatform === 'WEIBO' ? '增加主图' : '增加正文插图'} disabled={bodyItemCount >= countRange.max} onClick={() => changeBodyItemCount(1)}><Plus size={14}/></button>
+          <button type="button" aria-label={activePlatform === 'WEIBO' ? '减少微博配图' : '减少正文插图'} disabled={bodyItemCount <= countRange.min} onClick={() => changeBodyItemCount(-1)}><Minus size={14}/></button>
+          <output aria-label={activePlatform === 'WEIBO' ? '微博配图数量' : '正文插图数量'}>{bodyItemCount}</output>
+          <button type="button" aria-label={activePlatform === 'WEIBO' ? '增加微博配图' : '增加正文插图'} disabled={bodyItemCount >= countRange.max} onClick={() => changeBodyItemCount(1)}><Plus size={14}/></button>
         </div>
         {plan.length > 0 && <button className="button" type="button" disabled={planBusy || !hasCopy} onClick={() => void planWithAI()}>{planBusy ? <LoaderCircle size={15}/> : <RefreshCw size={15}/>} {planNeedsRefresh ? '更新方案' : '重新策划'}</button>}
       </div>

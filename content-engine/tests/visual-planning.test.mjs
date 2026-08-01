@@ -3,7 +3,7 @@ import test from 'node:test';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { buildVisualPlanningPrompt, parseVisualPlanningContent, mergePlannedItems } = require('../server/services/visual-planning.cjs');
+const { buildVisualPlanningPrompt, buildVisualPlanningRepairPrompt, parseVisualPlanningContent, mergePlannedItems } = require('../server/services/visual-planning.cjs');
 
 const item = (role, title, placement) => ({
   role,
@@ -37,6 +37,26 @@ test('配图策划提示词读取完整正文并禁止空泛占位词', () => {
   assert.match(prompt.system, /图片内容为主、文字为辅/);
   assert.match(prompt.system, /禁止把模板、矢量、图标/);
   assert.match(prompt.system, /最多四个必要短标签/);
+  assert.match(prompt.message, /封面 1 张 \+ 正文插图 2 张/);
+  assert.match(prompt.message, /bodyItemCount 不是总数/);
+  assert.match(prompt.message, /"totalImageCount":3/);
+});
+
+test('数量修复提示明确总数并要求重写完整数组', () => {
+  const repair = buildVisualPlanningRepairPrompt('系统规则', '实际返回 5 张', { platform: 'WECHAT', bodyItemCount: 5 });
+  assert.match(repair, /封面 1 张 \+ 正文插图 5 张/);
+  assert.match(repair, /恰好包含 6 项/);
+  assert.match(repair, /COVER → BODY → BODY → BODY → BODY → BODY/);
+  assert.match(repair, /不要只补缺失项/);
+});
+
+test('微博九张方案使用一张主图加八张后续配图', () => {
+  const prompt = buildVisualPlanningPrompt({
+    project: { title: '机器人行业观察', planning: { title: '机器人行业观察', category: '科技', coreMessage: '解释产品、团队和应用场景' }, versionTitle: '机器人行业观察', versionBody: '正文内容足够完整。' },
+    platform: 'WEIBO', bodyItemCount: 9, styleProfile: { preset: 'FRESH_EDITORIAL', customPrompt: '' }, request: '',
+  });
+  assert.match(prompt.message, /首张角色为 MAIN，其余 8 张角色为 BODY/);
+  assert.match(prompt.message, /"totalImageCount":9/);
 });
 
 test('模型方案必须返回平台所需数量和具体内容', () => {

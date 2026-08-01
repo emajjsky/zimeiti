@@ -28,3 +28,10 @@ test('外部策略通过连接的 chat completions 返回标准文本结果', as
   assert.equal(request.options.headers.Authorization, 'Bearer secret');
   assert.deepEqual(result, { content: '{"ok":true}', inputTokens: 12, outputTokens: 8 });
 });
+
+test('多图配图策划允许最多一万六千输出 Token', async () => {
+  let args;
+  const runner = createTextModelRunner({ runBailianCli: async (nextArgs) => { args = nextArgs; return payload; } });
+  await runner.runText({ provider: 'BAILIAN_CLI', apiKey: 'secret', model: 'qwen-plus', system: 'system', message: 'message', maxTokens: 20_000 });
+  assert.equal(args[args.indexOf('--max-tokens') + 1], '16000');
+});

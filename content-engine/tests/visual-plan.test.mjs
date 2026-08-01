@@ -149,13 +149,17 @@ test('公众号支持指定正文插图数量，封面单独计算', () => {
 });
 
 test('用户指定的正文配图数量会限制在平台合理范围内', () => {
-  assert.deepEqual(visualPlanCountRange('WECHAT'), { min: 2, max: 5 });
-  assert.deepEqual(visualPlanCountRange('ZHIHU'), { min: 2, max: 4 });
+  assert.deepEqual(visualPlanCountRange('WECHAT'), { min: 2, max: 11 });
+  assert.deepEqual(visualPlanCountRange('ZHIHU'), { min: 2, max: 11 });
   assert.deepEqual(visualPlanCountRange('XIAOHONGSHU'), { min: 5, max: 8 });
-  assert.deepEqual(visualPlanCountRange('WEIBO'), { min: 0, max: 1 });
+  assert.deepEqual(visualPlanCountRange('WEIBO'), { min: 1, max: 9 });
   assert.equal(buildVisualPlan(article, 'WECHAT', { bodyItemCount: 0 }).length, 3);
-  assert.equal(buildVisualPlan(article, 'WECHAT', { bodyItemCount: 99 }).length, 6);
+  assert.equal(buildVisualPlan(article, 'WECHAT', { bodyItemCount: 99 }).length, 12);
   assert.equal(buildVisualPlan(article, 'XIAOHONGSHU', { bodyItemCount: 8 }).length, 9);
+  assert.equal(buildVisualPlan(article, 'ZHIHU', { bodyItemCount: 99 }).length, 12);
+  const weibo = buildVisualPlan(article, 'WEIBO', { bodyItemCount: 9 });
+  assert.equal(weibo.length, 9);
+  assert.deepEqual(weibo.map((item) => item.role), ['MAIN', 'BODY', 'BODY', 'BODY', 'BODY', 'BODY', 'BODY', 'BODY', 'BODY']);
 });
 
 test('调整配图数量时保留现有项和素材绑定，新项目保持未绑定', () => {

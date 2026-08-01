@@ -17,7 +17,7 @@ function parseModelResponse(value) {
 function createTextModelRunner({ runBailianCli = defaultRunBailianCli, fetchImpl = fetch } = {}) {
   return {
     async runText(input) {
-      const maxTokens = Number.isInteger(input.maxTokens) ? Math.max(256, Math.min(input.maxTokens, 8_000)) : 1_800;
+      const maxTokens = Number.isInteger(input.maxTokens) ? Math.max(256, Math.min(input.maxTokens, 16_000)) : 1_800;
       const temperature = Number.isFinite(input.temperature) ? Math.max(0, Math.min(input.temperature, 1)) : 0.2;
       if (input.provider === 'BAILIAN_CLI') {
         if (!input.apiKey) throw new Error('工作空间未配置百炼 Key。');

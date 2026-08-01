@@ -127,7 +127,7 @@ const visualPlanningInput = z.object({
   }),
   request: z.string().trim().max(2_000).default(''),
   currentItemId: z.string().trim().min(1).max(100).optional(),
-  currentPlan: z.array(z.record(z.string(), z.unknown())).max(10).default([]),
+  currentPlan: z.array(z.record(z.string(), z.unknown())).max(12).default([]),
   keepAssignedAssets: z.boolean().default(true),
 });
 const createProjectInput = z.object({
@@ -909,7 +909,7 @@ app.post('/api/v1/creative/projects/:projectId/visual/plan', { preHandler: authe
   let inputTokens = 0;
   let outputTokens = 0;
   try {
-    const result = await textRunner.runText({ provider: route.provider, model: route.model, system: prompt.system, message: prompt.message, maxTokens: 6_000, temperature: 0.15, ...connectionInput });
+    const result = await textRunner.runText({ provider: route.provider, model: route.model, system: prompt.system, message: prompt.message, maxTokens: 16_000, temperature: 0.15, ...connectionInput });
     inputTokens += result.inputTokens ?? 0;
     outputTokens += result.outputTokens ?? 0;
     let parsed;
@@ -919,9 +919,13 @@ app.post('/api/v1/creative/projects/:projectId/visual/plan', { preHandler: authe
       const repaired = await textRunner.runText({
         provider: route.provider,
         model: route.model,
-        system: buildVisualPlanningRepairPrompt(prompt.system, validationError instanceof Error ? validationError.message : '输出结构不完整。'),
+        system: buildVisualPlanningRepairPrompt(prompt.system, validationError instanceof Error ? validationError.message : '输出结构不完整。', {
+          platform: input.platform,
+          bodyItemCount: input.bodyItemCount,
+          singleItem: Boolean(input.currentItemId),
+        }),
         message: result.content,
-        maxTokens: 6_000,
+        maxTokens: 16_000,
         temperature: 0.1,
         ...connectionInput,
       });
@@ -2217,7 +2221,7 @@ app.put('/api/v1/creative/projects/:projectId/visual', { preHandler: authenticat
     }).default({ preset: 'FRESH_EDITORIAL', customPrompt: '' }),
     coverReferenceId: z.string().uuid().nullable(),
     assetReferenceIds: z.array(z.string().uuid()).max(12),
-    plan: z.array(visualPlanItemInput).max(10).default([]),
+    plan: z.array(visualPlanItemInput).max(12).default([]),
   }).superRefine((value, context) => {
     const assigned = value.plan.map((item) => item.assetReferenceId).filter(Boolean);
     if (new Set(assigned).size !== assigned.length) context.addIssue({ code: 'custom', path: ['plan'], message: '同一张图片不能绑定到多个配图位置。' });
