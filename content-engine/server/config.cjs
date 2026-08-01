@@ -15,6 +15,7 @@ module.exports = {
   jwtSecret,
   corsOrigin: process.env.CORS_ORIGIN || 'http://127.0.0.1:5173',
   uploadRoot: path.resolve(process.env.UPLOAD_ROOT || path.join(process.cwd(), 'data', 'uploads')),
+  workspaceDeletionEnabled: !isProduction || process.env.WORKSPACE_DELETE_ENABLED === 'true',
   encryptionSecret: process.env.CREDENTIAL_ENCRYPTION_KEY || (isProduction ? '' : crypto.createHash('sha256').update(jwtSecret).digest('base64')),
   isProduction,
 };

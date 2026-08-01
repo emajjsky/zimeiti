@@ -281,6 +281,21 @@ app.patch('/api/v1/workspaces/:workspaceId', { preHandler: authenticate }, async
   return workspaceStore.sessionForUser(request.user.sub);
 });
 
+app.get('/api/v1/workspaces/:workspaceId/deletion-impact', { preHandler: authenticate }, async (request) => {
+  const workspaceId = z.string().uuid().parse(request.params.workspaceId);
+  return workspaceStore.deletionImpact(request.user.sub, workspaceId);
+});
+
+app.delete('/api/v1/workspaces/:workspaceId', { preHandler: authenticate }, async (request, reply) => {
+  if (!config.workspaceDeletionEnabled) throw businessError(503, 'WORKSPACE_DELETE_DISABLED', '当前部署未开放工作空间永久删除。');
+  const workspaceId = z.string().uuid().parse(request.params.workspaceId);
+  const input = z.object({ confirmationName: z.string().max(80) }).parse(request.body);
+  const requested = await workspaceStore.requestDeletion(request.user.sub, workspaceId, input.confirmationName);
+  let queued = true;
+  try { await enqueue(requested.job); } catch { queued = false; }
+  reply.code(202).send({ ...(await workspaceStore.sessionForUser(request.user.sub)), deletionJobId: requested.deletionJob.id, queueJobId: requested.job.id, queued });
+});
+
 app.put('/api/v1/me/active-workspace', { preHandler: authenticate }, async (request) => {
   const input = z.object({ workspaceId: z.string().uuid() }).parse(request.body);
   return workspaceStore.select(request.user.sub, input.workspaceId);
@@ -415,6 +430,14 @@ app.patch('/api/v1/assets/:assetId', { preHandler: workspaceAccess.forRole('EDIT
   const assetId = z.string().uuid().parse(request.params.assetId);
   const input = assetMetadata.extend({ status: assetStatus }).parse(request.body);
   return assetStore.update(request.workspace.id, assetId, input);
+});
+
+app.delete('/api/v1/assets/:assetId', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
+  const assetId = z.string().uuid().parse(request.params.assetId);
+  const requested = await assetStore.requestDeletion(request.workspace.id, assetId, request.user.sub);
+  let queued = true;
+  try { await enqueue(requested.job); } catch { queued = false; }
+  reply.code(202).send({ assetId, deletionJobId: requested.deletionJob.id, queueJobId: requested.job.id, queued });
 });
 
 app.post('/api/v1/projects/:projectId/assets/:assetId', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {

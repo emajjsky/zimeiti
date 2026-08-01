@@ -1,4 +1,4 @@
-import { Check, LoaderCircle, Pencil, Plus } from 'lucide-react';
+import { Check, LoaderCircle, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { PageHeader } from '../../components/workspace/PageHeader';
 import { webWorkspaces } from '../../data/webApi';
@@ -19,6 +19,9 @@ export function WorkspaceManagementSettings({
   const [createName, setCreateName] = useState('');
   const [editingId, setEditingId] = useState('');
   const [editingName, setEditingName] = useState('');
+  const [deleting, setDeleting] = useState<WorkspaceSummary | null>(null);
+  const [impact, setImpact] = useState<{ projects: number; assets: number; channelAccounts: number; publications: number; metricSnapshots: number; retrospectives: number } | null>(null);
+  const [confirmationName, setConfirmationName] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -82,6 +85,19 @@ export function WorkspaceManagementSettings({
     }
   };
 
+  const openDeletion = async (workspace: WorkspaceSummary) => {
+    setDeleting(workspace); setImpact(null); setConfirmationName(''); setError('');
+    try { setImpact(await webWorkspaces.deletionImpact(workspace.id)); } catch (reason) { setError(reason instanceof Error ? reason.message : '读取删除影响失败。'); }
+  };
+
+  const removeWorkspace = async () => {
+    if (!deleting || confirmationName !== deleting.name || busyAction) return;
+    setBusyAction(`delete:${deleting.id}`); setError('');
+    try { onSessionChange(await webWorkspaces.remove(deleting.id, confirmationName)); setDeleting(null); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : '提交空间删除失败。'); }
+    finally { setBusyAction(''); }
+  };
+
   return (
     <section className="workspace-management-settings">
       <PageHeader title="工作空间管理" subtitle="每个空间拥有独立的项目、素材、账号配置和后续发布数据。" />
@@ -114,7 +130,7 @@ export function WorkspaceManagementSettings({
                 ) : (
                   <div className="workspace-management-actions">
                     {current ? <span className="workspace-current-label"><Check size={15} />当前空间</span> : <button className="button" type="button" disabled={Boolean(busyAction)} onClick={() => void selectWorkspace(workspace)}>{busyAction === `select:${workspace.id}` && <LoaderCircle className="spin" size={15} />}切换</button>}
-                    {workspace.role === 'OWNER' && <button className="text-button" type="button" disabled={Boolean(busyAction)} onClick={() => { setEditingId(workspace.id); setEditingName(workspace.name); }}><Pencil size={15} />重命名</button>}
+                    {workspace.role === 'OWNER' && <><button className="text-button" type="button" disabled={Boolean(busyAction)} onClick={() => { setEditingId(workspace.id); setEditingName(workspace.name); }}><Pencil size={15} />重命名</button><button className="text-button danger-text" type="button" disabled={Boolean(busyAction)} onClick={() => void openDeletion(workspace)}><Trash2 size={15}/>删除空间</button></>}
                   </div>
                 )}
               </article>
@@ -124,6 +140,7 @@ export function WorkspaceManagementSettings({
       ) : (
         <div className="settings-empty-state"><h2>还没有工作空间</h2><p>在上方输入名称创建第一个空间，创建后会立即进入。</p></div>
       )}
+      {deleting && <div className="workspace-delete-backdrop" role="presentation"><section className="workspace-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="workspace-delete-title"><header><div><h2 id="workspace-delete-title">删除工作空间</h2><p>这是不可逆操作，文件会在后台物理删除。</p></div><button className="icon-button" type="button" aria-label="关闭删除确认" onClick={() => setDeleting(null)}><X size={18}/></button></header>{impact ? <div className="workspace-delete-impact"><b>将删除</b><dl><div><dt>内容项目</dt><dd>{impact.projects}</dd></div><div><dt>空间素材</dt><dd>{impact.assets}</dd></div><div><dt>账号</dt><dd>{impact.channelAccounts}</dd></div><div><dt>已发布内容</dt><dd>{impact.publications}</dd></div><div><dt>指标快照</dt><dd>{impact.metricSnapshots}</dd></div><div><dt>复盘记录</dt><dd>{impact.retrospectives}</dd></div></dl><label><span>输入完整空间名称：{deleting.name}</span><input value={confirmationName} onChange={(event) => setConfirmationName(event.target.value)} autoFocus /></label></div> : <div className="workspace-management-loading"><span/><span/><span/></div>}<footer><button className="button" type="button" onClick={() => setDeleting(null)}>取消</button><button className="button danger" type="button" disabled={!impact || confirmationName !== deleting.name || Boolean(busyAction)} onClick={() => void removeWorkspace()}>{busyAction === `delete:${deleting.id}` ? <LoaderCircle size={15}/> : <Trash2 size={15}/>}确认永久删除</button></footer></section></div>}
     </section>
   );
 }

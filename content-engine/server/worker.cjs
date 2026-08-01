@@ -35,10 +35,13 @@ const { createProjectAgentStore } = require('./services/project-agent.cjs');
 const { updateCreativeProjects } = require('./services/project-planning.cjs');
 const { loadContentMasterState } = require('./services/content-master.cjs');
 const { applyAcceptedCopyToState, buildCopyPrompt, buildFinishedCopyPrompt, buildWritingPacket, copyActionPersistenceMode, parseCopyOutput, parseFinishedCopyBody } = require('./services/project-copy-action.cjs');
+const { createStorageDeletionService } = require('./services/storageDeletion.cjs');
+const { enqueue } = require('./queue.cjs');
 
 const connection = new IORedis(config.redisUrl, { maxRetriesPerRequest: null });
 const textRunner = createTextModelRunner();
 const projectAgentStore = createProjectAgentStore({ query, transaction });
+const storageDeletion = createStorageDeletionService({ query, transaction, uploadRoot: config.uploadRoot });
 
 async function processJob(queueJob) {
   const { jobId, workspaceId, payload } = queueJob.data;
@@ -55,6 +58,7 @@ async function processJob(queueJob) {
     await query("UPDATE generation_runs SET status = 'QUEUED', started_at = NULL, completed_at = NULL WHERE id = $1 AND workspace_id = $2 AND status = 'RUNNING'", [payload.runId, workspaceId]);
   }
   try {
+    if (queueJob.name === 'STORAGE_DELETE') return await storageDeletion.executeById({ workspaceId, deletionJobId: payload.deletionJobId, queueJobId: jobId });
     if (queueJob.name === 'AGENT_PLAN') return await generateAgentPlan({ jobId, workspaceId, planId: payload.planId });
     if (queueJob.name === 'INTELLIGENCE_ANALYSIS') return await generateIntelligenceAnalysis({ jobId, workspaceId, runId: payload.runId });
     if (queueJob.name === 'PROJECT_RESEARCH_PLAN') return await generateProjectResearchPlan({ jobId, workspaceId, runId: payload.runId });
@@ -967,7 +971,16 @@ async function generateAgentPlan({ jobId, workspaceId, planId }) {
 }
 
 const worker = new Worker('content-engine', processJob, { connection });
-worker.on('ready', () => console.log('Content Engine Worker 已启动'));
+worker.on('ready', async () => {
+  console.log('Content Engine Worker 已启动');
+  try {
+    const recovered = await storageDeletion.recoverPendingDeletionJobs();
+    await Promise.all(recovered.map((job) => enqueue(job)));
+    if (recovered.length) console.log(`已恢复 ${recovered.length} 个存储删除任务`);
+  } catch (error) {
+    console.error(`恢复存储删除任务失败：${error instanceof Error ? error.message : String(error)}`);
+  }
+});
 worker.on('failed', (job, error) => console.error(`任务 ${job?.id} 失败：${error.message}`));
 
 async function close() { await worker.close(); await connection.quit(); }

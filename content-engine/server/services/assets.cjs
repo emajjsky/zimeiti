@@ -144,7 +144,25 @@ function createAssetStore({ query, transaction, removeStoredFile = async () => {
     if (!result.rows.length) throw businessError(404, 'PROJECT_ASSET_NOT_FOUND', '这个项目没有关联该素材。');
   }
 
-  return { list, get, getStored, createFromStoredFile, update, listProject, linkToProject, unlinkFromProject };
+  async function requestDeletion(workspaceId, assetId, userId) {
+    return transaction(async (client) => {
+      const locked = await client.query(`SELECT * FROM workspace_assets
+        WHERE workspace_id = $1 AND id = $2 AND status <> 'DELETING'
+        FOR UPDATE`, [workspaceId, assetId]);
+      if (!locked.rows.length) throw businessError(404, 'ASSET_NOT_FOUND', '没有找到可删除的素材。');
+      const references = await client.query('SELECT count(*)::int AS count FROM project_asset_links WHERE workspace_id = $1 AND asset_id = $2', [workspaceId, assetId]);
+      if (Number(references.rows[0]?.count ?? 0) > 0) throw businessError(409, 'ASSET_IN_USE', '素材仍被项目引用，请先在所有项目中解除引用。');
+      await client.query("UPDATE workspace_assets SET status = 'DELETING', updated_at = now() WHERE workspace_id = $1 AND id = $2", [workspaceId, assetId]);
+      const deletion = await client.query(`INSERT INTO storage_deletion_jobs
+        (workspace_id, target_type, target_id, storage_key, status, requested_by)
+        VALUES ($1, 'ASSET', $2, $3, 'PENDING', $4) RETURNING *`, [workspaceId, assetId, locked.rows[0].storage_key, userId]);
+      const queued = await client.query(`INSERT INTO jobs (workspace_id, job_type, payload_json)
+        VALUES ($1, 'STORAGE_DELETE', $2) RETURNING *`, [workspaceId, JSON.stringify({ deletionJobId: deletion.rows[0].id })]);
+      return { assetId, deletionJob: deletion.rows[0], job: queued.rows[0] };
+    });
+  }
+
+  return { list, get, getStored, createFromStoredFile, update, listProject, linkToProject, unlinkFromProject, requestDeletion };
 }
 
 module.exports = { assetView, projectAssetView, createAssetStore };

@@ -79,6 +79,12 @@ export const webWorkspaces = {
   async select(workspaceId: string) {
     return updateWorkspaceSession(await request<WorkspaceSession>('/me/active-workspace', { method: 'PUT', body: JSON.stringify({ workspaceId }), workspaceScoped: false }));
   },
+  deletionImpact(workspaceId: string) {
+    return request<{ projects: number; assets: number; channelAccounts: number; publications: number; metricSnapshots: number; retrospectives: number }>(`/workspaces/${encodeURIComponent(workspaceId)}/deletion-impact`, { workspaceScoped: false });
+  },
+  async remove(workspaceId: string, confirmationName: string) {
+    return updateWorkspaceSession(await request<WorkspaceSession & { deletionJobId: string; queueJobId: string; queued: boolean }>(`/workspaces/${encodeURIComponent(workspaceId)}`, { method: 'DELETE', body: JSON.stringify({ confirmationName }), workspaceScoped: false }));
+  },
   current: (): WorkspaceSummary | null => {
     const session = sessionStore.read();
     return session?.workspaces.find(({ id }) => id === session.activeWorkspaceId) ?? null;
@@ -113,6 +119,7 @@ export const webAssets = {
     return (await requestWorkspaceContent(`/assets/${encodeURIComponent(assetId)}/content`, '读取素材失败')).blob();
   },
   update: (assetId: string, input: AssetUpdateInput) => request<WorkspaceAsset>(`/assets/${encodeURIComponent(assetId)}`, { method: 'PATCH', body: JSON.stringify(input) }),
+  remove: (assetId: string) => request<{ assetId: string; deletionJobId: string; queueJobId: string; queued: boolean }>(`/assets/${encodeURIComponent(assetId)}`, { method: 'DELETE' }),
   link: (projectId: string, assetId: string, input: ProjectAssetLinkInput) => request<ProjectAsset>(`/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`, { method: 'POST', body: JSON.stringify(input) }),
   unlink: (projectId: string, assetId: string) => request<void>(`/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`, { method: 'DELETE' }),
 };

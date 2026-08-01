@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 
@@ -93,4 +94,13 @@ test('只有所有者可以重命名活动空间', async () => {
   assert.deepEqual(await store.rename('user-1', 'workspace-a', '  新名称  '), {
     id: 'workspace-a', name: '新名称', role: 'OWNER', status: 'ACTIVE',
   });
+});
+
+test('空间删除 API 提供影响预览、完整名称确认和后台任务状态', () => {
+  const source = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
+  const service = fs.readFileSync(new URL('../server/services/workspaces.cjs', import.meta.url), 'utf8');
+  assert.match(source, /deletion-impact/);
+  assert.match(service, /WORKSPACE_DELETE_CONFIRMATION_MISMATCH/);
+  assert.match(source, /WORKSPACE_DELETE_DISABLED/);
+  assert.match(service, /STORAGE_DELETE/);
 });

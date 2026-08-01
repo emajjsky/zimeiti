@@ -98,11 +98,22 @@ test('同一项目重复选择同一素材只保留一条关系', async () => {
   assert.equal(linked.projectId, 'project-a');
 });
 
+test('仍被项目引用的素材不能进入永久删除队列', async () => {
+  const client = { async query(sql) {
+    if (sql.includes('FROM workspace_assets') && sql.includes('FOR UPDATE')) return { rows: [assetRow()], rowCount: 1 };
+    if (sql.includes('count(*)')) return { rows: [{ count: '2' }], rowCount: 1 };
+    throw new Error(`删除流程不应继续：${sql}`);
+  } };
+  const store = createAssetStore({ query: client.query.bind(client), transaction: async (callback) => callback(client) });
+  await assert.rejects(() => store.requestDeletion('workspace-a', 'asset-a', 'user-1'), (error) => error.code === 'ASSET_IN_USE');
+});
+
 test('空间素材 API 使用显式角色并为内容响应设置私有安全头', async () => {
   const source = await fs.promises.readFile(new URL('../server/index.cjs', import.meta.url), 'utf8');
   assert.match(source, /app\.get\('\/api\/v1\/assets', \{ preHandler: workspaceAccess\.forRole\('VIEWER'\) \}/);
   assert.match(source, /app\.post\('\/api\/v1\/assets', \{ preHandler: workspaceAccess\.forRole\('EDITOR'\) \}/);
   assert.match(source, /app\.post\('\/api\/v1\/projects\/:projectId\/assets\/:assetId', \{ preHandler: workspaceAccess\.forRole\('EDITOR'\) \}/);
+  assert.match(source, /app\.delete\('\/api\/v1\/assets\/:assetId', \{ preHandler: workspaceAccess\.forRole\('EDITOR'\) \}/);
   assert.match(source, /Cache-Control', 'private/);
   assert.match(source, /X-Content-Type-Options', 'nosniff'/);
   assert.match(source, /Content-Security-Policy', 'sandbox'/);

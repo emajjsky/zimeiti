@@ -86,7 +86,43 @@ function createWorkspaceStore({ query, transaction, defaultState }) {
     return workspaceView({ ...result.rows[0], role: 'OWNER' });
   }
 
-  return { sessionForUser, create, rename, select, assertMembership };
+  async function deletionImpact(userId, workspaceId) {
+    await assertMembership(userId, workspaceId, 'OWNER');
+    const tables = {
+      projects: 'content_projects',
+      assets: 'workspace_assets',
+      channelAccounts: 'channel_accounts',
+      publications: 'publications',
+      metricSnapshots: 'metric_snapshots',
+      retrospectives: 'retrospectives',
+    };
+    const impact = {};
+    for (const [key, table] of Object.entries(tables)) {
+      const exists = await query('SELECT to_regclass($1) AS table_name', [table]);
+      const value = exists.rows[0]?.table_name ?? exists.rows[0]?.exists;
+      if (!value) { impact[key] = 0; continue; }
+      const result = await query(`SELECT count(*)::int AS count FROM ${table} WHERE workspace_id = $1`, [workspaceId]);
+      impact[key] = Number(result.rows[0]?.count ?? 0);
+    }
+    return impact;
+  }
+
+  async function requestDeletion(userId, workspaceId, confirmationName) {
+    const workspace = await assertMembership(userId, workspaceId, 'OWNER');
+    if (String(confirmationName ?? '') !== workspace.name) throw businessError(400, 'WORKSPACE_DELETE_CONFIRMATION_MISMATCH', '请输入完整的工作空间名称确认删除。');
+    return transaction(async (client) => {
+      const updated = await client.query("UPDATE workspaces SET status = 'DELETING', updated_at = now() WHERE id = $1 AND status = 'ACTIVE' RETURNING id, name, status", [workspaceId]);
+      if (!updated.rows.length) throw businessError(409, 'WORKSPACE_DELETE_IN_PROGRESS', '工作空间已经在删除流程中。');
+      const deletion = await client.query(`INSERT INTO storage_deletion_jobs
+        (workspace_id, target_type, target_id, storage_key, status, requested_by)
+        VALUES ($1, 'WORKSPACE', $1, $2, 'PENDING', $3) RETURNING *`, [workspaceId, workspaceId, userId]);
+      const queued = await client.query(`INSERT INTO jobs (workspace_id, job_type, payload_json)
+        VALUES ($1, 'STORAGE_DELETE', $2) RETURNING *`, [workspaceId, JSON.stringify({ deletionJobId: deletion.rows[0].id })]);
+      return { workspace: workspaceView({ ...updated.rows[0], role: 'OWNER' }), deletionJob: deletion.rows[0], job: queued.rows[0] };
+    });
+  }
+
+  return { sessionForUser, create, rename, select, assertMembership, deletionImpact, requestDeletion };
 }
 
 module.exports = { createWorkspaceStore, resolveWorkspaceMembership, workspaceView };

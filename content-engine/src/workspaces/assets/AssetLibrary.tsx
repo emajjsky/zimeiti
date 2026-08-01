@@ -1,4 +1,4 @@
-import { Archive, File, Image, LoaderCircle, Pencil, Search, Upload, X } from 'lucide-react';
+import { Archive, File, Image, LoaderCircle, Pencil, Search, Trash2, Upload, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AssetPreviewDialog } from '../../components/assets/AssetPreviewDialog';
 import { PageHeader } from '../../components/workspace/PageHeader';
@@ -42,6 +42,12 @@ export function AssetLibrary() {
     catch (reason) { setError(reason instanceof Error ? reason.message : '上传素材失败。'); }
     finally { setBusy(false); if (inputRef.current) inputRef.current.value = ''; }
   };
+  const remove = async (asset: WorkspaceAsset) => {
+    if (asset.projectCount > 0 || !window.confirm(`永久删除“${asset.title}”？`)) return;
+    setError('');
+    try { await webAssets.remove(asset.id); setAssets((current) => current.filter((item) => item.id !== asset.id)); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : '提交素材删除失败。'); }
+  };
 
   return <section className="asset-library"><PageHeader eyebrow="ASSET LIBRARY / 素材库" title="空间素材库" subtitle="素材归属于当前工作空间，可被多个内容项目复用。" actions={<><input ref={inputRef} hidden type="file" onChange={(event) => { const file = event.target.files?.[0]; if (file) void upload(file); }}/><button className="button primary" type="button" disabled={busy} onClick={() => inputRef.current?.click()}>{busy ? <LoaderCircle size={16}/> : <Upload size={16}/>}上传素材</button></>}/>
     <div className="asset-library-toolbar"><label className="asset-search"><Search size={16}/><input aria-label="搜索素材" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标题、文件名或来源"/></label><select aria-label="素材类型" value={kind} onChange={(event) => setKind(event.target.value as AssetKind | '')}><option value="">全部类型</option>{Object.entries(kindNames).map(([id, name]) => <option value={id} key={id}>{name}</option>)}</select><select aria-label="素材来源" value={origin} onChange={(event) => setOrigin(event.target.value as AssetOrigin | '')}><option value="">全部来源</option>{Object.entries(originNames).map(([id, name]) => <option value={id} key={id}>{name}</option>)}</select><select aria-label="版权状态" value={copyright} onChange={(event) => setCopyright(event.target.value as AssetCopyrightStatus | '')}><option value="">全部版权</option>{Object.entries(copyrightNames).map(([id, name]) => <option value={id} key={id}>{name}</option>)}</select><select aria-label="归档状态" value={status} onChange={(event) => setStatus(event.target.value as Exclude<AssetStatus, 'DELETING'>)}><option value="ACTIVE">使用中</option><option value="ARCHIVED">已归档</option></select><input aria-label="起始日期" type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)}/></div>
@@ -49,7 +55,7 @@ export function AssetLibrary() {
     <div className="asset-library-summary"><b>{visible.length}</b><span>份素材</span><i/><span>{visible.reduce((sum, asset) => sum + asset.projectCount, 0)} 次项目引用</span></div>
     {loading ? <div className="asset-preview-state"><LoaderCircle size={26}/><span>正在读取素材库</span></div> : visible.length ? <div className="asset-library-grid">{visible.map((asset) => <article className="asset-card" key={asset.id}>
       <button className="asset-card-preview" type="button" aria-label={`预览 ${asset.title}`} onClick={() => setPreview(asset)}>{asset.kind === 'IMAGE' ? <Image size={28}/> : <File size={28}/>}<span>{kindNames[asset.kind]}</span></button>
-      <div className="asset-card-body"><div><b>{asset.title}</b><button className="icon-button" type="button" aria-label={`编辑 ${asset.title}`} onClick={() => setEditing(asset)}><Pencil size={15}/></button></div><small>{asset.originalFilename} · {formatBytes(asset.sizeBytes)}</small><p>{asset.sourceNote || originNames[asset.origin]}</p><footer><span>{copyrightNames[asset.copyrightStatus]}</span><b>{asset.projectCount} 个项目</b></footer></div>
+      <div className="asset-card-body"><div><b>{asset.title}</b><span className="asset-card-actions"><button className="icon-button" type="button" aria-label={`编辑 ${asset.title}`} onClick={() => setEditing(asset)}><Pencil size={15}/></button><button className="icon-button danger-icon" type="button" aria-label={`删除 ${asset.title}`} title={asset.projectCount ? '请先解除项目引用' : '永久删除'} disabled={asset.projectCount > 0} onClick={() => void remove(asset)}><Trash2 size={15}/></button></span></div><small>{asset.originalFilename} · {formatBytes(asset.sizeBytes)}</small><p>{asset.sourceNote || originNames[asset.origin]}</p><footer><span>{copyrightNames[asset.copyrightStatus]}</span><b>{asset.projectCount} 个项目</b></footer></div>
     </article>)}</div> : <div className="asset-library-empty"><Archive size={32}/><b>当前筛选下没有素材</b><span>上传文件后即可在项目资料和配图中复用。</span></div>}
     {preview && <AssetPreviewDialog asset={preview} onClose={() => setPreview(null)}/>} {editing && <AssetEditDialog asset={editing} onClose={() => setEditing(null)} onSaved={(asset) => { setAssets((current) => current.map((item) => item.id === asset.id ? asset : item)); setEditing(null); }}/>} 
   </section>;

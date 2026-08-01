@@ -32,6 +32,7 @@ test('除身份和空间管理外的每个 API 都声明空间角色', () => {
     '/api/v1/auth/login',
     '/api/v1/auth/me',
     '/api/v1/workspaces',
+    '/api/v1/workspaces/:workspaceId/deletion-impact',
     '/api/v1/workspaces/:workspaceId',
     '/api/v1/me/active-workspace',
   ]);
