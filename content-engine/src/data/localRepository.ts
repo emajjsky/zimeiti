@@ -1,8 +1,6 @@
 import { projectStageForLegacyStatus, type ContentProject, type IntelligenceItem, type IntelligenceSource, type Platform, type ProjectPlanning, type TopicCandidate } from '../domain/content';
 import { webIntelligence, webState } from './webApi';
 
-const key = 'content-engine-prototype-v1';
-
 export interface LocalState {
   workspace: WorkspaceProfile;
   feishuTemplate: FeishuLibraryTemplate;
@@ -54,16 +52,9 @@ export const seedState: LocalState = {
 };
 
 export async function loadState(): Promise<LocalState> {
-  if (window.localStorage.getItem('content-engine-web-session-v1')) {
-    const result = await webState.load();
-    const [sources, intelligence] = await Promise.all([webIntelligence.listSources(), webIntelligence.listItems()]);
-    return normalizeState({ ...result.state, sources, intelligence });
-  }
-
-  // 仅用于早期原型数据迁移；正式 Web 数据以服务端工作空间为准。
-  const value = window.localStorage.getItem(key);
-  if (!value) return seedState;
-  try { return normalizeState(JSON.parse(value) as LocalState); } catch { return seedState; }
+  const result = await webState.load();
+  const [sources, intelligence] = await Promise.all([webIntelligence.listSources(), webIntelligence.listItems()]);
+  return normalizeState({ ...result.state, sources, intelligence });
 }
 
 function normalizeState(state: LocalState): LocalState {

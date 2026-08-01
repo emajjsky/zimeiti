@@ -2,42 +2,85 @@ import type { LocalState } from './localRepository';
 import type { ApiUsageLog, ApiUsageSummary, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelTaskPolicy } from '../domain/integrations';
 import type { ContentProject, CreativeDelivery, CreativeVisualPlanItem, IntelligenceAnalysis, Platform, ProjectOriginType, ProjectPlanning } from '../domain/content';
 import type { AccountVoiceCalibrationDraft, AccountVoiceInput, AccountVoiceProfile, CreativeDraftCandidate, CreativeDraftPreparation, CreativeDraftRun, CreativeOutlineCandidate, CreativeOutlinePreparation, CreativeOutlineRun, CreativePlatform, CreativeSkillDefinition, ProjectAgentContext, ProjectAgentHistory, ProjectAgentPrepareInput, ProjectAgentPrepareResult, ProjectAgentRun, ProjectArtifact, ProjectInput, ProjectInputPayload, ProjectReference, ProjectReferenceMetadata, ProjectResearchContext, ProjectResearchRun, WritingBrief, WritingBriefInput } from '../domain/creative';
+import type { WebSession, WorkspaceSession, WorkspaceSummary } from '../domain/workspace';
+import { sessionStore } from './sessionStore';
 
-const tokenKey = 'content-engine-web-session-v1';
 const apiBase = import.meta.env.VITE_API_BASE ?? '/api/v1';
 
-export type WebSession = { accessToken: string; user: { id: string; email: string; display_name?: string }; workspace: { id: string; name: string } };
+export type { WebSession } from '../domain/workspace';
 
-function readSession(): WebSession | null {
-  try { return JSON.parse(window.localStorage.getItem(tokenKey) ?? 'null') as WebSession | null; } catch { return null; }
-}
+type RequestOptions = RequestInit & { authenticated?: boolean; workspaceScoped?: boolean };
 
-async function request<T>(path: string, options: RequestInit = {}, authenticated = true): Promise<T> {
-  const session = readSession();
-  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
-  const response = await fetch(`${apiBase}${path}`, { ...options, headers: { ...(options.body !== undefined && !isFormData ? { 'Content-Type': 'application/json' } : {}), ...(authenticated && session ? { Authorization: `Bearer ${session.accessToken}` } : {}), ...(options.headers ?? {}) } });
+async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const { authenticated = true, workspaceScoped = true, ...fetchOptions } = options;
+  const session = sessionStore.read();
+  if (authenticated && !session) throw new Error('登录状态已失效，请重新登录。');
+  if (authenticated && workspaceScoped && !session?.activeWorkspaceId) throw new Error('请选择工作空间后再继续。');
+  const isFormData = typeof FormData !== 'undefined' && fetchOptions.body instanceof FormData;
+  const response = await fetch(`${apiBase}${path}`, {
+    ...fetchOptions,
+    headers: {
+      ...(fetchOptions.body !== undefined && !isFormData ? { 'Content-Type': 'application/json' } : {}),
+      ...(authenticated && session ? { Authorization: `Bearer ${session.accessToken}` } : {}),
+      ...(authenticated && workspaceScoped && session?.activeWorkspaceId ? { 'X-Workspace-Id': session.activeWorkspaceId } : {}),
+      ...(fetchOptions.headers ?? {}),
+    },
+  });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload?.error?.message || `请求失败（HTTP ${response.status}）。`);
   return payload as T;
 }
 
 export const webAuth = {
-  session: readSession,
-  clear: () => window.localStorage.removeItem(tokenKey),
+  session: sessionStore.read,
+  clear: sessionStore.clear,
   async register(input: { email: string; password: string; displayName: string; workspaceName: string }) {
-    const result = await request<WebSession>('/auth/register', { method: 'POST', body: JSON.stringify(input) }, false);
-    window.localStorage.setItem(tokenKey, JSON.stringify(result)); return result;
+    const result = await request<WebSession>('/auth/register', { method: 'POST', body: JSON.stringify(input), authenticated: false, workspaceScoped: false });
+    return sessionStore.write(result);
   },
   async login(input: { email: string; password: string }) {
-    const result = await request<WebSession>('/auth/login', { method: 'POST', body: JSON.stringify(input) }, false);
-    window.localStorage.setItem(tokenKey, JSON.stringify(result)); return result;
+    const result = await request<WebSession>('/auth/login', { method: 'POST', body: JSON.stringify(input), authenticated: false, workspaceScoped: false });
+    return sessionStore.write(result);
   },
-  async me() { return request<{ user: WebSession['user']; workspace: WebSession['workspace'] }>('/auth/me'); },
+  async me() {
+    const result = await request<WebSession>('/auth/me', { workspaceScoped: false });
+    return sessionStore.write(result);
+  },
+};
+
+function updateWorkspaceSession(result: WorkspaceSession) {
+  const session = sessionStore.read();
+  if (!session) throw new Error('登录状态已失效，请重新登录。');
+  return sessionStore.write({ ...session, ...result });
+}
+
+export const webWorkspaces = {
+  async list() {
+    return updateWorkspaceSession(await request<WorkspaceSession>('/workspaces', { workspaceScoped: false }));
+  },
+  async create(name: string) {
+    return updateWorkspaceSession(await request<WorkspaceSession>('/workspaces', { method: 'POST', body: JSON.stringify({ name }), workspaceScoped: false }));
+  },
+  async rename(workspaceId: string, name: string) {
+    return updateWorkspaceSession(await request<WorkspaceSession>(`/workspaces/${encodeURIComponent(workspaceId)}`, { method: 'PATCH', body: JSON.stringify({ name }), workspaceScoped: false }));
+  },
+  async select(workspaceId: string) {
+    return updateWorkspaceSession(await request<WorkspaceSession>('/me/active-workspace', { method: 'PUT', body: JSON.stringify({ workspaceId }), workspaceScoped: false }));
+  },
+  current: (): WorkspaceSummary | null => {
+    const session = sessionStore.read();
+    return session?.workspaces.find(({ id }) => id === session.activeWorkspaceId) ?? null;
+  },
 };
 
 export const webState = {
   async load() { return request<{ state: LocalState; revision: number; updatedAt: string }>('/workspace/state'); },
-  async savePreferences(input: { workspace?: LocalState['workspace']; feishuTemplate?: LocalState['feishuTemplate'] }) { return request<{ revision: number; updatedAt: string }>('/workspace/preferences', { method: 'PATCH', body: JSON.stringify(input) }); },
+  async savePreferences(input: { workspace?: LocalState['workspace']; feishuTemplate?: LocalState['feishuTemplate'] }) {
+    const workspace = input.workspace
+      ? (({ name: _name, materialRoot: _materialRoot, ...preferences }) => preferences)(input.workspace)
+      : undefined;
+    return request<{ revision: number; updatedAt: string }>('/workspace/preferences', { method: 'PATCH', body: JSON.stringify({ ...input, workspace }) });
+  },
 };
 
 export const webAccountVoices = {
@@ -89,8 +132,9 @@ export const webCreative = {
     return request<ProjectReference>(`/creative/projects/${encodeURIComponent(projectId)}/files?${params}`, { method: 'POST', body });
   },
   async projectFile(id: string) {
-    const session = readSession();
-    const response = await fetch(`${apiBase}/creative/project-files/${encodeURIComponent(id)}/content`, { headers: session ? { Authorization: `Bearer ${session.accessToken}` } : {} });
+    const session = sessionStore.read();
+    if (!session?.activeWorkspaceId) throw new Error('请选择工作空间后再继续。');
+    const response = await fetch(`${apiBase}/creative/project-files/${encodeURIComponent(id)}/content`, { headers: { Authorization: `Bearer ${session.accessToken}`, 'X-Workspace-Id': session.activeWorkspaceId } });
     if (!response.ok) { const payload = await response.json().catch(() => ({})); throw new Error(payload?.error?.message || `读取文件失败（HTTP ${response.status}）。`); }
     return response.blob();
   },

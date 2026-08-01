@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
+const navigation = await import('../src/app/navigation.mjs').catch(() => null);
+
 test('账号声音设置入口独立于模型配置', async () => {
   const settings = await readFile(new URL('../src/workspaces/settings/AccountVoiceSettings.tsx', import.meta.url), 'utf8');
   assert.ok(navigation.settingsTabs.some((item) => item.id === 'voices' && item.label === '账号声音'));
@@ -10,8 +12,6 @@ test('账号声音设置入口独立于模型配置', async () => {
   assert.match(settings, /createCalibrationDraft/);
   assert.doesNotMatch(settings, /提示词正文|先选原型/);
 });
-
-const navigation = await import('../src/app/navigation.mjs').catch(() => null);
 
 test('一级导航移除独立规划，只保留七个工作入口', () => {
   assert.ok(navigation, '导航模型尚未实现');

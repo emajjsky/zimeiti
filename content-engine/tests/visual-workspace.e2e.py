@@ -21,7 +21,8 @@ GENERATED_SVG = """<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="
 SESSION = {
     "accessToken": "mock-access-token",
     "user": {"id": "user-1", "email": "creator@example.com", "display_name": "验收用户"},
-    "workspace": {"id": "workspace-1", "name": "验收工作空间"},
+    "workspaces": [{"id": "workspace-1", "name": "验收工作空间", "role": "OWNER", "status": "ACTIVE"}],
+    "activeWorkspaceId": "workspace-1",
 }
 
 
@@ -130,9 +131,10 @@ with sync_playwright() as playwright:
         path = urlparse(request.url).path
         method = request.method
         if path == "/api/v1/auth/me":
-            return respond(route, {"user": SESSION["user"], "workspace": SESSION["workspace"]})
+            return respond(route, SESSION)
+        assert request.headers.get("x-workspace-id") == SESSION["activeWorkspaceId"], f"{method} {path} 缺少当前空间头"
         if path == "/api/v1/workspace/state" and method == "GET":
-            return respond(route, {"state": {"workspace": {"name": "验收工作空间", "enabledPlatforms": ["WECHAT"], "setupCompleted": True}, "sources": [], "intelligence": [], "topics": [], "projects": [state["project"]]}, "revision": 1, "updatedAt": NOW})
+            return respond(route, {"workspace": SESSION["workspaces"][0], "state": {"workspace": {"name": "验收工作空间", "enabledPlatforms": ["WECHAT"], "setupCompleted": True}, "sources": [], "intelligence": [], "topics": [], "projects": [state["project"]]}, "revision": 1, "updatedAt": NOW})
         if path == "/api/v1/creative/projects" and method == "GET":
             return respond(route, {"projects": [state["project"]]})
         if path == "/api/v1/creative/skills":

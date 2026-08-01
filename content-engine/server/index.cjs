@@ -18,7 +18,9 @@ const { runBailianCli } = require('./runner/bailian.cjs');
 const { ANALYSIS_SCOPE, createTemplateStore, prepareAnalysisInput } = require('./services/intelligence-analysis.cjs');
 const { createCreativeSkillStore } = require('./services/creativeSkills.cjs');
 const { writingBriefInput } = require('./services/writing-brief.cjs');
-const { errorPayload } = require('./services/business-errors.cjs');
+const { businessError, errorPayload } = require('./services/business-errors.cjs');
+const { createWorkspaceStore, workspaceView } = require('./services/workspaces.cjs');
+const { createWorkspaceAccess } = require('./services/workspace-context.cjs');
 const { accountVoiceInput, accountVoiceCalibrationInput, createAccountVoiceStore } = require('./services/accountVoices.cjs');
 const { accountVoiceCalibrationDraftInput, buildVoiceCalibrationPrompt, buildVoiceCalibrationRepairPrompt, parseVoiceCalibrationDraft, voiceCalibrationErrorMessage } = require('./services/voiceCalibration.cjs');
 const { createTextModelRunner } = require('./services/text-model.cjs');
@@ -215,15 +217,12 @@ app.setErrorHandler((error, _request, reply) => {
 
 async function authenticate(request) { await request.jwtVerify(); }
 
-async function currentWorkspace(userId) {
-  const result = await query(`SELECT w.id, w.name FROM workspaces w JOIN workspace_members m ON m.workspace_id = w.id WHERE m.user_id = $1 ORDER BY m.role = 'OWNER' DESC, w.created_at ASC LIMIT 1`, [userId]);
-  if (!result.rowCount) throw new Error('当前用户没有工作空间。');
-  return result.rows[0];
+function defaultState(name) {
+  return { workspace: { primaryTopics: [], enabledPlatforms: ['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO', 'VIDEO_CHANNEL'], setupCompleted: false }, feishuTemplate: { name: `${name}内容库`, topicStorage: 'ONE_TABLE', includeSchedule: true, includeReview: false, status: 'DRAFT' }, sources: [], intelligence: [], projects: [] };
 }
 
-function defaultState(name) {
-  return { workspace: { name, materialRoot: '', primaryTopics: [], enabledPlatforms: ['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO', 'VIDEO_CHANNEL'], setupCompleted: false }, feishuTemplate: { name: `${name}内容库`, topicStorage: 'ONE_TABLE', includeSchedule: true, includeReview: false, status: 'DRAFT' }, sources: [], intelligence: [], projects: [] };
-}
+const workspaceStore = createWorkspaceStore({ query, transaction, defaultState });
+const workspaceAccess = createWorkspaceAccess({ query, authenticate });
 
 const authInput = z.object({ email: z.string().email().max(320), password: z.string().min(8).max(200), displayName: z.string().min(1).max(80).optional(), workspaceName: z.string().min(1).max(80).optional() });
 
@@ -236,42 +235,69 @@ app.post('/api/v1/auth/register', async (request, reply) => {
     const existing = await client.query('SELECT 1 FROM users WHERE email = $1', [email]);
     if (existing.rowCount) { const error = new Error('该邮箱已注册，请直接登录。'); error.statusCode = 409; throw error; }
     const createdUser = await client.query('INSERT INTO users (email, password_hash, display_name) VALUES ($1, $2, $3) RETURNING id, email, display_name', [email, hashPassword(input.password), input.displayName?.trim() || email.split('@')[0]]);
-    const createdWorkspace = await client.query('INSERT INTO workspaces (name, owner_id) VALUES ($1, $2) RETURNING id, name', [input.workspaceName?.trim() || `${createdUser.rows[0].display_name}的内容工作室`, createdUser.rows[0].id]);
+    const createdWorkspace = await client.query('INSERT INTO workspaces (name, owner_id) VALUES ($1, $2) RETURNING id, name, status', [input.workspaceName?.trim() || `${createdUser.rows[0].display_name}的内容工作室`, createdUser.rows[0].id]);
     await client.query('INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ($1, $2, $3)', [createdWorkspace.rows[0].id, createdUser.rows[0].id, 'OWNER']);
     await client.query('INSERT INTO workspace_snapshots (workspace_id, state_json) VALUES ($1, $2)', [createdWorkspace.rows[0].id, JSON.stringify(defaultState(createdWorkspace.rows[0].name))]);
-    return { user: createdUser.rows[0], workspace: createdWorkspace.rows[0] };
+    await client.query('INSERT INTO user_workspace_preferences (user_id, active_workspace_id) VALUES ($1, $2)', [createdUser.rows[0].id, createdWorkspace.rows[0].id]);
+    return { user: createdUser.rows[0], workspace: workspaceView({ ...createdWorkspace.rows[0], role: 'OWNER' }) };
   });
   const accessToken = app.jwt.sign({ sub: user.user.id, email: user.user.email });
-  reply.code(201).send({ ...user, accessToken });
+  reply.code(201).send({ user: user.user, workspaces: [user.workspace], activeWorkspaceId: user.workspace.id, accessToken });
 });
 
 app.post('/api/v1/auth/login', async (request) => {
   const input = authInput.pick({ email: true, password: true }).parse(request.body);
   const result = await query('SELECT id, email, display_name, password_hash FROM users WHERE email = $1', [input.email.trim().toLowerCase()]);
   if (!result.rowCount || !verifyPassword(input.password, result.rows[0].password_hash)) { const error = new Error('邮箱或密码错误。'); error.statusCode = 401; throw error; }
-  const user = result.rows[0]; const workspace = await currentWorkspace(user.id);
-  return { user: { id: user.id, email: user.email, display_name: user.display_name }, workspace, accessToken: app.jwt.sign({ sub: user.id, email: user.email }) };
+  const user = result.rows[0];
+  return { user: { id: user.id, email: user.email, display_name: user.display_name }, ...await workspaceStore.sessionForUser(user.id), accessToken: app.jwt.sign({ sub: user.id, email: user.email }) };
 });
 
 app.get('/api/v1/auth/me', { preHandler: authenticate }, async (request) => {
-  const workspace = await currentWorkspace(request.user.sub);
-  return { user: { id: request.user.sub, email: request.user.email }, workspace };
+  const result = await query('SELECT id, email, display_name FROM users WHERE id = $1', [request.user.sub]);
+  if (!result.rows.length) throw businessError(401, 'AUTH_INVALID', '登录状态已失效，请重新登录。');
+  const user = result.rows[0];
+  return { user, ...await workspaceStore.sessionForUser(user.id), accessToken: app.jwt.sign({ sub: user.id, email: user.email }) };
 });
 
-app.get('/api/v1/workspace/state', { preHandler: authenticate }, async (request) => {
-  const workspace = await currentWorkspace(request.user.sub);
+app.get('/api/v1/workspaces', { preHandler: authenticate }, async (request) => workspaceStore.sessionForUser(request.user.sub));
+
+app.post('/api/v1/workspaces', { preHandler: authenticate }, async (request, reply) => {
+  const input = z.object({ name: z.string().trim().min(1).max(80) }).parse(request.body);
+  await workspaceStore.create(request.user.sub, input.name);
+  reply.code(201).send(await workspaceStore.sessionForUser(request.user.sub));
+});
+
+app.patch('/api/v1/workspaces/:workspaceId', { preHandler: authenticate }, async (request) => {
+  const workspaceId = z.string().uuid().parse(request.params.workspaceId);
+  const input = z.object({ name: z.string().trim().min(1).max(80) }).parse(request.body);
+  await workspaceStore.rename(request.user.sub, workspaceId, input.name);
+  return workspaceStore.sessionForUser(request.user.sub);
+});
+
+app.put('/api/v1/me/active-workspace', { preHandler: authenticate }, async (request) => {
+  const input = z.object({ workspaceId: z.string().uuid() }).parse(request.body);
+  return workspaceStore.select(request.user.sub, input.workspaceId);
+});
+
+app.get('/api/v1/workspace/state', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
+  const workspace = request.workspace;
   const [snapshot, state] = await Promise.all([
     query('SELECT revision, updated_at FROM workspace_snapshots WHERE workspace_id = $1', [workspace.id]),
     loadCreativeState({ query }, workspace.id),
   ]);
-  return { workspace, state: { ...defaultState(workspace.name), ...state }, revision: snapshot.rows[0]?.revision ?? 1, updatedAt: snapshot.rows[0]?.updated_at ?? new Date().toISOString() };
+  const defaults = defaultState(workspace.name);
+  return {
+    workspace,
+    state: { ...defaults, ...state, workspace: { ...defaults.workspace, ...state.workspace, name: workspace.name } },
+    revision: snapshot.rows[0]?.revision ?? 1,
+    updatedAt: snapshot.rows[0]?.updated_at ?? new Date().toISOString(),
+  };
 });
 
-app.patch('/api/v1/workspace/preferences', { preHandler: authenticate }, async (request) => {
+app.patch('/api/v1/workspace/preferences', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const body = z.object({
     workspace: z.object({
-      name: z.string().trim().min(1).max(80),
-      materialRoot: z.string().max(1_000),
       primaryTopics: z.array(z.string().trim().min(1).max(80)).max(30),
       accountPositioning: z.string().max(2_000).optional(),
       targetAudience: z.string().max(2_000).optional(),
@@ -286,30 +312,30 @@ app.patch('/api/v1/workspace/preferences', { preHandler: authenticate }, async (
       status: z.enum(['DRAFT', 'READY_TO_CREATE', 'CREATED']),
     }).optional(),
   }).refine((value) => value.workspace || value.feishuTemplate, { message: '请提交要保存的工作空间设置。' }).parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const result = await transaction((client) => saveWorkspacePreferences(client, workspace.id, body));
   return { revision: result.revision, updatedAt: result.updated_at };
 });
 
-app.get('/api/v1/settings/credentials', { preHandler: authenticate }, async (request) => {
-  const workspace = await currentWorkspace(request.user.sub);
+app.get('/api/v1/settings/credentials', { preHandler: workspaceAccess.forRole('OWNER') }, async (request) => {
+  const workspace = request.workspace;
   const result = await query(`SELECT provider, status, updated_at, last_tested_at, last_error
     FROM credential_vault WHERE workspace_id = $1 AND provider = ANY($2::text[]) ORDER BY updated_at DESC`, [workspace.id, [...credentials]]);
   const rows = new Map(result.rows.map((row) => [row.provider, credentialView(row.provider, row)]));
   return [...credentials].map((provider) => rows.get(provider) ?? credentialView(provider));
 });
 
-app.get('/api/v1/settings/credentials/:provider', { preHandler: authenticate }, async (request) => {
+app.get('/api/v1/settings/credentials/:provider', { preHandler: workspaceAccess.forRole('OWNER') }, async (request) => {
   const provider = credentialProvider(request.params.provider);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const result = await query('SELECT provider, status, updated_at, last_tested_at, last_error FROM credential_vault WHERE workspace_id = $1 AND provider = $2', [workspace.id, provider]);
   return credentialView(provider, result.rows[0]);
 });
 
-app.put('/api/v1/settings/credentials/:provider', { preHandler: authenticate }, async (request) => {
+app.put('/api/v1/settings/credentials/:provider', { preHandler: workspaceAccess.forRole('OWNER') }, async (request) => {
   const provider = credentialProvider(request.params.provider);
   const input = z.object({ apiKey: z.string().min(1).max(1_000) }).parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const result = await query(`INSERT INTO credential_vault (workspace_id, provider, encrypted_secret, status, last_tested_at, last_error)
     VALUES ($1, $2, $3, 'UNVERIFIED', NULL, NULL)
     ON CONFLICT (workspace_id, provider) DO UPDATE SET encrypted_secret = excluded.encrypted_secret, status = 'UNVERIFIED', last_tested_at = NULL, last_error = NULL, updated_at = now()
@@ -317,9 +343,9 @@ app.put('/api/v1/settings/credentials/:provider', { preHandler: authenticate }, 
   return credentialView(provider, result.rows[0]);
 });
 
-app.post('/api/v1/settings/credentials/:provider/test', { preHandler: authenticate }, async (request) => {
+app.post('/api/v1/settings/credentials/:provider/test', { preHandler: workspaceAccess.forRole('OWNER') }, async (request) => {
   const provider = credentialProvider(request.params.provider);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const key = await credentialSecret(workspace.id, provider);
   try {
     if (provider === 'BAILIAN') {
@@ -338,9 +364,9 @@ app.post('/api/v1/settings/credentials/:provider/test', { preHandler: authentica
   }
 });
 
-app.delete('/api/v1/settings/credentials/:provider', { preHandler: authenticate }, async (request, reply) => {
+app.delete('/api/v1/settings/credentials/:provider', { preHandler: workspaceAccess.forRole('OWNER') }, async (request, reply) => {
   const provider = credentialProvider(request.params.provider);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   await transaction(async (client) => {
     await client.query('DELETE FROM credential_vault WHERE workspace_id = $1 AND provider = $2', [workspace.id, provider]);
     if (provider === 'BAILIAN') {
@@ -351,24 +377,24 @@ app.delete('/api/v1/settings/credentials/:provider', { preHandler: authenticate 
   reply.code(204).send();
 });
 
-app.get('/api/v1/models/connections', { preHandler: authenticate }, async (request) => {
-  const workspace = await currentWorkspace(request.user.sub);
+app.get('/api/v1/models/connections', { preHandler: workspaceAccess.forRole('OWNER') }, async (request) => {
+  const workspace = request.workspace;
   const result = await query(`SELECT id, provider, label, base_url, status, last_tested_at, last_error, updated_at
     FROM model_connections WHERE workspace_id = $1 ORDER BY updated_at DESC`, [workspace.id]);
   return result.rows.map(modelConnectionView);
 });
 
-app.post('/api/v1/models/connections', { preHandler: authenticate }, async (request, reply) => {
+app.post('/api/v1/models/connections', { preHandler: workspaceAccess.forRole('OWNER') }, async (request, reply) => {
   const input = modelConnectionInput(true).parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const result = await query(`INSERT INTO model_connections (workspace_id, provider, label, base_url, encrypted_secret)
     VALUES ($1, $2, $3, $4, $5) RETURNING id, provider, label, base_url, status, last_tested_at, last_error, updated_at`, [workspace.id, input.provider, input.label.trim(), normalizedBaseUrl(input.baseUrl), encrypt(input.apiKey.trim())]);
   reply.code(201).send(modelConnectionView(result.rows[0]));
 });
 
-app.put('/api/v1/models/connections/:id', { preHandler: authenticate }, async (request) => {
+app.put('/api/v1/models/connections/:id', { preHandler: workspaceAccess.forRole('OWNER') }, async (request) => {
   const input = modelConnectionInput(false).parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const existing = await query('SELECT encrypted_secret FROM model_connections WHERE id = $1 AND workspace_id = $2', [request.params.id, workspace.id]);
   if (!existing.rowCount) { const error = new Error('未找到外部 API 连接。'); error.statusCode = 404; throw error; }
   const secret = input.apiKey?.trim() ? encrypt(input.apiKey.trim()) : existing.rows[0].encrypted_secret;
@@ -379,8 +405,8 @@ app.put('/api/v1/models/connections/:id', { preHandler: authenticate }, async (r
   return modelConnectionView(result.rows[0]);
 });
 
-app.post('/api/v1/models/connections/:id/test', { preHandler: authenticate }, async (request) => {
-  const workspace = await currentWorkspace(request.user.sub);
+app.post('/api/v1/models/connections/:id/test', { preHandler: workspaceAccess.forRole('OWNER') }, async (request) => {
+  const workspace = request.workspace;
   const existing = await query('SELECT id, base_url, encrypted_secret FROM model_connections WHERE id = $1 AND workspace_id = $2', [request.params.id, workspace.id]);
   if (!existing.rowCount) { const error = new Error('未找到外部 API 连接。'); error.statusCode = 404; throw error; }
   try {
@@ -396,8 +422,8 @@ app.post('/api/v1/models/connections/:id/test', { preHandler: authenticate }, as
   }
 });
 
-app.delete('/api/v1/models/connections/:id', { preHandler: authenticate }, async (request, reply) => {
-  const workspace = await currentWorkspace(request.user.sub);
+app.delete('/api/v1/models/connections/:id', { preHandler: workspaceAccess.forRole('OWNER') }, async (request, reply) => {
+  const workspace = request.workspace;
   await transaction(async (client) => {
     const removed = await client.query('DELETE FROM model_connections WHERE id = $1 AND workspace_id = $2 RETURNING id', [request.params.id, workspace.id]);
     if (!removed.rowCount) { const error = new Error('未找到外部 API 连接。'); error.statusCode = 404; throw error; }
@@ -407,14 +433,14 @@ app.delete('/api/v1/models/connections/:id', { preHandler: authenticate }, async
   reply.code(204).send();
 });
 
-app.get('/api/v1/models/catalog', { preHandler: authenticate }, async (request) => {
-  const workspace = await currentWorkspace(request.user.sub);
+app.get('/api/v1/models/catalog', { preHandler: workspaceAccess.forRole('OWNER') }, async (request) => {
+  const workspace = request.workspace;
   const result = await query('SELECT item_json, updated_at FROM model_catalog WHERE workspace_id = $1 ORDER BY updated_at DESC, id', [workspace.id]);
   return result.rows.map((row) => ({ ...row.item_json, syncedAt: row.updated_at }));
 });
 
-app.post('/api/v1/models/catalog/sync', { preHandler: authenticate }, async (request) => {
-  const workspace = await currentWorkspace(request.user.sub);
+app.post('/api/v1/models/catalog/sync', { preHandler: workspaceAccess.forRole('OWNER') }, async (request) => {
+  const workspace = request.workspace;
   const items = []; const errors = [];
   const bailian = await query("SELECT encrypted_secret FROM credential_vault WHERE workspace_id = $1 AND provider = 'BAILIAN' AND status = 'READY'", [workspace.id]);
   if (bailian.rowCount) {
@@ -444,18 +470,18 @@ app.post('/api/v1/models/catalog/sync', { preHandler: authenticate }, async (req
   return { items: uniqueItems, errors };
 });
 
-app.get('/api/v1/models/task-policies', { preHandler: authenticate }, async (request) => {
-  const workspace = await currentWorkspace(request.user.sub);
+app.get('/api/v1/models/task-policies', { preHandler: workspaceAccess.forRole('OWNER') }, async (request) => {
+  const workspace = request.workspace;
   const result = await query('SELECT scope, provider, connection_id, model, updated_at FROM agent_model_policies WHERE workspace_id = $1 AND scope = ANY($2::text[])', [workspace.id, modelTasks]);
   const saved = new Map(result.rows.map((row) => [row.scope, { task: row.scope, provider: row.provider, connectionId: row.connection_id ?? undefined, model: row.model, updatedAt: row.updated_at }]));
   return modelTasks.map((task) => saved.get(task) ?? { task });
 });
 
-app.put('/api/v1/models/task-policies/:task', { preHandler: authenticate }, async (request) => {
+app.put('/api/v1/models/task-policies/:task', { preHandler: workspaceAccess.forRole('OWNER') }, async (request) => {
   const task = String(request.params.task);
   if (!modelTasks.includes(task)) { const error = new Error('不支持的任务策略。'); error.statusCode = 400; throw error; }
   const input = z.object({ provider: z.enum(['BAILIAN_CLI', 'EXTERNAL_API']).optional(), connectionId: z.string().uuid().optional(), model: z.string().max(160).optional() }).parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   if (!input.provider || !input.model?.trim()) {
     await query('DELETE FROM agent_model_policies WHERE workspace_id = $1 AND scope = $2', [workspace.id, task]);
     return { task };
@@ -470,8 +496,8 @@ app.put('/api/v1/models/task-policies/:task', { preHandler: authenticate }, asyn
   return { task: row.scope, provider: row.provider, connectionId: row.connection_id ?? undefined, model: row.model, updatedAt: row.updated_at };
 });
 
-app.get('/api/v1/models/usage', { preHandler: authenticate }, async (request) => {
-  const workspace = await currentWorkspace(request.user.sub);
+app.get('/api/v1/models/usage', { preHandler: workspaceAccess.forRole('OWNER') }, async (request) => {
+  const workspace = request.workspace;
   const [summary, rows] = await Promise.all([
     query(`SELECT COUNT(*)::int AS total_calls, COUNT(*) FILTER (WHERE status = 'SUCCESS')::int AS success_calls,
       COUNT(*) FILTER (WHERE status <> 'SUCCESS')::int AS failed_calls,
@@ -495,19 +521,19 @@ function promptTemplateView(row) {
   return { id: row.id, scope: row.scope, version: row.version, body: row.body, source: row.source, updatedAt: row.created_at };
 }
 
-app.get('/api/v1/settings/prompt-templates/:scope', { preHandler: authenticate }, async (request) => {
-  const workspace = await currentWorkspace(request.user.sub);
+app.get('/api/v1/settings/prompt-templates/:scope', { preHandler: workspaceAccess.forRole('OWNER') }, async (request) => {
+  const workspace = request.workspace;
   return promptTemplateView(await templateStore.get(workspace.id, promptTemplateScope(request.params.scope)));
 });
 
-app.put('/api/v1/settings/prompt-templates/:scope', { preHandler: authenticate }, async (request) => {
-  const workspace = await currentWorkspace(request.user.sub);
+app.put('/api/v1/settings/prompt-templates/:scope', { preHandler: workspaceAccess.forRole('OWNER') }, async (request) => {
+  const workspace = request.workspace;
   const input = z.object({ body: z.string().min(1).max(12_000) }).parse(request.body);
   return promptTemplateView(await templateStore.save(workspace.id, promptTemplateScope(request.params.scope), input.body));
 });
 
-app.post('/api/v1/settings/prompt-templates/:scope/reset', { preHandler: authenticate }, async (request) => {
-  const workspace = await currentWorkspace(request.user.sub);
+app.post('/api/v1/settings/prompt-templates/:scope/reset', { preHandler: workspaceAccess.forRole('OWNER') }, async (request) => {
+  const workspace = request.workspace;
   return promptTemplateView(await templateStore.reset(workspace.id, promptTemplateScope(request.params.scope)));
 });
 
@@ -538,9 +564,9 @@ function analysisItem(row) {
   return { id: row.id, title: row.title, summary: row.summary, source: row.source_name, url: row.canonical_url, category: row.category, keywords: row.matched_keywords ?? [], publishedAt: row.published_at?.toISOString?.() ?? row.published_at ?? row.created_at };
 }
 
-app.post('/api/v1/intelligence/items/:id/analyses/prepare', { preHandler: authenticate }, async (request, reply) => {
+app.post('/api/v1/intelligence/items/:id/analyses/prepare', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const input = z.object({ platforms: z.array(analysisPlatform).min(1).max(5) }).parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const itemResult = await query('SELECT * FROM intelligence_items WHERE id = $1 AND workspace_id = $2', [request.params.id, workspace.id]);
   if (!itemResult.rowCount) { const error = new Error('未找到这条资讯。'); error.statusCode = 404; throw error; }
   const [profile, route, template] = await Promise.all([analysisProfile(workspace.id), analysisRoute(workspace.id), templateStore.get(workspace.id, ANALYSIS_SCOPE)]);
@@ -551,8 +577,8 @@ app.post('/api/v1/intelligence/items/:id/analyses/prepare', { preHandler: authen
   reply.code(201).send({ id: run.rows[0].id, status: run.rows[0].status, createdAt: run.rows[0].created_at, confirmation: { sourceCount: 1, platforms: prepared.input.selectedPlatforms, model: route.model, promptVersion: template.version, generalAudienceWarning: prepared.generalAudienceWarning, costEstimate: null } });
 });
 
-app.post('/api/v1/generation-runs/:id/confirm', { preHandler: authenticate }, async (request, reply) => {
-  const workspace = await currentWorkspace(request.user.sub);
+app.post('/api/v1/generation-runs/:id/confirm', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
+  const workspace = request.workspace;
   const run = await query("UPDATE generation_runs SET status = 'QUEUED' WHERE id = $1 AND workspace_id = $2 AND status = 'DRAFT' RETURNING id, workspace_id, status", [request.params.id, workspace.id]);
   if (!run.rowCount) { const error = new Error('该分析任务当前不能确认。'); error.statusCode = 409; throw error; }
   const job = await query("INSERT INTO jobs (workspace_id, job_type, payload_json) VALUES ($1, 'INTELLIGENCE_ANALYSIS', $2) RETURNING *", [workspace.id, JSON.stringify({ runId: run.rows[0].id })]);
@@ -566,16 +592,16 @@ app.post('/api/v1/generation-runs/:id/confirm', { preHandler: authenticate }, as
   reply.code(202).send({ id: run.rows[0].id, status: 'QUEUED', jobId: job.rows[0].id });
 });
 
-app.post('/api/v1/generation-runs/:id/cancel', { preHandler: authenticate }, async (request) => {
-  const workspace = await currentWorkspace(request.user.sub);
+app.post('/api/v1/generation-runs/:id/cancel', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
+  const workspace = request.workspace;
   const result = await query("UPDATE generation_runs SET status = 'CANCELLED', completed_at = now() WHERE id = $1 AND workspace_id = $2 AND status IN ('DRAFT', 'QUEUED') RETURNING id, status", [request.params.id, workspace.id]);
   if (!result.rowCount) { const error = new Error('该分析任务当前不能取消。'); error.statusCode = 409; throw error; }
   await query("UPDATE jobs SET status = 'CANCELLED', completed_at = now() WHERE workspace_id = $1 AND payload_json->>'runId' = $2 AND status = 'PENDING'", [workspace.id, request.params.id]);
   return result.rows[0];
 });
 
-app.get('/api/v1/intelligence/items/:id/analyses/latest', { preHandler: authenticate }, async (request) => {
-  const workspace = await currentWorkspace(request.user.sub);
+app.get('/api/v1/intelligence/items/:id/analyses/latest', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
+  const workspace = request.workspace;
   const result = await query(`SELECT a.id, a.selected_platforms, a.output_json, a.overall_score, a.decision, a.created_at, r.model, r.prompt_version
     FROM intelligence_analyses a JOIN generation_runs r ON r.id = a.generation_run_id
     WHERE a.workspace_id = $1 AND a.intelligence_item_id = $2 ORDER BY a.created_at DESC LIMIT 1`, [workspace.id, request.params.id]);
@@ -584,8 +610,8 @@ app.get('/api/v1/intelligence/items/:id/analyses/latest', { preHandler: authenti
   return { id: row.id, selectedPlatforms: row.selected_platforms, ...row.output_json, overallScore: row.overall_score, decision: row.decision, model: row.model, promptVersion: row.prompt_version, analyzedAt: row.created_at };
 });
 
-app.get('/api/v1/intelligence/items/:id/analyses/latest-run', { preHandler: authenticate }, async (request) => {
-  const workspace = await currentWorkspace(request.user.sub);
+app.get('/api/v1/intelligence/items/:id/analyses/latest-run', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
+  const workspace = request.workspace;
   const result = await query(`SELECT r.id, r.status, r.error, r.model, r.prompt_version, r.input_json, r.created_at,
       (SELECT j.id FROM jobs j WHERE j.workspace_id = r.workspace_id AND j.payload_json->>'runId' = r.id::text ORDER BY j.created_at DESC LIMIT 1) AS job_id
     FROM generation_runs r
@@ -612,22 +638,22 @@ app.get('/api/v1/intelligence/items/:id/analyses/latest-run', { preHandler: auth
   };
 });
 
-app.post('/api/v1/intelligence/clip', { preHandler: authenticate }, async (request) => clipPublicLink(z.object({ url: z.string().url().max(2_000) }).parse(request.body).url));
-app.post('/api/v1/intelligence/search', { preHandler: authenticate }, async (request) => searchTavily((await currentWorkspace(request.user.sub)).id, z.object({ query: z.string(), category: z.string().optional(), domains: z.array(z.string()).optional() }).parse(request.body)));
-app.get('/api/v1/intelligence/sources', { preHandler: authenticate }, async (request) => listSources((await currentWorkspace(request.user.sub)).id));
-app.post('/api/v1/intelligence/sources', { preHandler: authenticate }, async (request, reply) => {
+app.post('/api/v1/intelligence/clip', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => clipPublicLink(z.object({ url: z.string().url().max(2_000) }).parse(request.body).url));
+app.post('/api/v1/intelligence/search', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => searchTavily(request.workspace.id, z.object({ query: z.string(), category: z.string().optional(), domains: z.array(z.string()).optional() }).parse(request.body)));
+app.get('/api/v1/intelligence/sources', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => listSources(request.workspace.id));
+app.post('/api/v1/intelligence/sources', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const input = z.object({ sources: z.array(sourceInput).min(1).max(30) }).parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   reply.code(201).send(await createSources(workspace.id, input.sources));
 });
-app.put('/api/v1/intelligence/sources/:id', { preHandler: authenticate }, async (request) => {
+app.put('/api/v1/intelligence/sources/:id', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const input = sourceInput.parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   return updateSource(workspace.id, request.params.id, input);
 });
-app.delete('/api/v1/intelligence/sources/:id', { preHandler: authenticate }, async (request, reply) => { await removeSource((await currentWorkspace(request.user.sub)).id, request.params.id); reply.code(204).send(); });
-app.get('/api/v1/intelligence/items', { preHandler: authenticate }, async (request) => listItems((await currentWorkspace(request.user.sub)).id));
-app.post('/api/v1/intelligence/items', { preHandler: authenticate }, async (request, reply) => {
+app.delete('/api/v1/intelligence/sources/:id', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => { await removeSource(request.workspace.id, request.params.id); reply.code(204).send(); });
+app.get('/api/v1/intelligence/items', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => listItems(request.workspace.id));
+app.post('/api/v1/intelligence/items', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const input = z.object({
     title: z.string().trim().min(1).max(500),
     summary: z.string().max(20_000).default(''),
@@ -642,29 +668,29 @@ app.post('/api/v1/intelligence/items', { preHandler: authenticate }, async (requ
     language: z.enum(['zh', 'en', 'other']).optional(),
     note: z.string().max(4_000).optional(),
   }).parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   reply.code(201).send(await saveItem(workspace.id, input));
 });
-app.post('/api/v1/intelligence/rss/refresh', { preHandler: authenticate }, async (request) => refreshWorkspaceRss((await currentWorkspace(request.user.sub)).id));
+app.post('/api/v1/intelligence/rss/refresh', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => refreshWorkspaceRss(request.workspace.id));
 
-app.get('/api/v1/creative/projects', { preHandler: authenticate }, async (request) => {
-  const workspace = await currentWorkspace(request.user.sub);
+app.get('/api/v1/creative/projects', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
+  const workspace = request.workspace;
   const state = await loadCreativeState({ query }, workspace.id);
   return { projects: [...state.projects].sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt)) };
 });
 
-app.post('/api/v1/creative/projects', { preHandler: authenticate }, async (request, reply) => {
+app.post('/api/v1/creative/projects', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const input = createProjectInput.parse(request.body ?? {});
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const project = createBlankProject(input);
   await transaction(async (client) => updateCreativeProjects(client, workspace.id, (state) => ({ ...state, projects: [project, ...state.projects] })));
   reply.code(201).send({ project, created: true });
 });
 
-app.post('/api/v1/creative/projects/from-intelligence/:itemId', { preHandler: authenticate }, async (request, reply) => {
+app.post('/api/v1/creative/projects/from-intelligence/:itemId', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const itemId = z.string().uuid().parse(request.params.itemId);
   const input = z.object({ angleIndex: z.number().int().min(0).max(9).default(0) }).parse(request.body ?? {});
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const [itemResult, analysisResult] = await Promise.all([
     query('SELECT * FROM intelligence_items WHERE id = $1 AND workspace_id = $2', [itemId, workspace.id]),
     query(`SELECT a.selected_platforms, a.output_json, a.overall_score, a.decision, a.created_at
@@ -695,18 +721,18 @@ app.post('/api/v1/creative/projects/from-intelligence/:itemId', { preHandler: au
   reply.code(created ? 201 : 200).send({ project, created });
 });
 
-app.get('/api/v1/creative/projects/:projectId/planning', { preHandler: authenticate }, async (request) => {
+app.get('/api/v1/creative/projects/:projectId/planning', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const project = await creativeProject(workspace.id, projectId);
   return { project, planning: project.planning };
 });
 
-app.put('/api/v1/creative/projects/:projectId/versions/:versionId', { preHandler: authenticate }, async (request) => {
+app.put('/api/v1/creative/projects/:projectId/versions/:versionId', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const versionId = z.string().min(1).max(240).parse(request.params.versionId);
   const input = z.object({ title: z.string().trim().min(1).max(240), body: z.string().max(200_000) }).parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   let project;
   await transaction(async (client) => {
     await updateCreativeProjects(client, workspace.id, (state) => {
@@ -727,10 +753,10 @@ app.put('/api/v1/creative/projects/:projectId/versions/:versionId', { preHandler
   return { project };
 });
 
-app.put('/api/v1/creative/projects/:projectId/planning', { preHandler: authenticate }, async (request) => {
+app.put('/api/v1/creative/projects/:projectId/planning', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = projectPlanningInput.parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   let project;
   await transaction(async (client) => {
     await updateCreativeProjects(client, workspace.id, async (state) => {
@@ -746,9 +772,9 @@ app.put('/api/v1/creative/projects/:projectId/planning', { preHandler: authentic
   return { project, planning: project.planning };
 });
 
-app.post('/api/v1/creative/projects/:projectId/planning/complete', { preHandler: authenticate }, async (request) => {
+app.post('/api/v1/creative/projects/:projectId/planning/complete', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   let project;
   await transaction(async (client) => {
     await updateCreativeProjects(client, workspace.id, async (state) => {
@@ -764,48 +790,48 @@ app.post('/api/v1/creative/projects/:projectId/planning/complete', { preHandler:
   return { project };
 });
 
-app.get('/api/v1/account-voices', { preHandler: authenticate }, async (request) => {
-  const workspace = await currentWorkspace(request.user.sub);
+app.get('/api/v1/account-voices', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
+  const workspace = request.workspace;
   return { voices: await accountVoiceStore.list(workspace.id) };
 });
 
-app.post('/api/v1/account-voices', { preHandler: authenticate }, async (request, reply) => {
+app.post('/api/v1/account-voices', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const input = accountVoiceInput.parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const voice = await accountVoiceStore.create(workspace.id, input);
   reply.code(201).send({ voice });
 });
 
-app.get('/api/v1/account-voices/:id', { preHandler: authenticate }, async (request) => {
-  const workspace = await currentWorkspace(request.user.sub);
+app.get('/api/v1/account-voices/:id', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
+  const workspace = request.workspace;
   const voice = await accountVoiceStore.get(workspace.id, z.string().uuid().parse(request.params.id));
   if (!voice) { const error = new Error('未找到账号声音。'); error.statusCode = 404; throw error; }
   return { voice };
 });
 
-app.put('/api/v1/account-voices/:id', { preHandler: authenticate }, async (request) => {
+app.put('/api/v1/account-voices/:id', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const input = accountVoiceInput.parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const voice = await accountVoiceStore.update(workspace.id, z.string().uuid().parse(request.params.id), input);
   return { voice };
 });
 
-app.post('/api/v1/account-voices/:id/default', { preHandler: authenticate }, async (request) => {
-  const workspace = await currentWorkspace(request.user.sub);
+app.post('/api/v1/account-voices/:id/default', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
+  const workspace = request.workspace;
   const voice = await accountVoiceStore.setDefault(workspace.id, z.string().uuid().parse(request.params.id));
   return { voice };
 });
 
-app.post('/api/v1/account-voices/:id/calibrations', { preHandler: authenticate }, async (request, reply) => {
+app.post('/api/v1/account-voices/:id/calibrations', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const input = accountVoiceCalibrationInput.parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const calibration = await accountVoiceStore.addCalibration(workspace.id, z.string().uuid().parse(request.params.id), input);
   reply.code(201).send({ calibration });
 });
 
-app.post('/api/v1/account-voices/calibration-drafts', { preHandler: authenticate }, async (request) => {
+app.post('/api/v1/account-voices/calibration-drafts', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const input = accountVoiceCalibrationDraftInput.parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const startedAt = Date.now();
   let route;
   try {
@@ -836,21 +862,21 @@ app.post('/api/v1/account-voices/calibration-drafts', { preHandler: authenticate
   }
 });
 
-app.get('/api/v1/creative/skills', { preHandler: authenticate }, async (request) => {
-  const workspace = await currentWorkspace(request.user.sub);
+app.get('/api/v1/creative/skills', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
+  const workspace = request.workspace;
   return creativeSkillStore.list(workspace.id);
 });
 
-app.get('/api/v1/creative/projects/:projectId/brief', { preHandler: authenticate }, async (request) => {
+app.get('/api/v1/creative/projects/:projectId/brief', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   return { brief: await creativeSkillStore.getBrief(workspace.id, projectId) };
 });
 
-app.put('/api/v1/creative/projects/:projectId/brief', { preHandler: authenticate }, async (request) => {
+app.put('/api/v1/creative/projects/:projectId/brief', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = writingBriefInput.parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   return { brief: await creativeSkillStore.saveBrief(workspace.id, projectId, input) };
 });
 
@@ -861,30 +887,30 @@ async function creativeProject(workspaceId, projectId) {
   return project;
 }
 
-app.get('/api/v1/creative/projects/:projectId/materials', { preHandler: authenticate }, async (request) => {
+app.get('/api/v1/creative/projects/:projectId/materials', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   await creativeProject(workspace.id, projectId);
   return projectMaterialStore.list(workspace.id, projectId);
 });
 
-app.post('/api/v1/creative/projects/:projectId/inputs', { preHandler: authenticate }, async (request, reply) => {
+app.post('/api/v1/creative/projects/:projectId/inputs', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = projectInputPayload.parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   await creativeProject(workspace.id, projectId);
   reply.code(201).send(await projectMaterialStore.createInput(workspace.id, projectId, input));
 });
 
-app.put('/api/v1/creative/project-inputs/:id', { preHandler: authenticate }, async (request) => {
+app.put('/api/v1/creative/project-inputs/:id', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const id = z.string().uuid().parse(request.params.id);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   return projectMaterialStore.updateInput(workspace.id, id, projectInputPayload.parse(request.body));
 });
 
-app.delete('/api/v1/creative/project-inputs/:id', { preHandler: authenticate }, async (request, reply) => {
+app.delete('/api/v1/creative/project-inputs/:id', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const id = z.string().uuid().parse(request.params.id);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   await projectMaterialStore.removeInput(workspace.id, id);
   reply.code(204).send();
 });
@@ -922,9 +948,9 @@ async function searchWikimediaImages(queryText) {
   return results;
 }
 
-app.get('/api/v1/creative/image-search', { preHandler: authenticate }, async (request) => {
+app.get('/api/v1/creative/image-search', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
   const input = z.object({ q: z.string().trim().min(2).max(120) }).parse(request.query);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const searches = [
     searchTavilyImages(workspace.id, input.q).then((results) => {
       if (!results.length) throw new Error('未配置 Tavily 或没有网页候选图');
@@ -940,10 +966,10 @@ app.get('/api/v1/creative/image-search', { preHandler: authenticate }, async (re
   }
 });
 
-app.post('/api/v1/creative/projects/:projectId/visual/plan', { preHandler: authenticate }, async (request, reply) => {
+app.post('/api/v1/creative/projects/:projectId/visual/plan', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = visualPlanningInput.parse(request.body ?? {});
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const project = await creativeProject(workspace.id, projectId);
   const version = project.versions?.find((item) => item.platform === input.platform);
   if (!String(version?.body ?? '').trim()) { const error = new Error('请先完成当前渠道正文，再生成配图方案。'); error.statusCode = 400; throw error; }
@@ -1017,10 +1043,10 @@ function generatedImageMime(filename) {
   return extension === '.jpg' || extension === '.jpeg' ? 'image/jpeg' : extension === '.webp' ? 'image/webp' : 'image/png';
 }
 
-app.post('/api/v1/creative/projects/:projectId/visual/generate', { preHandler: authenticate }, async (request, reply) => {
+app.post('/api/v1/creative/projects/:projectId/visual/generate', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = visualGenerationInput.parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   await creativeProject(workspace.id, projectId);
   const operation = input.referenceImageIds.length ? 'IMAGE_TO_IMAGE' : 'TEXT_TO_IMAGE';
   let policy = await query('SELECT provider, model FROM agent_model_policies WHERE workspace_id = $1 AND scope = $2', [workspace.id, operation]);
@@ -1068,20 +1094,20 @@ app.post('/api/v1/creative/projects/:projectId/visual/generate', { preHandler: a
   }
 });
 
-app.post('/api/v1/creative/projects/:projectId/references', { preHandler: authenticate }, async (request, reply) => {
+app.post('/api/v1/creative/projects/:projectId/references', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = projectReferenceMetadata.extend({ url: z.string().url().max(2_000).refine((value) => /^https?:\/\//i.test(value), '只支持 HTTP(S) 公开链接。') }).parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   await creativeProject(workspace.id, projectId);
   reply.code(201).send(await projectMaterialStore.createReference(workspace.id, projectId, { ...input, sourceType: 'LINK' }));
 });
 
-app.post('/api/v1/creative/projects/:projectId/images/import', { preHandler: authenticate }, async (request, reply) => {
+app.post('/api/v1/creative/projects/:projectId/images/import', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = projectReferenceMetadata.extend({
     url: z.string().url().max(2_000).refine((value) => /^https?:\/\//i.test(value), '只支持 HTTP(S) 公开图片。'),
   }).parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   await creativeProject(workspace.id, projectId);
   const stored = await saveRemoteProjectImage(config.uploadRoot, workspace.id, projectId, input.url);
   try {
@@ -1100,7 +1126,7 @@ app.post('/api/v1/creative/projects/:projectId/images/import', { preHandler: aut
   }
 });
 
-app.post('/api/v1/creative/projects/:projectId/files', { preHandler: authenticate }, async (request, reply) => {
+app.post('/api/v1/creative/projects/:projectId/files', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const queryInput = z.object({
     title: z.string().trim().max(200).optional(),
@@ -1111,7 +1137,7 @@ app.post('/api/v1/creative/projects/:projectId/files', { preHandler: authenticat
   }).parse(request.query);
   const platforms = queryInput.platforms ? queryInput.platforms.split(',').filter(Boolean) : [];
   projectPlatforms.parse(platforms);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   await creativeProject(workspace.id, projectId);
   const part = await request.file();
   if (!part) throw new Error('请选择要上传的文件。');
@@ -1128,23 +1154,23 @@ app.post('/api/v1/creative/projects/:projectId/files', { preHandler: authenticat
   }
 });
 
-app.put('/api/v1/creative/project-references/:id', { preHandler: authenticate }, async (request) => {
+app.put('/api/v1/creative/project-references/:id', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const id = z.string().uuid().parse(request.params.id);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   return projectMaterialStore.updateReference(workspace.id, id, projectReferenceMetadata.parse(request.body));
 });
 
-app.delete('/api/v1/creative/project-references/:id', { preHandler: authenticate }, async (request, reply) => {
+app.delete('/api/v1/creative/project-references/:id', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const id = z.string().uuid().parse(request.params.id);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const removed = await projectMaterialStore.removeReference(workspace.id, id);
   if (removed.storage_key) await removeProjectUpload(config.uploadRoot, removed.storage_key).catch((error) => request.log.warn({ error }, '清理项目素材文件失败'));
   reply.code(204).send();
 });
 
-app.get('/api/v1/creative/project-files/:id/content', { preHandler: authenticate }, async (request, reply) => {
+app.get('/api/v1/creative/project-files/:id/content', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request, reply) => {
   const id = z.string().uuid().parse(request.params.id);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const reference = await projectMaterialStore.getReference(workspace.id, id);
   if (reference.source_type !== 'FILE' || !reference.storage_key) { const error = new Error('这条参考资料没有文件内容。'); error.statusCode = 404; throw error; }
   const filename = encodeURIComponent(reference.original_filename || 'project-material');
@@ -1190,18 +1216,18 @@ async function researchMaterialIds(runId) {
   };
 }
 
-app.get('/api/v1/creative/projects/:projectId/agent', { preHandler: authenticate }, async (request) => {
+app.get('/api/v1/creative/projects/:projectId/agent', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = projectAgentQuery.parse(request.query);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   await creativeProject(workspace.id, projectId);
   return projectAgentStore.context(workspace.id, projectId, input);
 });
 
-app.post('/api/v1/creative/projects/:projectId/research/start', { preHandler: authenticate }, async (request, reply) => {
+app.post('/api/v1/creative/projects/:projectId/research/start', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = simplifiedResearchStartInput.parse(request.body ?? {});
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const [project, brief, policy, verificationPolicy, template, listed] = await Promise.all([
     creativeProject(workspace.id, projectId),
     creativeSkillStore.getBrief(workspace.id, projectId),
@@ -1271,9 +1297,9 @@ function advanceProjectToMasterWriting(state, projectId, now = new Date().toISOS
   return { ...state, projects };
 }
 
-app.post('/api/v1/creative/research-results/:artifactId/accept', { preHandler: authenticate }, async (request) => {
+app.post('/api/v1/creative/research-results/:artifactId/accept', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const artifactId = z.string().uuid().parse(request.params.artifactId);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   return transaction(async (client) => {
     const result = await client.query(`SELECT a.*, r.id AS research_result_id, r.output_json
       FROM project_artifacts a
@@ -1316,9 +1342,9 @@ app.post('/api/v1/creative/research-results/:artifactId/accept', { preHandler: a
   });
 });
 
-app.post('/api/v1/creative/projects/:projectId/research/skip', { preHandler: authenticate }, async (request) => {
+app.post('/api/v1/creative/projects/:projectId/research/skip', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   await creativeProject(workspace.id, projectId);
   return transaction(async (client) => {
     const now = new Date().toISOString();
@@ -1339,10 +1365,10 @@ app.post('/api/v1/creative/projects/:projectId/research/skip', { preHandler: aut
   });
 });
 
-app.post('/api/v1/creative/projects/:projectId/agent/prepare', { preHandler: authenticate }, async (request, reply) => {
+app.post('/api/v1/creative/projects/:projectId/agent/prepare', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = agentPrepareInput.parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   if (input.stage === 'RESEARCH') {
     const [project, brief, policy, materialRows] = await Promise.all([
       creativeProject(workspace.id, projectId),
@@ -1500,9 +1526,9 @@ app.post('/api/v1/creative/projects/:projectId/agent/prepare', { preHandler: aut
   reply.code(201).send(runView(run));
 });
 
-app.post('/api/v1/creative/agent-runs/:id/confirm', { preHandler: authenticate }, async (request, reply) => {
+app.post('/api/v1/creative/agent-runs/:id/confirm', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const runId = z.string().uuid().parse(request.params.id);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const prepared = await transaction(async (client) => {
     const run = await client.query(`UPDATE generation_runs SET status = 'QUEUED'
       WHERE id = $1 AND workspace_id = $2 AND status = 'DRAFT'
@@ -1531,9 +1557,9 @@ app.post('/api/v1/creative/agent-runs/:id/confirm', { preHandler: authenticate }
   reply.code(202).send({ id: runId, status: 'QUEUED', jobId: prepared.job.id });
 });
 
-app.post('/api/v1/creative/agent-runs/:id/cancel', { preHandler: authenticate }, async (request) => {
+app.post('/api/v1/creative/agent-runs/:id/cancel', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const runId = z.string().uuid().parse(request.params.id);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const result = await query(`UPDATE generation_runs SET status = 'CANCELLED', completed_at = now()
     WHERE id = $1 AND workspace_id = $2 AND status IN ('DRAFT', 'QUEUED', 'RUNNING')
       AND (action_version_id = $3 OR action_version_id = $4 OR action_version_id LIKE 'project-copy-%') RETURNING *`, [runId, workspace.id, PROJECT_RESEARCH_ACTION_VERSION, SIMPLIFIED_RESEARCH_WORKFLOW_VERSION]);
@@ -1542,10 +1568,10 @@ app.post('/api/v1/creative/agent-runs/:id/cancel', { preHandler: authenticate },
   return runView(result.rows[0]);
 });
 
-app.post('/api/v1/creative/projects/:projectId/research/sources/prepare', { preHandler: authenticate }, async (request, reply) => {
+app.post('/api/v1/creative/projects/:projectId/research/sources/prepare', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = z.object({ planArtifactId: z.string().uuid().optional() }).parse(request.body ?? {});
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   await creativeProject(workspace.id, projectId);
   const planResult = await query(`SELECT p.id, p.output_json, p.artifact_id
     FROM project_research_plans p
@@ -1597,9 +1623,9 @@ app.post('/api/v1/creative/projects/:projectId/research/sources/prepare', { preH
   reply.code(201).send(runView(run));
 });
 
-app.post('/api/v1/creative/research-source-runs/:id/confirm', { preHandler: authenticate }, async (request, reply) => {
+app.post('/api/v1/creative/research-source-runs/:id/confirm', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const runId = z.string().uuid().parse(request.params.id);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const prepared = await transaction(async (client) => {
     const run = await client.query(`UPDATE generation_runs SET status = 'QUEUED'
       WHERE id = $1 AND workspace_id = $2 AND action_version_id = $3 AND status = 'DRAFT'
@@ -1618,9 +1644,9 @@ app.post('/api/v1/creative/research-source-runs/:id/confirm', { preHandler: auth
   reply.code(202).send({ id: runId, status: 'QUEUED', jobId: prepared.id });
 });
 
-app.post('/api/v1/creative/research-source-runs/:id/cancel', { preHandler: authenticate }, async (request) => {
+app.post('/api/v1/creative/research-source-runs/:id/cancel', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const runId = z.string().uuid().parse(request.params.id);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const result = await query(`UPDATE generation_runs SET status = 'CANCELLED', completed_at = now()
     WHERE id = $1 AND workspace_id = $2 AND action_version_id = $3 AND status IN ('DRAFT', 'QUEUED') RETURNING *`, [runId, workspace.id, PROJECT_RESEARCH_SOURCES_VERSION]);
   if (!result.rowCount) { const error = new Error('该来源任务当前不能取消。'); error.statusCode = 409; throw error; }
@@ -1628,14 +1654,14 @@ app.post('/api/v1/creative/research-source-runs/:id/cancel', { preHandler: authe
   return runView(result.rows[0]);
 });
 
-app.post('/api/v1/creative/projects/:projectId/research/verification/prepare', { preHandler: authenticate }, async (request, reply) => {
+app.post('/api/v1/creative/projects/:projectId/research/verification/prepare', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = z.object({
     sourceArtifactId: z.string().uuid(),
     selectedSourceIds: z.array(z.string().uuid()).min(1).max(20),
   }).parse(request.body ?? {});
   const selectedSourceIds = [...new Set(input.selectedSourceIds)];
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   await creativeProject(workspace.id, projectId);
   const sourceRunResult = await query(`SELECT sr.id, sr.artifact_id, p.output_json AS plan_output, a.metadata_json
     FROM project_research_source_runs sr
@@ -1698,9 +1724,9 @@ app.post('/api/v1/creative/projects/:projectId/research/verification/prepare', {
   reply.code(201).send(runView(run));
 });
 
-app.post('/api/v1/creative/source-verification-runs/:id/confirm', { preHandler: authenticate }, async (request, reply) => {
+app.post('/api/v1/creative/source-verification-runs/:id/confirm', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const runId = z.string().uuid().parse(request.params.id);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const prepared = await transaction(async (client) => {
     const run = await client.query(`UPDATE generation_runs SET status = 'QUEUED'
       WHERE id = $1 AND workspace_id = $2 AND action_version_id = $3 AND status = 'DRAFT' RETURNING id`, [runId, workspace.id, SOURCE_VERIFICATION_VERSION]);
@@ -1718,9 +1744,9 @@ app.post('/api/v1/creative/source-verification-runs/:id/confirm', { preHandler: 
   reply.code(202).send({ id: runId, status: 'QUEUED', jobId: prepared.id });
 });
 
-app.post('/api/v1/creative/source-verification-runs/:id/cancel', { preHandler: authenticate }, async (request) => {
+app.post('/api/v1/creative/source-verification-runs/:id/cancel', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const runId = z.string().uuid().parse(request.params.id);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const result = await query(`UPDATE generation_runs SET status = 'CANCELLED', completed_at = now()
     WHERE id = $1 AND workspace_id = $2 AND action_version_id = $3 AND status IN ('DRAFT', 'QUEUED') RETURNING *`, [runId, workspace.id, SOURCE_VERIFICATION_VERSION]);
   if (!result.rowCount) { const error = new Error('该事实核验任务当前不能取消。'); error.statusCode = 409; throw error; }
@@ -1728,9 +1754,9 @@ app.post('/api/v1/creative/source-verification-runs/:id/cancel', { preHandler: a
   return runView(result.rows[0]);
 });
 
-app.post('/api/v1/creative/research-verifications/:artifactId/accept', { preHandler: authenticate }, async (request) => {
+app.post('/api/v1/creative/research-verifications/:artifactId/accept', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const artifactId = z.string().uuid().parse(request.params.artifactId);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   return transaction(async (client) => {
     const result = await client.query(`SELECT a.*, v.id AS verification_id, v.output_json
       FROM project_artifacts a JOIN project_source_verifications v ON v.artifact_id = a.id
@@ -1750,9 +1776,9 @@ app.post('/api/v1/creative/research-verifications/:artifactId/accept', { preHand
   });
 });
 
-app.get('/api/v1/creative/projects/:projectId/research', { preHandler: authenticate }, async (request) => {
+app.get('/api/v1/creative/projects/:projectId/research', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   await creativeProject(workspace.id, projectId);
   const [messages, run, plan] = await Promise.all([
     query(`SELECT * FROM (
@@ -1785,10 +1811,10 @@ app.get('/api/v1/creative/projects/:projectId/research', { preHandler: authentic
   };
 });
 
-app.post('/api/v1/creative/projects/:projectId/research/prepare', { preHandler: authenticate }, async (request, reply) => {
+app.post('/api/v1/creative/projects/:projectId/research/prepare', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = projectResearchInput.parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const [project, brief, policy, materialRows] = await Promise.all([
     creativeProject(workspace.id, projectId),
     creativeSkillStore.getBrief(workspace.id, projectId),
@@ -1817,9 +1843,9 @@ app.post('/api/v1/creative/projects/:projectId/research/prepare', { preHandler: 
   reply.code(201).send(researchRunView(run, { inputIds: input.inputIds, referenceIds: input.referenceIds }));
 });
 
-app.post('/api/v1/creative/research-runs/:id/confirm', { preHandler: authenticate }, async (request, reply) => {
+app.post('/api/v1/creative/research-runs/:id/confirm', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const runId = z.string().uuid().parse(request.params.id);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const run = await query('UPDATE generation_runs SET status = \'QUEUED\' WHERE id = $1 AND workspace_id = $2 AND action_version_id = $3 AND status = \'DRAFT\' RETURNING id', [runId, workspace.id, PROJECT_RESEARCH_ACTION_VERSION]);
   if (!run.rowCount) { const error = new Error('该研究计划当前不能确认。'); error.statusCode = 409; throw error; }
   const job = await query("INSERT INTO jobs (workspace_id, job_type, payload_json) VALUES ($1, 'PROJECT_RESEARCH_PLAN', $2) RETURNING *", [workspace.id, JSON.stringify({ runId })]);
@@ -1833,19 +1859,19 @@ app.post('/api/v1/creative/research-runs/:id/confirm', { preHandler: authenticat
   reply.code(202).send({ id: runId, status: 'QUEUED', jobId: job.rows[0].id });
 });
 
-app.post('/api/v1/creative/research-runs/:id/cancel', { preHandler: authenticate }, async (request) => {
+app.post('/api/v1/creative/research-runs/:id/cancel', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const runId = z.string().uuid().parse(request.params.id);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const result = await query("UPDATE generation_runs SET status = 'CANCELLED', completed_at = now() WHERE id = $1 AND workspace_id = $2 AND action_version_id = $3 AND status IN ('DRAFT', 'QUEUED') RETURNING id, status", [runId, workspace.id, PROJECT_RESEARCH_ACTION_VERSION]);
   if (!result.rowCount) { const error = new Error('该研究计划当前不能取消。'); error.statusCode = 409; throw error; }
   await query("UPDATE jobs SET status = 'CANCELLED', completed_at = now() WHERE workspace_id = $1 AND payload_json->>'runId' = $2 AND status = 'PENDING'", [workspace.id, runId]);
   return result.rows[0];
 });
 
-app.post('/api/v1/creative/projects/:projectId/outline/prepare', { preHandler: authenticate }, async (request, reply) => {
+app.post('/api/v1/creative/projects/:projectId/outline/prepare', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = z.object({ platform: creativePlatform }).parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const templateScope = outlineTemplateScope(input.platform);
   const [project, context, route, template] = await Promise.all([
     creativeProject(workspace.id, projectId),
@@ -1871,9 +1897,9 @@ app.post('/api/v1/creative/projects/:projectId/outline/prepare', { preHandler: a
   });
 });
 
-app.post('/api/v1/creative/outline-runs/:id/confirm', { preHandler: authenticate }, async (request, reply) => {
+app.post('/api/v1/creative/outline-runs/:id/confirm', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const runId = z.string().uuid().parse(request.params.id);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const run = await query("UPDATE generation_runs SET status = 'QUEUED' WHERE id = $1 AND workspace_id = $2 AND action_version_id = $3 AND status = 'DRAFT' RETURNING id", [runId, workspace.id, OUTLINE_ACTION_VERSION]);
   if (!run.rowCount) { const error = new Error('该大纲任务当前不能确认。'); error.statusCode = 409; throw error; }
   const job = await query("INSERT INTO jobs (workspace_id, job_type, payload_json) VALUES ($1, 'CREATIVE_OUTLINE', $2) RETURNING *", [workspace.id, JSON.stringify({ runId: run.rows[0].id })]);
@@ -1887,18 +1913,18 @@ app.post('/api/v1/creative/outline-runs/:id/confirm', { preHandler: authenticate
   reply.code(202).send({ id: run.rows[0].id, status: 'QUEUED', jobId: job.rows[0].id });
 });
 
-app.post('/api/v1/creative/outline-runs/:id/cancel', { preHandler: authenticate }, async (request) => {
+app.post('/api/v1/creative/outline-runs/:id/cancel', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const runId = z.string().uuid().parse(request.params.id);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const result = await query("UPDATE generation_runs SET status = 'CANCELLED', completed_at = now() WHERE id = $1 AND workspace_id = $2 AND action_version_id = $3 AND status IN ('DRAFT', 'QUEUED') RETURNING id, status", [runId, workspace.id, OUTLINE_ACTION_VERSION]);
   if (!result.rowCount) { const error = new Error('该大纲任务当前不能取消。'); error.statusCode = 409; throw error; }
   await query("UPDATE jobs SET status = 'CANCELLED', completed_at = now() WHERE workspace_id = $1 AND payload_json->>'runId' = $2 AND status = 'PENDING'", [workspace.id, runId]);
   return result.rows[0];
 });
 
-app.get('/api/v1/creative/projects/:projectId/outline/latest-run', { preHandler: authenticate }, async (request) => {
+app.get('/api/v1/creative/projects/:projectId/outline/latest-run', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
   const input = z.object({ platform: creativePlatform }).parse(request.query);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const result = await query(`SELECT r.id, r.status, r.error, r.model, r.prompt_version, r.source_snapshot_json, r.created_at,
       (SELECT j.id FROM jobs j WHERE j.workspace_id = r.workspace_id AND j.payload_json->>'runId' = r.id::text ORDER BY j.created_at DESC LIMIT 1) AS job_id
     FROM generation_runs r
@@ -1910,9 +1936,9 @@ app.get('/api/v1/creative/projects/:projectId/outline/latest-run', { preHandler:
   return { id: row.id, status: row.status, error: row.error ?? undefined, jobId: row.job_id ?? undefined, createdAt: row.created_at, confirmation: { model: row.model, platform: row.source_snapshot_json.platform, actionVersion: OUTLINE_ACTION_VERSION, promptVersion: Number(row.prompt_version), skills: (row.source_snapshot_json.skills ?? []).map((skill) => ({ dimension: skill.dimension, name: skill.name, version: skill.version?.version ?? skill.version })) } };
 });
 
-app.get('/api/v1/creative/projects/:projectId/outline/latest', { preHandler: authenticate }, async (request) => {
+app.get('/api/v1/creative/projects/:projectId/outline/latest', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
   const input = z.object({ platform: creativePlatform }).parse(request.query);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const result = await query(`SELECT c.*, r.model FROM creative_outline_candidates c
     JOIN generation_runs r ON r.id = c.generation_run_id
     WHERE c.workspace_id = $1 AND c.project_id = $2 AND c.platform = $3
@@ -1920,10 +1946,10 @@ app.get('/api/v1/creative/projects/:projectId/outline/latest', { preHandler: aut
   return outlineCandidateView(result.rows[0]);
 });
 
-app.post('/api/v1/creative/outline-candidates/:id/accept', { preHandler: authenticate }, async (request) => {
+app.post('/api/v1/creative/outline-candidates/:id/accept', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const candidateId = z.string().uuid().parse(request.params.id);
   const input = z.object({ selectedTitle: z.string().min(1).max(120) }).parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   return transaction(async (client) => {
     const candidateResult = await client.query(`SELECT c.*, r.model FROM creative_outline_candidates c
       JOIN generation_runs r ON r.id = c.generation_run_id
@@ -1954,10 +1980,10 @@ app.post('/api/v1/creative/outline-candidates/:id/accept', { preHandler: authent
   });
 });
 
-app.post('/api/v1/creative/projects/:projectId/draft/prepare', { preHandler: authenticate }, async (request, reply) => {
+app.post('/api/v1/creative/projects/:projectId/draft/prepare', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = z.object({ platform: creativePlatform }).parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const templateScope = draftTemplateScope(input.platform);
   const [project, context, route, template, outlineResult] = await Promise.all([
     creativeProject(workspace.id, projectId),
@@ -1989,9 +2015,9 @@ app.post('/api/v1/creative/projects/:projectId/draft/prepare', { preHandler: aut
   });
 });
 
-app.post('/api/v1/creative/draft-runs/:id/confirm', { preHandler: authenticate }, async (request, reply) => {
+app.post('/api/v1/creative/draft-runs/:id/confirm', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const runId = z.string().uuid().parse(request.params.id);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const run = await query("UPDATE generation_runs SET status = 'QUEUED' WHERE id = $1 AND workspace_id = $2 AND action_version_id = $3 AND status = 'DRAFT' RETURNING id", [runId, workspace.id, DRAFT_ACTION_VERSION]);
   if (!run.rowCount) { const error = new Error('该初稿任务当前不能确认。'); error.statusCode = 409; throw error; }
   const job = await query("INSERT INTO jobs (workspace_id, job_type, payload_json) VALUES ($1, 'CREATIVE_DRAFT', $2) RETURNING *", [workspace.id, JSON.stringify({ runId: run.rows[0].id })]);
@@ -2005,18 +2031,18 @@ app.post('/api/v1/creative/draft-runs/:id/confirm', { preHandler: authenticate }
   reply.code(202).send({ id: run.rows[0].id, status: 'QUEUED', jobId: job.rows[0].id });
 });
 
-app.post('/api/v1/creative/draft-runs/:id/cancel', { preHandler: authenticate }, async (request) => {
+app.post('/api/v1/creative/draft-runs/:id/cancel', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const runId = z.string().uuid().parse(request.params.id);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const result = await query("UPDATE generation_runs SET status = 'CANCELLED', completed_at = now() WHERE id = $1 AND workspace_id = $2 AND action_version_id = $3 AND status IN ('DRAFT', 'QUEUED') RETURNING id, status", [runId, workspace.id, DRAFT_ACTION_VERSION]);
   if (!result.rowCount) { const error = new Error('该初稿任务当前不能取消。'); error.statusCode = 409; throw error; }
   await query("UPDATE jobs SET status = 'CANCELLED', completed_at = now() WHERE workspace_id = $1 AND payload_json->>'runId' = $2 AND status = 'PENDING'", [workspace.id, runId]);
   return result.rows[0];
 });
 
-app.get('/api/v1/creative/projects/:projectId/draft/latest-run', { preHandler: authenticate }, async (request) => {
+app.get('/api/v1/creative/projects/:projectId/draft/latest-run', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
   const input = z.object({ platform: creativePlatform }).parse(request.query);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const result = await query(`SELECT r.id, r.status, r.error, r.model, r.prompt_version, r.source_snapshot_json, r.created_at,
       (SELECT j.id FROM jobs j WHERE j.workspace_id = r.workspace_id AND j.payload_json->>'runId' = r.id::text ORDER BY j.created_at DESC LIMIT 1) AS job_id
     FROM generation_runs r
@@ -2029,9 +2055,9 @@ app.get('/api/v1/creative/projects/:projectId/draft/latest-run', { preHandler: a
   return { id: row.id, status: row.status, error: row.error ?? undefined, jobId: row.job_id ?? undefined, createdAt: row.created_at, confirmation: { model: row.model, platform: row.source_snapshot_json.platform, actionVersion: DRAFT_ACTION_VERSION, promptVersion: Number(row.prompt_version), skills: (row.source_snapshot_json.skills ?? []).map((skill) => ({ dimension: skill.dimension, name: skill.name, version: skill.version?.version ?? skill.version })) } };
 });
 
-app.get('/api/v1/creative/projects/:projectId/draft/latest', { preHandler: authenticate }, async (request) => {
+app.get('/api/v1/creative/projects/:projectId/draft/latest', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
   const input = z.object({ platform: creativePlatform }).parse(request.query);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const result = await query(`SELECT c.*, r.model, r.prompt_version FROM creative_draft_candidates c
     JOIN generation_runs r ON r.id = c.generation_run_id
     JOIN creative_outline_candidates o ON o.id = c.outline_candidate_id AND o.status = 'ACCEPTED'
@@ -2040,9 +2066,9 @@ app.get('/api/v1/creative/projects/:projectId/draft/latest', { preHandler: authe
   return draftCandidateView(result.rows[0]);
 });
 
-app.post('/api/v1/creative/draft-candidates/:id/accept', { preHandler: authenticate }, async (request) => {
+app.post('/api/v1/creative/draft-candidates/:id/accept', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const candidateId = z.string().uuid().parse(request.params.id);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   return transaction(async (client) => {
     const candidateResult = await client.query(`SELECT c.*, r.model, r.prompt_version FROM creative_draft_candidates c
       JOIN generation_runs r ON r.id = c.generation_run_id
@@ -2077,10 +2103,10 @@ app.post('/api/v1/creative/draft-candidates/:id/accept', { preHandler: authentic
   });
 });
 
-app.post('/api/v1/creative/project-artifacts/:id/accept', { preHandler: authenticate }, async (request) => {
+app.post('/api/v1/creative/project-artifacts/:id/accept', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const artifactId = z.string().uuid().parse(request.params.id);
   const input = z.object({ selectedTitle: z.string().trim().min(1).max(120).optional() }).parse(request.body ?? {});
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   return transaction(async (client) => {
     const candidateResult = await client.query(`SELECT a.*, r.source_snapshot_json,
         v.id AS content_version_id, v.title AS content_title, v.body AS content_body,
@@ -2179,9 +2205,9 @@ app.post('/api/v1/creative/project-artifacts/:id/accept', { preHandler: authenti
   });
 });
 
-app.post('/api/v1/creative/project-artifacts/:id/reject', { preHandler: authenticate }, async (request) => {
+app.post('/api/v1/creative/project-artifacts/:id/reject', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const artifactId = z.string().uuid().parse(request.params.id);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   return transaction(async (client) => {
     const result = await client.query(`UPDATE project_artifacts
       SET status = 'REJECTED', updated_at = now()
@@ -2202,12 +2228,12 @@ app.post('/api/v1/creative/project-artifacts/:id/reject', { preHandler: authenti
   });
 });
 
-app.post('/api/v1/creative/projects/:projectId/platforms/:platform', { preHandler: authenticate }, async (request) => {
+app.post('/api/v1/creative/projects/:projectId/platforms/:platform', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const platformValue = String(request.params.platform);
   if (platformValue === 'VIDEO_CHANNEL') throw new Error('视频号使用独立的视频创作流程。');
   const platform = creativePlatform.parse(platformValue);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   return transaction(async (client) => {
     await client.query(`INSERT INTO platform_strategies (workspace_id, project_id, platform)
       VALUES ($1, $2, $3) ON CONFLICT (workspace_id, project_id, platform) DO NOTHING`, [workspace.id, projectId, platform]);
@@ -2229,10 +2255,10 @@ app.post('/api/v1/creative/projects/:projectId/platforms/:platform', { preHandle
   });
 });
 
-app.post('/api/v1/creative/projects/:projectId/platform-versions/complete', { preHandler: authenticate }, async (request) => {
+app.post('/api/v1/creative/projects/:projectId/platform-versions/complete', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = z.object({ platform: creativePlatform }).parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   return transaction(async (client) => {
     const updatedAt = new Date().toISOString();
     let project;
@@ -2315,13 +2341,13 @@ function documentForPlatform(project, platform, visual, now) {
   return { platform, format: 'HTML', content, generatedAt: now };
 }
 
-app.get('/api/v1/creative/projects/:projectId/delivery', { preHandler: authenticate }, async (request) => {
+app.get('/api/v1/creative/projects/:projectId/delivery', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   return { delivery: deliveryOf(await creativeProject(workspace.id, projectId)) };
 });
 
-app.put('/api/v1/creative/projects/:projectId/visual', { preHandler: authenticate }, async (request) => {
+app.put('/api/v1/creative/projects/:projectId/visual', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = z.object({
     platform: creativePlatform,
@@ -2337,7 +2363,7 @@ app.put('/api/v1/creative/projects/:projectId/visual', { preHandler: authenticat
     const assigned = value.plan.map((item) => item.assetReferenceId).filter(Boolean);
     if (new Set(assigned).size !== assigned.length) context.addIssue({ code: 'custom', path: ['plan'], message: '同一张图片不能绑定到多个配图位置。' });
   }).parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const existingProject = await creativeProject(workspace.id, projectId);
   const existingVersion = (existingProject.versions ?? []).find((item) => item.platform === input.platform);
   if (!existingVersion || String(existingVersion.body ?? '').trim().length < 80) {
@@ -2407,10 +2433,10 @@ app.put('/api/v1/creative/projects/:projectId/visual', { preHandler: authenticat
   });
 });
 
-app.post('/api/v1/creative/projects/:projectId/visual/complete', { preHandler: authenticate }, async (request) => {
+app.post('/api/v1/creative/projects/:projectId/visual/complete', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = z.object({ platform: creativePlatform }).parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   return transaction(async (client) => {
     const now = new Date().toISOString(); let project;
     await updateCreativeProjects(client, workspace.id, (state) => {
@@ -2427,10 +2453,10 @@ app.post('/api/v1/creative/projects/:projectId/visual/complete', { preHandler: a
   });
 });
 
-app.post('/api/v1/creative/projects/:projectId/layout/generate', { preHandler: authenticate }, async (request) => {
+app.post('/api/v1/creative/projects/:projectId/layout/generate', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = z.object({ platform: creativePlatform }).parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   return transaction(async (client) => {
     const now = new Date().toISOString(); let project;
     await updateCreativeProjects(client, workspace.id, (state) => {
@@ -2449,10 +2475,10 @@ app.post('/api/v1/creative/projects/:projectId/layout/generate', { preHandler: a
   });
 });
 
-app.post('/api/v1/creative/projects/:projectId/layout/complete', { preHandler: authenticate }, async (request) => {
+app.post('/api/v1/creative/projects/:projectId/layout/complete', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = z.object({ platform: creativePlatform }).parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   return transaction(async (client) => {
     const now = new Date().toISOString(); let project;
     await updateCreativeProjects(client, workspace.id, (state) => {
@@ -2469,10 +2495,10 @@ app.post('/api/v1/creative/projects/:projectId/layout/complete', { preHandler: a
   });
 });
 
-app.post('/api/v1/creative/projects/:projectId/review/complete', { preHandler: authenticate }, async (request) => {
+app.post('/api/v1/creative/projects/:projectId/review/complete', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = z.object({ platform: creativePlatform, acknowledgedFactChecks: z.array(z.string().min(1).max(2_000)).max(100) }).parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   return transaction(async (client) => {
     const now = new Date().toISOString(); let project;
     await updateCreativeProjects(client, workspace.id, (state) => {
@@ -2492,27 +2518,27 @@ app.post('/api/v1/creative/projects/:projectId/review/complete', { preHandler: a
   });
 });
 
-app.get('/api/v1/agent/skills', { preHandler: authenticate }, async (request) => listAvailableSkills((await currentWorkspace(request.user.sub)).id));
+app.get('/api/v1/agent/skills', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => listAvailableSkills(request.workspace.id));
 
-app.get('/api/v1/agent/model-policies/:scope', { preHandler: authenticate }, async (request) => {
-  const workspace = await currentWorkspace(request.user.sub);
+app.get('/api/v1/agent/model-policies/:scope', { preHandler: workspaceAccess.forRole('OWNER') }, async (request) => {
+  const workspace = request.workspace;
   const result = await query('SELECT scope, provider, model, updated_at FROM agent_model_policies WHERE workspace_id = $1 AND scope = $2', [workspace.id, String(request.params.scope)]);
   return result.rows[0] ?? { scope: String(request.params.scope), configured: false };
 });
 
-app.put('/api/v1/agent/model-policies/:scope', { preHandler: authenticate }, async (request) => {
+app.put('/api/v1/agent/model-policies/:scope', { preHandler: workspaceAccess.forRole('OWNER') }, async (request) => {
   const input = z.object({ model: z.string().min(1).max(160) }).parse(request.body);
   const scope = String(request.params.scope);
   if (scope !== 'AGENT_PLANNER') { const error = new Error('当前只支持配置核心 Agent 规划模型。'); error.statusCode = 400; throw error; }
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   await ensureCatalogModel(workspace.id, 'BAILIAN_CLI', undefined, input.model.trim());
   const result = await query(`INSERT INTO agent_model_policies (workspace_id, scope, provider, model) VALUES ($1, $2, 'BAILIAN_CLI', $3) ON CONFLICT (workspace_id, scope) DO UPDATE SET model = excluded.model, updated_at = now() RETURNING scope, provider, model, updated_at`, [workspace.id, scope, input.model.trim()]);
   return result.rows[0];
 });
 
-app.post('/api/v1/agent/plans', { preHandler: authenticate }, async (request, reply) => {
+app.post('/api/v1/agent/plans', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const input = z.object({ request: z.string().min(1).max(8_000), context: z.record(z.string(), z.unknown()).optional() }).parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const policy = await query('SELECT 1 FROM agent_model_policies WHERE workspace_id = $1 AND scope = $2', [workspace.id, 'AGENT_PLANNER']);
   if (!policy.rowCount) { const error = new Error('请先配置核心 Agent 规划模型。'); error.statusCode = 400; throw error; }
   const result = await query('INSERT INTO agent_plans (workspace_id, status, request_text, context_json) VALUES ($1, $2, $3, $4) RETURNING id, status, created_at', [workspace.id, 'GENERATING', input.request.trim(), JSON.stringify(input.context ?? {})]);
@@ -2521,15 +2547,15 @@ app.post('/api/v1/agent/plans', { preHandler: authenticate }, async (request, re
   reply.code(202).send({ id: result.rows[0].id, status: result.rows[0].status });
 });
 
-app.get('/api/v1/agent/plans/:id', { preHandler: authenticate }, async (request) => {
-  const workspace = await currentWorkspace(request.user.sub);
+app.get('/api/v1/agent/plans/:id', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
+  const workspace = request.workspace;
   const result = await query('SELECT id, status, request_text, context_json, plan_json, planner_model, error, confirmed_at, created_at, updated_at FROM agent_plans WHERE id = $1 AND workspace_id = $2', [request.params.id, workspace.id]);
   if (!result.rowCount) { const error = new Error('未找到 Agent 计划。'); error.statusCode = 404; throw error; }
   return result.rows[0];
 });
 
-app.post('/api/v1/agent/plans/:id/confirm', { preHandler: authenticate }, async (request) => {
-  const workspace = await currentWorkspace(request.user.sub);
+app.post('/api/v1/agent/plans/:id/confirm', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
+  const workspace = request.workspace;
   const result = await transaction(async (client) => {
     const plan = await client.query('SELECT plan_json FROM agent_plans WHERE id = $1 AND workspace_id = $2 AND status = $3 FOR UPDATE', [request.params.id, workspace.id, 'WAITING_CONFIRMATION']);
     if (!plan.rowCount) { const error = new Error('该计划当前不能确认。'); error.statusCode = 409; throw error; }
@@ -2540,23 +2566,23 @@ app.post('/api/v1/agent/plans/:id/confirm', { preHandler: authenticate }, async 
   return result.rows[0];
 });
 
-app.post('/api/v1/agent/plans/:id/cancel', { preHandler: authenticate }, async (request) => {
-  const workspace = await currentWorkspace(request.user.sub);
+app.post('/api/v1/agent/plans/:id/cancel', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
+  const workspace = request.workspace;
   const result = await query('UPDATE agent_plans SET status = $1, updated_at = now() WHERE id = $2 AND workspace_id = $3 AND status IN ($4, $5) RETURNING id, status', ['CANCELLED', request.params.id, workspace.id, 'GENERATING', 'WAITING_CONFIRMATION']);
   if (!result.rowCount) { const error = new Error('该计划当前不能取消。'); error.statusCode = 409; throw error; }
   return result.rows[0];
 });
 
-app.post('/api/v1/jobs/bailian-text', { preHandler: authenticate }, async (request, reply) => {
+app.post('/api/v1/jobs/bailian-text', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const input = z.object({ model: z.string().min(1).max(120), system: z.string().min(1).max(8_000), message: z.string().min(1).max(60_000) }).parse(request.body);
-  const workspace = await currentWorkspace(request.user.sub);
+  const workspace = request.workspace;
   const result = await query('INSERT INTO jobs (workspace_id, job_type, payload_json) VALUES ($1, $2, $3) RETURNING *', [workspace.id, 'BAILIAN_TEXT', JSON.stringify(input)]);
   await enqueue(result.rows[0]);
   reply.code(202).send({ id: result.rows[0].id, status: result.rows[0].status });
 });
 
-app.get('/api/v1/jobs/:id', { preHandler: authenticate }, async (request) => {
-  const workspace = await currentWorkspace(request.user.sub);
+app.get('/api/v1/jobs/:id', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
+  const workspace = request.workspace;
   const result = await query('SELECT id, job_type, status, result_json, error, created_at, started_at, completed_at FROM jobs WHERE id = $1 AND workspace_id = $2', [request.params.id, workspace.id]);
   if (!result.rowCount) { const error = new Error('未找到任务。'); error.statusCode = 404; throw error; }
   return result.rows[0];

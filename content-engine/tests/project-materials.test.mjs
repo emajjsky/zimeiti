@@ -196,7 +196,7 @@ test('项目资料 API 提供完整 CRUD、鉴权下载和 50MB 限制', () => {
   assert.match(source, /app\.post\('\/api\/v1\/creative\/projects\/:projectId\/references'/);
   assert.match(source, /app\.post\('\/api\/v1\/creative\/projects\/:projectId\/images\/import'/);
   assert.match(source, /app\.post\('\/api\/v1\/creative\/projects\/:projectId\/files'/);
-  assert.match(source, /app\.get\('\/api\/v1\/creative\/project-files\/:id\/content', \{ preHandler: authenticate \}/);
+  assert.match(source, /app\.get\('\/api\/v1\/creative\/project-files\/:id\/content', \{ preHandler: workspaceAccess\.forRole\('VIEWER'\) \}/);
   assert.match(source, /fileSize: 50 \* 1024 \* 1024/);
 });
 
