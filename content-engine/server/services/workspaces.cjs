@@ -19,7 +19,7 @@ async function resolveWorkspaceMembership(query, userId, workspaceId, minimumRol
   return workspace;
 }
 
-function createWorkspaceStore({ query, transaction, defaultState }) {
+function createWorkspaceStore({ query, transaction, defaultState, initializeWorkspace }) {
   const assertMembership = (userId, workspaceId, minimumRole = 'VIEWER') => (
     resolveWorkspaceMembership(query, userId, workspaceId, minimumRole)
   );
@@ -52,6 +52,7 @@ function createWorkspaceStore({ query, transaction, defaultState }) {
   async function create(userId, name) {
     const normalizedName = String(name ?? '').trim();
     if (!normalizedName) throw businessError(400, 'WORKSPACE_NAME_REQUIRED', '请输入工作空间名称。');
+    if (typeof initializeWorkspace !== 'function') throw new TypeError('工作空间初始化器未配置。');
     return transaction(async (client) => {
       const workspace = await client.query(
         'INSERT INTO workspaces (name, owner_id) VALUES ($1, $2) RETURNING id, name, status',
@@ -66,6 +67,7 @@ function createWorkspaceStore({ query, transaction, defaultState }) {
         'INSERT INTO workspace_snapshots (workspace_id, state_json) VALUES ($1, $2)',
         [created.id, JSON.stringify(defaultState(created.name))],
       );
+      await initializeWorkspace(client, created.id);
       await client.query(`INSERT INTO user_workspace_preferences (user_id, active_workspace_id)
         VALUES ($1, $2)
         ON CONFLICT (user_id) DO UPDATE

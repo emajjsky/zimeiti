@@ -86,7 +86,15 @@ async function analyzeWechatTemplateSource({ url, confirmedRights, route, runTex
   const requestedUrl = assertWechatArticleUrl(url);
   if (!route || route.scope !== undefined && route.scope !== WECHAT_TEMPLATE_ANALYSIS_SCOPE) throw businessError(409, 'TASK_POLICY_REQUIRED', '请先为公众号模板分析配置任务策略。', { scope: WECHAT_TEMPLATE_ANALYSIS_SCOPE });
   if (typeof runTextTask !== 'function') throw new TypeError('公众号模板分析需要 runTextTask。');
-  const page = await fetchPage(requestedUrl.toString());
+  let page;
+  try {
+    page = await fetchPage(requestedUrl.toString());
+  } catch (error) {
+    if (error?.code === 'LAYOUT_TEMPLATE_SOURCE_UNREADABLE') throw error;
+    const unreadable = businessError(422, 'LAYOUT_TEMPLATE_SOURCE_UNREADABLE', '公众号文章链接暂时无法读取，请确认链接公开且仍然有效。');
+    unreadable.cause = error;
+    throw unreadable;
+  }
   const finalUrl = assertWechatArticleUrl(page.url.toString());
   const signals = extractWechatLayoutSignals(page.html);
   const prompt = templateAnalysisPrompt(signals);
@@ -127,7 +135,9 @@ function templateView(template, version) {
     kind: template.kind,
     status: template.status,
     currentVersionId: template.current_version_id,
-    version: versionView(version),
+    currentVersionNumber: Number(version.version_number),
+    rules: version.rules_json,
+    sourceUrl: version.source_url ?? null,
     createdAt: template.created_at,
     updatedAt: template.updated_at,
   };
@@ -165,6 +175,18 @@ function createWechatLayoutTemplateStore({ query, transaction }) {
       WHERE template.workspace_id = $1 AND template.status = 'ACTIVE'
       ORDER BY CASE template.kind WHEN 'SYSTEM' THEN 0 ELSE 1 END, template.updated_at DESC, template.id`, [workspaceId]);
     return result.rows.map(joinedTemplateView);
+  }
+
+  async function get(workspaceId, templateId, client = { query }) {
+    const result = await client.query(`SELECT template.*, version.id AS version_id, version.version_number, version.rules_json,
+      version.source_type, version.source_url, version.source_fingerprint, version.prompt_version,
+      version.generation_run_id, version.created_at AS version_created_at
+      FROM wechat_layout_templates template
+      JOIN wechat_layout_template_versions version
+        ON version.workspace_id = template.workspace_id AND version.id = template.current_version_id
+      WHERE template.workspace_id = $1 AND template.id = $2 AND template.status = 'ACTIVE'`, [workspaceId, templateId]);
+    if (!result.rows.length) throw businessError(404, 'LAYOUT_TEMPLATE_NOT_FOUND', '没有找到该公众号排版模板。');
+    return joinedTemplateView(result.rows[0]);
   }
 
   async function create(workspaceId, name, input, transactionClient = null) {
@@ -219,25 +241,48 @@ function createWechatLayoutTemplateStore({ query, transaction }) {
     } catch (error) { throw databaseError(error); }
   }
 
+  async function duplicate(workspaceId, templateId, name, userId) {
+    return transaction(async (client) => {
+      const source = await get(workspaceId, templateId, client);
+      return create(workspaceId, name, { rules: source.rules, sourceType: 'MANUAL', userId }, client);
+    });
+  }
+
+  async function assertNotReferenced(client, workspaceId, templateId) {
+    const references = await client.query(`SELECT
+      (SELECT count(*) FROM content_drafts draft
+        JOIN wechat_layout_template_versions version ON version.workspace_id = draft.workspace_id AND version.id = draft.layout_template_version_id
+        WHERE version.workspace_id = $1 AND version.template_id = $2) +
+      (SELECT count(*) FROM content_draft_versions draft_version
+        JOIN wechat_layout_template_versions version ON version.workspace_id = draft_version.workspace_id AND version.id = draft_version.layout_template_version_id
+        WHERE version.workspace_id = $1 AND version.template_id = $2) AS count`, [workspaceId, templateId]);
+    if (Number(references.rows[0]?.count ?? 0) > 0) throw businessError(409, 'LAYOUT_TEMPLATE_IN_USE', '模板仍被草稿或历史版本引用，不能归档或删除。');
+  }
+
+  async function archive(workspaceId, templateId) {
+    return transaction(async (client) => {
+      const locked = await client.query(`SELECT * FROM wechat_layout_templates
+        WHERE workspace_id = $1 AND id = $2 AND status = 'ACTIVE' FOR UPDATE`, [workspaceId, templateId]);
+      if (!locked.rows.length) throw businessError(404, 'LAYOUT_TEMPLATE_NOT_FOUND', '没有找到该公众号排版模板。');
+      if (locked.rows[0].kind === 'SYSTEM') throw businessError(409, 'LAYOUT_TEMPLATE_SYSTEM_PROTECTED', '系统模板不能归档。');
+      await assertNotReferenced(client, workspaceId, templateId);
+      await client.query(`UPDATE wechat_layout_templates SET status = 'ARCHIVED', updated_at = now()
+        WHERE workspace_id = $1 AND id = $2`, [workspaceId, templateId]);
+    });
+  }
+
   async function remove(workspaceId, templateId) {
     return transaction(async (client) => {
       const locked = await client.query(`SELECT * FROM wechat_layout_templates
         WHERE workspace_id = $1 AND id = $2 AND status = 'ACTIVE' FOR UPDATE`, [workspaceId, templateId]);
       if (!locked.rows.length) throw businessError(404, 'LAYOUT_TEMPLATE_NOT_FOUND', '没有找到该公众号排版模板。');
       if (locked.rows[0].kind === 'SYSTEM') throw businessError(409, 'LAYOUT_TEMPLATE_SYSTEM_PROTECTED', '系统模板不能删除。');
-      const references = await client.query(`SELECT
-        (SELECT count(*) FROM content_drafts draft
-          JOIN wechat_layout_template_versions version ON version.workspace_id = draft.workspace_id AND version.id = draft.layout_template_version_id
-          WHERE version.workspace_id = $1 AND version.template_id = $2) +
-        (SELECT count(*) FROM content_draft_versions draft_version
-          JOIN wechat_layout_template_versions version ON version.workspace_id = draft_version.workspace_id AND version.id = draft_version.layout_template_version_id
-          WHERE version.workspace_id = $1 AND version.template_id = $2) AS count`, [workspaceId, templateId]);
-      if (Number(references.rows[0]?.count ?? 0) > 0) throw businessError(409, 'LAYOUT_TEMPLATE_IN_USE', '模板仍被草稿或历史版本引用，不能删除。');
+      await assertNotReferenced(client, workspaceId, templateId);
       await client.query('DELETE FROM wechat_layout_templates WHERE workspace_id = $1 AND id = $2', [workspaceId, templateId]);
     });
   }
 
-  return { list, create, update, remove };
+  return { list, get, create, update, duplicate, archive, remove };
 }
 
 module.exports = {

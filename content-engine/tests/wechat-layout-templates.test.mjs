@@ -118,6 +118,20 @@ test('链接分析必须确认授权且只接受公众号文章 URL', async () =
   assert.equal(fetched, false);
 });
 
+test('模板分析将页面读取失败转换为稳定业务错误', async () => {
+  await assert.rejects(
+    () => analyzeWechatTemplateSource({
+      url: 'https://mp.weixin.qq.com/s/example',
+      confirmedRights: true,
+      route: { scope: 'WECHAT_TEMPLATE_ANALYSIS', provider: 'BAILIAN_CLI', model: 'qwen' },
+      runTextTask: async () => { throw new Error('model must not run after page read failure'); },
+      fetchPublicPage: async () => { throw new Error('HTTP 403'); },
+    }),
+    (error) => error.code === 'LAYOUT_TEMPLATE_SOURCE_UNREADABLE'
+      && error.statusCode === 422,
+  );
+});
+
 test('链接分析接受公众号常见的 s 查询参数文章地址', async () => {
   const result = await analyzeWechatTemplateSource({
     url: 'https://mp.weixin.qq.com/s?__biz=example&mid=1',
@@ -190,7 +204,8 @@ test('自定义模板更新会创建递增的不可变版本并切换当前版�
   const updated = await store.update(WORKSPACE_ID, TEMPLATE_ID, { name: '新版模板', rules: DEFAULT_WECHAT_LAYOUT_RULES, userId: USER_ID });
 
   assert.equal(updated.name, '新版模板');
-  assert.equal(updated.version.versionNumber, 2);
+  assert.equal(updated.currentVersionNumber, 2);
+  assert.deepEqual(updated.rules, DEFAULT_WECHAT_LAYOUT_RULES);
   assert.ok(statements.some(({ sql }) => sql.includes('INSERT INTO wechat_layout_template_versions')));
   assert.ok(statements.some(({ sql }) => sql.includes('UPDATE wechat_layout_templates')));
 });
@@ -208,11 +223,25 @@ test('被草稿或历史版本引用的模板不能删除', async () => {
   );
 });
 
+test('被草稿引用的模板不能归档', async () => {
+  const client = { async query(sql) {
+    if (sql.includes('FOR UPDATE')) return { rows: [templateRow()], rowCount: 1 };
+    if (sql.includes('content_drafts')) return { rows: [{ count: 1 }], rowCount: 1 };
+    throw new Error(`引用检查后不应继续: ${sql}`);
+  } };
+  const store = createWechatLayoutTemplateStore({ query: async () => {}, transaction: (callback) => callback(client) });
+  await assert.rejects(
+    () => store.archive(WORKSPACE_ID, TEMPLATE_ID),
+    (error) => error.code === 'LAYOUT_TEMPLATE_IN_USE' && error.statusCode === 409,
+  );
+});
+
 test('模板路由导入成功后才创建模板并记录模型用量', async () => {
   const routes = new Map();
   const app = {
     get(path, options, handler) { routes.set(`GET ${path}`, { options, handler }); },
     post(path, options, handler) { routes.set(`POST ${path}`, { options, handler }); },
+    patch(path, options, handler) { routes.set(`PATCH ${path}`, { options, handler }); },
     put(path, options, handler) { routes.set(`PUT ${path}`, { options, handler }); },
     delete(path, options, handler) { routes.set(`DELETE ${path}`, { options, handler }); },
   };
@@ -224,8 +253,13 @@ test('模板路由导入成功后才创建模板并记录模型用量', async ()
       list: async () => [],
       create: async (...args) => { created.push(args); return { id: TEMPLATE_ID }; },
       update: async () => ({}),
+      duplicate: async () => ({}),
+      archive: async () => {},
+      get: async () => templateRow(),
       remove: async () => {},
     },
+    draftStore: { get: async () => ({}) },
+    renderWechatDraft: () => ({ html: '', checks: [] }),
     resolveTaskRoute: async () => ({ scope: 'WECHAT_TEMPLATE_ANALYSIS', provider: 'BAILIAN_CLI', model: 'qwen-max', promptVersion: 'wechat-layout-analysis:1' }),
     analyzeTemplateSource: async () => ({ rules: DEFAULT_WECHAT_LAYOUT_RULES, sourceUrl: 'https://mp.weixin.qq.com/s/example', sourceFingerprint: 'a'.repeat(64), promptVersion: 'wechat-layout-analysis:1', usage: { inputTokens: 10, outputTokens: 20 } }),
     runTextTask: async () => { throw new Error('分析器已注入，不应直接运行'); },
@@ -249,6 +283,7 @@ test('模板创建与成功用量日志属于同一事务，日志失败不会�
   const app = {
     get(path, options, handler) { routes.set(`GET ${path}`, { options, handler }); },
     post(path, options, handler) { routes.set(`POST ${path}`, { options, handler }); },
+    patch(path, options, handler) { routes.set(`PATCH ${path}`, { options, handler }); },
     put(path, options, handler) { routes.set(`PUT ${path}`, { options, handler }); },
     delete(path, options, handler) { routes.set(`DELETE ${path}`, { options, handler }); },
   };
@@ -269,8 +304,13 @@ test('模板创建与成功用量日志属于同一事务，日志失败不会�
         return { id: TEMPLATE_ID };
       },
       update: async () => ({}),
+      duplicate: async () => ({}),
+      archive: async () => {},
+      get: async () => templateRow(),
       remove: async () => {},
     },
+    draftStore: { get: async () => ({}) },
+    renderWechatDraft: () => ({ html: '', checks: [] }),
     resolveTaskRoute: async () => ({ provider: 'BAILIAN_CLI', model: 'qwen-max' }),
     analyzeTemplateSource: async () => ({ rules: DEFAULT_WECHAT_LAYOUT_RULES, sourceUrl: 'https://mp.weixin.qq.com/s/example', sourceFingerprint: 'a'.repeat(64), promptVersion: 'wechat-layout-analysis:1', usage: {} }),
     runTextTask: async () => { throw new Error('分析器已注入，不应直接运行'); },
@@ -282,4 +322,34 @@ test('模板创建与成功用量日志属于同一事务，日志失败不会�
     /usage write failed/,
   );
   assert.deepEqual(committed, []);
+});
+
+test('模板预览读取当前公众号草稿并返回服务端渲染 HTML', async () => {
+  const routes = new Map();
+  const app = {
+    get(path, options, handler) { routes.set(`GET ${path}`, { options, handler }); },
+    post(path, options, handler) { routes.set(`POST ${path}`, { options, handler }); },
+    patch(path, options, handler) { routes.set(`PATCH ${path}`, { options, handler }); },
+    put(path, options, handler) { routes.set(`PUT ${path}`, { options, handler }); },
+    delete(path, options, handler) { routes.set(`DELETE ${path}`, { options, handler }); },
+  };
+  const template = { id: TEMPLATE_ID, currentVersionId: VERSION_ID, rules: DEFAULT_WECHAT_LAYOUT_RULES };
+  const draft = { id: '44444444-4444-4444-8444-444444444444', platform: 'WECHAT', title: '母稿标题', body: '母稿正文', assets: [asset(0)] };
+  registerWechatLayoutTemplateRoutes(app, {
+    workspaceAccess: { forRole: (role) => role },
+    transaction: (callback) => callback({}),
+    templateStore: { list: async () => [], create: async () => ({}), update: async () => ({}), duplicate: async () => ({}), archive: async () => {}, remove: async () => {}, get: async () => template },
+    draftStore: { get: async () => draft },
+    renderWechatDraft: (input) => {
+      assert.equal(input.title, draft.title);
+      assert.equal(input.templateRules, template.rules);
+      return { html: '<article>真实预览</article>', checks: [] };
+    },
+    resolveTaskRoute: async () => ({}),
+    analyzeTemplateSource: async () => ({}),
+    runTextTask: async () => ({}),
+    recordUsage: async () => {},
+  });
+  const preview = await routes.get('POST /api/v1/wechat-layout-templates/:templateId/preview').handler({ workspace: { id: WORKSPACE_ID }, params: { templateId: TEMPLATE_ID }, body: { draftId: draft.id } });
+  assert.deepEqual(preview, { templateId: TEMPLATE_ID, templateVersionId: VERSION_ID, draftId: draft.id, html: '<article>真实预览</article>', checks: [] });
 });

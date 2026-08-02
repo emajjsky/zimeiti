@@ -4,7 +4,7 @@ import type { ContentProject, CreativeDelivery, CreativeVisualPlanItem, Intellig
 import type { AccountVoiceCalibrationDraft, AccountVoiceInput, AccountVoiceProfile, CreativeDraftCandidate, CreativeDraftPreparation, CreativeDraftRun, CreativeOutlineCandidate, CreativeOutlinePreparation, CreativeOutlineRun, CreativePlatform, CreativeSkillDefinition, ProjectAgentContext, ProjectAgentHistory, ProjectAgentPrepareInput, ProjectAgentPrepareResult, ProjectAgentRun, ProjectArtifact, ProjectInput, ProjectInputPayload, ProjectReference, ProjectReferenceMetadata, ProjectResearchContext, ProjectResearchRun, WritingBrief, WritingBriefInput } from '../domain/creative';
 import type { WebSession, WorkspaceSession, WorkspaceSummary } from '../domain/workspace';
 import type { AssetFilters, AssetMetadataInput, AssetUpdateInput, ProjectAsset, ProjectAssetLinkInput, WorkspaceAsset } from '../domain/assets';
-import type { ContentDraft, ContentDraftVersion, DraftPatchInput, DraftPreview, DraftPlatform } from '../domain/content-drafts';
+import type { ContentDraft, ContentDraftVersion, DraftPatchInput, DraftPreview, DraftPlatform, WechatLayoutPreview, WechatLayoutRules, WechatLayoutTemplate } from '../domain/content-drafts';
 import { sessionStore } from './sessionStore';
 
 const apiBase = import.meta.env.VITE_API_BASE ?? '/api/v1';
@@ -12,6 +12,13 @@ const apiBase = import.meta.env.VITE_API_BASE ?? '/api/v1';
 export type { WebSession } from '../domain/workspace';
 
 type RequestOptions = RequestInit & { authenticated?: boolean; workspaceScoped?: boolean };
+
+export class WebApiError extends Error {
+  constructor(message: string, readonly status: number, readonly code?: string, readonly details?: unknown) {
+    super(message);
+    this.name = 'WebApiError';
+  }
+}
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { authenticated = true, workspaceScoped = true, ...fetchOptions } = options;
@@ -29,7 +36,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     },
   });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload?.error?.message || `请求失败（HTTP ${response.status}）。`);
+  if (!response.ok) throw new WebApiError(payload?.error?.message || `请求失败（HTTP ${response.status}）。`, response.status, payload?.error?.code, payload?.error?.details);
   return payload as T;
 }
 
@@ -130,10 +137,20 @@ export const webDrafts = {
   upsertWechat: (projectId: string, input: { title: string; body: string }) => request<ContentDraft>(`/creative/projects/${encodeURIComponent(projectId)}/wechat-draft`, { method: 'POST', body: JSON.stringify(input) }),
   patch: (draftId: string, input: DraftPatchInput) => request<ContentDraft>(`/content-drafts/${encodeURIComponent(draftId)}`, { method: 'PATCH', body: JSON.stringify(input) }),
   replaceAssets: (draftId: string, input: { revision: number; assets: Array<{ assetId: string; role: 'COVER' | 'BODY' | 'CARD' | 'MAIN' }> }) => request<ContentDraft>(`/content-drafts/${encodeURIComponent(draftId)}/assets`, { method: 'PUT', body: JSON.stringify(input) }),
-  complete: (draftId: string) => request<{ draft: ContentDraft; version: ContentDraftVersion }>(`/content-drafts/${encodeURIComponent(draftId)}/complete`, { method: 'POST', body: '{}' }),
+  complete: (draftId: string, revision: number) => request<{ draft: ContentDraft; version: ContentDraftVersion }>(`/content-drafts/${encodeURIComponent(draftId)}/complete`, { method: 'POST', body: JSON.stringify({ revision }) }),
   derive: (draftId: string, input: { platform: Exclude<DraftPlatform, 'WECHAT'>; sourceDraftVersionId: string }) => request<ContentDraft>(`/content-drafts/${encodeURIComponent(draftId)}/derive`, { method: 'POST', body: JSON.stringify(input) }),
   versions: (draftId: string) => request<{ versions: ContentDraftVersion[] }>(`/content-drafts/${encodeURIComponent(draftId)}/versions`),
   preview: (draftId: string) => request<DraftPreview>(`/content-drafts/${encodeURIComponent(draftId)}/preview`),
+};
+
+export const webWechatTemplates = {
+  list: () => request<{ templates: WechatLayoutTemplate[] }>('/wechat-layout-templates'),
+  create: (input: { name: string; rules: WechatLayoutRules }) => request<WechatLayoutTemplate>('/wechat-layout-templates', { method: 'POST', body: JSON.stringify(input) }),
+  patch: (templateId: string, input: { name: string; rules: WechatLayoutRules }) => request<WechatLayoutTemplate>(`/wechat-layout-templates/${encodeURIComponent(templateId)}`, { method: 'PATCH', body: JSON.stringify(input) }),
+  duplicate: (templateId: string, name: string) => request<WechatLayoutTemplate>(`/wechat-layout-templates/${encodeURIComponent(templateId)}/duplicate`, { method: 'POST', body: JSON.stringify({ name }) }),
+  archive: (templateId: string) => request<void>(`/wechat-layout-templates/${encodeURIComponent(templateId)}/archive`, { method: 'POST', body: '{}' }),
+  import: (input: { name: string; url: string }) => request<WechatLayoutTemplate>('/wechat-layout-templates/import', { method: 'POST', body: JSON.stringify({ ...input, confirmedRights: true }) }),
+  preview: (templateId: string, draftId: string) => request<WechatLayoutPreview>(`/wechat-layout-templates/${encodeURIComponent(templateId)}/preview`, { method: 'POST', body: JSON.stringify({ draftId }) }),
 };
 
 export const webState = {

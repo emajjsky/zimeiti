@@ -1,11 +1,12 @@
 import { ArrowLeft, CircleAlert } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import type { CreateStageRoute } from '../../app/navigation.mjs';
-import { webAccountVoices, webCreative } from '../../data/webApi';
+import { webAccountVoices, webCreative, webDrafts } from '../../data/webApi';
 import { canOpenCreateStage, creativeStages, stageRouteForProjectStage } from '../../domain/creative-flow.mjs';
 import { canOpenChannelView, channelViewForStage } from '../../domain/channel-workflow.mjs';
 import { projectStageName, type ContentProject, type ContentVersion, type Platform } from '../../domain/content';
 import type { AccountVoiceProfile, CreativePlatform, CreativePlatformSkillMap, CreativeSkillDefinition, CreativeSkillDimension, CreativeSkillSelection, WritingBriefInput } from '../../domain/creative';
+import type { ContentDraft } from '../../domain/content-drafts';
 import { resolveWritingBriefPlatforms, shouldInitializeWritingBrief } from '../../domain/writing-brief-platforms.mjs';
 import { CopyWorkspace } from './CopyWorkspace';
 import { LayoutWorkspace } from './LayoutWorkspace';
@@ -108,6 +109,7 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
   const [brief, setBrief] = useState<WritingBriefInput | null>(null);
   const [briefState, setBriefState] = useState<'loading' | 'saving' | 'saved' | 'error'>('loading');
   const [briefError, setBriefError] = useState('');
+  const [wechatDraft, setWechatDraft] = useState<ContentDraft | null>(null);
   const contentVersions = useMemo(() => project?.versions.filter((version): version is ContentVersion & { platform: CreativePlatform } => version.platform !== 'VIDEO_CHANNEL') ?? [], [project?.versions]);
   const copyPlatform = activePlatform !== 'VIDEO_CHANNEL' && contentVersions.some((version) => version.platform === activePlatform) ? activePlatform : contentVersions[0]?.platform;
   const currentChannelDelivery = copyPlatform ? project?.delivery?.platforms?.[copyPlatform] : undefined;
@@ -115,7 +117,17 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
   const currentChannelVersion = copyPlatform ? contentVersions.find((version) => version.platform === copyPlatform) : undefined;
   const currentHasCopy = String(currentChannelVersion?.body ?? '').trim().length >= 80;
   const [channelView, setChannelView] = useState<ChannelView>(() => channelViewFor(project, copyPlatform));
-  const safeChannelView = canOpenChannelView(currentChannelStage, channelView, currentHasCopy) ? channelView : channelViewFor(project, copyPlatform);
+  const resolvedChannelView = canOpenChannelView(currentChannelStage, channelView, currentHasCopy) ? channelView : channelViewFor(project, copyPlatform);
+  const safeChannelView = copyPlatform !== 'WECHAT' && resolvedChannelView === 'layout' ? 'copy' : resolvedChannelView;
+
+  useEffect(() => {
+    if (!project || (safeChannelView !== 'layout' && wechatDraft?.projectId === project.id)) return;
+    let cancelled = false;
+    void webDrafts.list(project.id).then(({ drafts }) => {
+      if (!cancelled) setWechatDraft(drafts.find(({ platform }) => platform === 'WECHAT') ?? null);
+    }).catch((error) => { if (!cancelled) setBriefError(error instanceof Error ? error.message : '读取公众号草稿失败。'); });
+    return () => { cancelled = true; };
+  }, [project?.id, safeChannelView]);
 
   useEffect(() => {
     if (!project) return;
@@ -285,14 +297,14 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
       <nav className="channel-step-tabs" aria-label="当前渠道步骤">
         <button className={safeChannelView === 'copy' ? 'active' : ''} type="button" onClick={() => setChannelView('copy')}>正文</button>
         <button className={safeChannelView === 'visual' ? 'active' : ''} type="button" disabled={!canOpenChannelView(currentChannelStage, 'visual', currentHasCopy)} onClick={() => canOpenChannelView(currentChannelStage, 'visual', currentHasCopy) && setChannelView('visual')}>配图</button>
-        <button className={safeChannelView === 'layout' ? 'active' : ''} type="button" disabled={!canOpenChannelView(currentChannelStage, 'layout', currentHasCopy)} onClick={() => canOpenChannelView(currentChannelStage, 'layout', currentHasCopy) && setChannelView('layout')}>排版</button>
+        {copyPlatform === 'WECHAT' && <button className={safeChannelView === 'layout' ? 'active' : ''} type="button" disabled={!canOpenChannelView(currentChannelStage, 'layout', currentHasCopy)} onClick={() => canOpenChannelView(currentChannelStage, 'layout', currentHasCopy) && setChannelView('layout')}>排版</button>}
         <button className={safeChannelView === 'review' ? 'active' : ''} type="button" disabled={!canOpenChannelView(currentChannelStage, 'review', currentHasCopy)} onClick={() => canOpenChannelView(currentChannelStage, 'review', currentHasCopy) && setChannelView('review')}>审核</button>
       </nav>
     </section>}
     {stage === 'master' && copyPlatform && safeChannelView === 'copy' && <CopyWorkspace project={project} brief={brief} briefState={briefState} skills={skills} accountVoices={accountVoices} activePlatform={copyPlatform} onPlatform={onPlatform} onProjectChange={handleCopyProjectChange} onSaveBrief={saveBrief} onSaveVersion={onSaveVersion} onOpenResearch={() => onStage('research')} onCompletePlatforms={completePlatformVersions} onOpenModelSettings={onOpenModelSettings} onOpenAgentSettings={onOpenAgentSettings} onOpenVoiceSettings={onOpenVoiceSettings} />}
     {stage === 'master' && !copyPlatform && <div className="creative-stage-empty"><h2>没有可写作的图文平台</h2><p>请先在规划中选择公众号、小红书、知乎或微博。</p></div>}
     {stage === 'master' && copyPlatform && safeChannelView === 'visual' && <VisualWorkspace project={project} activePlatform={copyPlatform} onProjectChange={onProjectAccepted} onOpenModelSettings={onOpenModelSettings} />}
-    {stage === 'master' && copyPlatform && safeChannelView === 'layout' && <LayoutWorkspace project={project} activePlatform={copyPlatform} onProjectChange={onProjectAccepted} />}
+    {stage === 'master' && copyPlatform === 'WECHAT' && safeChannelView === 'layout' && wechatDraft && <LayoutWorkspace draft={wechatDraft} onDraftChange={setWechatDraft} onComplete={({ draft: completed }) => setWechatDraft(completed)} />}
     {stage === 'master' && copyPlatform && safeChannelView === 'review' && <ReviewWorkspace project={project} activePlatform={copyPlatform} onProjectChange={onProjectAccepted}/>}
   </section>;
 }

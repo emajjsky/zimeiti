@@ -136,11 +136,24 @@ test('完成公众号草稿原子创建不可变版本、冻结素材并标记�
       return { html: '<article>正文</article>', checks: [] };
     },
   });
-  const completed = await store.complete(draft.workspace_id, draft.id);
+  const completed = await store.complete(draft.workspace_id, draft.id, draft.revision);
   assert.equal(completed.version.id, 'version-1');
   assert.equal(completed.draft.currentVersionId, 'version-1');
   assert.ok(statements.some(({ sql }) => sql.includes('INSERT INTO content_draft_assets')));
   assert.ok(statements.some(({ sql }) => sql.includes('SET source_stale = true')));
+});
+
+test('完成草稿必须校验用户实际预览的 revision', async () => {
+  const draft = draftRow({ revision: 5 });
+  const client = { async query(sql) {
+    if (sql.includes('FOR UPDATE')) return { rows: [draft], rowCount: 1 };
+    throw new Error(`revision 冲突后不应继续：${sql}`);
+  } };
+  const store = createContentDraftStore({ query: async () => {}, transaction: (callback) => callback(client), renderWechatDraft: () => ({ html: '', checks: [] }) });
+  await assert.rejects(
+    () => store.complete(draft.workspace_id, draft.id, 4),
+    (error) => error.code === 'DRAFT_REVISION_CONFLICT' && error.statusCode === 409,
+  );
 });
 
 test('草稿路由使用显式工作空间角色并注册规格中的资源接口', async () => {
@@ -149,6 +162,7 @@ test('草稿路由使用显式工作空间角色并注册规格中的资源接�
   assert.match(source, /creative\/projects\/:projectId\/wechat-draft[\s\S]*forRole\('EDITOR'\)/);
   assert.match(source, /content-drafts\/:draftId[\s\S]*forRole\('EDITOR'\)/);
   assert.match(source, /content-drafts\/:draftId\/complete/);
+  assert.match(source, /completeInput\.parse\(request\.body\)/);
   assert.match(source, /content-drafts\/:draftId\/derive/);
   assert.match(source, /content-drafts\/:draftId\/versions/);
   assert.match(source, /content-drafts\/:draftId\/preview/);

@@ -55,6 +55,8 @@ test('迁移预置六个真实公众号模板并回填三平台版本', () => {
   assert.match(migration, /INSERT INTO content_drafts[\s\S]*platform_content_versions/);
   assert.match(migration, /MIGRATED_CURRENT/);
   assert.match(migration, /source_draft_version_id/);
+  assert.match(migration, /CREATE OR REPLACE FUNCTION seed_wechat_layout_templates\(target_workspace_id uuid\)/);
+  assert.match(migration, /SELECT seed_wechat_layout_templates\(workspace\.id\)[\s\S]*FROM workspaces workspace/);
   assert.doesNotMatch(migration, /DROP TABLE platform_content_versions/);
   assert.doesNotMatch(migration, /project_json\s*=\s*project_json\s*-\s*'delivery'/);
 });

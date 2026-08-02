@@ -13,8 +13,10 @@ function registerWechatLayoutTemplateRoutes(app, {
   runTextTask,
   recordUsage,
   transaction,
+  draftStore,
+  renderWechatDraft,
 }) {
-  if ([resolveTaskRoute, analyzeTemplateSource, runTextTask, recordUsage, transaction].some((dependency) => typeof dependency !== 'function')) {
+  if ([resolveTaskRoute, analyzeTemplateSource, runTextTask, recordUsage, transaction, renderWechatDraft].some((dependency) => typeof dependency !== 'function') || typeof draftStore?.get !== 'function') {
     throw new TypeError('公众号模板路由依赖未完整配置。');
   }
   app.get('/api/v1/wechat-layout-templates', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => ({
@@ -27,9 +29,37 @@ function registerWechatLayoutTemplateRoutes(app, {
     reply.code(201).send(created);
   });
 
-  app.put('/api/v1/wechat-layout-templates/:templateId', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
+  app.patch('/api/v1/wechat-layout-templates/:templateId', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
     const input = z.object({ name, rules }).parse(request.body);
     return templateStore.update(request.workspace.id, uuid.parse(request.params.templateId), { ...input, sourceType: 'MANUAL', userId: request.user.sub });
+  });
+
+  app.post('/api/v1/wechat-layout-templates/:templateId/duplicate', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
+    const input = z.object({ name }).parse(request.body);
+    const duplicated = await templateStore.duplicate(request.workspace.id, uuid.parse(request.params.templateId), input.name, request.user.sub);
+    reply.code(201).send(duplicated);
+  });
+
+  app.post('/api/v1/wechat-layout-templates/:templateId/archive', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
+    await templateStore.archive(request.workspace.id, uuid.parse(request.params.templateId));
+    reply.code(204).send();
+  });
+
+  app.post('/api/v1/wechat-layout-templates/:templateId/preview', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
+    const templateId = uuid.parse(request.params.templateId);
+    const input = z.object({ draftId: uuid }).parse(request.body);
+    const [template, draft] = await Promise.all([
+      templateStore.get(request.workspace.id, templateId),
+      draftStore.get(request.workspace.id, input.draftId),
+    ]);
+    if (draft.platform !== 'WECHAT') {
+      const error = new Error('只有公众号母稿需要排版预览。');
+      error.statusCode = 400;
+      error.code = 'DRAFT_PLATFORM_UNSUPPORTED';
+      throw error;
+    }
+    const rendered = renderWechatDraft({ title: draft.title, body: draft.body, assets: draft.assets, templateRules: template.rules });
+    return { templateId, templateVersionId: template.currentVersionId, draftId: draft.id, html: rendered.html, checks: rendered.checks };
   });
 
   app.delete('/api/v1/wechat-layout-templates/:templateId', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {

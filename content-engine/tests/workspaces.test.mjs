@@ -43,7 +43,7 @@ test('空间 DTO 不暴露数据库所有者和时间字段', () => {
   });
 });
 
-test('创建空间在同一事务写入主体、成员、快照和最后选择', async () => {
+test('创建空间在同一事务写入主体、成员、快照、系统模板和最后选择', async () => {
   const statements = [];
   const client = {
     async query(sql, values) {
@@ -58,16 +58,24 @@ test('创建空间在同一事务写入主体、成员、快照和最后选择',
     query: async () => { throw new Error('创建空间不应逃逸事务'); },
     transaction: (callback) => callback(client),
     defaultState: (name) => ({ workspace: { setupCompleted: false }, feishuTemplate: { name: `${name}内容库` } }),
+    initializeWorkspace: (transactionClient, workspaceId) => transactionClient.query('SELECT seed_wechat_layout_templates($1)', [workspaceId]),
   });
 
   assert.deepEqual(await store.create('user-1', '  客户账号  '), {
     id: 'workspace-new', name: '客户账号', role: 'OWNER', status: 'ACTIVE',
   });
-  assert.equal(statements.length, 4);
+  assert.equal(statements.length, 5);
   assert.match(statements[0].sql, /INSERT INTO workspaces/);
   assert.match(statements[1].sql, /INSERT INTO workspace_members/);
   assert.match(statements[2].sql, /INSERT INTO workspace_snapshots/);
-  assert.match(statements[3].sql, /INSERT INTO user_workspace_preferences/);
+  assert.match(statements[3].sql, /seed_wechat_layout_templates/);
+  assert.match(statements[4].sql, /INSERT INTO user_workspace_preferences/);
+});
+
+test('注册事务也会为首个工作空间播种系统模板', () => {
+  const source = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
+  const registration = source.slice(source.indexOf("app.post('/api/v1/auth/register'"), source.indexOf("app.post('/api/v1/auth/login'"));
+  assert.match(registration, /initializeWorkspace\(client, createdWorkspace\.rows\[0\]\.id\)/);
 });
 
 test('选择空间先校验成员关系再保存最后选择', async () => {

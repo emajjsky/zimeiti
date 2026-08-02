@@ -84,9 +84,16 @@ export interface WechatLayoutTemplate {
   currentVersionNumber: number;
   rules: WechatLayoutRules;
   sourceUrl: string | null;
-  previewHtml: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface WechatLayoutPreview {
+  templateId: string;
+  templateVersionId: string;
+  draftId: string;
+  html: string;
+  checks: Array<{ code: string; level: 'ERROR' | 'WARNING'; message: string }>;
 }
 
 export interface ChannelAccountCapability {

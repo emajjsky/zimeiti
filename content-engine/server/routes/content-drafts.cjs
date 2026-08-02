@@ -13,6 +13,7 @@ const assetInput = z.object({
   revision: z.number().int().positive(),
   assets: z.array(z.object({ assetId: uuid, role: z.enum(['COVER', 'BODY', 'CARD', 'MAIN']) })).max(12),
 });
+const completeInput = z.object({ revision: z.number().int().positive() });
 
 function registerContentDraftRoutes(app, { workspaceAccess, draftStore }) {
   app.get('/api/v1/creative/projects/:projectId/drafts', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
@@ -35,7 +36,8 @@ function registerContentDraftRoutes(app, { workspaceAccess, draftStore }) {
   });
 
   app.post('/api/v1/content-drafts/:draftId/complete', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
-    return draftStore.complete(request.workspace.id, uuid.parse(request.params.draftId));
+    const input = completeInput.parse(request.body);
+    return draftStore.complete(request.workspace.id, uuid.parse(request.params.draftId), input.revision);
   });
 
   app.post('/api/v1/content-drafts/:draftId/derive', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {

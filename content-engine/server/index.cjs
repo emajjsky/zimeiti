@@ -240,7 +240,8 @@ function defaultState(name) {
   return { workspace: { primaryTopics: [], enabledPlatforms: ['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO', 'VIDEO_CHANNEL'], setupCompleted: false }, feishuTemplate: { name: `${name}内容库`, topicStorage: 'ONE_TABLE', includeSchedule: true, includeReview: false, status: 'DRAFT' }, sources: [], intelligence: [], projects: [] };
 }
 
-const workspaceStore = createWorkspaceStore({ query, transaction, defaultState });
+const initializeWorkspace = (client, workspaceId) => client.query('SELECT seed_wechat_layout_templates($1)', [workspaceId]);
+const workspaceStore = createWorkspaceStore({ query, transaction, defaultState, initializeWorkspace });
 const workspaceAccess = createWorkspaceAccess({ query, authenticate });
 const assetStore = createAssetStore({ query, transaction, removeStoredFile: (storageKey) => removeAssetFile(config.uploadRoot, storageKey) });
 const draftStore = createContentDraftStore({ query, transaction, renderWechatDraft });
@@ -250,6 +251,8 @@ registerWechatLayoutTemplateRoutes(app, {
   workspaceAccess,
   templateStore: wechatLayoutTemplateStore,
   transaction,
+  draftStore,
+  renderWechatDraft,
   resolveTaskRoute: textTaskRoute,
   analyzeTemplateSource: (input) => analyzeWechatTemplateSource({ ...input, fetchPublicPage }),
   runTextTask: async ({ workspaceId, route, system, message, maxTokens, temperature }) => {
@@ -283,6 +286,7 @@ app.post('/api/v1/auth/register', async (request, reply) => {
     const createdWorkspace = await client.query('INSERT INTO workspaces (name, owner_id) VALUES ($1, $2) RETURNING id, name, status', [input.workspaceName?.trim() || `${createdUser.rows[0].display_name}的内容工作室`, createdUser.rows[0].id]);
     await client.query('INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ($1, $2, $3)', [createdWorkspace.rows[0].id, createdUser.rows[0].id, 'OWNER']);
     await client.query('INSERT INTO workspace_snapshots (workspace_id, state_json) VALUES ($1, $2)', [createdWorkspace.rows[0].id, JSON.stringify(defaultState(createdWorkspace.rows[0].name))]);
+    await initializeWorkspace(client, createdWorkspace.rows[0].id);
     await client.query('INSERT INTO user_workspace_preferences (user_id, active_workspace_id) VALUES ($1, $2)', [createdUser.rows[0].id, createdWorkspace.rows[0].id]);
     return { user: createdUser.rows[0], workspace: workspaceView({ ...createdWorkspace.rows[0], role: 'OWNER' }) };
   });

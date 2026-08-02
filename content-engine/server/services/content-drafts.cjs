@@ -251,9 +251,10 @@ function createContentDraftStore({ query, transaction, renderWechatDraft } = {})
     return rendered;
   }
 
-  async function complete(workspaceId, draftId) {
+  async function complete(workspaceId, draftId, expectedRevision) {
     return transaction(async (client) => {
       const draft = await loadDraft(client, workspaceId, draftId, { forUpdate: true });
+      if (Number(draft.revision) !== Number(expectedRevision)) throw businessError(409, 'DRAFT_REVISION_CONFLICT', '草稿已在其他页面更新，请刷新后继续。');
       if (!String(draft.body ?? '').trim()) throw businessError(400, 'DRAFT_BODY_REQUIRED', '正文不能为空。');
       if (draft.platform !== 'WECHAT' && (!draft.source_draft_version_id || draft.source_stale)) throw businessError(409, 'DRAFT_SOURCE_VERSION_STALE', '平台草稿来自旧公众号版本，请重新生成后再完成。');
       const assetResult = await client.query(`SELECT item.* FROM content_draft_assets item

@@ -30,7 +30,7 @@ test('创作后半段提供配图、排版、审核和发布包的真实接口',
   assert.match(client, /completeReview/);
 });
 
-test('创作工作台不再把配图、排版和审核渲染为占位页面', () => {
+test('创作工作台提供真实配图与排版，并将公众号排版直接保存为草稿', () => {
   const workspace = fs.readFileSync(new URL('../src/workspaces/create/CreateWorkspace.tsx', import.meta.url), 'utf8');
   const visual = fs.readFileSync(new URL('../src/workspaces/create/VisualWorkspace.tsx', import.meta.url), 'utf8');
   const layout = fs.readFileSync(new URL('../src/workspaces/create/LayoutWorkspace.tsx', import.meta.url), 'utf8');
@@ -47,7 +47,8 @@ test('创作工作台不再把配图、排版和审核渲染为占位页面', ()
   assert.doesNotMatch(visual, /aria-label="视觉结构"/);
   assert.match(workspace, /canOpenChannelView/);
   assert.match(workspace, /disabled=\{!canOpenChannelView/);
-  assert.match(layout, /确认排版，进入审核/);
+  assert.match(layout, /保存公众号草稿/);
+  assert.doesNotMatch(layout, /进入审核/);
   assert.match(review, /完成审核，生成发布包/);
   assert.match(review, /下载 .*发布稿/);
 });

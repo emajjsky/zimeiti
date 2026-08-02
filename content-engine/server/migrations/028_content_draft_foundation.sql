@@ -224,12 +224,12 @@ CREATE INDEX channel_accounts_workspace_idx
 CREATE INDEX platform_draft_tasks_workspace_idx
   ON platform_draft_tasks (workspace_id, status, updated_at DESC);
 
-CREATE TEMP TABLE seeded_wechat_layouts (
+CREATE TABLE wechat_layout_system_presets (
   name text PRIMARY KEY,
   rules_json jsonb NOT NULL
-) ON COMMIT DROP;
+);
 
-INSERT INTO seeded_wechat_layouts (name, rules_json) VALUES
+INSERT INTO wechat_layout_system_presets (name, rules_json) VALUES
   ('清爽阅读', '{"schemaVersion":1,"canvas":{"background":"#ffffff","textColor":"#273444","maxWidth":677},"title":{"fontSize":30,"fontWeight":700,"lineHeight":1.35,"color":"#111827"},"body":{"fontSize":16,"lineHeight":1.9,"paragraphSpacing":18},"heading":{"fontSize":21,"color":"#2563eb","borderColor":"#93c5fd"},"quote":{"background":"#f8fafc","borderColor":"#94a3b8"},"image":{"borderRadius":0,"spacing":20,"captionColor":"#64748b"},"divider":{"color":"#e2e8f0","thickness":1}}'),
   ('商务报告', '{"schemaVersion":1,"canvas":{"background":"#ffffff","textColor":"#243044","maxWidth":677},"title":{"fontSize":29,"fontWeight":700,"lineHeight":1.35,"color":"#172554"},"body":{"fontSize":16,"lineHeight":1.85,"paragraphSpacing":16},"heading":{"fontSize":20,"color":"#1e3a8a","borderColor":"#1e3a8a"},"quote":{"background":"#eff6ff","borderColor":"#3b82f6"},"image":{"borderRadius":0,"spacing":18,"captionColor":"#64748b"},"divider":{"color":"#cbd5e1","thickness":1}}'),
   ('科技媒体', '{"schemaVersion":1,"canvas":{"background":"#f8fbff","textColor":"#1e293b","maxWidth":677},"title":{"fontSize":31,"fontWeight":800,"lineHeight":1.3,"color":"#0f172a"},"body":{"fontSize":16,"lineHeight":1.85,"paragraphSpacing":18},"heading":{"fontSize":21,"color":"#0369a1","borderColor":"#38bdf8"},"quote":{"background":"#ecfeff","borderColor":"#06b6d4"},"image":{"borderRadius":8,"spacing":20,"captionColor":"#475569"},"divider":{"color":"#bae6fd","thickness":1}}'),
@@ -237,23 +237,40 @@ INSERT INTO seeded_wechat_layouts (name, rules_json) VALUES
   ('现代报刊', '{"schemaVersion":1,"canvas":{"background":"#ffffff","textColor":"#202020","maxWidth":677},"title":{"fontSize":32,"fontWeight":800,"lineHeight":1.25,"color":"#111111"},"body":{"fontSize":16,"lineHeight":1.8,"paragraphSpacing":16},"heading":{"fontSize":22,"color":"#111111","borderColor":"#111111"},"quote":{"background":"#f5f5f5","borderColor":"#4b5563"},"image":{"borderRadius":0,"spacing":18,"captionColor":"#5f6368"},"divider":{"color":"#111111","thickness":2}}'),
   ('知识长文', '{"schemaVersion":1,"canvas":{"background":"#ffffff","textColor":"#263238","maxWidth":677},"title":{"fontSize":30,"fontWeight":700,"lineHeight":1.35,"color":"#102a43"},"body":{"fontSize":16,"lineHeight":1.95,"paragraphSpacing":19},"heading":{"fontSize":21,"color":"#0f766e","borderColor":"#5eead4"},"quote":{"background":"#f0fdfa","borderColor":"#14b8a6"},"image":{"borderRadius":4,"spacing":20,"captionColor":"#52606d"},"divider":{"color":"#cbd5e1","thickness":1}}');
 
-INSERT INTO wechat_layout_templates (workspace_id, name, kind, status)
-SELECT workspace.id, seed.name, 'SYSTEM', 'ACTIVE'
-FROM workspaces workspace
-CROSS JOIN seeded_wechat_layouts seed;
+CREATE OR REPLACE FUNCTION seed_wechat_layout_templates(target_workspace_id uuid)
+RETURNS void
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  INSERT INTO wechat_layout_templates (workspace_id, name, kind, status)
+  SELECT target_workspace_id, preset.name, 'SYSTEM', 'ACTIVE'
+  FROM wechat_layout_system_presets preset
+  ON CONFLICT (workspace_id, name) DO NOTHING;
 
-INSERT INTO wechat_layout_template_versions (workspace_id, template_id, version_number, rules_json, source_type)
-SELECT template.workspace_id, template.id, 1, seed.rules_json, 'SYSTEM'
-FROM wechat_layout_templates template
-JOIN seeded_wechat_layouts seed ON seed.name = template.name
-WHERE template.kind = 'SYSTEM';
+  INSERT INTO wechat_layout_template_versions (workspace_id, template_id, version_number, rules_json, source_type)
+  SELECT template.workspace_id, template.id, 1, preset.rules_json, 'SYSTEM'
+  FROM wechat_layout_templates template
+  JOIN wechat_layout_system_presets preset ON preset.name = template.name
+  WHERE template.workspace_id = target_workspace_id
+    AND template.kind = 'SYSTEM'
+    AND NOT EXISTS (
+      SELECT 1 FROM wechat_layout_template_versions version
+      WHERE version.workspace_id = template.workspace_id AND version.template_id = template.id
+    );
 
-UPDATE wechat_layout_templates template
-SET current_version_id = version.id
-FROM wechat_layout_template_versions version
-WHERE version.workspace_id = template.workspace_id
-  AND version.template_id = template.id
-  AND version.version_number = 1;
+  UPDATE wechat_layout_templates template
+  SET current_version_id = version.id
+  FROM wechat_layout_template_versions version
+  WHERE template.workspace_id = target_workspace_id
+    AND template.current_version_id IS NULL
+    AND version.workspace_id = template.workspace_id
+    AND version.template_id = template.id
+    AND version.version_number = 1;
+END;
+$$;
+
+SELECT seed_wechat_layout_templates(workspace.id)
+FROM workspaces workspace;
 
 WITH draft_platforms AS (
   SELECT project.workspace_id, project.project_id, 'WECHAT'::text AS platform

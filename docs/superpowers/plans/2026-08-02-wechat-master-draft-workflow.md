@@ -488,6 +488,10 @@ git commit -m "feat: add wechat layout templates"
 
 ### Task 6: Build Template Gallery And Real Layout Preview
 
+**Status (2026-08-02): Completed and verified; migration 028 remains unapplied to the production database.**
+
+Verification: 413/413 Node tests, TypeScript typecheck, production build, server syntax checks, production dependency audit, and Playwright desktop/mobile acceptance passed. The browser acceptance verifies six rendered template previews, authenticated draft images rendered inside script-disabled sandboxed iframes, no horizontal overflow or mobile action-bar overlap, no console errors, and direct completion to a WeChat draft. Public WeChat page read failures return the stable `LAYOUT_TEMPLATE_SOURCE_UNREADABLE` business code.
+
 **Files:**
 - Create: `content-engine/src/workspaces/create/WechatLayoutTemplatePicker.tsx`
 - Modify: `content-engine/src/workspaces/create/LayoutWorkspace.tsx`

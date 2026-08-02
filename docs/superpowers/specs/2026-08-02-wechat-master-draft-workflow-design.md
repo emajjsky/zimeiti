@@ -101,7 +101,7 @@
 - `URL_ANALYSIS`：从用户提供的公开公众号链接提炼。
 - `CUSTOM`：用户复制现有模板后编辑形成。
 
-模板属于工作空间，可命名、预览、编辑、复制、归档和删除。已被草稿版本引用的模板版本不可物理删除，只能归档。
+模板属于工作空间，可命名、预览、编辑、复制、归档和删除。已被草稿或历史版本引用的模板不可归档或删除，避免破坏既有草稿的模板管理语义。
 
 ### 4.2 链接分析边界
 
@@ -183,7 +183,7 @@ GET/POST       /api/v1/wechat-layout-templates
 PATCH/DELETE   /api/v1/wechat-layout-templates/:templateId
 POST           /api/v1/wechat-layout-templates/:templateId/duplicate
 POST           /api/v1/wechat-layout-templates/import
-GET            /api/v1/wechat-layout-templates/:templateId/preview
+POST           /api/v1/wechat-layout-templates/:templateId/preview
 ```
 
 模板分析失败不得创建空模板。删除已使用模板时返回引用影响并要求归档，不级联破坏草稿。
