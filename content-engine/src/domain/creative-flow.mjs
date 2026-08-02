@@ -1,17 +1,21 @@
-export const creativeStages = [
-  { id: 'planning', label: '规划', projectStage: 'PLANNING' },
-  { id: 'master', label: '创作', projectStage: 'MASTER_WRITING' },
-];
+import { draftWorkflowSteps } from './draft-workflow.mjs';
+
+export const creativeStages = draftWorkflowSteps.map(({ id, label, stage }) => ({ id, label, projectStage: stage }));
 
 const projectStageRoutes = {
-  PLANNING: 'planning',
-  RESEARCH: 'research',
-  MASTER_WRITING: 'master',
-  PLATFORM_ADAPTATION: 'master',
-  VISUAL: 'master',
-  LAYOUT: 'master',
-  REVIEW: 'master',
-  COMPLETED: 'master',
+  PLANNING: 'preparation',
+  RESEARCH: 'preparation',
+  MASTER_WRITING: 'copy',
+  PLATFORM_ADAPTATION: 'copy',
+  VISUAL: 'visual',
+  LAYOUT: 'layout',
+  REVIEW: 'layout',
+  COMPLETED: 'drafts',
+  PREPARING: 'preparation',
+  WECHAT_WRITING: 'copy',
+  WECHAT_IMAGING: 'visual',
+  WECHAT_LAYOUT: 'layout',
+  DRAFT_READY: 'drafts',
 };
 
 export const planningFieldNames = [
@@ -21,7 +25,6 @@ export const planningFieldNames = [
   '创作目标',
   '目标受众',
   '核心表达',
-  '目标平台',
   '时效',
   '计划发布时间',
   '来源与核验要求',
@@ -29,11 +32,11 @@ export const planningFieldNames = [
 ];
 
 export function stageRouteForProjectStage(projectStage) {
-  return projectStageRoutes[projectStage] ?? 'planning';
+  return projectStageRoutes[projectStage] ?? 'preparation';
 }
 
 export function canOpenCreateStage(projectStage, routeStage) {
-  const stageIndex = { planning: 0, research: 1, master: 1, platform: 1, visual: 1, layout: 1, review: 1 };
+  const stageIndex = { preparation: 0, copy: 1, visual: 2, layout: 3, drafts: 4 };
   const currentIndex = stageIndex[stageRouteForProjectStage(projectStage)];
   const requestedIndex = stageIndex[routeStage];
   return requestedIndex >= 0 && requestedIndex <= currentIndex;
@@ -44,6 +47,5 @@ export function validatePlanningDraft(planning) {
     ['title', '请填写选题标题'],
   ];
   const errors = required.flatMap(([field, message]) => String(planning?.[field] ?? '').trim() ? [] : [message]);
-  if (!Array.isArray(planning?.targetPlatforms) || planning.targetPlatforms.length === 0) errors.push('请至少选择一个目标平台');
   return errors;
 }

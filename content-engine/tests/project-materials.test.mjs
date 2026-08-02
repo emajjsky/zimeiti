@@ -69,15 +69,15 @@ test('项目资料 API 使用空间素材上传、导入、读取和项目关联
   assert.match(source, /app\.post\('\/api\/v1\/projects\/:projectId\/assets\/:assetId'/);
 });
 
-test('研究是创作中的按需入口，篇幅只在写作策略出现', () => {
+test('研究在内容准备页按需执行，篇幅只在写作策略出现', () => {
   const copy = fs.readFileSync(new URL('../src/workspaces/create/CopyWorkspace.tsx', import.meta.url), 'utf8');
   const materials = fs.readFileSync(new URL('../src/workspaces/create/ProjectMaterials.tsx', import.meta.url), 'utf8');
-  const workspace = fs.readFileSync(new URL('../src/workspaces/create/CreateWorkspace.tsx', import.meta.url), 'utf8');
-  assert.deepEqual(creativeStages.slice(0, 2).map(({ id }) => id), ['planning', 'master']);
+  const preparation = fs.readFileSync(new URL('../src/workspaces/create/PreparationWorkspace.tsx', import.meta.url), 'utf8');
+  assert.deepEqual(creativeStages.slice(0, 2).map(({ id }) => id), ['preparation', 'copy']);
   assert.equal(planningFieldNames.some((name) => /篇幅/.test(name)), false);
   assert.match(copy, /目标篇幅/);
-  assert.match(copy, /补充研究/);
-  assert.match(workspace, /onOpenResearch=\{\(\) => onStage\('research'\)\}/);
+  assert.doesNotMatch(copy, /补充研究/);
+  assert.match(preparation, /stage="RESEARCH"/);
   assert.match(materials, /我的内容[\s\S]*参考链接[\s\S]*项目素材/);
   assert.match(materials, /webCreative\.createInput[\s\S]*webCreative\.createReference[\s\S]*webAssets\.upload[\s\S]*webAssets\.link/);
   assert.match(materials, /!inputItem[\s\S]*正文/);

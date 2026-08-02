@@ -72,8 +72,8 @@ test('主入口监听视图变化并复位浏览器滚动位置', async () => {
   assert.match(source, /useLayoutEffect\(\(\) => \{\s*resetViewport\(\);\s*\}, \[view\]\)/);
 });
 
-test('刷新地址可以恢复创作项目和平台', () => {
-  assert.deepEqual(navigation.readWorkspaceLocation({ search: '?view=create&project=project-42&platform=XIAOHONGSHU' }), {
+test('刷新地址只恢复创作项目和五步流程阶段', () => {
+  assert.deepEqual(navigation.readWorkspaceLocation({ search: '?view=create&project=project-42&stage=visual&platform=XIAOHONGSHU' }), {
     view: 'create',
     discoverSection: 'inbox',
     settingsSection: 'workspace',
@@ -81,8 +81,7 @@ test('刷新地址可以恢复创作项目和平台', () => {
     intelligenceId: null,
     legacyTopicId: null,
     projectId: 'project-42',
-    platform: 'XIAOHONGSHU',
-    stage: 'planning',
+    stage: 'visual',
   });
 });
 
@@ -95,24 +94,24 @@ test('旧规划和选题编辑 URL 兼容映射到创作项目中心', () => {
     intelligenceId: null,
     legacyTopicId: 'topic-1',
     projectId: null,
-    platform: 'WECHAT',
-    stage: 'planning',
+    stage: null,
   });
   assert.equal(navigation.readWorkspaceLocation({ search: '?view=topicEditor' }).view, 'create');
 });
 
-test('创作地址保存项目、阶段和平台', () => {
+test('创作地址只保存项目和五步流程阶段', () => {
   const url = navigation.workspaceLocationUrl({
     view: 'create', discoverSection: 'inbox', settingsSection: 'workspace', modelSection: null,
-    intelligenceId: null, legacyTopicId: null, projectId: 'project-1', platform: 'WECHAT', stage: 'research',
+    intelligenceId: null, legacyTopicId: null, projectId: 'project-1', stage: 'layout',
   }, { href: 'http://127.0.0.1:5173/' });
-  assert.equal(url, '/?view=create&project=project-1&stage=research&platform=WECHAT');
+  assert.equal(url, '/?view=create&project=project-1&stage=layout');
+  assert.equal(navigation.readWorkspaceLocation({ search: '?view=create&project=project-1&stage=master&platform=WECHAT' }).stage, null);
 });
 
 test('页面地址只保留当前工作区相关参数', () => {
   const url = navigation.workspaceLocationUrl({
     view: 'settings', discoverSection: 'search', settingsSection: 'models', modelSection: 'policies',
-    intelligenceId: 'intel-1', legacyTopicId: 'topic-1', projectId: 'project-1', platform: 'WECHAT', stage: 'planning',
+    intelligenceId: 'intel-1', legacyTopicId: 'topic-1', projectId: 'project-1', stage: 'preparation',
   }, { href: 'http://127.0.0.1:5173/?view=create&project=old&platform=WECHAT' });
   assert.equal(url, '/?view=settings&settings=models&model=policies');
 });

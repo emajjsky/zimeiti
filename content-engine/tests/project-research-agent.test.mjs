@@ -164,7 +164,7 @@ test('统一 Agent 研究准备接口接受空资料并继续冻结空快照', (
 test('项目资料管理与统一研究结果在界面上分离', () => {
   const materials = fs.readFileSync(new URL('../src/workspaces/create/ProjectMaterials.tsx', import.meta.url), 'utf8');
   const agent = fs.readFileSync(new URL('../src/workspaces/create/ProjectAgent.tsx', import.meta.url), 'utf8');
-  const workspace = fs.readFileSync(new URL('../src/workspaces/create/CreateWorkspace.tsx', import.meta.url), 'utf8');
+  const workspace = fs.readFileSync(new URL('../src/workspaces/create/PreparationWorkspace.tsx', import.meta.url), 'utf8');
   const styles = fs.readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
   assert.match(materials, /我的内容[\s\S]*参考链接[\s\S]*项目素材/);
   assert.match(materials, /webCreative\.createInput[\s\S]*webCreative\.createReference[\s\S]*webAssets\.upload[\s\S]*webAssets\.link/);
@@ -176,7 +176,7 @@ test('项目资料管理与统一研究结果在界面上分离', () => {
   assert.match(agent, /正在核验/);
   assert.match(workspace, /<ProjectMaterials project=\{project\}/);
   assert.match(workspace, /<ProjectAgent projectId=\{project\.id\} stage="RESEARCH"/);
-  assert.match(workspace, /onStage\('master'\)/);
+  assert.match(workspace, /开始公众号正文/);
   assert.match(styles, /\.project-research-layout/);
   assert.match(styles, /\.simplified-research\{/);
   assert.match(styles, /@media \(max-width:1100px\).*\.project-research-layout\{grid-template-columns:1fr\}/s);
@@ -185,7 +185,7 @@ test('项目资料管理与统一研究结果在界面上分离', () => {
 test('研究与文案复用同一个 ProjectAgent 入口并按阶段分流', () => {
   const agent = fs.readFileSync(new URL('../src/workspaces/create/ProjectAgent.tsx', import.meta.url), 'utf8');
   const materials = fs.readFileSync(new URL('../src/workspaces/create/ProjectMaterials.tsx', import.meta.url), 'utf8');
-  const workspace = fs.readFileSync(new URL('../src/workspaces/create/CreateWorkspace.tsx', import.meta.url), 'utf8');
+  const workspace = fs.readFileSync(new URL('../src/workspaces/create/PreparationWorkspace.tsx', import.meta.url), 'utf8');
   const copy = fs.readFileSync(new URL('../src/workspaces/create/CopyWorkspace.tsx', import.meta.url), 'utf8');
   assert.match(agent, /props\.stage === 'RESEARCH'/);
   assert.match(agent, /SimplifiedResearchAgent/);

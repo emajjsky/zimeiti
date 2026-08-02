@@ -150,19 +150,22 @@ test('未选择账号声音时仍可获得写作上下文', async () => {
   assert.equal(voiceSnapshotCalled, false);
 });
 
-test('创作主流程只保留项目级步骤，视频不列为必经步骤', () => {
+test('创作主流程固定为五步公众号母稿，视频不列为必经步骤', () => {
   assert.deepEqual(
     creativeStages.map(({ id, label }) => ({ id, label })),
     [
-      { id: 'planning', label: '规划' },
-      { id: 'master', label: '创作' },
+      { id: 'preparation', label: '内容准备' },
+      { id: 'copy', label: '公众号正文' },
+      { id: 'visual', label: '公众号配图' },
+      { id: 'layout', label: '公众号排版' },
+      { id: 'drafts', label: '完成草稿' },
     ],
   );
   assert.equal(creativeStages.some(({ id, label }) => id === 'video' || label === '视频'), false);
 
   const source = fs.readFileSync(new URL('../src/workspaces/create/CreateWorkspace.tsx', import.meta.url), 'utf8');
   const briefSchema = fs.readFileSync(new URL('../server/services/writing-brief.cjs', import.meta.url), 'utf8');
-  assert.match(source, /version\.platform !== 'VIDEO_CHANNEL'/);
+  assert.doesNotMatch(source, /VIDEO_CHANNEL|activePlatform|onPlatform/);
   assert.match(source, /webCreative\.saveBrief/);
   assert.match(briefSchema, /const creativePlatform = z\.enum\(\['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO'\]\)/);
   assert.match(briefSchema, /selectedPlatforms: z\.array\(creativePlatform\)/);
@@ -175,7 +178,8 @@ test('Skill 只在文案阶段作为写作策略出现，排版不参与写作�
   assert.deepEqual(WRITING_DIMENSIONS, ['SUBJECT', 'CONTENT_TYPE', 'CHANNEL']);
   assert.doesNotMatch(planning, /Skill 组合|creative-skill-panel|写作策略/);
   assert.match(copy, /copy-strategy/);
-  assert.match(copy, /题材[\s\S]*内容类型[\s\S]*语言风格/);
+  assert.match(copy, /题材[\s\S]*内容类型/);
+  assert.doesNotMatch(copy, /语言风格/);
   assert.match(copy, /sharedDimensions\.map/);
   assert.match(copy, /内容结构[\s\S]*渠道规则/);
   assert.doesNotMatch(copy, />排版</);

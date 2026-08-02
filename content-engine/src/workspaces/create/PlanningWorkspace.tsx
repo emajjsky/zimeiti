@@ -2,11 +2,10 @@ import { CheckCircle2, CircleAlert, LoaderCircle } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { webProjects } from '../../data/webApi';
 import { validatePlanningDraft } from '../../domain/creative-flow.mjs';
-import { platformName, type ContentProject, type Platform, type ProjectPlanning, type TimingWindow } from '../../domain/content';
+import type { ContentProject, ProjectPlanning, TimingWindow } from '../../domain/content';
 
 type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
 
-const platforms: Platform[] = ['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO', 'VIDEO_CHANNEL'];
 const timingOptions: { id: TimingWindow; label: string }[] = [
   { id: 'TODAY', label: '今天' },
   { id: 'THREE_DAYS', label: '3 天内' },
@@ -19,7 +18,8 @@ export function PlanningWorkspace({ project, onProjectChange, onComplete }: {
   onProjectChange: (project: ContentProject) => void;
   onComplete: (project: ContentProject) => void;
 }) {
-  const [planning, setPlanning] = useState<ProjectPlanning>(project.planning);
+  const normalizePlanning = (value: ProjectPlanning): ProjectPlanning => ({ ...value, targetPlatforms: ['WECHAT'] });
+  const [planning, setPlanning] = useState<ProjectPlanning>(() => normalizePlanning(project.planning));
   const [state, setState] = useState<SaveState>('idle');
   const [error, setError] = useState('');
   const [savedAt, setSavedAt] = useState('');
@@ -27,10 +27,10 @@ export function PlanningWorkspace({ project, onProjectChange, onComplete }: {
 
   useEffect(() => {
     let cancelled = false;
-    setPlanning(project.planning); setState('idle'); setError('');
+    setPlanning(normalizePlanning(project.planning)); setState('idle'); setError('');
     void webProjects.planning(project.id).then((result) => {
       if (cancelled) return;
-      setPlanning(result.planning); setState('saved'); setSavedAt(result.project.updatedAt);
+      setPlanning(normalizePlanning(result.planning)); setState('saved'); setSavedAt(result.project.updatedAt);
     }).catch((reason) => {
       if (cancelled) return;
       setError(reason instanceof Error ? reason.message : '规划读取失败'); setState('error');
@@ -39,11 +39,12 @@ export function PlanningWorkspace({ project, onProjectChange, onComplete }: {
   }, [project.id]);
 
   const save = (snapshot = planning) => {
+    const normalized = normalizePlanning(snapshot);
     const request = (async () => {
       setState('saving'); setError('');
       try {
-        const result = await webProjects.savePlanning(project.id, snapshot);
-        setPlanning(result.planning); setSavedAt(result.project.updatedAt); setState('saved'); onProjectChange(result.project);
+        const result = await webProjects.savePlanning(project.id, normalized);
+        setPlanning(normalizePlanning(result.planning)); setSavedAt(result.project.updatedAt); setState('saved'); onProjectChange(result.project);
         return result.project;
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : '规划保存失败'); setState('error');
@@ -64,12 +65,6 @@ export function PlanningWorkspace({ project, onProjectChange, onComplete }: {
   const change = (patch: Partial<ProjectPlanning>) => {
     setPlanning((current) => ({ ...current, ...patch })); setState('dirty'); setError('');
   };
-
-  const togglePlatform = (platform: Platform) => change({
-    targetPlatforms: planning.targetPlatforms.includes(platform)
-      ? planning.targetPlatforms.filter((item) => item !== platform)
-      : [...planning.targetPlatforms, platform],
-  });
 
   const confirm = async () => {
     const errors = validatePlanningDraft(planning);
@@ -101,7 +96,6 @@ export function PlanningWorkspace({ project, onProjectChange, onComplete }: {
       <div className="planning-fields">
         <label className="wide"><span>选题标题</span><input value={planning.title} onChange={(event) => change({ title: event.target.value })} autoFocus /></label>
         <label><span>时效</span><select value={planning.timing} onChange={(event) => change({ timing: event.target.value as TimingWindow })}>{timingOptions.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
-        <fieldset><legend>目标平台</legend><div>{platforms.map((platform) => <label key={platform}><input type="checkbox" checked={planning.targetPlatforms.includes(platform)} onChange={() => togglePlatform(platform)} /><span>{platformName[platform]}</span></label>)}</div></fieldset>
         <label className="wide"><span>补充要求</span><textarea rows={3} value={planning.constraints} onChange={(event) => change({ constraints: event.target.value })} placeholder="可选：想保留的素材、表达方式或特别要求" /></label>
       </div>
 
@@ -114,7 +108,7 @@ export function PlanningWorkspace({ project, onProjectChange, onComplete }: {
         <label className="wide"><span>核心表达</span><textarea rows={2} value={planning.coreMessage} onChange={(event) => change({ coreMessage: event.target.value })} /></label>
       </div></details>
 
-      <footer>{project.stage === 'PLANNING' && <button className="button primary" type="button" disabled={busy} onClick={() => void confirm()}>确认规划，开始研究</button>}</footer>
+      <footer>{project.stage === 'PLANNING' && <button className="button primary" type="button" disabled={busy} onClick={() => void confirm()}>确认内容准备</button>}</footer>
     </div>
   </section>;
 }

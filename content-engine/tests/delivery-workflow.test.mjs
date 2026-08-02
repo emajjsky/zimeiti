@@ -34,10 +34,9 @@ test('创作工作台提供真实配图与排版，并将公众号排版直接�
   const workspace = fs.readFileSync(new URL('../src/workspaces/create/CreateWorkspace.tsx', import.meta.url), 'utf8');
   const visual = fs.readFileSync(new URL('../src/workspaces/create/VisualWorkspace.tsx', import.meta.url), 'utf8');
   const layout = fs.readFileSync(new URL('../src/workspaces/create/LayoutWorkspace.tsx', import.meta.url), 'utf8');
-  const review = fs.readFileSync(new URL('../src/workspaces/create/ReviewWorkspace.tsx', import.meta.url), 'utf8');
   assert.match(workspace, /<VisualWorkspace/);
   assert.match(workspace, /<LayoutWorkspace/);
-  assert.match(workspace, /<ReviewWorkspace/);
+  assert.doesNotMatch(workspace, /ReviewWorkspace|canOpenChannelView|channel-platform-tabs/);
   assert.doesNotMatch(workspace, /配图尚未开始|排版尚未开始|审核尚未开始/);
   assert.match(visual, /确认素材，进入排版/);
   assert.match(visual, /if \(!hasCopy \|\| !plan\.length\) return/);
@@ -45,12 +44,10 @@ test('创作工作台提供真实配图与排版，并将公众号排版直接�
   assert.match(visual, /修改这张图/);
   assert.doesNotMatch(visual, />高级设置</);
   assert.doesNotMatch(visual, /aria-label="视觉结构"/);
-  assert.match(workspace, /canOpenChannelView/);
-  assert.match(workspace, /disabled=\{!canOpenChannelView/);
+  assert.match(visual, /webDrafts\.patch/);
+  assert.match(visual, /webDrafts\.replaceAssets/);
   assert.match(layout, /保存公众号草稿/);
   assert.doesNotMatch(layout, /进入审核/);
-  assert.match(review, /完成审核，生成发布包/);
-  assert.match(review, /下载 .*发布稿/);
 });
 
 test('服务端拒绝为没有公众号正文的草稿保存配图方案', () => {
@@ -63,15 +60,16 @@ test('服务端拒绝为没有公众号正文的草稿保存配图方案', () =>
   assert.match(route, /请先完成公众号正文/);
 });
 
-test('后半段制作状态按渠道隔离，公众号无需等待其他平台', () => {
+test('后半段制作状态只由公众号草稿资源推进', () => {
   const api = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
   const workspace = fs.readFileSync(new URL('../src/workspaces/create/CreateWorkspace.tsx', import.meta.url), 'utf8');
   const client = fs.readFileSync(new URL('../src/data/webApi.ts', import.meta.url), 'utf8');
   assert.match(api, /platforms: \{ \.\.\.delivery\.platforms, \[input\.platform\]/);
   assert.match(api, /platformDelivery\(delivery, input\.platform\)/);
   assert.doesNotMatch(api.slice(api.indexOf("platform-versions/complete"), api.indexOf('function deliveryOf')), /incomplete/);
-  assert.match(workspace, /delivery\?\.platforms\?\.\[copyPlatform\]/);
-  assert.match(client, /completePlatformVersions: \(projectId: string, platform: CreativePlatform\)/);
+  assert.doesNotMatch(workspace, /delivery\?\.platforms|copyPlatform|completePlatformVersions/);
+  assert.match(workspace, /draft\?\.status === 'READY'/);
+  assert.match(client, /replaceAssets: \(draftId: string/);
 });
 
 test('发布稿按渠道保留 HTML 或 Markdown 格式，且不需要外部平台授权', () => {

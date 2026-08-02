@@ -1,103 +1,84 @@
-import { ArrowLeft, CircleAlert } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { ArrowLeft, CircleAlert, LoaderCircle } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CreateStageRoute } from '../../app/navigation.mjs';
 import { webAccountVoices, webCreative, webDrafts } from '../../data/webApi';
 import { canOpenCreateStage, creativeStages, stageRouteForProjectStage } from '../../domain/creative-flow.mjs';
-import { canOpenChannelView, channelViewForStage } from '../../domain/channel-workflow.mjs';
-import { projectStageName, type ContentProject, type ContentVersion, type Platform } from '../../domain/content';
-import type { AccountVoiceProfile, CreativePlatform, CreativePlatformSkillMap, CreativeSkillDefinition, CreativeSkillDimension, CreativeSkillSelection, WritingBriefInput } from '../../domain/creative';
-import type { ContentDraft } from '../../domain/content-drafts';
-import { resolveWritingBriefPlatforms, shouldInitializeWritingBrief } from '../../domain/writing-brief-platforms.mjs';
+import { projectStageName, type ContentProject } from '../../domain/content';
+import type { ContentDraft, ContentDraftVersion } from '../../domain/content-drafts';
+import type { AccountVoiceProfile, CreativeSkillDefinition, CreativeSkillDimension, CreativeSkillSelection, WritingBrief, WritingBriefInput } from '../../domain/creative';
 import { CopyWorkspace } from './CopyWorkspace';
+import { DraftResultWorkspace } from './DraftResultWorkspace';
 import { LayoutWorkspace } from './LayoutWorkspace';
-import { PlanningWorkspace } from './PlanningWorkspace';
-import { ProjectAgent } from './ProjectAgent';
-import { ProjectMaterials } from './ProjectMaterials';
-import { ReviewWorkspace } from './ReviewWorkspace';
+import { PreparationWorkspace } from './PreparationWorkspace';
 import { VisualWorkspace } from './VisualWorkspace';
 
 const emptySelection: CreativeSkillSelection = { SUBJECT: '', CONTENT_TYPE: '', VOICE: '', LAYOUT: '', CHANNEL: '' };
-type ChannelView = 'copy' | 'visual' | 'layout' | 'review';
+const routeOrder: CreateStageRoute[] = ['preparation', 'copy', 'visual', 'layout', 'drafts'];
 
-function channelViewFor(project: ContentProject | undefined, platform: CreativePlatform | undefined): ChannelView {
-  const stage = platform ? project?.delivery?.platforms?.[platform]?.stage : undefined;
-  const version = platform ? project?.versions.find((item) => item.platform === platform) : undefined;
-  return channelViewForStage(stage ?? 'COPY', String(version?.body ?? '').trim().length >= 80) as ChannelView;
-}
-
-function channelStatus(stage: string | undefined) {
-  return ({ COPY: '正文中', VISUAL: '配图中', LAYOUT: '排版中', REVIEW: '审核中', READY: '已就绪' } as Record<string, string>)[stage ?? 'COPY'] ?? '正文中';
-}
-
-function firstVersion(skills: CreativeSkillDefinition[], dimension: CreativeSkillDimension, preferredSlug?: string) {
+function firstVersion(skills: CreativeSkillDefinition[], dimension: CreativeSkillDimension, preferredSlug: string) {
   const candidates = skills.filter((skill) => skill.dimension === dimension);
   return (candidates.find((skill) => skill.slug === preferredSlug) ?? candidates[0])?.version.id ?? '';
 }
 
-function subjectSlug(project: ContentProject) {
-  const value = `${project.title} ${project.coreViewpoint}`;
-  if (/财经|金融|股票|基金|经济|公司|商业/.test(value)) return 'finance';
-  if (/历史|人物|朝代|文物|人文/.test(value)) return 'history-humanities';
-  if (/国学|经典|儒家|道家|易经|论语/.test(value)) return 'chinese-classics';
-  if (/\bAI\b|人工智能|模型|科技|软件|工具/i.test(value)) return 'ai-technology';
-  return 'general';
-}
-
-function platformSkillDefaults(platforms: Platform[], skills: CreativeSkillDefinition[], current: CreativePlatformSkillMap = {}) {
-  return platforms.reduce<CreativePlatformSkillMap>((result, platform) => {
-    if (platform === 'VIDEO_CHANNEL') return result;
-    const slugs = {
-      WECHAT: { layout: 'wechat-longform', channel: 'wechat' },
-      XIAOHONGSHU: { layout: 'xiaohongshu-carousel', channel: 'xiaohongshu' },
-      ZHIHU: { layout: 'zhihu-answer', channel: 'zhihu' },
-      WEIBO: { layout: 'weibo-thread', channel: 'weibo' },
-    }[platform];
-    const defaultLength = platform === 'XIAOHONGSHU' ? '300-800 字，6-8 页图文卡片' : platform === 'WEIBO' ? '140-500 字，必要时串文' : platform === 'ZHIHU' ? '1500-3000 字' : '1500-2500 字';
-    result[platform] = { ...(current[platform] ?? {
-      LAYOUT: firstVersion(skills, 'LAYOUT', slugs.layout),
-      CHANNEL: firstVersion(skills, 'CHANNEL', slugs.channel),
-    }), lengthTarget: current[platform]?.lengthTarget ?? defaultLength };
-    return result;
-  }, { ...current });
+function wechatSkills(skills: CreativeSkillDefinition[]) {
+  return {
+    LAYOUT: firstVersion(skills, 'LAYOUT', 'wechat-longform'),
+    CHANNEL: firstVersion(skills, 'CHANNEL', 'wechat'),
+    lengthTarget: '1500-2500 字',
+  };
 }
 
 function defaultBrief(project: ContentProject, skills: CreativeSkillDefinition[], accountVoiceProfileId = ''): WritingBriefInput {
-  const contentVersions = project.versions.filter((version): version is ContentVersion & { platform: CreativePlatform } => version.platform !== 'VIDEO_CHANNEL');
-  const selectedPlatforms = resolveWritingBriefPlatforms({
-    selectedPlatforms: [],
-    versionPlatforms: contentVersions.map((version) => version.platform),
-    plannedPlatforms: project.planning.targetPlatforms,
-  });
-  const primaryPlatform = selectedPlatforms[0];
-  const lengthTarget = primaryPlatform === 'XIAOHONGSHU' ? '6-8 页图文' : primaryPlatform === 'WEIBO' ? '300-1000 字或 3-8 条串文' : primaryPlatform === 'ZHIHU' ? '1500-3000 字' : '1500-2500 字';
+  const value = `${project.title} ${project.coreViewpoint}`;
+  const subject = /财经|金融|股票|基金|经济|公司|商业/.test(value) ? 'finance'
+    : /历史|人物|朝代|文物|人文/.test(value) ? 'history-humanities'
+      : /国学|经典|儒家|道家|易经|论语/.test(value) ? 'chinese-classics'
+        : /\bAI\b|人工智能|模型|科技|软件|工具/i.test(value) ? 'ai-technology' : 'general';
   return {
-    objective: project.planning.objective || `围绕“${project.title}”形成一篇可发布的内容`,
+    objective: project.planning.objective || `围绕“${project.title}”形成一篇公众号文章`,
     targetAudience: project.planning.targetAudience,
     coreMessage: project.planning.coreMessage || project.coreViewpoint,
     sourceRequirements: project.planning.sourceRequirements || project.factChecks.join('；'),
-    lengthTarget,
-    selectedPlatforms,
+    lengthTarget: '1500-2500 字',
+    selectedPlatforms: ['WECHAT'],
     notes: project.planning.constraints,
-    selectedSkills: {
-      ...emptySelection,
-      SUBJECT: firstVersion(skills, 'SUBJECT', subjectSlug(project)),
-      CONTENT_TYPE: firstVersion(skills, 'CONTENT_TYPE', 'education'),
-      VOICE: '',
-    },
-    platformSkills: platformSkillDefaults(selectedPlatforms, skills),
+    selectedSkills: { ...emptySelection, SUBJECT: firstVersion(skills, 'SUBJECT', subject), CONTENT_TYPE: firstVersion(skills, 'CONTENT_TYPE', 'education') },
+    platformSkills: { WECHAT: wechatSkills(skills) },
     accountVoiceProfileId,
     voiceOffset: 'DEFAULT',
   };
 }
 
-export function CreateWorkspace({ project, stage, onStage, onExitProject, activePlatform, onPlatform, onSaveVersion, onProjectAccepted, onOpenModelSettings, onOpenAgentSettings, onOpenSearchSettings, onOpenVoiceSettings }: {
+function briefInput(brief: WritingBrief, skills: CreativeSkillDefinition[]): WritingBriefInput {
+  return {
+    objective: brief.objective,
+    targetAudience: brief.targetAudience,
+    coreMessage: brief.coreMessage,
+    sourceRequirements: brief.sourceRequirements,
+    lengthTarget: brief.lengthTarget || '1500-2500 字',
+    selectedPlatforms: ['WECHAT'],
+    notes: brief.notes,
+    accountVoiceProfileId: brief.accountVoiceProfileId,
+    voiceOffset: brief.voiceOffset,
+    selectedSkills: brief.selectedSkills,
+    platformSkills: { WECHAT: brief.platformSkills.WECHAT ?? wechatSkills(skills) },
+  };
+}
+
+function draftRoute(project: ContentProject, draft: ContentDraft | null): CreateStageRoute {
+  const projectRoute = stageRouteForProjectStage(project.stage);
+  let resourceRoute: CreateStageRoute = project.stage === 'PLANNING' || project.stage === 'RESEARCH' ? 'preparation' : 'copy';
+  if (draft?.body.trim().length && draft.body.trim().length >= 80) resourceRoute = 'visual';
+  if (draft?.visualPlan.workflowStatus === 'COMPLETE') resourceRoute = 'layout';
+  if (draft?.status === 'READY') resourceRoute = 'drafts';
+  return routeOrder[Math.max(routeOrder.indexOf(projectRoute), routeOrder.indexOf(resourceRoute))] ?? 'preparation';
+}
+
+export function CreateWorkspace({ project, stage, onStage, onExitProject, onProjectAccepted, onOpenModelSettings, onOpenAgentSettings, onOpenSearchSettings, onOpenVoiceSettings }: {
   project: ContentProject | undefined;
-  stage: CreateStageRoute;
+  stage: CreateStageRoute | null;
   onStage: (stage: CreateStageRoute) => void;
   onExitProject: () => void;
-  activePlatform: Platform;
-  onPlatform: (platform: Platform) => void;
-  onSaveVersion: (projectId: string, versionId: string, patch: Pick<ContentVersion, 'title' | 'body'>) => void;
   onProjectAccepted: (project: ContentProject) => void;
   onOpenModelSettings: () => void;
   onOpenAgentSettings: () => void;
@@ -108,203 +89,83 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, active
   const [accountVoices, setAccountVoices] = useState<AccountVoiceProfile[]>([]);
   const [brief, setBrief] = useState<WritingBriefInput | null>(null);
   const [briefState, setBriefState] = useState<'loading' | 'saving' | 'saved' | 'error'>('loading');
-  const [briefError, setBriefError] = useState('');
   const [wechatDraft, setWechatDraft] = useState<ContentDraft | null>(null);
-  const contentVersions = useMemo(() => project?.versions.filter((version): version is ContentVersion & { platform: CreativePlatform } => version.platform !== 'VIDEO_CHANNEL') ?? [], [project?.versions]);
-  const copyPlatform = activePlatform !== 'VIDEO_CHANNEL' && contentVersions.some((version) => version.platform === activePlatform) ? activePlatform : contentVersions[0]?.platform;
-  const currentChannelDelivery = copyPlatform ? project?.delivery?.platforms?.[copyPlatform] : undefined;
-  const currentChannelStage = currentChannelDelivery?.stage ?? 'COPY';
-  const currentChannelVersion = copyPlatform ? contentVersions.find((version) => version.platform === copyPlatform) : undefined;
-  const currentHasCopy = String(currentChannelVersion?.body ?? '').trim().length >= 80;
-  const [channelView, setChannelView] = useState<ChannelView>(() => channelViewFor(project, copyPlatform));
-  const resolvedChannelView = canOpenChannelView(currentChannelStage, channelView, currentHasCopy) ? channelView : channelViewFor(project, copyPlatform);
-  const safeChannelView = copyPlatform !== 'WECHAT' && resolvedChannelView === 'layout' ? 'copy' : resolvedChannelView;
+  const [completedVersion, setCompletedVersion] = useState<ContentDraftVersion | null>(null);
+  const [loadingDraft, setLoadingDraft] = useState(true);
+  const [error, setError] = useState('');
 
-  useEffect(() => {
-    if (!project || (safeChannelView !== 'layout' && wechatDraft?.projectId === project.id)) return;
-    let cancelled = false;
-    void webDrafts.list(project.id).then(({ drafts }) => {
-      if (!cancelled) setWechatDraft(drafts.find(({ platform }) => platform === 'WECHAT') ?? null);
-    }).catch((error) => { if (!cancelled) setBriefError(error instanceof Error ? error.message : '读取公众号草稿失败。'); });
-    return () => { cancelled = true; };
-  }, [project?.id, safeChannelView]);
+  const loadWechatDraft = useCallback(async () => {
+    if (!project) throw new Error('没有可读取的内容项目。');
+    const result = await webDrafts.list(project.id);
+    let draft = result.drafts.find((item) => item.platform === 'WECHAT') ?? null;
+    if (!draft) {
+      const version = project.versions.find((item) => item.platform === 'WECHAT');
+      draft = await webDrafts.upsertWechat(project.id, { title: version?.title ?? project.title, body: version?.body ?? '' });
+    }
+    setWechatDraft(draft);
+    return draft;
+  }, [project?.id]);
 
   useEffect(() => {
     if (!project) return;
-    if (stage === 'platform' || stage === 'visual' || stage === 'layout' || stage === 'review') { onStage('master'); return; }
-    if (!canOpenCreateStage(project.stage, stage)) onStage(stageRouteForProjectStage(project.stage));
-  }, [onStage, project?.stage, stage]);
-
-  useEffect(() => {
-    if (!project || !shouldInitializeWritingBrief(stage)) return;
     let cancelled = false;
-    setBrief(null);
-    setBriefState('loading');
-    setBriefError('');
-    void Promise.all([webCreative.skills(), webCreative.brief(project.id), webAccountVoices.list()]).then(async ([catalog, result, accountVoices]) => {
-      if (cancelled) return;
-      setSkills(catalog);
-      setAccountVoices(accountVoices.voices);
-      const defaultVoiceId = accountVoices.voices.find((voice) => voice.isDefault)?.id ?? '';
-      const recoveredPlatforms = resolveWritingBriefPlatforms({
-        selectedPlatforms: result.brief?.selectedPlatforms,
-        versionPlatforms: project.versions.map((version) => version.platform),
-        plannedPlatforms: project.planning.targetPlatforms,
-        activePlatform,
-      });
-      if (result.brief && (result.brief.selectedPlatforms.length === 0 || (!result.brief.accountVoiceProfileId && defaultVoiceId))) {
-        result.brief = (await webCreative.saveBrief(project.id, {
-          objective: result.brief.objective,
-          targetAudience: result.brief.targetAudience,
-          coreMessage: result.brief.coreMessage,
-          sourceRequirements: result.brief.sourceRequirements,
-          lengthTarget: result.brief.lengthTarget,
-          selectedPlatforms: recoveredPlatforms,
-          notes: result.brief.notes,
-          selectedSkills: result.brief.selectedSkills,
-          platformSkills: platformSkillDefaults(recoveredPlatforms, catalog, result.brief.platformSkills),
-          accountVoiceProfileId: defaultVoiceId,
-          voiceOffset: result.brief.voiceOffset ?? 'DEFAULT',
-        })).brief;
-      }
-      if (result.brief) {
-        setBrief({
-        objective: result.brief.objective,
-        targetAudience: result.brief.targetAudience,
-        coreMessage: result.brief.coreMessage,
-        sourceRequirements: result.brief.sourceRequirements,
-        lengthTarget: result.brief.lengthTarget,
-        selectedPlatforms: result.brief.selectedPlatforms,
-        notes: result.brief.notes,
-        accountVoiceProfileId: result.brief.accountVoiceProfileId,
-        voiceOffset: result.brief.voiceOffset,
-        selectedSkills: result.brief.selectedSkills,
-        platformSkills: platformSkillDefaults(result.brief.selectedPlatforms, catalog, result.brief.platformSkills),
-        });
-        setBriefState('saved');
-        return;
-      }
-      const defaults = defaultBrief(project, catalog, accountVoices.voices.find((voice) => voice.isDefault)?.id ?? '');
-      setBrief(defaults);
-      setBriefState('saving');
-      const saved = await webCreative.saveBrief(project.id, defaults);
-      if (cancelled) return;
-      setBrief({
-        objective: saved.brief.objective,
-        targetAudience: saved.brief.targetAudience,
-        coreMessage: saved.brief.coreMessage,
-        sourceRequirements: saved.brief.sourceRequirements,
-        lengthTarget: saved.brief.lengthTarget,
-        selectedPlatforms: saved.brief.selectedPlatforms,
-        notes: saved.brief.notes,
-        accountVoiceProfileId: saved.brief.accountVoiceProfileId,
-        voiceOffset: saved.brief.voiceOffset,
-        selectedSkills: saved.brief.selectedSkills,
-        platformSkills: saved.brief.platformSkills,
-      });
-      setBriefState('saved');
-    }).catch((error) => {
-      if (!cancelled) {
-        setBriefState('error');
-        setBriefError(error instanceof Error ? error.message : '正文配置保存失败');
-      }
-    });
+    setLoadingDraft(true); setError(''); setCompletedVersion(null);
+    void loadWechatDraft().then((draft) => {
+      if (cancelled || draft.status !== 'READY') return;
+      return webDrafts.versions(draft.id).then(({ versions }) => { if (!cancelled) setCompletedVersion(versions[0] ?? null); });
+    }).catch((reason) => { if (!cancelled) setError(reason instanceof Error ? reason.message : '读取公众号草稿失败。'); })
+      .finally(() => { if (!cancelled) setLoadingDraft(false); });
     return () => { cancelled = true; };
-  }, [project?.id, stage]);
+  }, [loadWechatDraft, project?.id]);
+
+  const currentRoute = useMemo(() => project ? draftRoute(project, wechatDraft) : 'preparation', [project, wechatDraft]);
+  const visibleStage = loadingDraft && stage ? stage : stage && routeOrder.indexOf(stage) <= routeOrder.indexOf(currentRoute) ? stage : currentRoute;
+  useEffect(() => { if (project && stage !== visibleStage) onStage(visibleStage); }, [onStage, project?.id, stage, visibleStage]);
 
   useEffect(() => {
-    if (contentVersions.length && !contentVersions.some((version) => version.platform === activePlatform)) onPlatform(contentVersions[0].platform);
-  }, [activePlatform, contentVersions, onPlatform]);
+    if (!project || visibleStage === 'preparation') return;
+    let cancelled = false;
+    setBrief(null); setBriefState('loading');
+    void Promise.all([webCreative.skills(), webCreative.brief(project.id), webAccountVoices.list()]).then(async ([catalog, result, voices]) => {
+      if (cancelled) return;
+      setSkills(catalog); setAccountVoices(voices.voices);
+      const fallback = defaultBrief(project, catalog, voices.voices.find((voice) => voice.isDefault)?.id ?? '');
+      const normalized = result.brief ? briefInput(result.brief, catalog) : fallback;
+      if (!result.brief || JSON.stringify(result.brief.selectedPlatforms) !== JSON.stringify(['WECHAT']) || !result.brief.platformSkills.WECHAT) {
+        setBriefState('saving');
+        const saved = await webCreative.saveBrief(project.id, normalized);
+        if (cancelled) return;
+        setBrief(briefInput(saved.brief, catalog));
+      } else {
+        setBrief(normalized);
+      }
+      setBriefState('saved');
+    }).catch((reason) => { if (!cancelled) { setBriefState('error'); setError(reason instanceof Error ? reason.message : '正文配置读取失败。'); } });
+    return () => { cancelled = true; };
+  }, [project?.id, visibleStage === 'preparation']);
 
-  useEffect(() => {
-    setChannelView(channelViewFor(project, copyPlatform));
-  }, [copyPlatform, currentChannelDelivery?.stage, currentHasCopy, project?.id]);
-
-  const saveBrief = async (next: WritingBriefInput = brief as WritingBriefInput) => {
-    if (!project || !next) return;
-    const selectedPlatforms = resolveWritingBriefPlatforms({
-      selectedPlatforms: next.selectedPlatforms,
-      versionPlatforms: project.versions.map((version) => version.platform),
-      plannedPlatforms: project.planning.targetPlatforms,
-      activePlatform,
-    });
-    const normalized = {
-      ...next,
-      selectedPlatforms,
-      platformSkills: platformSkillDefaults(selectedPlatforms, skills, next.platformSkills),
-    };
-    setBrief(normalized);
-    setBriefState('saving');
-    setBriefError('');
+  const saveBrief = async (next: WritingBriefInput) => {
+    if (!project) return;
+    const normalized: WritingBriefInput = { ...next, selectedPlatforms: ['WECHAT'], platformSkills: { WECHAT: next.platformSkills.WECHAT ?? wechatSkills(skills) } };
+    setBrief(normalized); setBriefState('saving');
     try {
       const result = await webCreative.saveBrief(project.id, normalized);
-      setBrief({
-        objective: result.brief.objective,
-        targetAudience: result.brief.targetAudience,
-        coreMessage: result.brief.coreMessage,
-        sourceRequirements: result.brief.sourceRequirements,
-        lengthTarget: result.brief.lengthTarget,
-        selectedPlatforms: result.brief.selectedPlatforms,
-        notes: result.brief.notes,
-        accountVoiceProfileId: result.brief.accountVoiceProfileId,
-        voiceOffset: result.brief.voiceOffset,
-        selectedSkills: result.brief.selectedSkills,
-        platformSkills: result.brief.platformSkills,
-      });
-      setBriefState('saved');
-    } catch (error) {
-      setBriefState('error');
-      setBriefError(error instanceof Error ? error.message : '正文配置保存失败');
-      throw error;
+      setBrief(briefInput(result.brief, skills)); setBriefState('saved');
+    } catch (reason) {
+      setBriefState('error'); setError(reason instanceof Error ? reason.message : '正文配置保存失败。'); throw reason;
     }
   };
 
-  const completePlatformVersions = async (platform: CreativePlatform) => {
-    if (!project) return;
-    try {
-      const result = await webCreative.completePlatformVersions(project.id, platform);
-      onProjectAccepted(result.project);
-    } catch (error) { throw error; }
-  };
-
-  const handleCopyProjectChange = (nextProject: ContentProject) => {
-    onProjectAccepted(nextProject);
-  };
-
   if (!project) return <section className="empty-workbench"><h1>还没有内容项目</h1></section>;
-
   return <section className="creative-workspace">
-    <header className="creative-workspace-head">
-      <button className="text-button" type="button" onClick={onExitProject}><ArrowLeft size={16}/>项目中心</button>
-      <div><h1>{project.title}</h1><span>{projectStageName[project.stage]}</span></div>
-    </header>
-
-    <nav className="creative-stage-nav" aria-label="创作流程">
-      {creativeStages.map((item) => {
-        const enabled = canOpenCreateStage(project.stage, item.id);
-        return <button type="button" key={item.id} className={stage === item.id ? 'active' : ''} disabled={!enabled} onClick={() => enabled && onStage(item.id)}><span>{item.label}</span></button>;
-      })}
-    </nav>
-
-    {stage === 'planning' && <PlanningWorkspace project={project} onProjectChange={onProjectAccepted} onComplete={(next) => { onProjectAccepted(next); onStage('master'); }} />}
-    {stage === 'research' && <div className="project-research-layout">
-      <ProjectMaterials project={project} platforms={contentVersions.map((version) => version.platform)}/>
-      <ProjectAgent projectId={project.id} stage="RESEARCH" onArtifactAccepted={(_artifact, nextProject) => { if (!nextProject) return; onProjectAccepted(nextProject); onStage('master'); }} onOpenSettings={(target) => target === 'search' ? onOpenSearchSettings() : onOpenAgentSettings()}/>
-    </div>}
-    {stage === 'master' && briefError && <div className="creative-stage-error"><CircleAlert size={18}/><span>{briefError}</span></div>}
-    {stage === 'master' && copyPlatform && <section className="channel-workbench-nav" aria-label="渠道制作导航">
-      <nav className="channel-platform-tabs" aria-label="创作平台">{contentVersions.map((version) => <button type="button" key={version.platform} className={version.platform === copyPlatform ? 'active' : ''} onClick={() => onPlatform(version.platform)}><b>{version.platform === 'WECHAT' ? '公众号' : version.platform === 'XIAOHONGSHU' ? '小红书' : version.platform === 'ZHIHU' ? '知乎' : '微博'}</b><small>{channelStatus(project.delivery?.platforms?.[version.platform]?.stage)}</small></button>)}</nav>
-      <nav className="channel-step-tabs" aria-label="当前渠道步骤">
-        <button className={safeChannelView === 'copy' ? 'active' : ''} type="button" onClick={() => setChannelView('copy')}>正文</button>
-        <button className={safeChannelView === 'visual' ? 'active' : ''} type="button" disabled={!canOpenChannelView(currentChannelStage, 'visual', currentHasCopy)} onClick={() => canOpenChannelView(currentChannelStage, 'visual', currentHasCopy) && setChannelView('visual')}>配图</button>
-        {copyPlatform === 'WECHAT' && <button className={safeChannelView === 'layout' ? 'active' : ''} type="button" disabled={!canOpenChannelView(currentChannelStage, 'layout', currentHasCopy)} onClick={() => canOpenChannelView(currentChannelStage, 'layout', currentHasCopy) && setChannelView('layout')}>排版</button>}
-        <button className={safeChannelView === 'review' ? 'active' : ''} type="button" disabled={!canOpenChannelView(currentChannelStage, 'review', currentHasCopy)} onClick={() => canOpenChannelView(currentChannelStage, 'review', currentHasCopy) && setChannelView('review')}>审核</button>
-      </nav>
-    </section>}
-    {stage === 'master' && copyPlatform && safeChannelView === 'copy' && <CopyWorkspace project={project} brief={brief} briefState={briefState} skills={skills} accountVoices={accountVoices} activePlatform={copyPlatform} onPlatform={onPlatform} onProjectChange={handleCopyProjectChange} onSaveBrief={saveBrief} onSaveVersion={onSaveVersion} onOpenResearch={() => onStage('research')} onCompletePlatforms={completePlatformVersions} onOpenModelSettings={onOpenModelSettings} onOpenAgentSettings={onOpenAgentSettings} onOpenVoiceSettings={onOpenVoiceSettings} />}
-    {stage === 'master' && !copyPlatform && <div className="creative-stage-empty"><h2>没有可写作的图文平台</h2><p>请先在规划中选择公众号、小红书、知乎或微博。</p></div>}
-    {stage === 'master' && copyPlatform && safeChannelView === 'visual' && <VisualWorkspace project={project} activePlatform={copyPlatform} onProjectChange={onProjectAccepted} onOpenModelSettings={onOpenModelSettings} />}
-    {stage === 'master' && copyPlatform === 'WECHAT' && safeChannelView === 'layout' && wechatDraft && <LayoutWorkspace draft={wechatDraft} onDraftChange={setWechatDraft} onComplete={({ draft: completed }) => setWechatDraft(completed)} />}
-    {stage === 'master' && copyPlatform && safeChannelView === 'review' && <ReviewWorkspace project={project} activePlatform={copyPlatform} onProjectChange={onProjectAccepted}/>}
+    <header className="creative-workspace-head"><button className="text-button" type="button" onClick={onExitProject}><ArrowLeft size={16}/>项目中心</button><div><h1>{project.title}</h1><span>{projectStageName[project.stage]}</span></div></header>
+    <nav className="creative-stage-nav" aria-label="公众号母稿流程">{creativeStages.map((item) => { const enabled = canOpenCreateStage(project.stage, item.id) || routeOrder.indexOf(item.id) <= routeOrder.indexOf(currentRoute); return <button type="button" key={item.id} className={visibleStage === item.id ? 'active' : ''} disabled={!enabled} onClick={() => enabled && onStage(item.id)}><span>{item.label}</span></button>; })}</nav>
+    {error && <div className="creative-stage-error" role="alert"><CircleAlert size={18}/><span>{error}</span></div>}
+    {loadingDraft && visibleStage !== 'preparation' && <div className="creative-stage-loading"><LoaderCircle size={20}/><span>正在读取公众号母稿</span></div>}
+    {visibleStage === 'preparation' && <PreparationWorkspace project={project} onProjectChange={onProjectAccepted} onContinue={() => onStage('copy')} onOpenAgentSettings={onOpenAgentSettings} onOpenSearchSettings={onOpenSearchSettings}/>}
+    {visibleStage === 'copy' && wechatDraft && <CopyWorkspace project={project} draft={wechatDraft} brief={brief} briefState={briefState} skills={skills} accountVoices={accountVoices} onProjectChange={onProjectAccepted} onDraftChange={setWechatDraft} onReloadDraft={loadWechatDraft} onSaveBrief={saveBrief} onContinue={() => onStage('visual')} onOpenModelSettings={onOpenModelSettings} onOpenAgentSettings={onOpenAgentSettings} onOpenVoiceSettings={onOpenVoiceSettings}/>}
+    {visibleStage === 'visual' && wechatDraft && <VisualWorkspace project={project} draft={wechatDraft} onDraftChange={setWechatDraft} onContinue={() => onStage('layout')} onOpenModelSettings={onOpenModelSettings}/>}
+    {visibleStage === 'layout' && wechatDraft && <LayoutWorkspace draft={wechatDraft} onDraftChange={setWechatDraft} onComplete={({ draft, version }) => { setWechatDraft(draft); setCompletedVersion(version); onStage('drafts'); }}/>}
+    {visibleStage === 'drafts' && wechatDraft && <DraftResultWorkspace draft={wechatDraft} version={completedVersion}/>}
   </section>;
 }

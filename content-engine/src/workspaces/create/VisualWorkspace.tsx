@@ -1,8 +1,9 @@
 import { Check, Image, LoaderCircle, Minus, Palette, Plus, RefreshCw, Save, Search, Sparkles, Trash2, Upload, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { webAssets, webCreative } from '../../data/webApi';
-import { platformName, type ContentProject, type CreativeVisualPlanItem, type CreativeVisualReferenceUse, type CreativeVisualStyleProfile } from '../../domain/content';
+import { webAssets, webCreative, webDrafts } from '../../data/webApi';
+import { type ContentProject, type CreativeVisualPlanItem, type CreativeVisualReferenceUse, type CreativeVisualStyleProfile } from '../../domain/content';
 import type { CreativePlatform } from '../../domain/creative';
+import type { ContentDraft } from '../../domain/content-drafts';
 import type { ProjectAsset, WorkspaceAsset } from '../../domain/assets';
 import { AssetPreviewDialog } from '../../components/assets/AssetPreviewDialog';
 import { AssetPickerDialog } from '../../components/assets/AssetPickerDialog';
@@ -14,12 +15,6 @@ type PlanningRoute = { scope: string; provider: string; model: string };
 
 function usableVisualReference(item: ProjectAsset) {
   return item.kind === 'IMAGE' && item.mimeType.startsWith('image/');
-}
-
-function visualPayload(platform: CreativePlatform, plan: CreativeVisualPlanItem[], styleProfile: CreativeVisualStyleProfile) {
-  const assetIds = [...new Set(plan.map((item) => item.assetId).filter((id): id is string => Boolean(id)))];
-  const coverAssetId = plan.find((item) => item.role === 'COVER' || item.role === 'MAIN')?.assetId ?? assetIds[0] ?? null;
-  return { platform, planVersion: VISUAL_PLAN_VERSION, styleProfile, coverAssetId, assetIds, plan };
 }
 
 function roleName(role: CreativeVisualPlanItem['role']) {
@@ -84,14 +79,15 @@ function safePlan(items: unknown): CreativeVisualPlanItem[] {
   }));
 }
 
-export function VisualWorkspace({ project, activePlatform, onProjectChange, onOpenModelSettings }: {
+export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onOpenModelSettings }: {
   project: ContentProject;
-  activePlatform: CreativePlatform;
-  onProjectChange: (project: ContentProject) => void;
+  draft: ContentDraft;
+  onDraftChange: (draft: ContentDraft) => void;
+  onContinue: () => void;
   onOpenModelSettings: () => void;
 }) {
-  const currentDelivery = project.delivery?.platforms?.[activePlatform];
-  const version = project.versions.find((item) => item.platform === activePlatform);
+  const platform: CreativePlatform = 'WECHAT';
+  const persistedVisual = draft.visualPlan as { planVersion?: number; plan?: unknown; styleProfile?: CreativeVisualStyleProfile; workflowStatus?: string };
   const [plan, setPlan] = useState<CreativeVisualPlanItem[]>([]);
   const [bodyItemCount, setBodyItemCount] = useState(0);
   const [styleProfile, setStyleProfile] = useState<CreativeVisualStyleProfile>({ preset: 'FRESH_EDITORIAL', customPrompt: '' });
@@ -125,6 +121,8 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
   const searchRevision = useRef(0);
   const hydratedProjectKey = useRef('');
   const fileUrlsRef = useRef<Record<string, string>>({});
+  const draftRef = useRef(draft);
+  const saveQueue = useRef<Promise<ContentDraft>>(Promise.resolve(draft));
   const visualAssets = useMemo(() => assets.filter(usableVisualReference), [assets]);
   const activeItem = plan.find((item) => item.id === activeItemId) ?? plan[0];
   const activePrompt = String(activeItem?.prompt ?? '').trim();
@@ -132,21 +130,21 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
   const assignedAssetSrc = assignedAsset ? fileUrls[assignedAsset.id] : undefined;
   const referenceAssets = activeItem?.references.map((item) => ({ config: item, asset: visualAssets.find((asset) => asset.id === item.assetId) })).filter((item) => item.asset) ?? [];
   const boundCount = plan.filter((item) => item.assetId).length;
-  const countRange = visualPlanCountRange(activePlatform);
-  const hasCopy = String(version?.body ?? '').trim().length >= 80;
+  const countRange = visualPlanCountRange(platform);
+  const hasCopy = draft.body.trim().length >= 80;
   const selectedStyle = visualStyles.find((style) => style.id === styleDraft.preset) ?? visualStyles[0];
   const visibleStyleGroup = visualStyleGroups.find((group) => group.id === activeStyleGroup) ?? visualStyleGroups[0];
 
   useEffect(() => {
-    const projectKey = `${project.id}:${activePlatform}`;
+    const projectKey = `${project.id}:${platform}`;
     const switchedProject = hydratedProjectKey.current !== projectKey;
-    const persisted = currentDelivery?.visual?.planVersion === VISUAL_PLAN_VERSION ? safePlan(currentDelivery?.visual?.plan) : [];
-    const legacy = safePlan(currentDelivery?.visual?.plan);
-    const persistedCount = currentDelivery?.visual?.planVersion === VISUAL_PLAN_VERSION
-      ? activePlatform === 'WEIBO' ? legacy.length : legacy.filter((item) => item.role === 'BODY' || item.role === 'CARD').length
+    const persisted = persistedVisual.planVersion === VISUAL_PLAN_VERSION ? safePlan(persistedVisual.plan) : [];
+    const legacy = safePlan(persistedVisual.plan);
+    const persistedCount = persistedVisual.planVersion === VISUAL_PLAN_VERSION
+      ? legacy.filter((item) => item.role === 'BODY' || item.role === 'CARD').length
       : 0;
-    const nextCount = persistedCount || recommendedBodyItemCount(activePlatform, version?.body ?? '');
-    const nextStyleProfile = { preset: currentDelivery?.visual?.styleProfile?.preset ?? 'FRESH_EDITORIAL' as const, customPrompt: currentDelivery?.visual?.styleProfile?.customPrompt ?? '' };
+    const nextCount = persistedCount || recommendedBodyItemCount(platform, draft.body);
+    const nextStyleProfile = { preset: persistedVisual.styleProfile?.preset ?? 'FRESH_EDITORIAL' as const, customPrompt: persistedVisual.styleProfile?.customPrompt ?? '' };
     setPlan((current) => JSON.stringify(current) === JSON.stringify(persisted) ? current : persisted);
     setBodyItemCount(nextCount);
     setStyleProfile((current) => JSON.stringify(current) === JSON.stringify(nextStyleProfile) ? current : nextStyleProfile);
@@ -162,7 +160,30 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
     hydratedProjectKey.current = projectKey;
     setHydratedPlanKey(projectKey);
     lastSavedSignature.current = persisted.length ? JSON.stringify({ plan: persisted, styleProfile: nextStyleProfile }) : '';
-  }, [activePlatform, currentDelivery?.visual?.updatedAt, project.id, version?.body]);
+  }, [draft.id]);
+
+  useEffect(() => { draftRef.current = draft; }, [draft]);
+
+  const persistVisual = (snapshot: { plan: CreativeVisualPlanItem[]; styleProfile: CreativeVisualStyleProfile }, workflowStatus = persistedVisual.workflowStatus) => {
+    const queued = saveQueue.current.catch(() => draftRef.current).then(async () => {
+      let saved = await webDrafts.patch(draftRef.current.id, {
+        revision: draftRef.current.revision,
+        visualPlan: { planVersion: VISUAL_PLAN_VERSION, plan: snapshot.plan, styleProfile: snapshot.styleProfile, ...(workflowStatus ? { workflowStatus } : {}) },
+      });
+      const seen = new Set<string>();
+      const orderedAssets = snapshot.plan.flatMap((item) => {
+        if (!item.assetId || seen.has(item.assetId)) return [];
+        seen.add(item.assetId);
+        return [{ assetId: item.assetId, role: item.role }];
+      });
+      saved = await webDrafts.replaceAssets(saved.id, { revision: saved.revision, assets: orderedAssets });
+      draftRef.current = saved;
+      onDraftChange(saved);
+      return saved;
+    });
+    saveQueue.current = queued;
+    return queued;
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -199,17 +220,16 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
 
   useEffect(() => {
     if (!hasCopy || !plan.length) return;
-    if (hydratedPlanKey !== `${project.id}:${activePlatform}`) return;
+    if (hydratedPlanKey !== `${project.id}:${platform}`) return;
     const signature = JSON.stringify({ plan, styleProfile });
     if (signature === lastSavedSignature.current) return;
     const revision = ++saveRevision.current;
     setSaveState('saving');
     const timer = window.setTimeout(() => {
-      void webCreative.saveVisual(project.id, visualPayload(activePlatform, plan, styleProfile)).then((result) => {
+      void persistVisual({ plan, styleProfile }).then(() => {
         if (revision !== saveRevision.current) return;
         lastSavedSignature.current = signature;
         setSaveState('saved');
-        onProjectChange(result.project);
       }).catch((reason) => {
         if (revision !== saveRevision.current) return;
         setSaveState('error');
@@ -217,7 +237,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
       });
     }, 650);
     return () => window.clearTimeout(timer);
-  }, [activePlatform, hasCopy, hydratedPlanKey, onProjectChange, plan, project.id, styleProfile]);
+  }, [hasCopy, hydratedPlanKey, plan, project.id, styleProfile]);
 
   const runSearch = async (query: string) => {
     const normalized = query.trim();
@@ -303,7 +323,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
       const existing = assets.find((item) => item.sourceUrl?.trim() === result.imageUrl.trim());
       if (existing) { assignAsset(existing); return; }
       const imported = await webAssets.import({ title: result.title, url: result.imageUrl, sourceNote: `Wikimedia Commons｜许可：${result.license}｜署名：${result.attribution}｜来源：${result.sourceUrl}`, copyrightStatus: 'OPEN_LICENSE' });
-      const linked = await webAssets.link(project.id, imported.asset.id, { role: 'VISUAL', scope: 'IMAGING', title: imported.asset.title, notes: imported.asset.sourceNote, platforms: [activePlatform] });
+      const linked = await webAssets.link(project.id, imported.asset.id, { role: 'VISUAL', scope: 'IMAGING', title: imported.asset.title, notes: imported.asset.sourceNote, platforms: [platform] });
       assignAsset(linked);
     } catch (reason) { setError(reason instanceof Error ? reason.message : '导入图片失败。'); }
     finally { setImportingId(null); }
@@ -314,7 +334,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
     setGenerateBusy(true); setError('');
     try {
       const { projectAsset } = await webCreative.generateImage(project.id, {
-        platform: activePlatform, prompt: activePrompt, size: activeItem.size,
+        platform, prompt: activePrompt, size: activeItem.size,
         assetIds: activeItem.references.map((item) => item.assetId),
       });
       assignAsset(projectAsset);
@@ -325,10 +345,9 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
   const save = async () => {
     setBusy('save'); setError('');
     try {
-      const result = await webCreative.saveVisual(project.id, visualPayload(activePlatform, plan, styleProfile));
+      await persistVisual({ plan, styleProfile });
       lastSavedSignature.current = JSON.stringify({ plan, styleProfile });
       setSaveState('saved');
-      onProjectChange(result.project);
     } catch (reason) { setSaveState('error'); setError(reason instanceof Error ? reason.message : '保存配图方案失败。'); }
     finally { setBusy(null); }
   };
@@ -337,10 +356,9 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
     if (!hasCopy) { setError('请先完成当前渠道正文，再确认配图进入排版。'); return; }
     setBusy('complete'); setError('');
     try {
-      await webCreative.saveVisual(project.id, visualPayload(activePlatform, plan, styleProfile));
-      const result = await webCreative.completeVisual(project.id, activePlatform);
+      await persistVisual({ plan, styleProfile }, 'COMPLETE');
       lastSavedSignature.current = JSON.stringify({ plan, styleProfile });
-      onProjectChange(result.project);
+      onContinue();
     } catch (reason) { setError(reason instanceof Error ? reason.message : '确认配图失败。'); }
     finally { setBusy(null); }
   };
@@ -383,23 +401,19 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
     setNotice(plan.length ? '图片数量已调整。点击“更新方案”后重新安排位置。' : '');
   };
 
-  const planCountSummary = activePlatform === 'WEIBO'
-    ? `配图 ${bodyItemCount} 张`
-    : activePlatform === 'XIAOHONGSHU'
-      ? `封面 1 张，内容页 ${bodyItemCount} 张`
-      : `封面 1 张，正文插图 ${bodyItemCount} 张`;
+  const planCountSummary = `封面 1 张，正文插图 ${bodyItemCount} 张`;
 
   const assetSrc = (asset: ProjectAsset | undefined) => asset ? fileUrls[asset.id] : undefined;
 
   return <section className="visual-workspace">
     <header className="delivery-workspace-head visual-workspace-head">
-      <div><h2>{platformName[activePlatform]}配图</h2><p>{planCountSummary}｜任务策略：公众号配图策划（WECHAT_VISUAL_PLANNING）</p></div>
+      <div><h2>公众号配图</h2><p>{planCountSummary}｜任务策略：公众号配图策划（WECHAT_VISUAL_PLANNING）</p></div>
       <div className="visual-plan-actions">
         <button className="visual-project-style" type="button" aria-label="设置项目配图风格" onClick={openStyleDialog}><Palette size={15}/><span>项目风格</span><b>{allVisualStyles.find((style) => style.id === styleProfile.preset)?.name ?? visualStyles[0].name}</b></button>
         <div className="visual-count-stepper" aria-label="配图数量">
-          <button type="button" aria-label={activePlatform === 'WEIBO' ? '减少微博配图' : '减少正文插图'} disabled={bodyItemCount <= countRange.min} onClick={() => changeBodyItemCount(-1)}><Minus size={14}/></button>
-          <output aria-label={activePlatform === 'WEIBO' ? '微博配图数量' : '正文插图数量'}>{bodyItemCount}</output>
-          <button type="button" aria-label={activePlatform === 'WEIBO' ? '增加微博配图' : '增加正文插图'} disabled={bodyItemCount >= countRange.max} onClick={() => changeBodyItemCount(1)}><Plus size={14}/></button>
+          <button type="button" aria-label="减少正文插图" disabled={bodyItemCount <= countRange.min} onClick={() => changeBodyItemCount(-1)}><Minus size={14}/></button>
+          <output aria-label="正文插图数量">{bodyItemCount}</output>
+          <button type="button" aria-label="增加正文插图" disabled={bodyItemCount >= countRange.max} onClick={() => changeBodyItemCount(1)}><Plus size={14}/></button>
         </div>
         {plan.length > 0 && <button className="button" type="button" disabled={planBusy || !hasCopy} onClick={() => void planWithAI()}>{planBusy ? <LoaderCircle size={15}/> : <RefreshCw size={15}/>} {planNeedsRefresh ? '更新方案' : '重新策划'}</button>}
       </div>
@@ -522,6 +536,6 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
     </div>}
 
     {previewAsset && <AssetPreviewDialog asset={previewAsset} externalUrl={previewAsset.id ? undefined : previewAsset.sourceUrl ?? undefined} onClose={() => setPreviewAsset(null)}/>} 
-    {assetPickerOpen && <AssetPickerDialog projectId={project.id} role="VISUAL" scope="IMAGING" platforms={[activePlatform]} imageOnly excludedAssetIds={visualAssets.map((asset) => asset.id)} onLinked={(asset) => { setAssets((current) => [asset, ...current]); assignAsset(asset); }} onClose={() => setAssetPickerOpen(false)}/>} 
+    {assetPickerOpen && <AssetPickerDialog projectId={project.id} role="VISUAL" scope="IMAGING" platforms={[platform]} imageOnly excludedAssetIds={visualAssets.map((asset) => asset.id)} onLinked={(asset) => { setAssets((current) => [asset, ...current]); assignAsset(asset); }} onClose={() => setAssetPickerOpen(false)}/>}
   </section>;
 }

@@ -33,9 +33,10 @@ test('016 增加知乎微博 Skill 并扩展旧候选平台约束', () => {
   assert.match(migration, /creative_draft_candidates_platform_check/);
 });
 
-test('知乎和微博项目刷新后保留当前平台', () => {
+test('旧平台参数不会进入公众号母稿 URL 状态', () => {
   for (const platform of ['ZHIHU', 'WEIBO']) {
     const route = readWorkspaceLocation({ search: `?view=create&project=project-1&platform=${platform}` });
-    assert.equal(route.platform, platform);
+    assert.equal('platform' in route, false);
+    assert.equal(route.stage, null);
   }
 });

@@ -55,8 +55,7 @@ const legacyCreativeViews = new Set(['plan', 'topicEditor']);
 const discoverSections = new Set(discoverTabs.map((item) => item.id));
 const settingsSections = new Set(settingsTabs.map((item) => item.id));
 const modelSections = new Set(['bailian', 'agent', 'search', 'connections', 'policies', 'templates', 'usage']);
-const platforms = new Set(['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO', 'VIDEO_CHANNEL']);
-const createStages = new Set(['planning', 'research', 'master', 'platform', 'visual', 'layout', 'review']);
+const createStages = new Set(['preparation', 'copy', 'visual', 'layout', 'drafts']);
 
 function allowed(value, values, fallback = null) {
   return typeof value === 'string' && values.has(value) ? value : fallback;
@@ -74,8 +73,7 @@ export function readWorkspaceLocation(locationTarget = globalThis.location) {
     intelligenceId: params.get('intel') || null,
     legacyTopicId: isLegacyCreative ? params.get('topic') || null : null,
     projectId: params.get('project') || null,
-    platform: allowed(params.get('platform'), platforms, 'WECHAT'),
-    stage: allowed(params.get('stage'), createStages, 'planning'),
+    stage: allowed(params.get('stage'), createStages),
   };
 }
 
@@ -96,8 +94,7 @@ export function workspaceLocationUrl(route, locationTarget = globalThis.location
     if (route.projectId) params.set('project', route.projectId);
   }
   if (route.view === 'create') {
-    if (route.projectId) params.set('stage', allowed(route.stage, createStages, 'planning'));
-    params.set('platform', allowed(route.platform, platforms, 'WECHAT'));
+    if (route.projectId && allowed(route.stage, createStages)) params.set('stage', route.stage);
   }
   return `${url.pathname}${url.search}${url.hash}`;
 }

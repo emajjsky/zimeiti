@@ -4,7 +4,7 @@ import { animate, createScope, stagger } from 'animejs';
 import { ArrowLeft, Bell, BrainCircuit, CalendarDays, ChartColumn, CheckCircle2, ChevronRight, CircleAlert, CircleCheck, Compass, FilePenLine, FolderOpen, KeyRound, Lightbulb, LoaderCircle, Menu, PenLine, Pencil, Plus, RefreshCw, Search, Send, Settings, Trash2 } from 'lucide-react';
 import { intelligenceKey, loadState, seedState, type FeishuLibraryTemplate, type LocalState, type WorkspaceProfile } from './data/localRepository';
 import { webAgent, webAuth, webCreative, webIntelligence, webModels, webProjects, webSettings, webState, webWorkspaces, type CreateProjectInput, type CredentialStatus, type WebSession } from './data/webApi';
-import { platformName, projectStageName, type ContentProject, type ContentVersion, type IntelligenceSource, type Platform } from './domain/content';
+import { platformName, projectStageName, type ContentProject, type IntelligenceSource, type Platform } from './domain/content';
 import { stageRouteForProjectStage } from './domain/creative-flow.mjs';
 import { completedProjects, formatTodayTitle, projectTaskEntries } from './domain/today.mjs';
 import type { ApiUsageLog, ApiUsageSummary, ApiUsageTask, ModelCapability, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelOperation, ModelProvider, ModelTask, ModelTaskPolicy } from './domain/integrations';
@@ -56,8 +56,7 @@ function App({ session, onSessionChange }: { session: WebSession; onSessionChang
   const [state, setState] = useState<LocalState>(seedState);
   const [selectedIntelId, setSelectedIntelId] = useState(initialRoute.intelligenceId ?? '');
   const [selectedProjectId, setSelectedProjectId] = useState(initialRoute.projectId ?? '');
-  const [activePlatform, setActivePlatform] = useState<Platform>(initialRoute.platform);
-  const [createStage, setCreateStage] = useState<CreateStageRoute>(initialRoute.stage);
+  const [createStage, setCreateStage] = useState<CreateStageRoute | null>(initialRoute.stage);
   const [creationRequested, setCreationRequested] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const [refreshFeedback, setRefreshFeedback] = useState<{ status: 'idle' | 'running' | 'success' | 'empty' | 'error'; message: string }>({ status: 'idle', message: '' });
@@ -67,7 +66,6 @@ function App({ session, onSessionChange }: { session: WebSession; onSessionChang
   const [requestedModelSection, setRequestedModelSection] = useState<ModelSection | null>(initialRoute.modelSection);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const preferenceSaveQueue = useRef<Promise<unknown>>(Promise.resolve());
-  const versionSaveQueues = useRef(new Map<string, Promise<unknown>>());
 
   const selectedIntel = state.intelligence.find((item) => item.id === selectedIntelId) ?? state.intelligence[0];
   const featuredProject = state.projects.find((item) => item.id === selectedProjectId);
@@ -100,10 +98,9 @@ function App({ session, onSessionChange }: { session: WebSession; onSessionChang
       intelligenceId: selectedIntelId || null,
       legacyTopicId: null,
       projectId: selectedProjectId || null,
-      platform: activePlatform,
       stage: createStage,
     });
-  }, [activePlatform, createStage, discoverSection, isLoaded, requestedModelSection, selectedIntelId, selectedProjectId, settingsSection, view]);
+  }, [createStage, discoverSection, isLoaded, requestedModelSection, selectedIntelId, selectedProjectId, settingsSection, view]);
 
   const updateState = (next: LocalState) => {
     setState(next);
@@ -116,7 +113,6 @@ function App({ session, onSessionChange }: { session: WebSession; onSessionChang
   };
   const flushPendingSaves = async () => {
     await preferenceSaveQueue.current;
-    await Promise.all([...versionSaveQueues.current.values()]);
   };
   const openDiscover = (section: DiscoverSection, preset: SearchPreset | null = null) => {
     setView('discover');
@@ -135,7 +131,6 @@ function App({ session, onSessionChange }: { session: WebSession; onSessionChang
   };
   const openProject = (project: ContentProject) => {
     setSelectedProjectId(project.id);
-    setActivePlatform(project.planning.targetPlatforms[0] ?? project.versions[0]?.platform ?? 'WECHAT');
     setCreateStage(stageRouteForProjectStage(project.stage));
     setView('create');
   };
@@ -155,28 +150,9 @@ function App({ session, onSessionChange }: { session: WebSession; onSessionChang
   };
   const requestNewCreation = () => {
     setSelectedProjectId('');
-    setCreateStage('planning');
+    setCreateStage(null);
     setCreationRequested(true);
     setView('create');
-  };
-  const saveContentVersion = (projectId: string, versionId: string, patch: Pick<ContentVersion, 'title' | 'body'>) => {
-    const updatedAt = new Date().toISOString();
-    setState((current) => ({
-      ...current,
-      projects: current.projects.map((project) => project.id !== projectId ? project : {
-        ...project,
-        status: project.status === 'BRIEF' ? 'WRITING' : project.status,
-        updatedAt,
-        versions: project.versions.map((version) => version.id === versionId ? { ...version, ...patch, updatedAt } : version),
-      }),
-    }));
-    const key = `${projectId}:${versionId}`;
-    const previous = versionSaveQueues.current.get(key) ?? Promise.resolve();
-    const pending = previous.catch(() => undefined).then(() => webCreative.updateVersion(projectId, versionId, patch)).then((result) => {
-      setState((current) => ({ ...current, projects: current.projects.map((project) => project.id === result.project.id ? result.project : project) }));
-    }).catch((error) => { console.error('保存平台正文失败', error); });
-    versionSaveQueues.current.set(key, pending);
-    void pending.finally(() => { if (versionSaveQueues.current.get(key) === pending) versionSaveQueues.current.delete(key); });
   };
   const acceptProjectFromServer = (acceptedProject: ContentProject) => {
     setState((current) => ({ ...current, projects: current.projects.map((project) => project.id === acceptedProject.id ? acceptedProject : project) }));
@@ -259,14 +235,14 @@ function App({ session, onSessionChange }: { session: WebSession; onSessionChang
       <div className="top-actions"><button className="button primary" onClick={requestNewCreation}><Plus size={16}/>新建创作</button><button className="icon-button" aria-label="通知"><Bell size={20}/></button><button className="icon-button" aria-label="同步"><RefreshCw size={20}/></button><span className="avatar" /></div>
     </header>
     <aside className={sidebarOpen ? 'sidebar open' : 'sidebar'}>
-      <nav className="primary-navigation" aria-label="主导航">{navigationGroups.map((group) => <section className="nav-group" key={group.id}><div className="nav-group-label">{group.label}</div>{group.items.map(({ view: target, label }) => { const Icon = navigationIcons[target]; return <button key={target} className={`nav-item ${view === target ? 'active' : ''}`} aria-current={view === target ? 'page' : undefined} onClick={() => { if (target === 'create') { setSelectedProjectId(''); setCreateStage('planning'); } setView(target); setSidebarOpen(false); }}><Icon size={19}/><span>{label}</span></button>; })}</section>)}</nav>
+      <nav className="primary-navigation" aria-label="主导航">{navigationGroups.map((group) => <section className="nav-group" key={group.id}><div className="nav-group-label">{group.label}</div>{group.items.map(({ view: target, label }) => { const Icon = navigationIcons[target]; return <button key={target} className={`nav-item ${view === target ? 'active' : ''}`} aria-current={view === target ? 'page' : undefined} onClick={() => { if (target === 'create') { setSelectedProjectId(''); setCreateStage(null); } setView(target); setSidebarOpen(false); }}><Icon size={19}/><span>{label}</span></button>; })}</section>)}</nav>
     </aside>
     {sidebarOpen && <button className="sidebar-backdrop" type="button" aria-label="关闭导航" onClick={() => setSidebarOpen(false)} />}
     <main className="main-content">
       {view === 'today' && <Today onNavigate={setView} projects={state.projects} intelligence={state.intelligence} onOpenProject={(id) => { const project = state.projects.find((item) => item.id === id); if (project) openProject(project); }} />}
       {view === 'discover' && <DiscoverWorkspace section={discoverSection} onSectionChange={setDiscoverSection} inbox={<IntelligenceInbox item={selectedIntel} intelligence={state.intelligence} sources={state.sources} projects={state.projects} defaultPlatforms={state.workspace.enabledPlatforms} onSelect={setSelectedIntelId} onAddToCreative={(itemId, analysis, angleIndex) => void addIntelligenceToCreative(itemId, analysis, angleIndex)} onOpenProject={openIntelligenceProject} onSaveAnalysis={saveAnalysis} onRefresh={refreshRss} onOpenSources={() => openSettings('sources')} refreshFeedback={refreshFeedback} />} search={<NetworkSearchPanel preset={searchPreset} onSave={saveSearchCandidate} onOpenSearchSettings={() => openSettings('models', 'search')} checkStatus={webSearchStatus} searchWeb={searchWeb} />} linkImport={<LinkImportPanel onSave={saveClippedLink} onShowInbox={() => openDiscover('inbox')} previewLink={previewPublicLink} />} />}
       {view === 'create' && (!selectedProjectId || !featuredProject) && <CreativeProjectCenter projects={state.projects} onOpenProject={openProject} onCreateProject={createProject} creationRequested={creationRequested} onCreationHandled={() => setCreationRequested(false)} />}
-      {view === 'create' && selectedProjectId && featuredProject && <CreateWorkspace project={featuredProject} stage={createStage} onStage={setCreateStage} onExitProject={() => { setSelectedProjectId(''); setCreateStage('planning'); }} activePlatform={activePlatform} onPlatform={setActivePlatform} onSaveVersion={saveContentVersion} onProjectAccepted={acceptProjectFromServer} onOpenModelSettings={() => openSettings('models', 'policies')} onOpenAgentSettings={() => openSettings('models', 'agent')} onOpenSearchSettings={() => openSettings('models', 'search')} onOpenVoiceSettings={() => openSettings('voices')} />}
+      {view === 'create' && selectedProjectId && featuredProject && <CreateWorkspace project={featuredProject} stage={createStage} onStage={setCreateStage} onExitProject={() => { setSelectedProjectId(''); setCreateStage(null); }} onProjectAccepted={acceptProjectFromServer} onOpenModelSettings={() => openSettings('models', 'policies')} onOpenAgentSettings={() => openSettings('models', 'agent')} onOpenSearchSettings={() => openSettings('models', 'search')} onOpenVoiceSettings={() => openSettings('voices')} />}
       {view === 'publish' && <Publish project={featuredProject} onNavigate={setView} />}
       {view === 'review' && <Review projects={state.projects} onOpenProject={(project) => openProject(project)} />}
       {view === 'assets' && <AssetLibrary/>}

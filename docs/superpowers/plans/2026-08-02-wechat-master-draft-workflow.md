@@ -92,7 +92,6 @@
 - `content-engine/src/domain/channel-workflow.d.mts`
 - `content-engine/src/domain/writing-brief-platforms.mjs`
 - `content-engine/src/domain/writing-brief-platforms.d.mts`
-- `content-engine/src/workspaces/create/ReviewWorkspace.tsx`
 - `content-engine/src/workspaces/settings/AccountAuthorizationSettings.tsx`
 
 ---
@@ -540,9 +539,14 @@ git commit -m "feat: render wechat layout previews"
 
 ### Task 7: Replace The Two-Dimensional Creation UI With One Linear Workflow
 
+**Status (2026-08-02): Completed and verified; migrations 028 and 029 remain unapplied to the production database.**
+
+Verification: 414/414 Node tests, TypeScript typecheck, production build, and Playwright desktop/mobile acceptance passed. The browser acceptance traverses content preparation, optional research skip, WeChat copy, visual planning, layout, and saved draft; refreshes and restores every stage; removes the platform URL parameter; exposes all five steps without horizontal scrolling at 390px; preserves long draft titles without truncation; and reports no horizontal overflow or console errors.
+
 **Files:**
 - Create: `content-engine/src/workspaces/create/PreparationWorkspace.tsx`
 - Create: `content-engine/src/workspaces/create/DraftResultWorkspace.tsx`
+- Delete: `content-engine/src/workspaces/create/ReviewWorkspace.tsx`
 - Modify: `content-engine/src/workspaces/create/CreateWorkspace.tsx`
 - Modify: `content-engine/src/workspaces/create/PlanningWorkspace.tsx`
 - Modify: `content-engine/src/workspaces/create/CopyWorkspace.tsx`

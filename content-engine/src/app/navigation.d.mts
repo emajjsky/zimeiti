@@ -7,7 +7,7 @@ export type View =
   | 'assets'
   | 'settings';
 
-export type CreateStageRoute = 'planning' | 'research' | 'master' | 'platform' | 'visual' | 'layout' | 'review';
+export type CreateStageRoute = 'preparation' | 'copy' | 'visual' | 'layout' | 'drafts';
 
 export type DiscoverSection = 'inbox' | 'search' | 'import';
 
@@ -74,8 +74,7 @@ export interface WorkspaceLocationState {
   intelligenceId: string | null;
   legacyTopicId: string | null;
   projectId: string | null;
-  platform: 'WECHAT' | 'XIAOHONGSHU' | 'ZHIHU' | 'WEIBO' | 'VIDEO_CHANNEL';
-  stage: CreateStageRoute;
+  stage: CreateStageRoute | null;
 }
 
 export interface WorkspaceLocationTarget {
