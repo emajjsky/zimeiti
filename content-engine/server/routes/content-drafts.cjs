@@ -15,7 +15,7 @@ const assetInput = z.object({
 });
 const completeInput = z.object({ revision: z.number().int().positive() });
 
-function registerContentDraftRoutes(app, { workspaceAccess, draftStore }) {
+function registerContentDraftRoutes(app, { workspaceAccess, draftStore, adaptationService }) {
   app.get('/api/v1/creative/projects/:projectId/drafts', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
     const id = projectId.parse(request.params.projectId);
     return { drafts: await draftStore.listProject(request.workspace.id, id) };
@@ -42,9 +42,22 @@ function registerContentDraftRoutes(app, { workspaceAccess, draftStore }) {
 
   app.post('/api/v1/content-drafts/:draftId/derive', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
     const sourceDraftId = uuid.parse(request.params.draftId);
-    const source = await draftStore.get(request.workspace.id, sourceDraftId);
-    const input = z.object({ platform: z.enum(['XIAOHONGSHU', 'WEIBO']), sourceDraftVersionId: uuid }).parse(request.body);
-    return draftStore.createDerivedWorkingCopy(request.workspace.id, source.projectId, input.platform, input.sourceDraftVersionId);
+    const input = z.object({ platform: z.enum(['XIAOHONGSHU', 'WEIBO']) }).strict().parse(request.body);
+    return adaptationService.prepare({ workspaceId: request.workspace.id, sourceDraftId, platform: input.platform });
+  });
+
+  app.get('/api/v1/content-draft-adaptation-runs/:runId', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
+    return adaptationService.get({ workspaceId: request.workspace.id, runId: uuid.parse(request.params.runId) });
+  });
+
+  app.post('/api/v1/content-draft-adaptation-runs/:runId/confirm', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
+    const result = await adaptationService.confirm({ workspaceId: request.workspace.id, runId: uuid.parse(request.params.runId) });
+    reply.code(202);
+    return result;
+  });
+
+  app.post('/api/v1/content-draft-adaptation-runs/:runId/cancel', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
+    return adaptationService.cancel({ workspaceId: request.workspace.id, runId: uuid.parse(request.params.runId) });
   });
 
   app.get('/api/v1/content-drafts/:draftId/versions', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {

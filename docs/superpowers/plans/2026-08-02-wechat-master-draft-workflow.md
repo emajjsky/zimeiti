@@ -613,12 +613,18 @@ git commit -m "refactor: make wechat the creation workflow"
 
 ### Task 8: Add Explicit Xiaohongshu And Weibo Adaptation Jobs
 
+**Status (2026-08-02): Completed and verified; migrations 028 and 029 remain unapplied to the production database.**
+
+Verification: 426/426 Node tests, TypeScript typecheck, production build, server syntax checks, and production dependency audit passed. The adaptation contract resolves only `XIAOHONGSHU_ADAPTATION` or `WEIBO_ADAPTATION`, freezes the current completed WeChat version and visible policy, creates no derived draft before explicit confirmation and strict parse success, rejects stale sources before model usage, limits suggestions to nine source-bound images, exposes run status for the editor, and never overwrites immutable versions.
+
 **Files:**
 - Create: `content-engine/server/services/draft-adaptation.cjs`
 - Create: `content-engine/tests/draft-adaptation.test.mjs`
 - Modify: `content-engine/server/routes/content-drafts.cjs`
+- Modify: `content-engine/server/services/content-drafts.cjs`
 - Modify: `content-engine/server/worker.cjs`
 - Modify: `content-engine/server/index.cjs`
+- Modify: `content-engine/src/domain/content-drafts.ts`
 - Modify: `content-engine/src/domain/integrations.ts`
 - Modify: `content-engine/src/data/webApi.ts`
 - Modify: `content-engine/src/main.tsx`
@@ -627,6 +633,7 @@ git commit -m "refactor: make wechat the creation workflow"
 - Produces: `adaptationScope(platform)` returning only `XIAOHONGSHU_ADAPTATION | WEIBO_ADAPTATION`.
 - Produces: `buildAdaptationPrompt(snapshot)`, `parseAdaptationOutput(content, platform)`.
 - Produces job type: `DRAFT_ADAPTATION` with `{ runId, draftId, sourceDraftVersionId, platform }`.
+- Produces run status API: `GET /api/v1/content-draft-adaptation-runs/:runId`.
 
 - [ ] **Step 1: Write failing parser, policy, and Worker tests**
 

@@ -33,6 +33,7 @@ const {
 const { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, workflowSourceActionsForProject, projectOriginalSource, sourceMatchesProject, buildResearchResult } = require('./services/simplified-research.cjs');
 const { createProjectAgentStore } = require('./services/project-agent.cjs');
 const { createContentDraftStore } = require('./services/content-drafts.cjs');
+const { createDraftAdaptationService } = require('./services/draft-adaptation.cjs');
 const { WECHAT_COPY_GENERATION_SCOPE, buildCopyPrompt, buildFinishedCopyPrompt, buildWritingPacket, parseCopyOutput, parseFinishedCopyBody } = require('./services/project-copy-action.cjs');
 const { createStorageDeletionService } = require('./services/storageDeletion.cjs');
 const { enqueue } = require('./queue.cjs');
@@ -41,6 +42,15 @@ const connection = new IORedis(config.redisUrl, { maxRetriesPerRequest: null });
 const textRunner = createTextModelRunner();
 const projectAgentStore = createProjectAgentStore({ query, transaction });
 const draftStore = createContentDraftStore({ query, transaction });
+const draftAdaptationService = createDraftAdaptationService({
+  query,
+  transaction,
+  draftStore,
+  runTextTask: async ({ workspaceId, route, system, message }) => {
+    const connectionInput = await textConnectionInput(workspaceId, route);
+    return textRunner.runText({ provider: route.provider, model: route.model, system, message, ...connectionInput });
+  },
+});
 const storageDeletion = createStorageDeletionService({ query, transaction, uploadRoot: config.uploadRoot });
 
 async function processJob(queueJob) {
@@ -68,6 +78,7 @@ async function processJob(queueJob) {
     if (queueJob.name === 'CREATIVE_OUTLINE') return await generateCreativeOutline({ jobId, workspaceId, runId: payload.runId });
     if (queueJob.name === 'CREATIVE_DRAFT') return await generateCreativeDraft({ jobId, workspaceId, runId: payload.runId });
     if (queueJob.name === 'PROJECT_COPY_ACTION') return await generateProjectCopyAction({ jobId, workspaceId, runId: payload.runId });
+    if (queueJob.name === 'DRAFT_ADAPTATION') return await draftAdaptationService.execute({ jobId, workspaceId, runId: payload.runId });
     if (queueJob.name !== 'BAILIAN_TEXT') throw new Error(`暂不支持的任务类型：${queueJob.name}`);
     const keyRow = await query('SELECT encrypted_secret FROM credential_vault WHERE workspace_id = $1 AND provider = $2', [workspaceId, 'BAILIAN']);
     if (!keyRow.rowCount) throw new Error('工作空间未配置百炼 Key。');

@@ -4,7 +4,7 @@ import type { ContentProject, CreativeDelivery, CreativeVisualPlanItem, Intellig
 import type { AccountVoiceCalibrationDraft, AccountVoiceInput, AccountVoiceProfile, CreativeDraftCandidate, CreativeDraftPreparation, CreativeDraftRun, CreativeOutlineCandidate, CreativeOutlinePreparation, CreativeOutlineRun, CreativePlatform, CreativeSkillDefinition, ProjectAgentContext, ProjectAgentHistory, ProjectAgentPrepareInput, ProjectAgentPrepareResult, ProjectAgentRun, ProjectArtifact, ProjectInput, ProjectInputPayload, ProjectReference, ProjectReferenceMetadata, ProjectResearchContext, ProjectResearchRun, WritingBrief, WritingBriefInput } from '../domain/creative';
 import type { WebSession, WorkspaceSession, WorkspaceSummary } from '../domain/workspace';
 import type { AssetFilters, AssetMetadataInput, AssetUpdateInput, ProjectAsset, ProjectAssetLinkInput, WorkspaceAsset } from '../domain/assets';
-import type { ContentDraft, ContentDraftVersion, DraftPatchInput, DraftPreview, DraftPlatform, WechatLayoutPreview, WechatLayoutRules, WechatLayoutTemplate } from '../domain/content-drafts';
+import type { ContentDraft, ContentDraftVersion, DraftAdaptationRun, DraftPatchInput, DraftPreview, DraftPlatform, WechatLayoutPreview, WechatLayoutRules, WechatLayoutTemplate } from '../domain/content-drafts';
 import { sessionStore } from './sessionStore';
 
 const apiBase = import.meta.env.VITE_API_BASE ?? '/api/v1';
@@ -138,7 +138,10 @@ export const webDrafts = {
   patch: (draftId: string, input: DraftPatchInput) => request<ContentDraft>(`/content-drafts/${encodeURIComponent(draftId)}`, { method: 'PATCH', body: JSON.stringify(input) }),
   replaceAssets: (draftId: string, input: { revision: number; assets: Array<{ assetId: string; role: 'COVER' | 'BODY' | 'CARD' | 'MAIN' }> }) => request<ContentDraft>(`/content-drafts/${encodeURIComponent(draftId)}/assets`, { method: 'PUT', body: JSON.stringify(input) }),
   complete: (draftId: string, revision: number) => request<{ draft: ContentDraft; version: ContentDraftVersion }>(`/content-drafts/${encodeURIComponent(draftId)}/complete`, { method: 'POST', body: JSON.stringify({ revision }) }),
-  derive: (draftId: string, input: { platform: Exclude<DraftPlatform, 'WECHAT'>; sourceDraftVersionId: string }) => request<ContentDraft>(`/content-drafts/${encodeURIComponent(draftId)}/derive`, { method: 'POST', body: JSON.stringify(input) }),
+  derive: (draftId: string, platform: Exclude<DraftPlatform, 'WECHAT'>) => request<DraftAdaptationRun>(`/content-drafts/${encodeURIComponent(draftId)}/derive`, { method: 'POST', body: JSON.stringify({ platform }) }),
+  adaptation: (runId: string) => request<DraftAdaptationRun>(`/content-draft-adaptation-runs/${encodeURIComponent(runId)}`),
+  confirmAdaptation: (runId: string) => request<DraftAdaptationRun>(`/content-draft-adaptation-runs/${encodeURIComponent(runId)}/confirm`, { method: 'POST', body: '{}' }),
+  cancelAdaptation: (runId: string) => request<DraftAdaptationRun>(`/content-draft-adaptation-runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST', body: '{}' }),
   versions: (draftId: string) => request<{ versions: ContentDraftVersion[] }>(`/content-drafts/${encodeURIComponent(draftId)}/versions`),
   preview: (draftId: string) => request<DraftPreview>(`/content-drafts/${encodeURIComponent(draftId)}/preview`),
 };

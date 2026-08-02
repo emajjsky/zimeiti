@@ -207,10 +207,10 @@ function createContentDraftStore({ query, transaction, renderWechatDraft } = {})
     return result.rows.map(versionView);
   }
 
-  async function createDerivedWorkingCopy(workspaceId, projectId, platform, sourceDraftVersionId) {
+  async function createDerivedWorkingCopy(workspaceId, projectId, platform, sourceDraftVersionId, transactionClient = null) {
     if (!DERIVED_PLATFORMS.has(platform)) throw businessError(400, 'DRAFT_PLATFORM_UNSUPPORTED', '只能从公众号母稿派生小红书或微博草稿。');
     if (!sourceDraftVersionId) throw businessError(409, 'DRAFT_SOURCE_VERSION_STALE', '请先完成公众号草稿，再生成平台草稿。');
-    return transaction(async (client) => {
+    const create = async (client) => {
       const source = await client.query(`SELECT version.id
         FROM content_draft_versions version
         JOIN content_drafts draft
@@ -230,7 +230,8 @@ function createContentDraftStore({ query, transaction, renderWechatDraft } = {})
       if (!existing.rows.length) throw businessError(409, 'DRAFT_SOURCE_VERSION_STALE', '派生草稿状态已变化，请重试。');
       if (existing.rows[0].source_draft_version_id !== sourceDraftVersionId) throw businessError(409, 'DRAFT_SOURCE_VERSION_STALE', '现有平台草稿来自旧公众号版本，请明确重新生成。');
       return draftView(existing.rows[0]);
-    });
+    };
+    return transactionClient ? create(transactionClient) : transaction(create);
   }
 
   async function markDerivedStale(workspaceId, projectId, client = { query }) {

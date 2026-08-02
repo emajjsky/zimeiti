@@ -50,6 +50,7 @@ const { createProjectAgentStore, artifactView, runView } = require('./services/p
 const { loadContentMasterState } = require('./services/content-master.cjs');
 const { createAssetStore } = require('./services/assets.cjs');
 const { createContentDraftStore } = require('./services/content-drafts.cjs');
+const { createDraftAdaptationService } = require('./services/draft-adaptation.cjs');
 const { registerContentDraftRoutes } = require('./routes/content-drafts.cjs');
 const { renderWechatDraft } = require('./services/wechat-layout-renderer.cjs');
 const { analyzeWechatTemplateSource, createWechatLayoutTemplateStore } = require('./services/wechat-layout-templates.cjs');
@@ -245,8 +246,9 @@ const workspaceStore = createWorkspaceStore({ query, transaction, defaultState, 
 const workspaceAccess = createWorkspaceAccess({ query, authenticate });
 const assetStore = createAssetStore({ query, transaction, removeStoredFile: (storageKey) => removeAssetFile(config.uploadRoot, storageKey) });
 const draftStore = createContentDraftStore({ query, transaction, renderWechatDraft });
+const draftAdaptationService = createDraftAdaptationService({ query, transaction, draftStore, resolveTaskRoute: textTaskRoute, enqueue });
 const wechatLayoutTemplateStore = createWechatLayoutTemplateStore({ query, transaction });
-registerContentDraftRoutes(app, { workspaceAccess, draftStore, assetStore });
+registerContentDraftRoutes(app, { workspaceAccess, draftStore, assetStore, adaptationService: draftAdaptationService });
 registerWechatLayoutTemplateRoutes(app, {
   workspaceAccess,
   templateStore: wechatLayoutTemplateStore,

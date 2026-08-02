@@ -2,6 +2,7 @@ export type DraftPlatform = 'WECHAT' | 'XIAOHONGSHU' | 'WEIBO';
 export type ProjectWorkflowStage = 'PREPARING' | 'WECHAT_WRITING' | 'WECHAT_IMAGING' | 'WECHAT_LAYOUT' | 'DRAFT_READY';
 export type ContentDraftStatus = 'EDITING' | 'READY' | 'ARCHIVED';
 export type DraftAssetRole = 'COVER' | 'BODY' | 'CARD' | 'MAIN';
+export type DraftAdaptationRunStatus = 'DRAFT' | 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
 export type WechatLayoutTemplateStatus = 'ACTIVE' | 'ARCHIVED';
 export type WechatLayoutTemplateKind = 'SYSTEM' | 'CUSTOM';
 export type ChannelAccountMode = 'MANUAL' | 'OFFICIAL';
@@ -61,6 +62,30 @@ export interface ContentDraftVersion {
   generationRunId: string | null;
   assets: DraftAsset[];
   createdAt: string;
+}
+
+export interface DraftAdaptationRun {
+  id: string;
+  status: DraftAdaptationRunStatus;
+  createdAt?: string;
+  jobId?: string;
+  error?: string;
+  result?: {
+    draftId: string;
+    platform: Exclude<DraftPlatform, 'WECHAT'>;
+  };
+  confirmation?: {
+    platform: Exclude<DraftPlatform, 'WECHAT'>;
+    sourceDraftVersionId: string;
+    sourceAssetCount: number;
+    policy: {
+      scope: 'XIAOHONGSHU_ADAPTATION' | 'WEIBO_ADAPTATION';
+      provider: 'BAILIAN_CLI' | 'EXTERNAL_API';
+      connectionId: string | null;
+      model: string;
+      promptVersion: string;
+    };
+  };
 }
 
 export interface WechatLayoutRules {
