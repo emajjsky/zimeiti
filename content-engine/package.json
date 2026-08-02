@@ -11,6 +11,8 @@
     "dev:worker": "node --watch server/worker.cjs",
     "start": "node server/index.cjs",
     "db:migrate": "node server/migrate.cjs",
+    "archive:zhihu": "node scripts/export-zhihu-archive.cjs",
+    "verify:draft-migration": "node scripts/verify-draft-migration.cjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "typecheck": "tsc -b --pretty false"
