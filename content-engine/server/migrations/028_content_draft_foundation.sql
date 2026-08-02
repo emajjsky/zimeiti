@@ -58,6 +58,7 @@ CREATE TABLE content_drafts (
   visual_plan_json jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(visual_plan_json) = 'object'),
   layout_template_version_id uuid,
   source_draft_version_id uuid,
+  source_stale boolean NOT NULL DEFAULT false,
   current_version_id uuid,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),

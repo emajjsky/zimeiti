@@ -4,6 +4,7 @@ import type { ContentProject, CreativeDelivery, CreativeVisualPlanItem, Intellig
 import type { AccountVoiceCalibrationDraft, AccountVoiceInput, AccountVoiceProfile, CreativeDraftCandidate, CreativeDraftPreparation, CreativeDraftRun, CreativeOutlineCandidate, CreativeOutlinePreparation, CreativeOutlineRun, CreativePlatform, CreativeSkillDefinition, ProjectAgentContext, ProjectAgentHistory, ProjectAgentPrepareInput, ProjectAgentPrepareResult, ProjectAgentRun, ProjectArtifact, ProjectInput, ProjectInputPayload, ProjectReference, ProjectReferenceMetadata, ProjectResearchContext, ProjectResearchRun, WritingBrief, WritingBriefInput } from '../domain/creative';
 import type { WebSession, WorkspaceSession, WorkspaceSummary } from '../domain/workspace';
 import type { AssetFilters, AssetMetadataInput, AssetUpdateInput, ProjectAsset, ProjectAssetLinkInput, WorkspaceAsset } from '../domain/assets';
+import type { ContentDraft, ContentDraftVersion, DraftPatchInput, DraftPreview, DraftPlatform } from '../domain/content-drafts';
 import { sessionStore } from './sessionStore';
 
 const apiBase = import.meta.env.VITE_API_BASE ?? '/api/v1';
@@ -122,6 +123,17 @@ export const webAssets = {
   remove: (assetId: string) => request<{ assetId: string; deletionJobId: string; queueJobId: string; queued: boolean }>(`/assets/${encodeURIComponent(assetId)}`, { method: 'DELETE' }),
   link: (projectId: string, assetId: string, input: ProjectAssetLinkInput) => request<ProjectAsset>(`/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`, { method: 'POST', body: JSON.stringify(input) }),
   unlink: (projectId: string, assetId: string) => request<void>(`/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`, { method: 'DELETE' }),
+};
+
+export const webDrafts = {
+  list: (projectId: string) => request<{ drafts: ContentDraft[] }>(`/creative/projects/${encodeURIComponent(projectId)}/drafts`),
+  upsertWechat: (projectId: string, input: { title: string; body: string }) => request<ContentDraft>(`/creative/projects/${encodeURIComponent(projectId)}/wechat-draft`, { method: 'POST', body: JSON.stringify(input) }),
+  patch: (draftId: string, input: DraftPatchInput) => request<ContentDraft>(`/content-drafts/${encodeURIComponent(draftId)}`, { method: 'PATCH', body: JSON.stringify(input) }),
+  replaceAssets: (draftId: string, input: { revision: number; assets: Array<{ assetId: string; role: 'COVER' | 'BODY' | 'CARD' | 'MAIN' }> }) => request<ContentDraft>(`/content-drafts/${encodeURIComponent(draftId)}/assets`, { method: 'PUT', body: JSON.stringify(input) }),
+  complete: (draftId: string) => request<{ draft: ContentDraft; version: ContentDraftVersion }>(`/content-drafts/${encodeURIComponent(draftId)}/complete`, { method: 'POST', body: '{}' }),
+  derive: (draftId: string, input: { platform: Exclude<DraftPlatform, 'WECHAT'>; sourceDraftVersionId: string }) => request<ContentDraft>(`/content-drafts/${encodeURIComponent(draftId)}/derive`, { method: 'POST', body: JSON.stringify(input) }),
+  versions: (draftId: string) => request<{ versions: ContentDraftVersion[] }>(`/content-drafts/${encodeURIComponent(draftId)}/versions`),
+  preview: (draftId: string) => request<DraftPreview>(`/content-drafts/${encodeURIComponent(draftId)}/preview`),
 };
 
 export const webState = {

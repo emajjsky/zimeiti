@@ -16,6 +16,7 @@ test('迁移建立工作空间隔离的草稿、模板、账号和平台草稿�
   assert.match(migration, /FOREIGN KEY \(workspace_id, project_id\)[\s\S]*REFERENCES content_projects\(workspace_id, project_id\)/);
   assert.match(migration, /UNIQUE \(workspace_id, project_id, platform\)/);
   assert.match(migration, /revision integer NOT NULL DEFAULT 1 CHECK \(revision > 0\)/);
+  assert.match(migration, /source_stale boolean NOT NULL DEFAULT false/);
   assert.match(migration, /CREATE TABLE content_draft_versions/);
   assert.match(migration, /UNIQUE \(workspace_id, draft_id, version_number\)/);
   assert.match(migration, /source_draft_version_id uuid/);

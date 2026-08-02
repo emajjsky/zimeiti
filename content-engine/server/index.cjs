@@ -48,6 +48,8 @@ const { createProjectMaterialStore } = require('./services/projectMaterials.cjs'
 const { createProjectAgentStore, artifactView, runView } = require('./services/project-agent.cjs');
 const { loadContentMasterState } = require('./services/content-master.cjs');
 const { createAssetStore } = require('./services/assets.cjs');
+const { createContentDraftStore } = require('./services/content-drafts.cjs');
+const { registerContentDraftRoutes } = require('./routes/content-drafts.cjs');
 const { detectFileType, safePath, saveUploadedAsset, saveRemoteImageAsset, openAsset, readAssetText, removeAssetFile } = require('./services/assetStorage.cjs');
 const { PROJECT_RESEARCH_ACTION_VERSION, PROJECT_RESEARCH_SCOPE, researchRunView, researchPlanView } = require('./services/project-research.cjs');
 const { PROJECT_RESEARCH_SOURCES_VERSION, researchSourceActions } = require('./services/project-research-sources.cjs');
@@ -229,6 +231,8 @@ function defaultState(name) {
 const workspaceStore = createWorkspaceStore({ query, transaction, defaultState });
 const workspaceAccess = createWorkspaceAccess({ query, authenticate });
 const assetStore = createAssetStore({ query, transaction, removeStoredFile: (storageKey) => removeAssetFile(config.uploadRoot, storageKey) });
+const draftStore = createContentDraftStore({ query, transaction });
+registerContentDraftRoutes(app, { workspaceAccess, draftStore, assetStore });
 
 const authInput = z.object({ email: z.string().email().max(320), password: z.string().min(8).max(200), displayName: z.string().min(1).max(80).optional(), workspaceName: z.string().min(1).max(80).optional() });
 

@@ -39,6 +39,7 @@ export interface ContentDraft {
   visualPlan: Record<string, unknown>;
   layoutTemplateVersionId: string | null;
   sourceDraftVersionId: string | null;
+  sourceStale: boolean;
   currentVersionId: string | null;
   assets: DraftAsset[];
   createdAt: string;
