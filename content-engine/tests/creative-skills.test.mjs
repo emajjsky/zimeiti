@@ -181,13 +181,9 @@ test('Skill 只在文案阶段作为写作策略出现，排版不参与写作�
   assert.doesNotMatch(copy, />排版</);
 });
 
-test('提示词模板按任务和四个图文平台分别配置', () => {
+test('提示词模板把公众号正文作为唯一母稿生成任务', () => {
   const source = fs.readFileSync(new URL('../src/workspaces/settings/PromptTemplateSettings.tsx', import.meta.url), 'utf8');
-  assert.match(source, /CREATIVE_\$\{task\}_\$\{platform\}/);
-  assert.match(source, /公众号图文/);
-  assert.match(source, /小红书图文/);
-  assert.match(source, /知乎回答/);
-  assert.match(source, /微博内容/);
-  assert.match(source, /prompt-platform-tabs/);
-  assert.doesNotMatch(source, /CREATIVE_OUTLINE'|CREATIVE_DRAFT'/);
+  assert.match(source, /WECHAT_COPY_GENERATION/);
+  assert.match(source, /公众号正文/);
+  assert.doesNotMatch(source, /PromptPlatform|小红书图文|知乎回答|微博内容|prompt-platform-tabs/);
 });

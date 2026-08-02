@@ -50,24 +50,12 @@ test('数量修复提示明确总数并要求重写完整数组', () => {
   assert.match(repair, /不要只补缺失项/);
 });
 
-test('微博九张方案使用一张主图加八张后续配图', () => {
-  const prompt = buildVisualPlanningPrompt({
-    project: { title: '机器人行业观察', planning: { title: '机器人行业观察', category: '科技', coreMessage: '解释产品、团队和应用场景' }, versionTitle: '机器人行业观察', versionBody: '正文内容足够完整。' },
-    platform: 'WEIBO', bodyItemCount: 9, styleProfile: { preset: 'FRESH_EDITORIAL', customPrompt: '' }, request: '',
-  });
-  assert.match(prompt.message, /首张角色为 MAIN，其余 8 张角色为 BODY/);
-  assert.match(prompt.message, /"totalImageCount":9/);
-});
-
-test('保存配图时按平台限制图片总数', () => {
+test('母稿配图只接受公众号并限制为十二张', () => {
   assert.doesNotThrow(() => validateVisualPlanImageCount('WECHAT', 12));
-  assert.doesNotThrow(() => validateVisualPlanImageCount('ZHIHU', 12));
-  assert.doesNotThrow(() => validateVisualPlanImageCount('XIAOHONGSHU', 9));
-  assert.doesNotThrow(() => validateVisualPlanImageCount('WEIBO', 9));
   assert.throws(() => validateVisualPlanImageCount('WECHAT', 13), /公众号最多保存 12 张图片/);
-  assert.throws(() => validateVisualPlanImageCount('ZHIHU', 13), /知乎最多保存 12 张图片/);
-  assert.throws(() => validateVisualPlanImageCount('XIAOHONGSHU', 10), /小红书最多保存 9 张图片/);
-  assert.throws(() => validateVisualPlanImageCount('WEIBO', 10), /微博最多保存 9 张图片/);
+  assert.throws(() => validateVisualPlanImageCount('ZHIHU', 1), /不支持的平台/);
+  assert.throws(() => validateVisualPlanImageCount('XIAOHONGSHU', 1), /不支持的平台/);
+  assert.throws(() => validateVisualPlanImageCount('WEIBO', 1), /不支持的平台/);
 });
 
 test('模型方案必须返回平台所需数量和具体内容', () => {

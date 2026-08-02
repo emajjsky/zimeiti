@@ -7,10 +7,12 @@ export type ModelTask =
   | 'SOURCE_VERIFICATION'
   | 'TOPIC_RECOMMENDATION'
   | 'VOICE_CALIBRATION'
-  | 'CONTENT_WRITING'
-  | 'CONTENT_REWRITE'
-  | 'CONTENT_LAYOUT'
-  | 'VISUAL_PLANNING'
+  | 'WECHAT_COPY_GENERATION'
+  | 'WECHAT_VISUAL_PLANNING'
+  | 'WECHAT_TEMPLATE_ANALYSIS'
+  | 'XIAOHONGSHU_ADAPTATION'
+  | 'WEIBO_ADAPTATION'
+  | 'CONTENT_PREFLIGHT_REVIEW'
   | 'TEXT_TO_IMAGE'
   | 'IMAGE_TO_IMAGE'
   | 'SPEECH_SYNTHESIS'
@@ -44,9 +46,6 @@ export interface ModelTaskPolicy {
   provider?: ModelRouteProvider;
   connectionId?: string;
   model?: string;
-  fallbackProvider?: ModelRouteProvider;
-  fallbackConnectionId?: string;
-  fallbackModel?: string;
   updatedAt?: string;
 }
 

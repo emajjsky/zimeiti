@@ -2,36 +2,25 @@ import { FilePenLine, LoaderCircle, RotateCcw, Save } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { webModels, type PromptTemplate, type PromptTemplateScope } from '../../data/webApi';
 
-type PromptTask = 'ANALYSIS' | 'VERIFICATION' | 'OUTLINE' | 'DRAFT' | 'REVISION';
-type PromptPlatform = 'WECHAT' | 'XIAOHONGSHU' | 'ZHIHU' | 'WEIBO';
+type PromptTask = 'ANALYSIS' | 'VERIFICATION' | 'WECHAT_COPY';
 
 const taskTabs: { id: PromptTask; label: string }[] = [
   { id: 'ANALYSIS', label: '热点分析' },
   { id: 'VERIFICATION', label: '事实核验' },
-  { id: 'OUTLINE', label: '生成大纲' },
-  { id: 'DRAFT', label: '生成初稿' },
-  { id: 'REVISION', label: '修改文案' },
-];
-
-const platforms: { id: PromptPlatform; label: string }[] = [
-  { id: 'WECHAT', label: '公众号图文' },
-  { id: 'XIAOHONGSHU', label: '小红书图文' },
-  { id: 'ZHIHU', label: '知乎回答' },
-  { id: 'WEIBO', label: '微博内容' },
+  { id: 'WECHAT_COPY', label: '公众号正文' },
 ];
 
 const analysisVariables = ['{{title}}', '{{summary}}', '{{source}}', '{{publishedAt}}', '{{category}}', '{{keywords}}', '{{primaryTopics}}', '{{accountPositioning}}', '{{targetAudience}}', '{{platforms}}'];
 
-function scopeFor(task: PromptTask, platform: PromptPlatform): PromptTemplateScope {
+function scopeFor(task: PromptTask): PromptTemplateScope {
   if (task === 'ANALYSIS') return 'INTELLIGENCE_ANALYSIS';
   if (task === 'VERIFICATION') return 'SOURCE_VERIFICATION';
-  return `CREATIVE_${task}_${platform}` as PromptTemplateScope;
+  return 'WECHAT_COPY_GENERATION';
 }
 
 export function PromptTemplateSettings() {
   const [task, setTask] = useState<PromptTask>('ANALYSIS');
-  const [platform, setPlatform] = useState<PromptPlatform>('WECHAT');
-  const scope = scopeFor(task, platform);
+  const scope = scopeFor(task);
   const [templates, setTemplates] = useState<Partial<Record<PromptTemplateScope, PromptTemplate>>>({});
   const [drafts, setDrafts] = useState<Partial<Record<PromptTemplateScope, string>>>({});
   const [loadingScope, setLoadingScope] = useState<PromptTemplateScope | null>('INTELLIGENCE_ANALYSIS');
@@ -42,8 +31,7 @@ export function PromptTemplateSettings() {
   const body = drafts[scope] ?? '';
   const dirty = Boolean(template && body !== template.body);
   const taskLabel = taskTabs.find((item) => item.id === task)?.label ?? '';
-  const platformLabel = platforms.find((item) => item.id === platform)?.label ?? '';
-  const editorTitle = ['ANALYSIS', 'VERIFICATION'].includes(task) ? taskLabel : `${taskLabel} · ${platformLabel}`;
+  const editorTitle = taskLabel;
   const variables = useMemo(() => task === 'ANALYSIS' ? analysisVariables : [], [task]);
 
   useEffect(() => {
@@ -66,12 +54,6 @@ export function PromptTemplateSettings() {
   const changeTask = (nextTask: PromptTask) => {
     if (busy !== 'idle') return;
     setTask(nextTask);
-    setNotice(null);
-  };
-
-  const changePlatform = (nextPlatform: PromptPlatform) => {
-    if (busy !== 'idle') return;
-    setPlatform(nextPlatform);
     setNotice(null);
   };
 
@@ -111,9 +93,6 @@ export function PromptTemplateSettings() {
     <nav className="prompt-template-tabs" aria-label="提示词任务">
       {taskTabs.map((item) => <button type="button" key={item.id} className={task === item.id ? 'active' : ''} onClick={() => changeTask(item.id)}>{item.label}</button>)}
     </nav>
-    {!['ANALYSIS', 'VERIFICATION'].includes(task) && <nav className="prompt-platform-tabs" aria-label="目标平台">
-      {platforms.map((item) => <button type="button" key={item.id} className={platform === item.id ? 'active' : ''} onClick={() => changePlatform(item.id)}>{item.label}</button>)}
-    </nav>}
     <header className="prompt-template-head"><div><FilePenLine size={19}/><b>{editorTitle}</b></div>{template && <small>V{template.version} · {template.source === 'DEFAULT' ? '默认' : '自定义'}{dirty ? ' · 未保存' : ''}</small>}</header>
     {notice?.scope === scope && <p className={`model-notice ${notice.type}`}>{notice.text}</p>}
     {loadingScope === scope ? <div className="prompt-template-loading"><LoaderCircle size={19}/><span>读取模板</span></div> : <>

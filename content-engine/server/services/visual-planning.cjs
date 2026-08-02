@@ -1,16 +1,14 @@
 const { z } = require('zod');
 
-const VISUAL_PLANNING_SCOPE = 'VISUAL_PLANNING';
-const VISUAL_PLANNING_OPERATION = 'VISUAL_PLANNING';
+const VISUAL_PLANNING_SCOPE = 'WECHAT_VISUAL_PLANNING';
+const VISUAL_PLANNING_OPERATION = 'WECHAT_VISUAL_PLANNING';
+const VISUAL_PLANNING_PROMPT_VERSION = '1.0.0';
 
 const platformNames = {
   WECHAT: '公众号',
-  XIAOHONGSHU: '小红书',
-  ZHIHU: '知乎',
-  WEIBO: '微博',
 };
 
-const visualPlanImageLimits = Object.freeze({ WECHAT: 12, XIAOHONGSHU: 9, ZHIHU: 12, WEIBO: 9 });
+const visualPlanImageLimits = Object.freeze({ WECHAT: 12 });
 
 function validateVisualPlanImageCount(platform, imageCount) {
   const limit = visualPlanImageLimits[platform];
@@ -80,23 +78,21 @@ function stripCodeFence(content) {
 }
 
 function expectedRoles(platform, bodyItemCount) {
-  if (platform === 'WEIBO') return bodyItemCount === 0 ? [] : ['MAIN', ...Array.from({ length: Math.max(0, bodyItemCount - 1) }, () => 'BODY')];
-  return [platform === 'XIAOHONGSHU' ? 'COVER' : 'COVER', ...Array.from({ length: bodyItemCount }, () => platform === 'XIAOHONGSHU' ? 'CARD' : 'BODY')];
+  validateVisualPlanImageCount(platform, bodyItemCount + 1);
+  return ['COVER', ...Array.from({ length: bodyItemCount }, () => 'BODY')];
 }
 
 function quantityInstruction(platform, bodyItemCount, singleItem = false) {
   if (singleItem) return { bodyImageCount: null, totalImageCount: 1, exactRoleSequence: ['当前图片角色'], instruction: 'items 数组必须且只能包含 1 项。' };
   const roles = expectedRoles(platform, bodyItemCount);
-  const bodyName = platform === 'XIAOHONGSHU' ? '内容页' : platform === 'WEIBO' ? '配图' : '正文插图';
-  const coverCount = platform === 'WEIBO' ? 0 : 1;
+  const bodyName = '正文插图';
+  const coverCount = 1;
   return {
     coverImageCount: coverCount,
     bodyImageCount: bodyItemCount,
     totalImageCount: roles.length,
     exactRoleSequence: roles,
-    instruction: platform === 'WEIBO'
-      ? `items 数组必须恰好包含 ${roles.length} 项：首张角色为 MAIN，其余 ${Math.max(0, roles.length - 1)} 张角色为 BODY。`
-      : `items 数组必须恰好包含 ${roles.length} 项：封面 ${coverCount} 张 + ${bodyName} ${bodyItemCount} 张。bodyItemCount 不是总数。`,
+    instruction: `items 数组必须恰好包含 ${roles.length} 项：封面 ${coverCount} 张 + ${bodyName} ${bodyItemCount} 张。bodyItemCount 不是总数。`,
   };
 }
 
@@ -211,6 +207,7 @@ function mergePlannedItems({ platform, plannedItems, currentPlan = [], currentIt
 module.exports = {
   VISUAL_PLANNING_SCOPE,
   VISUAL_PLANNING_OPERATION,
+  VISUAL_PLANNING_PROMPT_VERSION,
   visualPlanSchema,
   buildVisualPlanningPrompt,
   buildVisualPlanningRepairPrompt,

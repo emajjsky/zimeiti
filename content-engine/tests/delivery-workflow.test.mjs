@@ -52,13 +52,14 @@ test('创作工作台不再把配图、排版和审核渲染为占位页面', ()
   assert.match(review, /下载 .*发布稿/);
 });
 
-test('服务端拒绝为没有正文的渠道保存配图方案', () => {
+test('服务端拒绝为没有公众号正文的草稿保存配图方案', () => {
   const api = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
   const start = api.indexOf("app.put('/api/v1/creative/projects/:projectId/visual'");
   const end = api.indexOf("app.post('/api/v1/creative/projects/:projectId/visual/complete'", start);
   const route = api.slice(start, end);
-  assert.match(route, /existingVersion\.body/);
-  assert.match(route, /请先完成.*正文/);
+  assert.match(route, /draft\.platform !== 'WECHAT'/);
+  assert.match(route, /draft\.body/);
+  assert.match(route, /请先完成公众号正文/);
 });
 
 test('后半段制作状态按渠道隔离，公众号无需等待其他平台', () => {
@@ -98,7 +99,7 @@ test('视觉导演保存完整策划字段并支持参考图真实图生图', ()
   assert.match(client, /planVisual:/);
   assert.match(api, /VISUAL_PLANNING_SCOPE/);
   assert.doesNotMatch(api, /VISUAL_PLANNING_FALLBACK_SCOPE/);
-  assert.match(api, /'VISUAL_PLANNING'/);
+  assert.match(api, /'WECHAT_VISUAL_PLANNING'/);
   assert.match(api, /bodyItemCount:\s*z\.number\(\)\.int\(\)\.min\(0\)\.max\(11\)/);
   assert.match(api, /currentPlan:\s*z\.array\(z\.record[\s\S]*?\.max\(12\)/);
   assert.match(api, /plan:\s*z\.array\(visualPlanItemInput\)\.max\(12\)/);
@@ -109,11 +110,11 @@ test('配图策划使用独立可见任务策略，不静默回退到文案模�
   const service = fs.readFileSync(new URL('../server/services/visual-planning.cjs', import.meta.url), 'utf8');
   const client = fs.readFileSync(new URL('../src/main.tsx', import.meta.url), 'utf8');
   const workspace = fs.readFileSync(new URL('../src/workspaces/create/VisualWorkspace.tsx', import.meta.url), 'utf8');
-  const migration = fs.readFileSync(new URL('../server/migrations/024_visible_visual_planning_policy.sql', import.meta.url), 'utf8');
-  assert.match(service, /VISUAL_PLANNING_SCOPE = 'VISUAL_PLANNING'/);
+  const migration = fs.readFileSync(new URL('../server/migrations/028_content_draft_foundation.sql', import.meta.url), 'utf8');
+  assert.match(service, /VISUAL_PLANNING_SCOPE = 'WECHAT_VISUAL_PLANNING'/);
   assert.doesNotMatch(service, /CONTENT_WRITING/);
   assert.match(api, /const scope = VISUAL_PLANNING_SCOPE;[\s\S]*?textTaskRoute\(workspace\.id, scope, '配图策划'\)/);
-  assert.match(client, /VISUAL_PLANNING: '配图策划'/);
-  assert.match(workspace, /实际策略：配图策划/);
-  assert.match(migration, /SELECT workspace_id, 'VISUAL_PLANNING'/);
+  assert.match(client, /WECHAT_VISUAL_PLANNING: '公众号配图策划'/);
+  assert.match(workspace, /实际策略：公众号配图策划/);
+  assert.match(migration, /SELECT workspace_id, 'WECHAT_VISUAL_PLANNING'/);
 });

@@ -99,6 +99,8 @@
 
 ### Task 1: Lock The New Domain Contract
 
+**Status (2026-08-02): Completed and verified in `a04e0bf`.**
+
 **Files:**
 - Create: `content-engine/src/domain/content-drafts.ts`
 - Create: `content-engine/src/domain/draft-workflow.mjs`
@@ -160,6 +162,8 @@ git commit -m "feat: define master draft workflow"
 ```
 
 ### Task 2: Add Safe Archive And Migration Contracts
+
+**Status (2026-08-02): Completed and verified in `c676df0`; the production database has not applied migration 028.**
 
 **Files:**
 - Create: `content-engine/scripts/export-zhihu-archive.cjs`
@@ -272,6 +276,8 @@ git commit -m "feat: add safe content draft migration"
 
 ### Task 3: Implement Draft Store And Resource APIs
 
+**Status (2026-08-02): Completed and verified in `e12f228`.**
+
 **Files:**
 - Create: `content-engine/server/services/content-drafts.cjs`
 - Create: `content-engine/server/routes/content-drafts.cjs`
@@ -348,6 +354,8 @@ git commit -m "feat: add content draft api"
 ```
 
 ### Task 4: Persist WeChat Copy And Visuals Into The Draft Domain
+
+**Status (2026-08-02): Completed and verified locally; migration 028 was rehearsed only on a disposable database copy.**
 
 **Files:**
 - Modify: `content-engine/server/services/project-copy-action.cjs`
@@ -1056,4 +1064,3 @@ git commit -m "test: verify master draft workflow"
 | Zhihu removal with archive | 2, 13, 14 | archive manifest + migration verifier |
 | No Review or old delivery runtime | 7, 13 | source scan + E2E |
 | No data loss or broken assets | 2, 14 | backup, restore rehearsal, SHA-256 reconciliation |
-

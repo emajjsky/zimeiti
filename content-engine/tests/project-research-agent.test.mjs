@@ -153,7 +153,7 @@ test('研究计划先准备确认卡，用户确认后才入队', () => {
 test('统一 Agent 研究准备接口接受空资料并继续冻结空快照', () => {
   const server = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
   const start = server.indexOf("/creative/projects/:projectId/agent/prepare");
-  const end = server.indexOf("if (!input.platform)", start);
+  const end = server.indexOf("if (input.platform !== 'WECHAT')", start);
   const researchPrepare = server.slice(start, end);
   assert.ok(start > -1 && end > start);
   assert.doesNotMatch(researchPrepare, /至少选择一条项目资料/);

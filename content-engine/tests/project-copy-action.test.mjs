@@ -374,23 +374,19 @@ test('017 注册八个需要确认的受控文案动作', () => {
   assert.match(migration, /CONTENT_REWRITE/);
 });
 
-test('四平台修订提示词在设置页可见并接入服务端模板仓储', () => {
+test('公众号正文生成提示词以独立 Scope 接入模板仓储', () => {
   const server = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
   const api = fs.readFileSync(new URL('../src/data/webApi.ts', import.meta.url), 'utf8');
   const settings = fs.readFileSync(new URL('../src/workspaces/settings/PromptTemplateSettings.tsx', import.meta.url), 'utf8');
-  assert.match(server, /REVISION_TEMPLATE_SCOPES\.WECHAT/);
-  assert.match(server, /REVISION_TEMPLATE_SCOPES\.XIAOHONGSHU/);
-  assert.match(server, /REVISION_TEMPLATE_SCOPES\.ZHIHU/);
-  assert.match(server, /REVISION_TEMPLATE_SCOPES\.WEIBO/);
-  assert.match(api, /CREATIVE_REVISION_WECHAT/);
-  assert.match(api, /CREATIVE_REVISION_WEIBO/);
-  assert.match(settings, /id: 'REVISION', label: '修改文案'/);
+  assert.match(server, /WECHAT_COPY_GENERATION_SCOPE/);
+  assert.match(api, /WECHAT_COPY_GENERATION/);
+  assert.match(settings, /WECHAT_COPY_GENERATION/);
+  assert.doesNotMatch(settings, /PromptPlatform|ZHIHU|知乎/);
 });
 
-test('不同文案动作冻结对应的大纲、初稿或修订模板', () => {
-  assert.equal(copyPromptTemplateScope('GENERATE_OUTLINE', 'WECHAT'), 'CREATIVE_OUTLINE_WECHAT');
-  assert.equal(copyPromptTemplateScope('GENERATE_DRAFT', 'ZHIHU'), 'CREATIVE_DRAFT_ZHIHU');
-  assert.equal(copyPromptTemplateScope('POLISH_EXISTING_DRAFT', 'WEIBO'), 'CREATIVE_REVISION_WEIBO');
+test('公众号正文动作统一冻结独立提示词 Scope', () => {
+  for (const action of COPY_ACTIONS) assert.equal(copyPromptTemplateScope(action, 'WECHAT'), 'WECHAT_COPY_GENERATION');
+  assert.throws(() => copyPromptTemplateScope('GENERATE_DRAFT', 'WEIBO'), /公众号/);
 });
 
 test('Project Agent prepare 不入队，confirm 才创建 Worker Job', () => {
@@ -403,28 +399,20 @@ test('Project Agent prepare 不入队，confirm 才创建 Worker Job', () => {
   assert.match(confirm, /await enqueue/);
 });
 
-test('Project Agent Worker 首次生成直接落正式正文，主动修改才保存候选', () => {
+test('Project Agent Worker 只把正文写入公众号工作草稿', () => {
   const worker = fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8');
   const execute = routeSlice(worker, 'async function generateProjectCopyAction', 'async function generateAgentPlan');
   assert.match(worker, /PROJECT_COPY_ACTION/);
-  assert.match(execute, /project_artifacts/);
-  assert.match(execute, /platform_content_versions/);
-  assert.match(execute, /copyActionPersistenceMode\(snapshot\.action\)/);
-  assert.match(execute, /status:\s*persistenceMode/);
-  assert.match(execute, /updateCreativeProjects/);
-  assert.match(execute, /applyAcceptedCopyToState/);
-  assert.match(execute, /accepted_at = now\(\)/);
+  assert.match(execute, /draftStore\.upsertWechat/);
+  assert.doesNotMatch(execute, /platform_content_versions|updateCreativeProjects|applyAcceptedCopyToState/);
+  assert.doesNotMatch(execute, /type:\s*'PLATFORM_COPY'/);
   assert.doesNotMatch(execute, /qualityReview/);
 });
 
-test('首次正文根据项目母版历史递增版本号，不重复创建版本一', () => {
+test('正文生成不再维护第二套内容母版版本', () => {
   const worker = fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8');
   const execute = routeSlice(worker, 'async function generateProjectCopyAction', 'async function generateAgentPlan');
-  assert.match(worker, /loadContentMasterState/);
-  assert.match(execute, /loadContentMasterState\(client, workspaceId, snapshot\.projectId\)/);
-  assert.match(execute, /masterState\.nextVersion/);
-  assert.match(execute, /masterState\.parentVersionId/);
-  assert.doesNotMatch(execute, /content_master_versions[\s\S]{0,250}VALUES \(\$1, \$2, \$3, 1,/);
+  assert.doesNotMatch(execute, /loadContentMasterState|content_master_versions|CONTENT_MASTER/);
 });
 
 test('项目母版状态在事务锁内返回已采用版本和下一版本', async () => {
@@ -453,22 +441,21 @@ test('采用修改候选时根据项目母版历史递增版本号', () => {
   assert.doesNotMatch(accept, /content_master_versions[\s\S]{0,250}VALUES \(\$1, \$2, \$3, 1,/);
 });
 
-test('首次正文没有独立研究 Scope 时复用正文模型准备上下文', () => {
+test('首次正文不会把正文模型静默当作研究或核验模型', () => {
   const server = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
   const prepare = routeSlice(server, "/agent/prepare", "/agent-runs/:id/confirm");
-  assert.match(prepare, /const primaryRoute = \{ provider: route\.provider, connectionId: route\.connectionId \?\? null, model: route\.model \}/);
-  assert.match(prepare, /researchPolicy\.rowCount \? \{ provider: 'BAILIAN_CLI',[^\n]+ \} : primaryRoute/);
-  assert.match(prepare, /verificationPolicy\.rowCount \? \{ provider: 'BAILIAN_CLI',[^\n]+ \} : primaryRoute/);
+  assert.doesNotMatch(prepare, /:\s*primaryRoute/);
+  assert.match(prepare, /researchPolicy\.rowCount\s*\?\s*\{/);
+  assert.match(prepare, /verificationPolicy\.rowCount\s*\?\s*\{/);
 });
 
-test('自动研究失败时降级使用已有上下文继续写正文', () => {
+test('自动研究或核验失败时明确终止正文任务', () => {
   const worker = fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8');
   const prepareStart = worker.indexOf('async function prepareCopyResearchContext');
   const prepareEnd = worker.indexOf('async function generateProjectCopyAction', prepareStart);
   const prepare = worker.slice(prepareStart, prepareEnd);
-  assert.match(prepare, /catch \(error\)/);
-  assert.match(prepare, /automatic research failed/);
-  assert.match(prepare, /researchContext:\s*snapshot\.researchContext/);
+  assert.doesNotMatch(prepare, /automatic research failed|automatic verification failed|continuing with saved context/);
+  assert.doesNotMatch(prepare, /console\.warn/);
 });
 
 test('采用候选时更新正式版本并合并待核验事实', () => {

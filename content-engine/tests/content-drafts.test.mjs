@@ -59,6 +59,28 @@ test('旧 revision 不能覆盖新页面内容', async () => {
   assert.deepEqual(calls[0].values.slice(0, 3), ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', '11111111-1111-4111-8111-111111111111', 2]);
 });
 
+test('Worker 可把公众号正文写入当前事务而不调用根连接', async () => {
+  const draft = draftRow({ revision: 4, title: '新标题', body: '新正文' });
+  const clientCalls = [];
+  const client = {
+    async query(sql, values) {
+      clientCalls.push({ sql, values });
+      return { rows: [draft], rowCount: 1 };
+    },
+  };
+  const store = createContentDraftStore({
+    query: async () => { throw new Error('传入事务 client 后不应调用根连接'); },
+    transaction: async () => { throw new Error('传入事务 client 后不应开启嵌套事务'); },
+  });
+
+  const saved = await store.upsertWechat(draft.workspace_id, draft.project_id, { title: draft.title, body: draft.body }, client);
+
+  assert.equal(saved.title, '新标题');
+  assert.equal(saved.body, '新正文');
+  assert.equal(clientCalls.length, 1);
+  assert.match(clientCalls[0].sql, /INSERT INTO content_drafts/);
+});
+
 test('派生草稿必须固定引用公众号当前不可变版本', async () => {
   const store = createContentDraftStore({ query: async () => { throw new Error('空来源不应访问数据库'); }, transaction: async () => {} });
   await assert.rejects(

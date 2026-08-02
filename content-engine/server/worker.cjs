@@ -32,15 +32,15 @@ const {
 } = require('./services/source-verification.cjs');
 const { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, workflowSourceActionsForProject, projectOriginalSource, sourceMatchesProject, buildResearchResult } = require('./services/simplified-research.cjs');
 const { createProjectAgentStore } = require('./services/project-agent.cjs');
-const { updateCreativeProjects } = require('./services/project-planning.cjs');
-const { loadContentMasterState } = require('./services/content-master.cjs');
-const { applyAcceptedCopyToState, buildCopyPrompt, buildFinishedCopyPrompt, buildWritingPacket, copyActionPersistenceMode, parseCopyOutput, parseFinishedCopyBody } = require('./services/project-copy-action.cjs');
+const { createContentDraftStore } = require('./services/content-drafts.cjs');
+const { WECHAT_COPY_GENERATION_SCOPE, buildCopyPrompt, buildFinishedCopyPrompt, buildWritingPacket, parseCopyOutput, parseFinishedCopyBody } = require('./services/project-copy-action.cjs');
 const { createStorageDeletionService } = require('./services/storageDeletion.cjs');
 const { enqueue } = require('./queue.cjs');
 
 const connection = new IORedis(config.redisUrl, { maxRetriesPerRequest: null });
 const textRunner = createTextModelRunner();
 const projectAgentStore = createProjectAgentStore({ query, transaction });
+const draftStore = createContentDraftStore({ query, transaction });
 const storageDeletion = createStorageDeletionService({ query, transaction, uploadRoot: config.uploadRoot });
 
 async function processJob(queueJob) {
@@ -750,33 +750,23 @@ async function prepareCopyResearchContext(workspaceId, snapshot, input) {
     materials: snapshot.materials ?? [],
     stage: 'COPY',
   };
-  try {
-    const planned = await runWorkflowResearchPlan(workspaceId, researchSnapshot, input.researchRoute);
-    const sources = await captureWorkflowSources(workspaceId, planned.output, snapshot.project);
-    let verification = null;
-    try {
-      verification = await verifyWorkflowClaims(workspaceId, planned.output, sources, input.verificationRoute, input.verificationTemplate);
-    } catch (error) {
-      console.warn(`[PROJECT_COPY] automatic verification failed: ${error instanceof Error ? error.message : '核验失败'}`);
-    }
-    const result = buildResearchResult({
-      plan: planned.output,
-      sources,
-      verification: verification?.output ?? null,
-      materials: snapshot.materials ?? [],
-      verificationStatus: verification?.recovered ? 'PARTIAL' : verification ? 'COMPLETE' : 'FAILED',
-      verificationMessage: verification?.warning ?? '',
-    });
-    return {
-      researchContext: copyResearchContext(result),
-      inputTokens: planned.inputTokens + (verification?.inputTokens ?? 0),
-      outputTokens: planned.outputTokens + (verification?.outputTokens ?? 0),
-      sourceCount: result.sources.length,
-    };
-  } catch (error) {
-    console.warn(`[PROJECT_COPY] automatic research failed, continuing with saved context: ${error instanceof Error ? error.message : '研究失败'}`);
-    return { researchContext: snapshot.researchContext, inputTokens: 0, outputTokens: 0, sourceCount: 0 };
-  }
+  const planned = await runWorkflowResearchPlan(workspaceId, researchSnapshot, input.researchRoute);
+  const sources = await captureWorkflowSources(workspaceId, planned.output, snapshot.project);
+  const verification = await verifyWorkflowClaims(workspaceId, planned.output, sources, input.verificationRoute, input.verificationTemplate);
+  const result = buildResearchResult({
+    plan: planned.output,
+    sources,
+    verification: verification?.output ?? null,
+    materials: snapshot.materials ?? [],
+    verificationStatus: verification?.recovered ? 'PARTIAL' : verification ? 'COMPLETE' : 'NOT_REQUESTED',
+    verificationMessage: verification?.warning ?? '',
+  });
+  return {
+    researchContext: copyResearchContext(result),
+    inputTokens: planned.inputTokens + (verification?.inputTokens ?? 0),
+    outputTokens: planned.outputTokens + (verification?.outputTokens ?? 0),
+    sourceCount: result.sources.length,
+  };
 }
 
 async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
@@ -793,10 +783,23 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
     const run = runResult.rows[0];
     const snapshot = run.source_snapshot_json;
     const input = run.input_json;
+    if (snapshot.platform !== 'WECHAT' || snapshot.policy?.scope !== WECHAT_COPY_GENERATION_SCOPE) throw new Error('正文任务不是有效的公众号母稿任务。');
     route = input.route;
+    const policy = {
+      scope: WECHAT_COPY_GENERATION_SCOPE,
+      provider: route.provider,
+      connectionId: route.connectionId ?? null,
+      model: route.model,
+      promptVersion: input.template.version,
+    };
+    if (policy.provider !== snapshot.policy.provider
+      || policy.connectionId !== (snapshot.policy.connectionId ?? null)
+      || policy.model !== snapshot.policy.model
+      || String(policy.promptVersion) !== String(snapshot.policy.promptVersion)) {
+      throw new Error('正文任务策略快照与执行参数不一致。');
+    }
     const isOutlineAction = snapshot.action === 'GENERATE_OUTLINE';
     const isInitialDraft = snapshot.action === 'GENERATE_DRAFT';
-    const persistenceMode = copyActionPersistenceMode(snapshot.action);
     const prepared = isInitialDraft
       ? await prepareCopyResearchContext(workspaceId, snapshot, input)
       : { researchContext: snapshot.researchContext, inputTokens: 0, outputTokens: 0, sourceCount: 0 };
@@ -817,122 +820,51 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
     const saved = await transaction(async (client) => {
       const activeRun = await client.query("SELECT id FROM generation_runs WHERE id = $1 AND workspace_id = $2 AND status = 'RUNNING' FOR UPDATE", [runId, workspaceId]);
       if (!activeRun.rowCount) throw new Error('文案任务已取消或中断。');
-      const isOutline = isOutlineAction;
-      const masterState = isInitialDraft ? await loadContentMasterState(client, workspaceId, snapshot.projectId) : null;
-      const artifact = await projectAgentStore.createArtifact(client, {
+      const artifact = isOutlineAction ? await projectAgentStore.createArtifact(client, {
         workspaceId,
         projectId: snapshot.projectId,
-        type: isOutline ? 'OUTLINE' : 'PLATFORM_COPY',
+        type: 'OUTLINE',
         stage: 'COPY',
-        platform: snapshot.platform,
-        status: persistenceMode,
+        platform: 'WECHAT',
+        status: 'CANDIDATE',
         actionRunId: runId,
-        title: isOutline ? output.titleOptions[0] : output.title,
+        title: output.titleOptions[0],
         metadata: { action: snapshot.action, payload: output },
-      });
-      let versionId = null;
-      let acceptedProject = null;
-      if (!isOutline) {
-        const versionResult = await client.query(`SELECT
-            COALESCE(MAX(v.version_number), 0) + 1 AS next_version,
-            (ARRAY_AGG(v.id ORDER BY v.version_number DESC) FILTER (WHERE a.status = 'ACCEPTED'))[1] AS parent_version_id,
-            (ARRAY_AGG(v.content_master_version_id ORDER BY v.version_number DESC) FILTER (WHERE a.status = 'ACCEPTED'))[1] AS master_version_id
-          FROM platform_content_versions v
-          JOIN project_artifacts a ON a.id = v.artifact_id
-          WHERE v.workspace_id = $1 AND v.project_id = $2 AND v.platform = $3`, [workspaceId, snapshot.projectId, snapshot.platform]);
-        const version = versionResult.rows[0];
-        let masterVersionId = version.master_version_id ?? masterState?.acceptedMasterId ?? null;
-        if (isInitialDraft && !masterVersionId) {
-          const masterArtifact = await projectAgentStore.createArtifact(client, {
-            workspaceId,
-            projectId: snapshot.projectId,
-            type: 'CONTENT_MASTER',
-            stage: 'COPY',
-            status: 'ACCEPTED',
-            actionRunId: runId,
-            title: output.title,
-          });
-          await client.query('UPDATE project_artifacts SET accepted_at = now(), updated_at = now() WHERE id = $1 AND workspace_id = $2', [masterArtifact.id, workspaceId]);
-          const materialRefs = writingPacket.authorMaterials.map((material) => material.id);
-          const createdMaster = await client.query(`INSERT INTO content_master_versions
-            (workspace_id, project_id, artifact_id, version_number, thesis, facts_to_verify_json, material_refs_json, parent_version_id)
-            VALUES ($1, $2, $3, $4, $5, '[]'::jsonb, $6, $7) RETURNING id`, [
-            workspaceId,
-            snapshot.projectId,
-            masterArtifact.id,
-            masterState.nextVersion,
-            writingPacket.coreMessage || output.title,
-            JSON.stringify(materialRefs),
-            masterState.parentVersionId,
-          ]);
-          masterVersionId = createdMaster.rows[0].id;
-        }
-        const inserted = await client.query(`INSERT INTO platform_content_versions
-          (workspace_id, project_id, platform, artifact_id, content_master_version_id, parent_version_id,
-           version_number, title, body, facts_to_verify_json, change_summary)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`, [
-          workspaceId,
-          snapshot.projectId,
-          snapshot.platform,
-          artifact.id,
-          masterVersionId,
-          version.parent_version_id ?? null,
-          Number(version.next_version),
-          output.title,
-          output.body,
-          JSON.stringify(output.factsToVerify),
-          output.changeSummary,
-        ]);
-        versionId = inserted.rows[0].id;
-        if (isInitialDraft) {
-          await client.query(`UPDATE project_artifacts SET status = 'REJECTED', updated_at = now()
-            WHERE workspace_id = $1 AND project_id = $2 AND platform = $3 AND artifact_type = 'PLATFORM_COPY'
-              AND status = 'ACCEPTED' AND id <> $4`, [workspaceId, snapshot.projectId, snapshot.platform, artifact.id]);
-          await client.query('UPDATE project_artifacts SET accepted_at = now(), updated_at = now() WHERE id = $1 AND workspace_id = $2', [artifact.id, workspaceId]);
-          const updatedAt = new Date().toISOString();
-          await updateCreativeProjects(client, workspaceId, (state) => {
-            const applied = applyAcceptedCopyToState(state, {
-              projectId: snapshot.projectId,
-              platform: snapshot.platform,
-              title: output.title,
-              body: output.body,
-              factsToVerify: [],
-              updatedAt,
-            });
-            acceptedProject = applied.project;
-            return applied.state;
-          }, updatedAt);
-        }
-      }
+      }) : null;
+      const draft = isOutlineAction ? null : await draftStore.upsertWechat(workspaceId, snapshot.projectId, {
+        title: output.title,
+        body: output.body,
+      }, client);
       const message = await client.query(`INSERT INTO project_agent_messages
         (workspace_id, project_id, action_run_id, role, content, stage, message_type, artifact_refs_json, metadata_json)
         VALUES ($1, $2, $3, 'ASSISTANT', $4, 'COPY', 'ARTIFACT', $5, $6) RETURNING id`, [
         workspaceId,
         snapshot.projectId,
         runId,
-        isOutline ? output.summary : isInitialDraft ? '正文已生成并自动保存。' : output.changeSummary,
-        JSON.stringify([artifact.id]),
-        JSON.stringify({ platform: snapshot.platform, action: snapshot.action, model: route.model, status: persistenceMode }),
+        isOutlineAction ? output.summary : isInitialDraft ? '正文已生成并自动保存。' : output.changeSummary,
+        JSON.stringify(artifact ? [artifact.id] : []),
+        JSON.stringify({ platform: 'WECHAT', action: snapshot.action, policy, draftId: draft?.id ?? null }),
       ]);
-      await client.query('UPDATE project_artifacts SET created_by_message_id = $1 WHERE id = $2 AND workspace_id = $3', [message.rows[0].id, artifact.id, workspaceId]);
-      if (isInitialDraft) {
+      if (artifact) await client.query('UPDATE project_artifacts SET created_by_message_id = $1 WHERE id = $2 AND workspace_id = $3', [message.rows[0].id, artifact.id, workspaceId]);
+      if (!isOutlineAction) {
         await projectAgentStore.upsertStageSummary(client, {
           workspaceId,
           projectId: snapshot.projectId,
           stage: 'COPY',
-          platform: snapshot.platform,
-          summary: '正文已生成并自动保存。',
+          platform: 'WECHAT',
+          summary: isInitialDraft ? '正文已生成并自动保存。' : output.changeSummary,
           throughMessageId: message.rows[0].id,
         });
       }
       await client.query("UPDATE generation_runs SET status = 'SUCCEEDED', output_json = $2, usage_json = $3, completed_at = now() WHERE id = $1", [runId, JSON.stringify(output), JSON.stringify({ inputTokens, outputTokens, automaticResearchSources: prepared.sourceCount })]);
-      await client.query("UPDATE jobs SET status = 'SUCCEEDED', result_json = $2, completed_at = now() WHERE id = $1", [jobId, JSON.stringify({ artifactId: artifact.id, versionId, project: acceptedProject })]);
+      const result = { artifactId: artifact?.id ?? null, draftId: draft?.id ?? null };
+      await client.query("UPDATE jobs SET status = 'SUCCEEDED', result_json = $2, completed_at = now() WHERE id = $1", [jobId, JSON.stringify(result)]);
       await client.query(`INSERT INTO api_usage_logs
         (workspace_id, job_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens)
-        VALUES ($1, $2, $3, $4, 'PROJECT_COPY', 'SUCCESS', $5, $6, $7)`, [
-        workspaceId, jobId, route.provider, route.model, Date.now() - startedAt, inputTokens ?? null, outputTokens ?? null,
+        VALUES ($1, $2, $3, $4, $5, 'SUCCESS', $6, $7, $8)`, [
+        workspaceId, jobId, route.provider, route.model, WECHAT_COPY_GENERATION_SCOPE, Date.now() - startedAt, inputTokens ?? null, outputTokens ?? null,
       ]);
-      return { artifactId: artifact.id, versionId, project: acceptedProject };
+      return result;
     });
     return saved;
   } catch (error) {
@@ -941,8 +873,8 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
       await client.query("UPDATE generation_runs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1 AND workspace_id = $3", [runId, message.slice(0, 2_000), workspaceId]);
       await client.query(`INSERT INTO api_usage_logs
         (workspace_id, job_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens, error)
-        VALUES ($1, $2, $3, $4, 'PROJECT_COPY', 'FAILED', $5, $6, $7, $8)`, [
-        workspaceId, jobId, route?.provider ?? 'UNKNOWN', route?.model ?? null, Date.now() - startedAt,
+        VALUES ($1, $2, $3, $4, $5, 'FAILED', $6, $7, $8, $9)`, [
+        workspaceId, jobId, route?.provider ?? 'UNKNOWN', route?.model ?? null, WECHAT_COPY_GENERATION_SCOPE, Date.now() - startedAt,
         inputTokens ?? null, outputTokens ?? null, message.slice(0, 2_000),
       ]);
     });

@@ -27,6 +27,7 @@ const { createTextModelRunner } = require('./services/text-model.cjs');
 const {
   VISUAL_PLANNING_SCOPE,
   VISUAL_PLANNING_OPERATION,
+  VISUAL_PLANNING_PROMPT_VERSION,
   buildVisualPlanningPrompt,
   buildVisualPlanningRepairPrompt,
   parseVisualPlanningContent,
@@ -59,6 +60,7 @@ const { OUTLINE_ACTION_VERSION, OUTLINE_SCOPE, OUTLINE_TEMPLATE_SCOPES, outlineT
 const { DRAFT_ACTION_VERSION, DRAFT_SCOPE, DRAFT_TEMPLATE_SCOPES, draftTemplateScope, validateDraftTemplate, defaultDraftTemplate, draftCandidateView } = require('./services/creative-draft.cjs');
 const {
   COPY_ACTIONS,
+  WECHAT_COPY_GENERATION_SCOPE,
   REVISION_TEMPLATE_SCOPES,
   applyAcceptedCopyToState,
   copyActionScope,
@@ -72,7 +74,13 @@ const {
 
 const app = Fastify({ logger: true, bodyLimit: 5 * 1024 * 1024 });
 const credentials = new Set(['TAVILY', 'BAILIAN']);
-const modelTasks = ['INTELLIGENCE_ANALYSIS', 'SOURCE_VERIFICATION', 'TOPIC_RECOMMENDATION', 'VOICE_CALIBRATION', 'CONTENT_WRITING', 'CONTENT_REWRITE', 'CONTENT_LAYOUT', 'VISUAL_PLANNING', 'TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE', 'SPEECH_SYNTHESIS', 'SPEECH_RECOGNITION', 'TEXT_TO_VIDEO', 'IMAGE_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO', 'REFERENCE_TO_VIDEO', 'VIDEO_EDIT'];
+const modelTasks = [
+  'INTELLIGENCE_ANALYSIS', 'SOURCE_VERIFICATION', 'TOPIC_RECOMMENDATION', 'VOICE_CALIBRATION',
+  'WECHAT_COPY_GENERATION', 'WECHAT_VISUAL_PLANNING', 'WECHAT_TEMPLATE_ANALYSIS',
+  'XIAOHONGSHU_ADAPTATION', 'WEIBO_ADAPTATION', 'CONTENT_PREFLIGHT_REVIEW',
+  'TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE', 'SPEECH_SYNTHESIS', 'SPEECH_RECOGNITION',
+  'TEXT_TO_VIDEO', 'IMAGE_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO', 'REFERENCE_TO_VIDEO', 'VIDEO_EDIT',
+];
 const externalProviders = new Set(['DASHSCOPE', 'SILICONFLOW', 'VOLCENGINE_ARK', 'KIMI', 'ZHIPU', 'OPENAI', 'OPENAI_COMPATIBLE']);
 const creativePlatform = z.enum(['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO']);
 const analysisPlatform = z.enum(['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO', 'VIDEO_CHANNEL']);
@@ -92,7 +100,7 @@ const projectPlanningInput = z.object({
   constraints: z.string().max(8_000),
 });
 const visualGenerationInput = z.object({
-  platform: creativePlatform,
+  platform: z.literal('WECHAT'),
   prompt: z.string().trim().min(4).max(8_000),
   size: z.enum(['1:1', '3:4', '4:3', '9:16', '16:9']).default('3:4'),
   assetIds: z.array(z.string().uuid()).max(3).default([]),
@@ -126,7 +134,7 @@ const visualPlanItemInput = z.object({
   assetId: z.string().uuid().nullable(),
 });
 const visualPlanningInput = z.object({
-  platform: creativePlatform,
+  platform: z.literal('WECHAT'),
   bodyItemCount: z.number().int().min(0).max(11),
   styleProfile: z.object({
     preset: visualStylePreset,
@@ -147,6 +155,7 @@ const createProjectInput = z.object({
 });
 const templateStore = createTemplateStore({ query }, {
   [SOURCE_VERIFICATION_SCOPE]: { defaultTemplate: defaultSourceVerificationTemplate, validateTemplate: validateSourceVerificationTemplate },
+  [WECHAT_COPY_GENERATION_SCOPE]: { defaultTemplate: () => defaultDraftTemplate('WECHAT'), validateTemplate: validateDraftTemplate },
   [OUTLINE_TEMPLATE_SCOPES.WECHAT]: { defaultTemplate: () => defaultOutlineTemplate('WECHAT'), validateTemplate: validateOutlineTemplate },
   [OUTLINE_TEMPLATE_SCOPES.XIAOHONGSHU]: { defaultTemplate: () => defaultOutlineTemplate('XIAOHONGSHU'), validateTemplate: validateOutlineTemplate },
   [OUTLINE_TEMPLATE_SCOPES.ZHIHU]: { defaultTemplate: () => defaultOutlineTemplate('ZHIHU'), validateTemplate: validateOutlineTemplate },
@@ -653,7 +662,7 @@ app.get('/api/v1/models/usage', { preHandler: workspaceAccess.forRole('OWNER') }
 
 function promptTemplateScope(value) {
   const scope = String(value || '');
-  const supported = [ANALYSIS_SCOPE, SOURCE_VERIFICATION_SCOPE, ...Object.values(OUTLINE_TEMPLATE_SCOPES), ...Object.values(DRAFT_TEMPLATE_SCOPES), ...Object.values(REVISION_TEMPLATE_SCOPES)];
+  const supported = [ANALYSIS_SCOPE, SOURCE_VERIFICATION_SCOPE, WECHAT_COPY_GENERATION_SCOPE, ...Object.values(OUTLINE_TEMPLATE_SCOPES), ...Object.values(DRAFT_TEMPLATE_SCOPES), ...Object.values(REVISION_TEMPLATE_SCOPES)];
   if (!supported.includes(scope)) { const error = new Error('当前提示词模板尚未接入执行器。'); error.statusCode = 400; throw error; }
   return scope;
 }
@@ -689,7 +698,7 @@ async function analysisRoute(workspaceId) {
 
 async function textTaskRoute(workspaceId, scope, label) {
   const result = await query('SELECT provider, connection_id, model FROM agent_model_policies WHERE workspace_id = $1 AND scope = $2', [workspaceId, scope]);
-  if (!result.rowCount) throw new Error(`请先为${label}配置可用文本模型。`);
+  if (!result.rowCount) throw businessError(409, 'TASK_POLICY_REQUIRED', `请先为${label}配置任务策略。`, { scope });
   const route = { provider: result.rows[0].provider, connectionId: result.rows[0].connection_id ?? undefined, model: result.rows[0].model };
   if (route.provider === 'BAILIAN_CLI') {
     const credential = await query("SELECT 1 FROM credential_vault WHERE workspace_id = $1 AND provider = 'BAILIAN' AND status = 'READY'", [workspaceId]);
@@ -1111,10 +1120,13 @@ app.post('/api/v1/creative/projects/:projectId/visual/plan', { preHandler: works
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = visualPlanningInput.parse(request.body ?? {});
   const workspace = request.workspace;
-  const project = await creativeProject(workspace.id, projectId);
-  const version = project.versions?.find((item) => item.platform === input.platform);
-  if (!String(version?.body ?? '').trim()) { const error = new Error('请先完成当前渠道正文，再生成配图方案。'); error.statusCode = 400; throw error; }
-  const persistedPlan = project.delivery?.platforms?.[input.platform]?.visual?.plan;
+  const [project, drafts] = await Promise.all([
+    creativeProject(workspace.id, projectId),
+    draftStore.listProject(workspace.id, projectId),
+  ]);
+  const draft = drafts.find((item) => item.platform === 'WECHAT');
+  if (!String(draft?.body ?? '').trim()) throw businessError(409, 'WECHAT_DRAFT_REQUIRED', '请先完成公众号正文，再生成配图方案。');
+  const persistedPlan = draft.visualPlan?.plan;
   const currentPlan = input.currentPlan.length ? input.currentPlan : Array.isArray(persistedPlan) ? persistedPlan : [];
   const currentItem = input.currentItemId ? currentPlan.find((item) => item.id === input.currentItemId) : undefined;
   if (input.currentItemId && !currentItem) { const error = new Error('没有找到要重新策划的图片。'); error.statusCode = 404; throw error; }
@@ -1125,8 +1137,8 @@ app.post('/api/v1/creative/projects/:projectId/visual/plan', { preHandler: works
   const prompt = buildVisualPlanningPrompt({
     project: {
       ...project,
-      versionTitle: version?.title ?? '',
-      versionBody: version?.body ?? '',
+      versionTitle: draft.title,
+      versionBody: draft.body,
     },
     platform: input.platform,
     bodyItemCount: input.bodyItemCount,
@@ -1171,7 +1183,17 @@ app.post('/api/v1/creative/projects/:projectId/visual/plan', { preHandler: works
     });
     await query(`INSERT INTO api_usage_logs (workspace_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens)
       VALUES ($1, $2, $3, $4, 'SUCCESS', $5, $6, $7)`, [workspace.id, route.provider, route.model, VISUAL_PLANNING_OPERATION, Date.now() - startedAt, inputTokens || null, outputTokens || null]);
-    reply.code(201).send({ plan, strategy: parsed.strategy, model: route.model, provider: route.provider, scope });
+    reply.code(201).send({
+      plan,
+      strategy: parsed.strategy,
+      policy: {
+        scope,
+        provider: route.provider,
+        connectionId: route.connectionId ?? null,
+        model: route.model,
+        promptVersion: VISUAL_PLANNING_PROMPT_VERSION,
+      },
+    });
   } catch (error) {
     await query(`INSERT INTO api_usage_logs (workspace_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens, error)
       VALUES ($1, $2, $3, $4, 'ERROR', $5, $6, $7, $8)`, [workspace.id, route.provider, route.model, VISUAL_PLANNING_OPERATION, Date.now() - startedAt, inputTokens || null, outputTokens || null, (error instanceof Error ? error.message : '配图策划失败').slice(0, 2_000)]);
@@ -1190,9 +1212,8 @@ app.post('/api/v1/creative/projects/:projectId/visual/generate', { preHandler: w
   const workspace = request.workspace;
   await creativeProject(workspace.id, projectId);
   const operation = input.assetIds.length ? 'IMAGE_TO_IMAGE' : 'TEXT_TO_IMAGE';
-  let policy = await query('SELECT provider, model FROM agent_model_policies WHERE workspace_id = $1 AND scope = $2', [workspace.id, operation]);
-  if (!policy.rowCount && operation === 'IMAGE_TO_IMAGE') policy = await query("SELECT provider, model FROM agent_model_policies WHERE workspace_id = $1 AND scope = 'TEXT_TO_IMAGE'", [workspace.id]);
-  if (!policy.rowCount) { const error = new Error(`请先在“模型与 API”中为${operation === 'IMAGE_TO_IMAGE' ? '图生图' : '文生图'}选择模型。`); error.statusCode = 400; throw error; }
+  const policy = await query('SELECT provider, model FROM agent_model_policies WHERE workspace_id = $1 AND scope = $2', [workspace.id, operation]);
+  if (!policy.rowCount) throw businessError(409, 'TASK_POLICY_REQUIRED', `请先在“模型与 API”中为${operation === 'IMAGE_TO_IMAGE' ? '图生图' : '文生图'}选择模型。`, { scope: operation });
   if (policy.rows[0].provider !== 'BAILIAN_CLI') { const error = new Error('当前版本的 AI 生图仅支持已配置的百炼 CLI 文生图模型。'); error.statusCode = 400; throw error; }
   const model = policy.rows[0].model;
   const apiKey = await credentialSecret(workspace.id, 'BAILIAN');
@@ -1505,21 +1526,18 @@ app.post('/api/v1/creative/projects/:projectId/agent/prepare', { preHandler: wor
     return;
   }
 
-  if (!input.platform) throw new Error('文案阶段必须指定目标平台。');
-  const [project, context, materialRows, summaries, masterResult, acceptedVersion, acceptedResearch] = await Promise.all([
+  if (input.platform !== 'WECHAT') throw businessError(400, 'WECHAT_MASTER_REQUIRED', '正文创作只支持公众号母稿。');
+  const [project, context, materialRows, summaries, masterResult, drafts, acceptedResearch] = await Promise.all([
     creativeProject(workspace.id, projectId),
-    creativeSkillStore.getContext(workspace.id, projectId, input.platform),
+    creativeSkillStore.getContext(workspace.id, projectId, 'WECHAT'),
     projectMaterialStore.researchSnapshot(workspace.id, projectId, input.inputIds, input.referenceIds, input.assetIds),
     query(`SELECT stage, platform, summary, version FROM project_stage_summaries
       WHERE workspace_id = $1 AND project_id = $2 AND (platform IS NULL OR platform = $3)
-      ORDER BY created_at DESC LIMIT 10`, [workspace.id, projectId, input.platform]),
+      ORDER BY created_at DESC LIMIT 10`, [workspace.id, projectId, 'WECHAT']),
     query(`SELECT m.* FROM content_master_versions m
       JOIN project_artifacts a ON a.id = m.artifact_id AND a.status = 'ACCEPTED'
       WHERE m.workspace_id = $1 AND m.project_id = $2 ORDER BY m.version_number DESC LIMIT 1`, [workspace.id, projectId]),
-    query(`SELECT v.* FROM platform_content_versions v
-      JOIN project_artifacts a ON a.id = v.artifact_id AND a.status = 'ACCEPTED'
-      WHERE v.workspace_id = $1 AND v.project_id = $2 AND v.platform = $3
-      ORDER BY v.version_number DESC LIMIT 1`, [workspace.id, projectId, input.platform]),
+    draftStore.listProject(workspace.id, projectId),
     query(`SELECT r.output_json
       FROM project_research_results r
       JOIN project_artifacts a ON a.id = r.artifact_id AND a.status = 'ACCEPTED'
@@ -1527,24 +1545,21 @@ app.post('/api/v1/creative/projects/:projectId/agent/prepare', { preHandler: wor
       ORDER BY r.accepted_at DESC NULLS LAST, r.created_at DESC LIMIT 1`, [workspace.id, projectId]),
   ]);
   if (!context) throw new Error('请先保存创作设定和写作策略。');
-  if (!context.brief.selectedPlatforms.includes(input.platform)) throw new Error('目标平台不在已保存的创作设定中。');
-  const projectVersion = project.versions?.find((version) => version.platform === input.platform);
-  if (!projectVersion) throw new Error('项目没有对应的图文平台版本。');
-  const currentRow = acceptedVersion.rows[0];
-  const currentContent = currentRow
-    ? { id: currentRow.id, title: currentRow.title, body: currentRow.body, factsToVerify: currentRow.facts_to_verify_json ?? [] }
-    : { id: projectVersion.id, title: projectVersion.title ?? '', body: projectVersion.body ?? '', factsToVerify: project.factChecks ?? [] };
-  const resolution = resolveCopyAction({ request: input.request, hasBody: Boolean(currentContent.body?.trim()), selection: input.selection, targetPlatform: input.platform });
+  const currentDraft = drafts.find((draft) => draft.platform === 'WECHAT');
+  const currentContent = currentDraft
+    ? { id: currentDraft.id, title: currentDraft.title, body: currentDraft.body, factsToVerify: project.factChecks ?? [] }
+    : { id: null, title: '', body: '', factsToVerify: project.factChecks ?? [] };
+  const resolution = resolveCopyAction({ request: input.request, hasBody: Boolean(currentContent.body?.trim()), selection: input.selection, targetPlatform: 'WECHAT' });
   if (resolution.needsClarification) {
-    await projectAgentStore.appendMessage(workspace.id, projectId, { role: 'USER', content: input.request, stage: 'COPY', metadata: { platform: input.platform } });
-    const message = await projectAgentStore.appendMessage(workspace.id, projectId, { role: 'ASSISTANT', content: resolution.question, stage: 'COPY', metadata: { platform: input.platform, needsClarification: true } });
+    await projectAgentStore.appendMessage(workspace.id, projectId, { role: 'USER', content: input.request, stage: 'COPY', metadata: { platform: 'WECHAT' } });
+    const message = await projectAgentStore.appendMessage(workspace.id, projectId, { role: 'ASSISTANT', content: resolution.question, stage: 'COPY', metadata: { platform: 'WECHAT', needsClarification: true } });
     reply.code(200).send({ needsClarification: true, message });
     return;
   }
   const action = resolution.action;
   const [route, template, researchPolicy, verificationPolicy, verificationTemplate] = await Promise.all([
     textTaskRoute(workspace.id, copyActionScope(action), action === 'GENERATE_OUTLINE' || action === 'GENERATE_DRAFT' ? '文案生成' : '文案改写'),
-    templateStore.get(workspace.id, copyPromptTemplateScope(action, input.platform)),
+    templateStore.get(workspace.id, copyPromptTemplateScope(action, 'WECHAT')),
     action === 'GENERATE_DRAFT' ? query(`SELECT p.model FROM agent_model_policies p
       JOIN credential_vault c ON c.workspace_id = p.workspace_id AND c.provider = 'BAILIAN' AND c.status = 'READY'
       WHERE p.workspace_id = $1 AND p.scope = $2 AND p.provider = 'BAILIAN_CLI'`, [workspace.id, PROJECT_RESEARCH_SCOPE]) : Promise.resolve({ rowCount: 0, rows: [] }),
@@ -1569,7 +1584,7 @@ app.post('/api/v1/creative/projects/:projectId/agent/prepare', { preHandler: wor
     brief: context.brief,
     accountVoice: context.accountVoice,
     skills: context.skills,
-    platform: input.platform,
+    platform: 'WECHAT',
     stage: 'COPY',
     action,
     request: input.request,
@@ -1588,16 +1603,23 @@ app.post('/api/v1/creative/projects/:projectId/agent/prepare', { preHandler: wor
     materials,
     researchContext,
   };
-  const primaryRoute = { provider: route.provider, connectionId: route.connectionId ?? null, model: route.model };
   const researchRoute = action === 'GENERATE_DRAFT'
-    ? researchPolicy.rowCount ? { provider: 'BAILIAN_CLI', model: researchPolicy.rows[0].model } : primaryRoute
+    ? researchPolicy.rowCount ? { provider: 'BAILIAN_CLI', model: researchPolicy.rows[0].model } : null
     : null;
   const verificationRoute = action === 'GENERATE_DRAFT'
-    ? verificationPolicy.rowCount ? { provider: 'BAILIAN_CLI', model: verificationPolicy.rows[0].model } : primaryRoute
+    ? verificationPolicy.rowCount ? { provider: 'BAILIAN_CLI', model: verificationPolicy.rows[0].model } : null
     : null;
+  const policySnapshot = {
+    scope: WECHAT_COPY_GENERATION_SCOPE,
+    provider: route.provider,
+    connectionId: route.connectionId ?? null,
+    model: route.model,
+    promptVersion: template.version,
+  };
+  sourceSnapshot.policy = policySnapshot;
   const runInput = {
     template: { id: template.id, version: template.version, body: template.body },
-    route: primaryRoute,
+    route: { provider: route.provider, connectionId: route.connectionId ?? null, model: route.model },
     ...(researchRoute ? { researchRoute } : {}),
     ...(verificationRoute ? { verificationRoute } : {}),
     ...(verificationTemplate ? { verificationTemplate: verificationTemplate.body } : {}),
@@ -1605,7 +1627,7 @@ app.post('/api/v1/creative/projects/:projectId/agent/prepare', { preHandler: wor
   const run = await transaction(async (client) => {
     await client.query(`UPDATE generation_runs SET status = 'CANCELLED', completed_at = now()
       WHERE workspace_id = $1 AND action_version_id LIKE 'project-copy-%' AND status = 'DRAFT'
-        AND source_snapshot_json->>'projectId' = $2 AND source_snapshot_json->>'platform' = $3`, [workspace.id, projectId, input.platform]);
+        AND source_snapshot_json->>'projectId' = $2 AND source_snapshot_json->>'platform' = $3`, [workspace.id, projectId, 'WECHAT']);
     const created = await client.query(`INSERT INTO generation_runs
       (workspace_id, action_version_id, status, source_snapshot_json, input_json, model, prompt_version, estimated_cost)
       VALUES ($1, $2, 'DRAFT', $3, $4, $5, $6, 'null'::jsonb) RETURNING *`, [
@@ -1615,9 +1637,9 @@ app.post('/api/v1/creative/projects/:projectId/agent/prepare', { preHandler: wor
       (workspace_id, project_id, action_run_id, role, content, stage, message_type, metadata_json)
       VALUES ($1, $2, $3, 'USER', $4, 'COPY', 'MESSAGE', $5),
              ($1, $2, $3, 'ASSISTANT', $6, 'COPY', 'CONFIRMATION', $7)`, [
-      workspace.id, projectId, created.rows[0].id, input.request, JSON.stringify({ platform: input.platform }),
+      workspace.id, projectId, created.rows[0].id, input.request, JSON.stringify({ platform: 'WECHAT' }),
        action === 'GENERATE_DRAFT' ? '正文任务已准备，确认后自动补齐上下文并生成成稿。' : '文案修改已准备，确认后生成可对比版本。',
-      JSON.stringify({ platform: input.platform, action, model: route.model, promptVersion: template.version }),
+      JSON.stringify({ platform: 'WECHAT', action, policy: policySnapshot }),
     ]);
     return created.rows[0];
   });
@@ -2449,7 +2471,8 @@ app.get('/api/v1/creative/projects/:projectId/delivery', { preHandler: workspace
 app.put('/api/v1/creative/projects/:projectId/visual', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = z.object({
-    platform: creativePlatform,
+    draftId: z.string().uuid(),
+    revision: z.number().int().positive(),
     planVersion: z.number().int().min(1).max(100),
     styleProfile: z.object({
       preset: visualStylePreset,
@@ -2462,19 +2485,15 @@ app.put('/api/v1/creative/projects/:projectId/visual', { preHandler: workspaceAc
     const assigned = value.plan.map((item) => item.assetId).filter(Boolean);
     if (new Set(assigned).size !== assigned.length) context.addIssue({ code: 'custom', path: ['plan'], message: '同一张图片不能绑定到多个配图位置。' });
     try {
-      validateVisualPlanImageCount(value.platform, Math.max(value.assetIds.length, value.plan.length));
+      validateVisualPlanImageCount('WECHAT', Math.max(value.assetIds.length, value.plan.length));
     } catch (error) {
       context.addIssue({ code: 'custom', path: ['assetIds'], message: error instanceof Error ? error.message : '配图数量超过平台上限。' });
     }
   }).parse(request.body);
   const workspace = request.workspace;
-  const existingProject = await creativeProject(workspace.id, projectId);
-  const existingVersion = (existingProject.versions ?? []).find((item) => item.platform === input.platform);
-  if (!existingVersion || String(existingVersion.body ?? '').trim().length < 80) {
-    const error = new Error(`请先完成${creativePlatformNames[input.platform] ?? input.platform}的正文。`);
-    error.statusCode = 409;
-    throw error;
-  }
+  const draft = await draftStore.get(workspace.id, input.draftId);
+  if (draft.projectId !== projectId || draft.platform !== 'WECHAT') throw businessError(400, 'WECHAT_DRAFT_REQUIRED', '配图只能保存到当前项目的公众号母稿。');
+  if (String(draft.body ?? '').trim().length < 80) throw businessError(409, 'WECHAT_DRAFT_REQUIRED', '请先完成公众号正文。');
   return transaction(async (client) => {
     const listed = await projectMaterialStore.list(workspace.id, projectId);
     const requested = [...new Set([...input.assetIds, ...input.plan.map((item) => item.assetId).filter(Boolean)])];
@@ -2490,50 +2509,26 @@ app.put('/api/v1/creative/projects/:projectId/visual', { preHandler: workspaceAc
       return [asset?.sha256 || item.assetId];
     });
     if (new Set(assignedKeys).size !== assignedKeys.length) { const error = new Error('同一张图片不能绑定到多个配图位置。'); error.statusCode = 400; throw error; }
-    const now = new Date().toISOString();
-    let project;
-    await updateCreativeProjects(client, workspace.id, (state) => {
-      const index = state.projects.findIndex((item) => item.id === projectId);
-      if (index < 0) { const error = new Error('未找到这个内容项目。'); error.statusCode = 404; throw error; }
-      const current = state.projects[index];
-      const delivery = deliveryOf(current); const currentPlatform = platformDelivery(delivery, input.platform);
-      const plannedAssets = input.plan.flatMap((item) => {
-        const asset = item.assetId ? assetById.get(item.assetId) : null;
-        if (!asset) return [];
-        return [{
-          assetId: asset.id,
-          title: asset.title,
-          role: item.role === 'COVER' || item.role === 'MAIN' ? 'COVER' : 'BODY',
-          url: null,
-          planItemId: item.id,
-          placement: item.placement,
-          purpose: item.purpose,
-        }];
-      });
-      const plannedIds = new Set(plannedAssets.map((item) => item.assetId));
-      const unplannedAssets = assets.filter((item) => !plannedIds.has(item.id)).map((item) => ({
-        assetId: item.id, title: item.title, role: item.id === input.coverAssetId ? 'COVER' : 'BODY', url: null,
-      }));
-      project = {
-        ...current,
-        delivery: {
-          ...delivery,
-          platforms: { ...delivery.platforms, [input.platform]: { ...currentPlatform, visual: {
-            planVersion: input.planVersion,
-            styleProfile: input.styleProfile,
-            coverAssetId: input.coverAssetId,
-            assetIds: requested,
-            assets: [...plannedAssets, ...unplannedAssets],
-            plan: input.plan,
-            updatedAt: now,
-          } } },
-        },
-        updatedAt: now,
-      };
-      const projects = [...state.projects]; projects[index] = project;
-      return { ...state, projects };
-    }, now);
-    return { project };
+    const patched = await draftStore.patchWorkingCopy(workspace.id, draft.id, {
+      revision: input.revision,
+      visualPlan: {
+        planVersion: input.planVersion,
+        styleProfile: input.styleProfile,
+        coverAssetId: input.coverAssetId,
+        plan: input.plan,
+      },
+    }, client);
+    const roleByAssetId = new Map(input.plan.flatMap((item) => item.assetId
+      ? [[item.assetId, item.role === 'COVER' || item.role === 'MAIN' ? 'COVER' : 'BODY']]
+      : []));
+    const saved = await draftStore.replaceWorkingAssets(workspace.id, draft.id, {
+      revision: patched.revision,
+      assets: requested.map((assetId) => ({
+        assetId,
+        role: roleByAssetId.get(assetId) ?? (assetId === input.coverAssetId ? 'COVER' : 'BODY'),
+      })),
+    }, client);
+    return { draft: saved };
   });
 });
 

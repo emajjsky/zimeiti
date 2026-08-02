@@ -1,6 +1,7 @@
 const { z } = require('zod');
-const { outlineSchema, outlineTemplateScope } = require('./creative-outline.cjs');
-const { draftTemplateScope } = require('./creative-draft.cjs');
+const { outlineSchema } = require('./creative-outline.cjs');
+
+const WECHAT_COPY_GENERATION_SCOPE = 'WECHAT_COPY_GENERATION';
 
 const COPY_ACTIONS = [
   'GENERATE_OUTLINE',
@@ -58,7 +59,7 @@ function copyActionVersion(action) {
 
 function copyActionScope(action) {
   if (!COPY_ACTIONS.includes(action)) throw new Error('未知的文案动作。');
-  return action === 'GENERATE_OUTLINE' || action === 'GENERATE_DRAFT' ? 'CONTENT_WRITING' : 'CONTENT_REWRITE';
+  return WECHAT_COPY_GENERATION_SCOPE;
 }
 
 function copyActionPersistenceMode(action) {
@@ -105,9 +106,9 @@ function copyTemplateScope(platform) {
 }
 
 function copyPromptTemplateScope(action, platform) {
-  if (action === 'GENERATE_OUTLINE') return outlineTemplateScope(platform);
-  if (action === 'GENERATE_DRAFT') return draftTemplateScope(platform);
-  return copyTemplateScope(platform);
+  if (!COPY_ACTIONS.includes(action)) throw new Error('未知的文案动作。');
+  if (platform !== 'WECHAT') throw new Error('正文创作只支持公众号母稿。');
+  return WECHAT_COPY_GENERATION_SCOPE;
 }
 
 function mergeFactsToVerify(...groups) {
@@ -607,6 +608,7 @@ function buildCopyQualityReviewPrompt({ action, platform, output, researchContex
 }
 
 module.exports = {
+  WECHAT_COPY_GENERATION_SCOPE,
   COPY_ACTIONS,
   REVISION_TEMPLATE_SCOPES,
   MAX_REVISION_TEMPLATE_LENGTH,

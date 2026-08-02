@@ -41,6 +41,7 @@ function runView(row) {
   const skills = Array.isArray(snapshot.skills) ? snapshot.skills : [];
   const sourceCounts = snapshot.counts && typeof snapshot.counts === 'object' ? snapshot.counts : undefined;
   const process = snapshot.process && typeof snapshot.process === 'object' ? snapshot.process : undefined;
+  const policy = snapshot.policy && typeof snapshot.policy === 'object' ? snapshot.policy : undefined;
   return {
     id: row.id,
     action: actionName(row.action_version_id),
@@ -55,6 +56,7 @@ function runView(row) {
       ...(sourceCounts ? { sourceCounts, tools: Array.isArray(snapshot.tools) ? snapshot.tools : [] } : {}),
       ...(process ? { phase: process.phase, progress: process.progress } : {}),
     },
+    ...(policy ? { policy } : {}),
     ...(row.error ? { error: row.error } : {}),
     createdAt: row.created_at,
   };

@@ -40,6 +40,14 @@ test('模板版本被草稿引用时不能级联删除', () => {
   assert.doesNotMatch(versionTemplateReference, /ON DELETE CASCADE/);
 });
 
+test('迁移把正文与视觉策略一次性切换到显式 Scope', () => {
+  assert.match(migration, /WECHAT_COPY_GENERATION/);
+  assert.match(migration, /WECHAT_VISUAL_PLANNING/);
+  assert.match(migration, /wechat-visual-planning:1\.0\.0/);
+  assert.match(migration, /CREATIVE_DRAFT_WECHAT/);
+  assert.match(migration, /DELETE FROM agent_model_policies[\s\S]*CONTENT_WRITING[\s\S]*VISUAL_PLANNING/);
+});
+
 test('迁移预置六个真实公众号模板并回填三平台版本', () => {
   for (const name of ['清爽阅读', '商务报告', '科技媒体', '人文杂志', '现代报刊', '知识长文']) {
     assert.match(migration, new RegExp(name));

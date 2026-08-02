@@ -181,7 +181,7 @@ export const webCreative = {
   removeInput: (id: string) => request<void>(`/creative/project-inputs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   createReference: (projectId: string, input: ProjectReferenceMetadata & { url: string }) => request<ProjectReference>(`/creative/projects/${encodeURIComponent(projectId)}/references`, { method: 'POST', body: JSON.stringify(input) }),
   searchImages: (query: string) => request<{ provider: string; results: Array<{ id: string; title: string; thumbnailUrl: string; imageUrl: string; sourceUrl: string; license: string; attribution: string }> }>(`/creative/image-search?q=${encodeURIComponent(query)}`),
-  planVisual: (projectId: string, input: { platform: CreativePlatform; bodyItemCount: number; styleProfile: import('../domain/content').CreativeVisualStyleProfile; request?: string; currentItemId?: string; currentPlan?: CreativeVisualPlanItem[]; keepAssignedAssets?: boolean }) => request<{ plan: CreativeVisualPlanItem[]; strategy: string; model: string; provider: string; scope: string }>(`/creative/projects/${encodeURIComponent(projectId)}/visual/plan`, { method: 'POST', body: JSON.stringify(input) }),
+  planVisual: (projectId: string, input: { platform: 'WECHAT'; bodyItemCount: number; styleProfile: import('../domain/content').CreativeVisualStyleProfile; request?: string; currentItemId?: string; currentPlan?: CreativeVisualPlanItem[]; keepAssignedAssets?: boolean }) => request<{ plan: CreativeVisualPlanItem[]; strategy: string; policy: { scope: string; provider: string; connectionId: string | null; model: string; promptVersion: string } }>(`/creative/projects/${encodeURIComponent(projectId)}/visual/plan`, { method: 'POST', body: JSON.stringify(input) }),
   generateImage: (projectId: string, input: { platform: CreativePlatform; prompt: string; size: '1:1' | '3:4' | '4:3' | '9:16' | '16:9'; assetIds?: string[] }) => request<{ asset: WorkspaceAsset; projectAsset: ProjectAsset }>(`/creative/projects/${encodeURIComponent(projectId)}/visual/generate`, { method: 'POST', body: JSON.stringify(input) }),
   updateReference: (id: string, input: ProjectReferenceMetadata) => request<ProjectReference>(`/creative/project-references/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(input) }),
   removeReference: (id: string) => request<void>(`/creative/project-references/${encodeURIComponent(id)}`, { method: 'DELETE' }),
@@ -259,18 +259,7 @@ export type CredentialStatus = { provider: 'BAILIAN' | 'TAVILY'; configured: boo
 export type PromptTemplateScope =
   | 'INTELLIGENCE_ANALYSIS'
   | 'SOURCE_VERIFICATION'
-  | 'CREATIVE_OUTLINE_WECHAT'
-  | 'CREATIVE_OUTLINE_XIAOHONGSHU'
-  | 'CREATIVE_OUTLINE_ZHIHU'
-  | 'CREATIVE_OUTLINE_WEIBO'
-  | 'CREATIVE_DRAFT_WECHAT'
-  | 'CREATIVE_DRAFT_XIAOHONGSHU'
-  | 'CREATIVE_DRAFT_ZHIHU'
-  | 'CREATIVE_DRAFT_WEIBO'
-  | 'CREATIVE_REVISION_WECHAT'
-  | 'CREATIVE_REVISION_XIAOHONGSHU'
-  | 'CREATIVE_REVISION_ZHIHU'
-  | 'CREATIVE_REVISION_WEIBO';
+  | 'WECHAT_COPY_GENERATION';
 export type PromptTemplate = { id: string; scope: PromptTemplateScope; version: number; body: string; source: 'DEFAULT' | 'CUSTOM'; updatedAt: string };
 
 export const webAgent = {

@@ -468,3 +468,68 @@ BEGIN
   END IF;
 END;
 $$;
+
+UPDATE agent_action_definitions
+SET model_scope = 'WECHAT_COPY_GENERATION', updated_at = now()
+WHERE id LIKE 'project-copy-%';
+
+INSERT INTO agent_action_definitions
+  (id, name, description, model_scope, execution_target, requires_confirmation)
+VALUES
+  ('wechat-visual-planning', '公众号配图策划', '根据公众号母稿生成图片内容优先的配图方案。', 'WECHAT_VISUAL_PLANNING', 'cloud', false)
+ON CONFLICT (id) DO UPDATE SET
+  name = excluded.name,
+  description = excluded.description,
+  model_scope = excluded.model_scope,
+  execution_target = excluded.execution_target,
+  requires_confirmation = excluded.requires_confirmation,
+  updated_at = now();
+
+INSERT INTO agent_action_versions
+  (id, action_id, version, input_schema_json, output_schema_json)
+VALUES
+  ('wechat-visual-planning:1.0.0', 'wechat-visual-planning', '1.0.0',
+    '{"requires":["projectId","draftId","bodyItemCount","styleProfile","modelRoute"]}'::jsonb,
+    '{"outputs":["strategy","plan","policy"]}'::jsonb)
+ON CONFLICT (id) DO NOTHING;
+
+WITH ranked_copy_policies AS (
+  SELECT policy.*,
+    row_number() OVER (
+      PARTITION BY policy.workspace_id
+      ORDER BY CASE policy.scope WHEN 'CONTENT_WRITING' THEN 0 ELSE 1 END, policy.updated_at DESC
+    ) AS priority
+  FROM agent_model_policies policy
+  WHERE policy.scope IN ('CONTENT_WRITING', 'CONTENT_REWRITE')
+)
+INSERT INTO agent_model_policies
+  (workspace_id, scope, provider, connection_id, model, created_at, updated_at)
+SELECT workspace_id, 'WECHAT_COPY_GENERATION', provider, connection_id, model, now(), now()
+FROM ranked_copy_policies
+WHERE priority = 1
+ON CONFLICT (workspace_id, scope) DO NOTHING;
+
+INSERT INTO agent_model_policies
+  (workspace_id, scope, provider, connection_id, model, created_at, updated_at)
+SELECT workspace_id, 'WECHAT_VISUAL_PLANNING', provider, connection_id, model, now(), now()
+FROM agent_model_policies
+WHERE scope = 'VISUAL_PLANNING'
+ON CONFLICT (workspace_id, scope) DO NOTHING;
+
+DELETE FROM agent_model_policies
+WHERE scope IN ('CONTENT_WRITING', 'CONTENT_REWRITE', 'VISUAL_PLANNING');
+
+WITH latest_wechat_copy_template AS (
+  SELECT DISTINCT ON (template.workspace_id)
+    template.workspace_id,
+    template.body,
+    template.source
+  FROM prompt_template_versions template
+  WHERE template.scope = 'CREATIVE_DRAFT_WECHAT'
+  ORDER BY template.workspace_id, template.version DESC
+)
+INSERT INTO prompt_template_versions
+  (workspace_id, scope, version, body, source)
+SELECT workspace_id, 'WECHAT_COPY_GENERATION', 1, body, source
+FROM latest_wechat_copy_template
+ON CONFLICT (workspace_id, scope, version) DO NOTHING;

@@ -350,7 +350,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
     setPlanBusy(true); setError(''); setNotice('');
     try {
       const result = await webCreative.planVisual(project.id, {
-        platform: activePlatform,
+        platform: 'WECHAT',
         bodyItemCount,
         styleProfile,
         request,
@@ -360,7 +360,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
       });
       const next = safePlan(result.plan);
       setPlan(next);
-      setPlanningRoute({ scope: result.scope, provider: result.provider, model: result.model });
+      setPlanningRoute({ scope: result.policy.scope, provider: result.policy.provider, model: result.policy.model });
       setPlanNeedsRefresh(false);
       setActiveItemId((current) => currentItemId && next.some((item) => item.id === currentItemId) ? currentItemId : next.some((item) => item.id === current) ? current : next[0]?.id ?? '');
       const selected = currentItemId ? next.find((item) => item.id === currentItemId) : next[0];
@@ -393,7 +393,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
 
   return <section className="visual-workspace">
     <header className="delivery-workspace-head visual-workspace-head">
-      <div><h2>{platformName[activePlatform]}配图</h2><p>{planCountSummary}｜任务策略：配图策划（VISUAL_PLANNING）</p></div>
+      <div><h2>{platformName[activePlatform]}配图</h2><p>{planCountSummary}｜任务策略：公众号配图策划（WECHAT_VISUAL_PLANNING）</p></div>
       <div className="visual-plan-actions">
         <button className="visual-project-style" type="button" aria-label="设置项目配图风格" onClick={openStyleDialog}><Palette size={15}/><span>项目风格</span><b>{allVisualStyles.find((style) => style.id === styleProfile.preset)?.name ?? visualStyles[0].name}</b></button>
         <div className="visual-count-stepper" aria-label="配图数量">
@@ -499,7 +499,7 @@ export function VisualWorkspace({ project, activePlatform, onProjectChange, onOp
       </main>}
     </div>}
 
-    {plan.length > 0 && <footer className="delivery-workspace-footer"><span>{saveState === 'saving' ? '正在自动保存配图方案' : planningRoute ? `实际策略：配图策划（${planningRoute.scope}） · ${planningRoute.provider} / ${planningRoute.model}` : boundCount ? `已绑定 ${boundCount}/${plan.length} 张图片｜策略：配图策划（VISUAL_PLANNING）` : '策略：配图策划（VISUAL_PLANNING）｜可从第一张开始选图'}</span><div><button className="text-button" type="button" onClick={onOpenModelSettings}>查看任务策略</button><button className="button" type="button" disabled={busy !== null} onClick={() => void save()}>{busy === 'save' ? <LoaderCircle size={16}/> : <Save size={16}/>}保存</button><button className="button primary" type="button" disabled={busy !== null || !hasCopy} onClick={() => void complete()}>{busy === 'complete' ? <LoaderCircle size={16}/> : null}确认素材，进入排版</button></div></footer>}
+    {plan.length > 0 && <footer className="delivery-workspace-footer"><span>{saveState === 'saving' ? '正在自动保存配图方案' : planningRoute ? `实际策略：公众号配图策划（${planningRoute.scope}） · ${planningRoute.provider} / ${planningRoute.model}` : boundCount ? `已绑定 ${boundCount}/${plan.length} 张图片｜策略：公众号配图策划（WECHAT_VISUAL_PLANNING）` : '策略：公众号配图策划（WECHAT_VISUAL_PLANNING）｜可从第一张开始选图'}</span><div><button className="text-button" type="button" onClick={onOpenModelSettings}>查看任务策略</button><button className="button" type="button" disabled={busy !== null} onClick={() => void save()}>{busy === 'save' ? <LoaderCircle size={16}/> : <Save size={16}/>}保存</button><button className="button primary" type="button" disabled={busy !== null || !hasCopy} onClick={() => void complete()}>{busy === 'complete' ? <LoaderCircle size={16}/> : null}确认素材，进入排版</button></div></footer>}
 
     {styleDialogOpen && <div className="visual-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setStyleDialogOpen(false); }}>
       <section className="visual-style-dialog" role="dialog" aria-modal="true" aria-labelledby="visual-style-dialog-title">

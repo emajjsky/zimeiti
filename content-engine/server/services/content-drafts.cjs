@@ -106,10 +106,10 @@ function createContentDraftStore({ query, transaction, renderWechatDraft } = {})
     return draftView(await loadDraft({ query }, workspaceId, draftId));
   }
 
-  async function upsertWechat(workspaceId, projectId, input = {}) {
+  async function upsertWechat(workspaceId, projectId, input = {}, client = { query }) {
     const title = String(input.title ?? '');
     const body = String(input.body ?? '');
-    const result = await query(`INSERT INTO content_drafts (workspace_id, project_id, platform, title, body)
+    const result = await client.query(`INSERT INTO content_drafts (workspace_id, project_id, platform, title, body)
       SELECT $1, project.project_id, 'WECHAT', $3, $4
       FROM content_projects project
       WHERE project.workspace_id = $1 AND project.project_id = $2
@@ -124,8 +124,8 @@ function createContentDraftStore({ query, transaction, renderWechatDraft } = {})
     return draftView(result.rows[0]);
   }
 
-  async function patchWorkingCopy(workspaceId, draftId, input) {
-    const result = await query(`UPDATE content_drafts
+  async function patchWorkingCopy(workspaceId, draftId, input, client = { query }) {
+    const result = await client.query(`UPDATE content_drafts
       SET title = COALESCE($4, title),
         body = COALESCE($5, body),
         visual_plan_json = COALESCE($6::jsonb, visual_plan_json),
@@ -145,13 +145,13 @@ function createContentDraftStore({ query, transaction, renderWechatDraft } = {})
       input.layoutTemplateVersionId ?? null,
     ]);
     if (result.rows.length) return draftView(result.rows[0]);
-    const existing = await query('SELECT id FROM content_drafts WHERE workspace_id = $1 AND id = $2', [workspaceId, draftId]);
+    const existing = await client.query('SELECT id FROM content_drafts WHERE workspace_id = $1 AND id = $2', [workspaceId, draftId]);
     if (!existing.rows.length) throw businessError(404, 'DRAFT_NOT_FOUND', '没有找到这份草稿。');
     throw businessError(409, 'DRAFT_REVISION_CONFLICT', '草稿已在其他页面更新，请刷新后继续。');
   }
 
-  async function replaceWorkingAssets(workspaceId, draftId, input) {
-    return transaction(async (client) => {
+  async function replaceWorkingAssets(workspaceId, draftId, input, transactionClient = null) {
+    const replace = async (client) => {
       const draft = await loadDraft(client, workspaceId, draftId, { forUpdate: true });
       if (Number(draft.revision) !== Number(input.revision)) throw businessError(409, 'DRAFT_REVISION_CONFLICT', '草稿已在其他页面更新，请刷新后继续。');
       assertImageCount(draft.platform, input.assets);
@@ -186,7 +186,8 @@ function createContentDraftStore({ query, transaction, renderWechatDraft } = {})
         created_at: null,
       }));
       return draftView(updated.rows[0]);
-    });
+    };
+    return transactionClient ? replace(transactionClient) : transaction(replace);
   }
 
   async function versions(workspaceId, draftId) {
