@@ -355,7 +355,7 @@ git commit -m "feat: add content draft api"
 
 ### Task 4: Persist WeChat Copy And Visuals Into The Draft Domain
 
-**Status (2026-08-02): Completed and verified locally; migration 028 was rehearsed only on a disposable database copy.**
+**Status (2026-08-02): Completed and verified in `398851d`; migration 028 was rehearsed only on a disposable database copy.**
 
 **Files:**
 - Modify: `content-engine/server/services/project-copy-action.cjs`
@@ -417,6 +417,8 @@ git commit -m "refactor: persist wechat creation as drafts"
 ```
 
 ### Task 5: Build WeChat Template Service And Safe Renderer
+
+**Status (2026-08-02): Completed and verified locally; the production database has not applied migration 028.**
 
 **Files:**
 - Create: `content-engine/server/services/wechat-layout-renderer.cjs`

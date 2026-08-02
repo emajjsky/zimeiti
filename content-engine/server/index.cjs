@@ -9,7 +9,7 @@ const { z } = require('zod');
 const config = require('./config.cjs');
 const { query, transaction } = require('./db.cjs');
 const { encrypt, decrypt, hashPassword, verifyPassword } = require('./crypto.cjs');
-const { clipPublicLink, readPublicArticle } = require('./services/public-web.cjs');
+const { clipPublicLink, readPublicArticle, fetchPublicPage } = require('./services/public-web.cjs');
 const { searchTavily, searchTavilyImages } = require('./services/tavily.cjs');
 const { listSources, createSources, updateSource, removeSource, listItems, saveItem, refreshWorkspaceRss } = require('./services/intelligenceRepository.cjs');
 const { enqueue } = require('./queue.cjs');
@@ -51,6 +51,9 @@ const { loadContentMasterState } = require('./services/content-master.cjs');
 const { createAssetStore } = require('./services/assets.cjs');
 const { createContentDraftStore } = require('./services/content-drafts.cjs');
 const { registerContentDraftRoutes } = require('./routes/content-drafts.cjs');
+const { renderWechatDraft } = require('./services/wechat-layout-renderer.cjs');
+const { analyzeWechatTemplateSource, createWechatLayoutTemplateStore } = require('./services/wechat-layout-templates.cjs');
+const { registerWechatLayoutTemplateRoutes } = require('./routes/wechat-layout-templates.cjs');
 const { detectFileType, safePath, saveUploadedAsset, saveRemoteImageAsset, openAsset, readAssetText, removeAssetFile } = require('./services/assetStorage.cjs');
 const { PROJECT_RESEARCH_ACTION_VERSION, PROJECT_RESEARCH_SCOPE, researchRunView, researchPlanView } = require('./services/project-research.cjs');
 const { PROJECT_RESEARCH_SOURCES_VERSION, researchSourceActions } = require('./services/project-research-sources.cjs');
@@ -240,8 +243,31 @@ function defaultState(name) {
 const workspaceStore = createWorkspaceStore({ query, transaction, defaultState });
 const workspaceAccess = createWorkspaceAccess({ query, authenticate });
 const assetStore = createAssetStore({ query, transaction, removeStoredFile: (storageKey) => removeAssetFile(config.uploadRoot, storageKey) });
-const draftStore = createContentDraftStore({ query, transaction });
+const draftStore = createContentDraftStore({ query, transaction, renderWechatDraft });
+const wechatLayoutTemplateStore = createWechatLayoutTemplateStore({ query, transaction });
 registerContentDraftRoutes(app, { workspaceAccess, draftStore, assetStore });
+registerWechatLayoutTemplateRoutes(app, {
+  workspaceAccess,
+  templateStore: wechatLayoutTemplateStore,
+  transaction,
+  resolveTaskRoute: textTaskRoute,
+  analyzeTemplateSource: (input) => analyzeWechatTemplateSource({ ...input, fetchPublicPage }),
+  runTextTask: async ({ workspaceId, route, system, message, maxTokens, temperature }) => {
+    const connectionInput = await textConnectionInput(workspaceId, route);
+    return textRunner.runText({
+      provider: route.provider === 'BAILIAN_CLI' ? 'BAILIAN_CLI' : 'EXTERNAL_API',
+      model: route.model,
+      system,
+      message,
+      maxTokens,
+      temperature,
+      ...connectionInput,
+    });
+  },
+  recordUsage: ({ workspaceId, provider, model, operation, status, durationMs, inputTokens, outputTokens, error }, client = { query }) => client.query(`INSERT INTO api_usage_logs
+    (workspace_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens, error)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, [workspaceId, provider, model, operation, status, durationMs, inputTokens ?? null, outputTokens ?? null, error ?? null]),
+});
 
 const authInput = z.object({ email: z.string().email().max(320), password: z.string().min(8).max(200), displayName: z.string().min(1).max(80).optional(), workspaceName: z.string().min(1).max(80).optional() });
 

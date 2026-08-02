@@ -13,6 +13,19 @@ async function validatePublicUrl(rawUrl) {
   return url;
 }
 
+function assertWechatArticleUrl(rawUrl) {
+  let url;
+  try { url = rawUrl instanceof URL ? new URL(rawUrl.toString()) : new URL(String(rawUrl ?? '').trim()); }
+  catch { throw new Error('请输入有效的公众号文章链接。'); }
+  if (url.protocol !== 'https:' || url.username || url.password || url.hostname.toLowerCase() !== 'mp.weixin.qq.com' || !/^\/s(?:\/|$)/i.test(url.pathname)) {
+    const error = new Error('只支持 mp.weixin.qq.com/s 下的公众号文章链接。');
+    error.statusCode = 400;
+    error.code = 'LAYOUT_TEMPLATE_SOURCE_UNSUPPORTED';
+    throw error;
+  }
+  return url;
+}
+
 async function clipPublicLink(rawUrl) {
   const page = await fetchPublicPage(rawUrl);
   return buildPublicPreviewFromHtml(page.url, page.html);
@@ -55,7 +68,7 @@ async function fetchPublicPage(rawUrl, { fetchImpl = fetch, validateUrl = valida
 }
 
 async function browserFallback(requestedUrl, browserFetch, validateUrl) {
-  if (!browserFetch || !isWeChatHost(requestedUrl) || !/^\/s\//i.test(requestedUrl.pathname)) {
+  if (!browserFetch || !isWeChatHost(requestedUrl) || !/^\/s(?:\/|$)/i.test(requestedUrl.pathname)) {
     throwVerificationError();
   }
   let result;
@@ -193,4 +206,4 @@ function clean(value) {
 }
 function isPrivateAddress(address) { const value = address.toLowerCase(); if (value === '::1' || value.startsWith('fc') || value.startsWith('fd') || value.startsWith('fe80:')) return true; if (!/^\d+\.\d+\.\d+\.\d+$/.test(value)) return false; const [a, b] = value.split('.').map(Number); return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168); }
 
-module.exports = { clipPublicLink, readPublicArticle, fetchPublicPage, buildPublicPreviewFromHtml, sourceName, validatePublicUrl, buildPublicPreview };
+module.exports = { clipPublicLink, readPublicArticle, fetchPublicPage, buildPublicPreviewFromHtml, sourceName, validatePublicUrl, assertWechatArticleUrl, buildPublicPreview };
