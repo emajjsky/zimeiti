@@ -45,6 +45,26 @@ test('已选平台仍必须配置独立渠道规则', () => {
   );
 });
 
+test('公众号母稿拒绝非公众号 selectedPlatforms', () => {
+  assert.throws(
+    () => writingBriefInput.parse({ ...brief, selectedPlatforms: ['WECHAT', 'XIAOHONGSHU'] }),
+    /Invalid input|Too big|array/i,
+  );
+});
+
+test('公众号母稿拒绝 platformSkills 中的额外平台', () => {
+  assert.throws(
+    () => writingBriefInput.parse({
+      ...brief,
+      platformSkills: {
+        ...brief.platformSkills,
+        WEIBO: { LAYOUT: 'weibo-layout', CHANNEL: 'weibo-channel' },
+      },
+    }),
+    /Unrecognized key|WEIBO/i,
+  );
+});
+
 test('写作简报保存账号声音和本篇语气，而不是泛化语言风格', () => {
   const result = writingBriefInput.parse({ ...brief, accountVoiceProfileId: '715a27a6-38d7-4bcf-ab68-4765fbb0f697', voiceOffset: 'SHARPER' });
   assert.equal(result.accountVoiceProfileId, '715a27a6-38d7-4bcf-ab68-4765fbb0f697');

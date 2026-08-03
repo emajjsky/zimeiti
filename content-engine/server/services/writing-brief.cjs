@@ -1,7 +1,5 @@
 const { z } = require('zod');
 
-const creativePlatform = z.enum(['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO']);
-const creativePlatformNames = { WECHAT: '公众号', XIAOHONGSHU: '小红书', ZHIHU: '知乎', WEIBO: '微博' };
 const platformSkillInput = z.object({
   LAYOUT: z.string().min(1).max(160).optional(),
   CHANNEL: z.string().min(1).max(160).optional(),
@@ -14,7 +12,7 @@ const writingBriefInput = z.object({
   coreMessage: z.string().max(4_000),
   sourceRequirements: z.string().max(4_000),
   lengthTarget: z.string().max(120),
-  selectedPlatforms: z.array(creativePlatform).min(1).max(4),
+  selectedPlatforms: z.tuple([z.literal('WECHAT')]),
   notes: z.string().max(4_000),
   accountVoiceProfileId: z.string().uuid().or(z.literal('')).default(''),
   voiceOffset: z.enum(['DEFAULT', 'MORE_RESTRAINED', 'SHARPER', 'MORE_PERSONAL', 'MORE_NARRATIVE']).default('DEFAULT'),
@@ -25,15 +23,10 @@ const writingBriefInput = z.object({
     LAYOUT: z.string().max(160).default(''),
     CHANNEL: z.string().max(160).default(''),
   }),
-  platformSkills: z.object({
-    WECHAT: platformSkillInput.optional(),
-    XIAOHONGSHU: platformSkillInput.optional(),
-    ZHIHU: platformSkillInput.optional(),
-    WEIBO: platformSkillInput.optional(),
-  }),
+  platformSkills: z.object({ WECHAT: platformSkillInput }).strict(),
 }).superRefine((value, context) => {
-  for (const platform of value.selectedPlatforms) {
-    if (!value.platformSkills[platform]?.CHANNEL) context.addIssue({ code: 'custom', path: ['platformSkills', platform], message: `请配置${creativePlatformNames[platform]}写作规则。` });
+  if (!value.platformSkills.WECHAT.LAYOUT || !value.platformSkills.WECHAT.CHANNEL) {
+    context.addIssue({ code: 'custom', path: ['platformSkills', 'WECHAT'], message: '请配置公众号写作规则。' });
   }
 });
 

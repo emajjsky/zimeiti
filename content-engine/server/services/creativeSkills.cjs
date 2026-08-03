@@ -92,6 +92,13 @@ function createCreativeSkillStore({ query, transaction, accountVoiceStore = null
   }
 
   async function saveBrief(workspaceId, projectId, input) {
+    const platforms = input.selectedPlatforms ?? [];
+    const platformKeys = Object.keys(input.platformSkills ?? {});
+    if (platforms.length !== 1 || platforms[0] !== 'WECHAT' || platformKeys.length !== 1 || platformKeys[0] !== 'WECHAT') {
+      const error = new Error('公众号母稿写作策略只允许公众号规则。');
+      error.statusCode = 400;
+      throw error;
+    }
     const shared = ['SUBJECT', 'CONTENT_TYPE'];
     const requestedPairs = [
       ...shared.map((dimension) => [dimension, input.selectedSkills[dimension]]),
@@ -99,7 +106,7 @@ function createCreativeSkillStore({ query, transaction, accountVoiceStore = null
       ...input.selectedPlatforms.flatMap((platform) => input.platformSkills[platform]?.LAYOUT ? [['LAYOUT', input.platformSkills[platform].LAYOUT]] : []),
     ];
     if (requestedPairs.some(([, id]) => !id)) {
-      const error = new Error('写作策略无效，请选择题材、内容类型、语言风格，并确保平台写作规则可用。');
+      const error = new Error('写作策略无效，请选择题材、内容类型，并确保公众号写作规则可用。');
       error.statusCode = 400;
       throw error;
     }

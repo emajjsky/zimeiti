@@ -915,6 +915,8 @@ git commit -m "feat: replace publish center with platform drafts"
 
 ### Task 13: Remove Legacy Platform Workflow And Zhihu Runtime
 
+**Interim WritingBrief hardening (2026-08-03):** The active WeChat copy page now exposes only subject, content type, and target length. Fixed WeChat layout/channel Skill versions are rebuilt from the catalog, legacy multi-platform Briefs are normalized through the normal save API, and both the request schema and store reject non-WeChat keys. Unit tests, the creative E2E legacy-Brief fixture, and a real logged-in Chrome refresh passed. This is not Task 13 completion: migration 029 has not been created or executed, historical Zhihu data has not been deleted, and the remaining legacy runtime removal steps below stay open.
+
 **Files:**
 - Create: `content-engine/server/migrations/029_remove_legacy_platform_workflow.sql`
 - Modify: `content-engine/server/index.cjs`

@@ -20,6 +20,8 @@ ASSET_B_ID = "77777777-7777-4777-8777-777777777777"
 TEMPLATE_ID = "22222222-2222-4222-8222-222222222222"
 TEMPLATE_VERSION_ID = "33333333-3333-4333-8333-333333333333"
 NOW = "2026-08-02T08:00:00.000Z"
+WECHAT_LAYOUT_SKILL_ID = "creative-layout-wechat:1.0.0"
+WECHAT_CHANNEL_SKILL_ID = "creative-channel-wechat:1.0.0"
 SESSION = {
     "accessToken": "mock-access-token",
     "user": {"id": "user-1", "email": "creator@example.com", "display_name": "验收用户"},
@@ -154,6 +156,31 @@ with sync_playwright() as playwright:
         "derived": None,
         "adaptation_status": "DRAFT",
         "adaptation_polls": 0,
+        "brief": {
+            "objective": "建立核验方法",
+            "targetAudience": "内容创作者",
+            "coreMessage": "先验证再判断",
+            "sourceRequirements": "公开资料",
+            "lengthTarget": "1500-2500 字",
+            "selectedPlatforms": ["WECHAT", "XIAOHONGSHU", "ZHIHU", "WEIBO"],
+            "notes": "",
+            "selectedSkills": {
+                "SUBJECT": "creative-subject-general:1.0.0",
+                "CONTENT_TYPE": "creative-type-education:1.0.0",
+                "VOICE": "",
+                "LAYOUT": "",
+                "CHANNEL": "",
+            },
+            "platformSkills": {
+                "WECHAT": {"LAYOUT": "creative-layout-xhs:1.0.0", "CHANNEL": "creative-channel-xhs:1.0.0", "lengthTarget": "1500-2500 字"},
+                "XIAOHONGSHU": {"LAYOUT": "creative-layout-xhs:1.0.0", "CHANNEL": "creative-channel-xhs:1.0.0"},
+                "ZHIHU": {"LAYOUT": "creative-layout-zhihu:1.0.0", "CHANNEL": "creative-channel-zhihu:1.0.0"},
+                "WEIBO": {"LAYOUT": "creative-layout-weibo:1.0.0", "CHANNEL": "creative-channel-weibo:1.0.0"},
+            },
+            "accountVoiceProfileId": "",
+            "voiceOffset": "DEFAULT",
+        },
+        "brief_puts": [],
         "unexpected": [],
         "console_errors": [],
         "requests": [],
@@ -253,11 +280,31 @@ with sync_playwright() as playwright:
         if path == f"/api/v1/creative/projects/{PROJECT_ID}/drafts" and method == "GET":
             return respond(route, {"drafts": [state["draft"]] + ([state["derived"]] if state["derived"] else [])})
         if path == "/api/v1/creative/skills" and method == "GET":
-            return respond(route, [])
+            return respond(route, [
+                {"id": "subject-general", "dimension": "SUBJECT", "slug": "general", "name": "通用", "description": "", "sortOrder": 1, "version": {"id": "creative-subject-general:1.0.0", "version": "1.0.0", "instructions": "", "rules": {}}},
+                {"id": "type-education", "dimension": "CONTENT_TYPE", "slug": "education", "name": "科普", "description": "", "sortOrder": 1, "version": {"id": "creative-type-education:1.0.0", "version": "1.0.0", "instructions": "", "rules": {}}},
+                {"id": "layout-wechat", "dimension": "LAYOUT", "slug": "wechat-longform", "name": "公众号长文", "description": "", "sortOrder": 1, "version": {"id": WECHAT_LAYOUT_SKILL_ID, "version": "1.0.0", "instructions": "", "rules": {}}},
+                {"id": "layout-xhs", "dimension": "LAYOUT", "slug": "xiaohongshu-grid", "name": "小红书分页图文", "description": "", "sortOrder": 2, "version": {"id": "creative-layout-xhs:1.0.0", "version": "1.0.0", "instructions": "", "rules": {}}},
+                {"id": "layout-zhihu", "dimension": "LAYOUT", "slug": "zhihu-answer", "name": "知乎回答", "description": "", "sortOrder": 3, "version": {"id": "creative-layout-zhihu:1.0.0", "version": "1.0.0", "instructions": "", "rules": {}}},
+                {"id": "layout-weibo", "dimension": "LAYOUT", "slug": "weibo-thread", "name": "微博单条与串文", "description": "", "sortOrder": 4, "version": {"id": "creative-layout-weibo:1.0.0", "version": "1.0.0", "instructions": "", "rules": {}}},
+                {"id": "channel-wechat", "dimension": "CHANNEL", "slug": "wechat", "name": "公众号", "description": "", "sortOrder": 1, "version": {"id": WECHAT_CHANNEL_SKILL_ID, "version": "1.0.0", "instructions": "", "rules": {}}},
+                {"id": "channel-xhs", "dimension": "CHANNEL", "slug": "xiaohongshu", "name": "小红书", "description": "", "sortOrder": 2, "version": {"id": "creative-channel-xhs:1.0.0", "version": "1.0.0", "instructions": "", "rules": {}}},
+                {"id": "channel-zhihu", "dimension": "CHANNEL", "slug": "zhihu", "name": "知乎", "description": "", "sortOrder": 3, "version": {"id": "creative-channel-zhihu:1.0.0", "version": "1.0.0", "instructions": "", "rules": {}}},
+                {"id": "channel-weibo", "dimension": "CHANNEL", "slug": "weibo", "name": "微博", "description": "", "sortOrder": 4, "version": {"id": "creative-channel-weibo:1.0.0", "version": "1.0.0", "instructions": "", "rules": {}}},
+            ])
         if path == "/api/v1/account-voices" and method == "GET":
             return respond(route, {"voices": []})
         if path == f"/api/v1/creative/projects/{PROJECT_ID}/brief" and method == "GET":
-            return respond(route, {"brief": {"objective": "建立核验方法", "targetAudience": "内容创作者", "coreMessage": "先验证再判断", "sourceRequirements": "公开资料", "lengthTarget": "1500-2500 字", "selectedPlatforms": ["WECHAT"], "notes": "", "selectedSkills": {"SUBJECT": "", "CONTENT_TYPE": "", "VOICE": "", "LAYOUT": "", "CHANNEL": ""}, "platformSkills": {"WECHAT": {"LAYOUT": "", "CHANNEL": "", "lengthTarget": "1500-2500 字"}}, "accountVoiceProfileId": "", "voiceOffset": "DEFAULT"}})
+            return respond(route, {"brief": state["brief"]})
+        if path == f"/api/v1/creative/projects/{PROJECT_ID}/brief" and method == "PUT":
+            payload = request.post_data_json
+            assert payload["selectedPlatforms"] == ["WECHAT"], payload
+            assert list(payload["platformSkills"]) == ["WECHAT"], payload
+            assert payload["platformSkills"]["WECHAT"]["LAYOUT"] == WECHAT_LAYOUT_SKILL_ID, payload
+            assert payload["platformSkills"]["WECHAT"]["CHANNEL"] == WECHAT_CHANNEL_SKILL_ID, payload
+            state["brief_puts"].append(payload)
+            state["brief"] = {**payload, "id": "brief-1", "projectId": PROJECT_ID, "updatedAt": NOW}
+            return respond(route, {"brief": state["brief"]})
         if path == f"/api/v1/content-drafts/{DRAFT_ID}" and method == "PATCH":
             patch_draft(request.post_data_json)
             return respond(route, state["draft"])
@@ -347,6 +394,13 @@ with sync_playwright() as playwright:
     assert "stage=copy" in page.url
     page.reload(); page.wait_for_load_state("networkidle")
     page.locator(".copy-editor").wait_for()
+    strategy = page.locator(".copy-strategy")
+    assert strategy.get_by_text("题材", exact=True).count() == 1
+    assert strategy.get_by_text("内容类型", exact=True).count() == 1
+    assert strategy.get_by_text("目标篇幅", exact=True).count() == 1
+    for removed_option in ("内容结构", "渠道规则", "小红书分页图文", "知乎回答", "微博单条与串文"):
+        assert strategy.get_by_text(removed_option, exact=True).count() == 0, removed_option
+    assert state["brief_puts"], "旧多平台 Brief 未自动规范化"
     page.get_by_label("标题", exact=True).fill("普通人如何核验 AI 工具的真实价值")
     body = "真正有价值的工具，必须在具体任务中稳定产出可以验证的结果。" * 6
     page.get_by_label("正文", exact=True).fill(body)

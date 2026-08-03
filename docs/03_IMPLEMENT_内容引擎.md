@@ -969,3 +969,14 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - `VISUAL_PLAN_VERSION` 升级为 5。旧版项目配图方案在加载时重新编译最终提示词，并移除遗留的 `negativePrompt` 字段，已有素材绑定继续保留。
 - 项目风格由 17 套扩展为 25 套，新增黑白刊物、现代报刊、生活方式摄影、咨询报告、科普图谱、铅笔线稿、木刻版画和工业纪实。
 - 风格选择器改为分类案例画廊。每次只显示当前分类，卡片直接呈现版式、构图、图文密度、色彩和材质差异；右侧固定展示选中案例的大预览、用途、色板及项目统一补充要求。
+
+## 2026-08-03 修复：公众号母稿不再混入跨平台写作规则
+
+- 根因位于 `CopyWorkspace.tsx`：页面虽然固定 `selectedPlatforms = ['WECHAT']`，仍遍历完整 Skill 目录渲染 `LAYOUT/CHANNEL`，因此公众号下拉框出现“小红书分页图文、知乎回答、微博单条与串文”。
+- `CopyWorkspace.tsx` 删除两个平台规则选择器，Skill 分组只读取 `SUBJECT/CONTENT_TYPE`；页面保留目标篇幅、账号声音和本篇语气。
+- `CreateWorkspace.tsx` 统一用 Skill slug 解析固定公众号 `LAYOUT/CHANNEL`。读取旧 Brief 时检查平台数组、平台规则键、固定规则版本和篇幅一致性，不符合时通过 `webCreative.saveBrief()` 保存规范化结果。
+- `writing-brief.cjs` 将请求契约收紧为 `selectedPlatforms: ['WECHAT']` 和严格的单键 `platformSkills.WECHAT`；`creativeSkills.cjs` 在查询 Skill 或开启事务前再次拒绝非公众号输入，防止绕过路由 Schema。
+- `creative-skills.test.mjs`、`writing-brief-input.test.mjs` 和 `creative-workflow.test.mjs` 覆盖 UI、Schema、Store 三层边界；`creative-workspace.e2e.py` 注入旧四平台 Brief 和完整旧 Skill 目录，验证自动规范化请求只保留公众号固定规则。
+- 真实登录 Chrome 已刷新宇树科技项目：写作策略标签为题材、内容类型、目标篇幅，五个旧字段/选项均不存在，状态为“已自动保存”，应用错误数和控制台错误均为 0，页面无横向溢出。
+- 最终验证通过：全量 `436/436` 单元测试、TypeScript 类型检查、生产构建、`server/index.cjs` 与 `server/worker.cjs` 语法检查、创作工作区 E2E 和差异检查。
+- 本修复未创建或执行迁移 `029`，未删除历史数据，也未把 Task 13 标记完成。

@@ -13,6 +13,9 @@ const selection = {
 };
 const platformSkills = {
   WECHAT: { LAYOUT: 'creative-layout-wechat:1.0.0', CHANNEL: 'creative-channel-wechat:1.0.0' },
+};
+const legacyPlatformSkills = {
+  ...platformSkills,
   XIAOHONGSHU: { LAYOUT: 'creative-layout-xhs:1.0.0', CHANNEL: 'creative-channel-xhs:1.0.0' },
 };
 
@@ -60,19 +63,39 @@ test('错误维度的 Skill 组合不会写入数据库', async () => {
   assert.equal(transactionCalled, false);
 });
 
+test('Store 拒绝把非公众号平台规则写入母稿 Brief', async () => {
+  let queryCalled = false;
+  let transactionCalled = false;
+  const store = createCreativeSkillStore({
+    query: async () => { queryCalled = true; return { rowCount: 0, rows: [] }; },
+    transaction: async () => { transactionCalled = true; },
+  });
+
+  await assert.rejects(
+    () => store.saveBrief('workspace-id', 'project-1', {
+      selectedPlatforms: ['WECHAT', 'XIAOHONGSHU'],
+      selectedSkills: selection,
+      platformSkills: legacyPlatformSkills,
+    }),
+    /只允许公众号规则/,
+  );
+  assert.equal(queryCalled, false);
+  assert.equal(transactionCalled, false);
+});
+
 test('生成小红书内容只冻结写作维度和小红书平台规则', async () => {
   let call = 0;
   const rows = [
     { id: 'creative-subject-ai', dimension: 'SUBJECT', slug: 'ai-technology', name: 'AI 科技', description: '', sort_order: 1, version_id: selection.SUBJECT, version: '1.0.0', instructions_md: 'AI 规则', rules_json: {} },
     { id: 'creative-type-education', dimension: 'CONTENT_TYPE', slug: 'education', name: '科普', description: '', sort_order: 1, version_id: selection.CONTENT_TYPE, version: '1.0.0', instructions_md: '科普规则', rules_json: {} },
     { id: 'creative-voice-fresh', dimension: 'VOICE', slug: 'plain-fresh', name: '通俗清新', description: '', sort_order: 1, version_id: selection.VOICE, version: '1.0.0', instructions_md: '语言规则', rules_json: {} },
-    { id: 'creative-channel-xhs', dimension: 'CHANNEL', slug: 'xiaohongshu', name: '小红书', description: '', sort_order: 1, version_id: platformSkills.XIAOHONGSHU.CHANNEL, version: '1.0.0', instructions_md: '小红书渠道', rules_json: {} },
+    { id: 'creative-channel-xhs', dimension: 'CHANNEL', slug: 'xiaohongshu', name: '小红书', description: '', sort_order: 1, version_id: legacyPlatformSkills.XIAOHONGSHU.CHANNEL, version: '1.0.0', instructions_md: '小红书渠道', rules_json: {} },
   ];
   const store = createCreativeSkillStore({
     accountVoiceStore: { getWritingSnapshot: async () => ({ id: 'voice-1', name: '把话说透', version: 1, rules: {}, offset: 'DEFAULT' }) },
     query: async () => {
       call += 1;
-      if (call === 1) return { rowCount: 1, rows: [{ id: 'brief-id', project_id: 'project-1', selected_platforms_json: ['WECHAT', 'XIAOHONGSHU'], selected_versions_json: selection, platform_versions_json: platformSkills, account_voice_profile_id: 'voice-1', voice_offset: 'DEFAULT' }] };
+      if (call === 1) return { rowCount: 1, rows: [{ id: 'brief-id', project_id: 'project-1', selected_platforms_json: ['WECHAT', 'XIAOHONGSHU'], selected_versions_json: selection, platform_versions_json: legacyPlatformSkills, account_voice_profile_id: 'voice-1', voice_offset: 'DEFAULT' }] };
       return { rowCount: rows.length, rows };
     },
     transaction: async () => { throw new Error('不应进入事务'); },
@@ -167,9 +190,9 @@ test('创作主流程固定为五步公众号母稿，视频不列为必经步�
   const briefSchema = fs.readFileSync(new URL('../server/services/writing-brief.cjs', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /VIDEO_CHANNEL|activePlatform|onPlatform/);
   assert.match(source, /webCreative\.saveBrief/);
-  assert.match(briefSchema, /const creativePlatform = z\.enum\(\['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO'\]\)/);
-  assert.match(briefSchema, /selectedPlatforms: z\.array\(creativePlatform\)/);
-  assert.doesNotMatch(briefSchema, /const creativePlatform = z\.enum\([^\n]*VIDEO_CHANNEL/);
+  assert.match(briefSchema, /selectedPlatforms: z\.tuple\(\[z\.literal\('WECHAT'\)\]\)/);
+  assert.match(briefSchema, /platformSkills: z\.object\(\{ WECHAT: platformSkillInput \}\)\.strict\(\)/);
+  assert.doesNotMatch(briefSchema, /XIAOHONGSHU|ZHIHU|WEIBO|VIDEO_CHANNEL/);
 });
 
 test('Skill 只在文案阶段作为写作策略出现，排版不参与写作确认', () => {
@@ -181,7 +204,9 @@ test('Skill 只在文案阶段作为写作策略出现，排版不参与写作�
   assert.match(copy, /题材[\s\S]*内容类型/);
   assert.doesNotMatch(copy, /语言风格/);
   assert.match(copy, /sharedDimensions\.map/);
-  assert.match(copy, /内容结构[\s\S]*渠道规则/);
+  assert.match(copy, /目标篇幅/);
+  assert.doesNotMatch(copy, /内容结构|渠道规则|platformDimensions/);
+  assert.doesNotMatch(copy, /小红书分页图文|知乎回答|微博单条与串文/);
   assert.doesNotMatch(copy, />排版</);
 });
 

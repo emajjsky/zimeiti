@@ -20,11 +20,11 @@ function firstVersion(skills: CreativeSkillDefinition[], dimension: CreativeSkil
   return (candidates.find((skill) => skill.slug === preferredSlug) ?? candidates[0])?.version.id ?? '';
 }
 
-function wechatSkills(skills: CreativeSkillDefinition[]) {
+function wechatSkills(skills: CreativeSkillDefinition[], lengthTarget = '1500-2500 字') {
   return {
     LAYOUT: firstVersion(skills, 'LAYOUT', 'wechat-longform'),
     CHANNEL: firstVersion(skills, 'CHANNEL', 'wechat'),
-    lengthTarget: '1500-2500 字',
+    lengthTarget,
   };
 }
 
@@ -50,19 +50,32 @@ function defaultBrief(project: ContentProject, skills: CreativeSkillDefinition[]
 }
 
 function briefInput(brief: WritingBrief, skills: CreativeSkillDefinition[]): WritingBriefInput {
+  const lengthTarget = brief.platformSkills.WECHAT?.lengthTarget || brief.lengthTarget || '1500-2500 字';
   return {
     objective: brief.objective,
     targetAudience: brief.targetAudience,
     coreMessage: brief.coreMessage,
     sourceRequirements: brief.sourceRequirements,
-    lengthTarget: brief.lengthTarget || '1500-2500 字',
+    lengthTarget,
     selectedPlatforms: ['WECHAT'],
     notes: brief.notes,
     accountVoiceProfileId: brief.accountVoiceProfileId,
     voiceOffset: brief.voiceOffset,
     selectedSkills: brief.selectedSkills,
-    platformSkills: { WECHAT: brief.platformSkills.WECHAT ?? wechatSkills(skills) },
+    platformSkills: { WECHAT: wechatSkills(skills, lengthTarget) },
   };
+}
+
+function requiresWechatBriefNormalization(brief: WritingBrief, normalized: WritingBriefInput) {
+  const current = brief.platformSkills.WECHAT;
+  const expected = normalized.platformSkills.WECHAT;
+  return brief.selectedPlatforms.length !== 1
+    || brief.selectedPlatforms[0] !== 'WECHAT'
+    || Object.keys(brief.platformSkills).some((platform) => platform !== 'WECHAT')
+    || current?.LAYOUT !== expected?.LAYOUT
+    || current?.CHANNEL !== expected?.CHANNEL
+    || current?.lengthTarget !== expected?.lengthTarget
+    || brief.lengthTarget !== normalized.lengthTarget;
 }
 
 function draftRoute(project: ContentProject, draft: ContentDraft | null): CreateStageRoute {
@@ -154,7 +167,7 @@ export function CreateWorkspace({ project, stage, activeDerivedDraftId, onStage,
       setSkills(catalog); setAccountVoices(voices.voices);
       const fallback = defaultBrief(project, catalog, voices.voices.find((voice) => voice.isDefault)?.id ?? '');
       const normalized = result.brief ? briefInput(result.brief, catalog) : fallback;
-      if (!result.brief || JSON.stringify(result.brief.selectedPlatforms) !== JSON.stringify(['WECHAT']) || !result.brief.platformSkills.WECHAT) {
+      if (!result.brief || requiresWechatBriefNormalization(result.brief, normalized)) {
         setBriefState('saving');
         const saved = await webCreative.saveBrief(project.id, normalized);
         if (cancelled) return;
@@ -169,7 +182,8 @@ export function CreateWorkspace({ project, stage, activeDerivedDraftId, onStage,
 
   const saveBrief = async (next: WritingBriefInput) => {
     if (!project) return;
-    const normalized: WritingBriefInput = { ...next, selectedPlatforms: ['WECHAT'], platformSkills: { WECHAT: next.platformSkills.WECHAT ?? wechatSkills(skills) } };
+    const lengthTarget = next.platformSkills.WECHAT?.lengthTarget || next.lengthTarget || '1500-2500 字';
+    const normalized: WritingBriefInput = { ...next, lengthTarget, selectedPlatforms: ['WECHAT'], platformSkills: { WECHAT: wechatSkills(skills, lengthTarget) } };
     setBrief(normalized); setBriefState('saving');
     try {
       const result = await webCreative.saveBrief(project.id, normalized);

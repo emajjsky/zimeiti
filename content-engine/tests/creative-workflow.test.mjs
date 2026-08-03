@@ -31,6 +31,16 @@ test('文案工作区只编辑公众号母稿且复用通用 Project Agent', () 
   assert.doesNotMatch(workspace, /prepareOutline|prepareDraft/);
 });
 
+test('公众号母稿策略不暴露其他平台的结构与渠道选项', () => {
+  const copy = fs.readFileSync(new URL('../src/workspaces/create/CopyWorkspace.tsx', import.meta.url), 'utf8');
+  const workspace = fs.readFileSync(new URL('../src/workspaces/create/CreateWorkspace.tsx', import.meta.url), 'utf8');
+  assert.match(copy, /题材[\s\S]*内容类型[\s\S]*目标篇幅/);
+  assert.doesNotMatch(copy, /内容结构|渠道规则|小红书分页图文|知乎回答|微博单条与串文/);
+  assert.match(workspace, /selectedPlatforms: \['WECHAT'\]/);
+  assert.match(workspace, /platformSkills: \{ WECHAT: wechatSkills\(skills, lengthTarget\) \}/);
+  assert.match(workspace, /requiresWechatBriefNormalization/);
+});
+
 test('文案工作区支持 revision 保存、正文选区和明确采用候选', () => {
   const copy = fs.readFileSync(new URL('../src/workspaces/create/CopyWorkspace.tsx', import.meta.url), 'utf8');
   const dialog = fs.readFileSync(new URL('../src/workspaces/create/CopyCandidateDialog.tsx', import.meta.url), 'utf8');
