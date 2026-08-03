@@ -1,5 +1,14 @@
 # 内容引擎技术实施方案
 
+## 2026-08-03 修复：正文生成完成后当前页面即时同步
+
+- 根因不是模型或数据库写入失败。`028_content_draft_foundation.sql` 上线后，首次 `GENERATE_DRAFT` 由 Worker 在成功事务中直接写入公众号 `content_drafts`，不再创建 `ACCEPTED PLATFORM_COPY` 候选；前端却仍以该候选是否存在作为完成条件，因此服务端已有正文、当前编辑器仍保留生成前的空本地状态，只有切页重新加载草稿后才显示。
+- 新增 `GET /api/v1/creative/agent-runs/:id`。接口按 JWT 当前用户、`X-Workspace-Id` 和工作空间成员角色读取单个 Agent 运行，限定研究/文案 Agent 动作版本，返回统一 `ProjectAgentRun` 终态；不存在或跨空间运行返回 404，不通过消息文案猜测成功状态。
+- `ProjectAgent.tsx` 将研究产物采用与首次正文完成拆为两个显式事件。文案轮询记录具体运行 ID，活动运行消失后读取同一运行终态；只有 `SUCCEEDED + GENERATE_DRAFT` 才调用 `onDraftGenerated`，`FAILED` 展示真实错误，`CANCELLED` 和其它动作不刷新正式正文。并发轮询复用同一请求 Promise，完成回调成功前不清除观察状态，网络失败可继续重试且不会重复触发成功同步。
+- `CopyWorkspace.tsx` 的 `applyServerDraft()` 同步更新 `draftRef`、`contentRef`、保存队列和受控 textarea 状态，首次正文无需卸载页面即可出现。已有正文状态以当前工作草稿内容为准，不再依赖已删除的首次候选语义；生成期间标题、正文和保存按钮锁定，正文或创作设定尚在保存时禁止启动任务，避免旧 revision 覆盖新成稿。
+- 本次没有数据库迁移、数据删除、历史项目改写或模型重跑。真实项目中已经生成的正文继续保留；修复只调整运行状态读取和前端草稿同步。
+- 回归新增运行生命周期领域测试、工作空间隔离的运行状态接口契约测试和完整 Playwright 场景。浏览器从点击“生成正文”开始模拟 `DRAFT -> QUEUED -> RUNNING -> SUCCEEDED`，验证当前 `stage=copy` 页面即时出现正文、运行期间不可编辑、完成后恢复编辑、无需刷新或切页，且后续五步流程、390px 页面和控制台检查继续通过。最终验证为全量 `446/446`、TypeScript、生产构建、API/Worker 语法和 `git diff --check` 全部通过。
+
 ## 2026-08-03 修复：热点固定公众号母稿与研究结果真实性
 
 - 发现页删除 `defaultPlatforms`、平台 checkbox、本地平台状态和平台建议结果块。`prepareAnalysis` 改为空请求体，服务端使用 strict 空对象校验并固定 `['WECHAT']`；确认旧分析草稿时再次校验冻结平台，历史跨平台草稿不能进入队列。

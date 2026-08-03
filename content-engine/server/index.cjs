@@ -1698,6 +1698,18 @@ app.post('/api/v1/creative/projects/:projectId/agent/prepare', { preHandler: wor
   reply.code(201).send(runView(run));
 });
 
+app.get('/api/v1/creative/agent-runs/:id', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
+  const runId = z.string().uuid().parse(request.params.id);
+  const workspace = request.workspace;
+  const result = await query(`SELECT * FROM generation_runs
+    WHERE id = $1 AND workspace_id = $2
+      AND (action_version_id = $3 OR action_version_id = $4 OR action_version_id LIKE 'project-copy-%')`, [
+    runId, workspace.id, PROJECT_RESEARCH_ACTION_VERSION, SIMPLIFIED_RESEARCH_WORKFLOW_VERSION,
+  ]);
+  if (!result.rowCount) { const error = new Error('没有找到这个 Agent 任务。'); error.statusCode = 404; throw error; }
+  return runView(result.rows[0]);
+});
+
 app.post('/api/v1/creative/agent-runs/:id/confirm', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const runId = z.string().uuid().parse(request.params.id);
   const workspace = request.workspace;

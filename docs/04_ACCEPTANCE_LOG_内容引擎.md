@@ -1,5 +1,17 @@
 # 内容引擎验收记录
 
+## A76. 正文生成后当前页面即时显示（2026-08-03）
+
+| 验收项 | 状态 | 证据 |
+| --- | --- | --- |
+| 根因确认 | 通过 | 调用记录与数据库草稿均证明正文已成功写入；前端错误等待不存在的首次 `ACCEPTED PLATFORM_COPY` 候选，所以当前受控 textarea 未更新，切页重新加载后才显示。 |
+| 运行终态 | 通过 | 新增工作空间隔离的单运行查询 API；客户端按同一运行 ID 判断终态，只允许 `SUCCEEDED + GENERATE_DRAFT` 触发正式草稿同步，失败、取消、未结束和其它动作均不会误刷新。 |
+| 当前页同步 | 通过 | `onDraftGenerated -> onReloadDraft -> applyServerDraft` 同时更新草稿 revision 引用、编辑器 content ref、受控状态和保存队列；不依赖页面卸载、路由切换或伪候选。 |
+| 并发安全 | 通过 | 轮询请求串行复用；同步成功前保留观察运行。生成期间编辑器与保存按钮锁定，正文/创作设定保存完成前不能启动生成，防止旧本地保存覆盖 Worker 新成稿。 |
+| 数据安全 | 通过 | 无迁移、无删除、无历史数据重写、无模型重跑；现有已生成正文原样保留。 |
+| 浏览器验收 | 通过 | Playwright 完整模拟 `DRAFT -> QUEUED -> RUNNING -> SUCCEEDED`：当前 `stage=copy` 页面正文即时出现，运行中不可编辑，完成后恢复编辑，不刷新、不切页；后续配图、排版、完成草稿、小红书派生和 390px 检查继续通过，应用控制台错误为 0。截图：`%TEMP%/content-engine-creative-workspace-e2e/generated-copy-immediate.png`。 |
+| 自动化回归 | 通过 | 定向测试 `19/19`，全量 `npm test` `446/446`，`npm run typecheck`、`npm run build`、`node --check server/index.cjs`、`node --check server/worker.cjs`、创作流程 E2E 与 `git diff --check` 全部通过。 |
+
 ## A75. 热点公众号母稿与研究真实性（2026-08-03）
 
 | 验收项 | 状态 | 证据 |

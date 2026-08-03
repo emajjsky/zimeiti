@@ -53,3 +53,16 @@ test('首次正文不产生候选，只有大纲或主动修改候选进入查�
   assert.doesNotMatch(agent, /正文候选已生成|正式文稿尚未改变|查看并采用|正在生成正文候选|候选审核/);
   assert.match(agent, /正在准备资料|正在生成正文/);
 });
+
+test('首次正文完成后按运行成功状态同步当前编辑器，不依赖候选产物或切换页面', () => {
+  const agent = fs.readFileSync(new URL('../src/workspaces/create/ProjectAgent.tsx', import.meta.url), 'utf8');
+  const copy = fs.readFileSync(new URL('../src/workspaces/create/CopyWorkspace.tsx', import.meta.url), 'utf8');
+  assert.match(agent, /webCreative\.agentRun\(watchedRun\.current\.id\)/);
+  assert.match(agent, /completed\.type === 'SYNC_GENERATED_DRAFT'/);
+  assert.match(agent, /await onDraftGenerated\(\)/);
+  assert.doesNotMatch(agent, /watchedRun\.current\?\.action === 'GENERATE_DRAFT'[\s\S]*result\.artifacts\.find/);
+  assert.match(copy, /onDraftGenerated=\{async \(\) => \{ applyServerDraft\(await onReloadDraft\(\)\); \}\}/);
+  assert.match(copy, /contentRef\.current = nextContent/);
+  assert.match(copy, /saveQueue\.current = Promise\.resolve\(updated\)/);
+  assert.match(copy, /readOnly=\{copyRunActive\}/);
+});

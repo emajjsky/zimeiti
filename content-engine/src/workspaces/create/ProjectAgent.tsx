@@ -1,40 +1,50 @@
 import { Bot, Check, CircleAlert, FileCheck2, LoaderCircle, Search, Settings2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { webCreative, webProjects } from '../../data/webApi';
+import { webCreative } from '../../data/webApi';
 import { copyActionPanelState, copyActionRequest, type CopyPanelAction } from '../../domain/copy-action-panel.mjs';
+import { copyRunCompletion } from '../../domain/copy-run-lifecycle.mjs';
 import { platformName, type ContentProject } from '../../domain/content';
 import type { CreativePlatform, ProjectAgentContext, ProjectArtifact, ResearchResult } from '../../domain/creative';
 import { selectCurrentResearchArtifact } from '../../domain/research-result-selection.mjs';
 
-type ProjectAgentProps = {
+type ProjectAgentBaseProps = {
   projectId: string;
-  stage: 'RESEARCH' | 'COPY';
-  platform?: CreativePlatform;
+  refreshToken?: number;
+  onContextChange?: (context: ProjectAgentContext) => void;
+  onOpenSettings: (target: 'agent' | 'policies' | 'search') => void;
+};
+
+type ResearchProjectAgentProps = ProjectAgentBaseProps & {
+  stage: 'RESEARCH';
+  onArtifactAccepted: (artifact: ProjectArtifact, project?: ContentProject) => void;
+};
+
+type CopyProjectAgentProps = ProjectAgentBaseProps & {
+  stage: 'COPY';
+  platform: CreativePlatform;
   selectedMaterials?: { inputIds: string[]; referenceIds: string[]; assetIds: string[] };
   selection?: { text: string; start: number; end: number };
   hasAcceptedCopy?: boolean;
   blockedReason?: string;
-  refreshToken?: number;
   onClearSelection?: () => void;
-  onContextChange?: (context: ProjectAgentContext) => void;
   onArtifactOpen?: (artifact: ProjectArtifact) => void;
-  onArtifactAccepted: (artifact: ProjectArtifact, project?: ContentProject) => void;
-  onOpenSettings: (target: 'agent' | 'policies' | 'search') => void;
+  onDraftGenerated: () => Promise<void>;
 };
+
+type ProjectAgentProps = ResearchProjectAgentProps | CopyProjectAgentProps;
 
 export function ProjectAgent(props: ProjectAgentProps) {
   if (props.stage === 'RESEARCH') return <SimplifiedResearchAgent {...props}/>;
   return <CopyProjectAgent {...props}/>;
 }
 
-function SimplifiedResearchAgent({ projectId, refreshToken = 0, onContextChange, onArtifactAccepted, onOpenSettings }: ProjectAgentProps) {
+function SimplifiedResearchAgent({ projectId, refreshToken = 0, onContextChange, onArtifactAccepted, onOpenSettings }: ResearchProjectAgentProps) {
   const [context, setContext] = useState<ProjectAgentContext | null>(null);
   const [request, setRequest] = useState('');
   const [showResearchSupplement, setShowResearchSupplement] = useState(false);
   const [busy, setBusy] = useState<'idle' | 'loading' | 'starting' | 'accepting' | 'skipping' | 'cancelling'>('loading');
   const [error, setError] = useState('');
   const acceptingRef = useRef(false);
-
   const reload = async () => {
     const result = await webCreative.agentContext(projectId, { stage: 'RESEARCH', history: 'CURRENT' });
     setContext(result); setError(''); onContextChange?.(result);
@@ -187,34 +197,42 @@ function researchRunLabel(phase: string | undefined) {
   return phase === 'VERIFYING' ? '正在核验' : phase === 'SOURCES' ? '正在检索' : phase === 'PLANNING' ? '正在整理' : '正在研究';
 }
 
-function CopyProjectAgent({ projectId, stage, platform, selectedMaterials, selection, hasAcceptedCopy = false, blockedReason, refreshToken = 0, onClearSelection, onContextChange, onArtifactOpen, onArtifactAccepted, onOpenSettings }: ProjectAgentProps) {
+function CopyProjectAgent({ projectId, stage, platform, selectedMaterials, selection, hasAcceptedCopy = false, blockedReason, refreshToken = 0, onClearSelection, onContextChange, onArtifactOpen, onDraftGenerated, onOpenSettings }: CopyProjectAgentProps) {
   const [context, setContext] = useState<ProjectAgentContext | null>(null);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState<'idle' | 'loading' | 'starting' | 'cancelling'>('loading');
   const [error, setError] = useState('');
   const watchedRun = useRef<{ id: string; action: string } | null>(null);
+  const reloadPromise = useRef<Promise<ProjectAgentContext> | null>(null);
 
-  const reload = async () => {
-    const result = await webCreative.agentContext(projectId, { stage, platform, history: 'CURRENT' });
-    setContext(result); onContextChange?.(result);
-    if (result.activeRun && ['DRAFT', 'QUEUED', 'RUNNING'].includes(result.activeRun.status)) {
-      watchedRun.current = { id: result.activeRun.id, action: result.activeRun.action };
-    } else if (watchedRun.current?.action === 'GENERATE_DRAFT') {
-      const accepted = result.artifacts.find((artifact) => artifact.type === 'PLATFORM_COPY' && artifact.platform === platform && artifact.status === 'ACCEPTED');
-      if (accepted) {
-        const refreshed = await webProjects.planning(projectId);
-        onArtifactAccepted(accepted, refreshed.project);
+  const reload = () => {
+    if (reloadPromise.current) return reloadPromise.current;
+    const pending = (async () => {
+      const result = await webCreative.agentContext(projectId, { stage, platform, history: 'CURRENT' });
+      if (result.activeRun && ['DRAFT', 'QUEUED', 'RUNNING'].includes(result.activeRun.status)) {
+        watchedRun.current = { id: result.activeRun.id, action: result.activeRun.action };
+      } else if (watchedRun.current) {
+        const completed = copyRunCompletion(watchedRun.current, await webCreative.agentRun(watchedRun.current.id));
+        if (completed.type === 'WAIT') return result;
+        if (completed.type === 'ERROR') setError(completed.message);
+        if (completed.type === 'SYNC_GENERATED_DRAFT') {
+          await onDraftGenerated();
+        }
+        watchedRun.current = null;
       }
-      watchedRun.current = null;
-    }
-    return result;
+      setContext(result); onContextChange?.(result);
+      return result;
+    })();
+    reloadPromise.current = pending;
+    void pending.finally(() => { if (reloadPromise.current === pending) reloadPromise.current = null; }).catch(() => undefined);
+    return pending;
   };
 
   useEffect(() => {
     let cancelled = false;
     setBusy('loading'); setError(''); setContext(null);
-    void webCreative.agentContext(projectId, { stage, platform, history: 'CURRENT' })
-      .then((result) => { if (!cancelled) { setContext(result); onContextChange?.(result); } })
+    void reload()
+      .then(() => undefined)
       .catch((reason) => { if (!cancelled) setError(reason instanceof Error ? reason.message : '读取文案状态失败。'); })
       .finally(() => { if (!cancelled) setBusy('idle'); });
     return () => { cancelled = true; };

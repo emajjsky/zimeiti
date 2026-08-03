@@ -111,9 +111,24 @@ export function CopyWorkspace({ project, draft, brief, briefState, skills, accou
 
   const skillGroups = useMemo(() => new Map<CreativeSkillDimension, CreativeSkillDefinition[]>(sharedDimensions.map(({ id }) => [id, skills.filter((skill) => skill.dimension === id)])), [skills]);
   const artifacts = (agentContext?.artifacts ?? []).filter((artifact) => artifact.type === 'OUTLINE' || artifact.type === 'PLATFORM_COPY');
-  const hasAcceptedCopy = artifacts.some((artifact) => artifact.type === 'PLATFORM_COPY' && artifact.platform === 'WECHAT' && artifact.status === 'ACCEPTED');
+  const hasAcceptedCopy = content.body.trim().length >= 80
+    || artifacts.some((artifact) => artifact.type === 'PLATFORM_COPY' && artifact.platform === 'WECHAT' && artifact.status === 'ACCEPTED');
   const platformStrategy = strategy?.platformSkills.WECHAT;
   const activeVoice = accountVoices.find((voice) => voice.id === strategy?.accountVoiceProfileId);
+  const copyRunActive = Boolean(agentContext?.activeRun && ['DRAFT', 'QUEUED', 'RUNNING'].includes(agentContext.activeRun.status));
+  const copyActionBlockedReason = strategyState === 'saving' ? '正在保存创作设定'
+    : strategyState === 'error' ? '创作设定保存失败，请重试'
+      : saveState === 'dirty' || saveState === 'saving' ? '正在保存正文' : undefined;
+
+  const applyServerDraft = (updated: ContentDraft) => {
+    const nextContent = { title: updated.title, body: updated.body };
+    draftRef.current = updated;
+    contentRef.current = nextContent;
+    saveQueue.current = Promise.resolve(updated);
+    setContent(nextContent);
+    setSaveState('saved');
+    setSelection(undefined);
+  };
 
   const changeContent = (patch: Partial<typeof content>) => {
     setContent((current) => ({ ...current, ...patch })); setSaveState('dirty'); setSelection(undefined);
@@ -146,7 +161,7 @@ export function CopyWorkspace({ project, draft, brief, briefState, skills, accou
       const result = await webCreative.acceptArtifact(candidate.id, selectedTitle);
       onProjectChange(result.project);
       const updated = await onReloadDraft();
-      setContent({ title: updated.title, body: updated.body });
+      applyServerDraft(updated);
       setCandidate(null); setSaveState('saved'); setRefreshToken((value) => value + 1);
     } catch (reason) { setError(reason instanceof Error ? reason.message : '采用候选失败。'); }
     finally { setCandidateBusy('idle'); }
@@ -171,11 +186,11 @@ export function CopyWorkspace({ project, draft, brief, briefState, skills, accou
     {error && <div className="copy-workspace-error" role="alert"><CircleAlert size={16}/><span>{error}</span>{/模型|提示词|任务策略/.test(error) && <button className="text-button" type="button" onClick={onOpenModelSettings}>去配置</button>}</div>}
     {strategy && <section className="copy-voice-state" aria-label="账号声音"><div className="copy-voice-summary"><span>当前账号声音</span><div><b>{activeVoice?.name ?? '尚未设置账号声音'}</b><p>{activeVoice?.rules.opening ?? '先在设置中导入自己的文章，提炼可继承的表达规则。'}</p></div></div><div className="copy-voice-controls"><label><span>使用声音</span><select value={strategy.accountVoiceProfileId} onChange={(event) => changeStrategy({ accountVoiceProfileId: event.target.value })}><option value="">暂不使用</option>{accountVoices.map((voice) => <option key={voice.id} value={voice.id}>{voice.name}{voice.isDefault ? '（默认）' : ''}</option>)}</select></label><label><span>本篇语气</span><select value={strategy.voiceOffset} onChange={(event) => changeStrategy({ voiceOffset: event.target.value as VoiceOffset })}>{voiceOffsets.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label></div><button className="copy-voice-manage" type="button" onClick={onOpenVoiceSettings}><PenLine size={15}/>编辑声音</button></section>}
     <div className="copy-workspace-layout">
-      <section className="copy-editor"><header className="copy-editor-head"><div><b>公众号正式正文</b><span>{saveState === 'dirty' || saveState === 'saving' ? '正在保存' : saveState === 'error' ? '保存失败' : `已保存 ${draftRef.current.updatedAt}`}</span></div><div><button className="text-button" type="button" aria-expanded={historyOpen} onClick={() => setHistoryOpen((value) => !value)}><History size={15}/>版本 {artifacts.length}</button><button className="button" type="button" onClick={() => void persistDraft()}><Save size={15}/>保存</button></div></header>
+      <section className="copy-editor"><header className="copy-editor-head"><div><b>公众号正式正文</b><span>{saveState === 'dirty' || saveState === 'saving' ? '正在保存' : saveState === 'error' ? '保存失败' : `已保存 ${draftRef.current.updatedAt}`}</span></div><div><button className="text-button" type="button" aria-expanded={historyOpen} onClick={() => setHistoryOpen((value) => !value)}><History size={15}/>版本 {artifacts.length}</button><button className="button" type="button" disabled={copyRunActive} onClick={() => void persistDraft()}><Save size={15}/>保存</button></div></header>
         {historyOpen && <section className="copy-version-panel" aria-label="文案版本记录"><header><b>版本记录</b><button className="icon-button" type="button" aria-label="关闭版本记录" onClick={() => setHistoryOpen(false)}><X size={15}/></button></header>{artifacts.length ? <div>{artifacts.map((artifact) => <button type="button" key={artifact.id} onClick={() => setCandidate(artifact)}><span>{artifactTitle(artifact)}</span><small>{artifactStatus(artifact.status)} · V{artifact.version}</small></button>)}</div> : <p>暂无候选版本</p>}</section>}
-        <div className="copy-document"><label><span>标题</span><textarea ref={titleRef} rows={1} value={content.title} onChange={(event) => changeContent({ title: event.target.value })} onBlur={() => void persistDraft()}/></label><label><span>正文</span><textarea ref={bodyRef} value={content.body} onChange={(event) => changeContent({ body: event.target.value })} onSelect={captureSelection} onBlur={captureSelection} placeholder="输入公众号母稿，或在右侧告诉文案助手生成和修改要求。"/></label></div>
+        <div className="copy-document"><label><span>标题</span><textarea ref={titleRef} rows={1} value={content.title} readOnly={copyRunActive} onChange={(event) => changeContent({ title: event.target.value })} onBlur={() => void persistDraft()}/></label><label><span>正文</span><textarea ref={bodyRef} value={content.body} readOnly={copyRunActive} onChange={(event) => changeContent({ body: event.target.value })} onSelect={captureSelection} onBlur={captureSelection} placeholder="输入公众号母稿，或在右侧告诉文案助手生成和修改要求。"/></label></div>
       </section>
-      <ProjectAgent projectId={project.id} stage="COPY" platform="WECHAT" selection={selection} hasAcceptedCopy={hasAcceptedCopy} blockedReason={strategyState === 'saving' ? '正在保存创作设定' : strategyState === 'error' ? '创作设定保存失败，请重试' : undefined} refreshToken={refreshToken} onClearSelection={() => setSelection(undefined)} onContextChange={setAgentContext} onArtifactOpen={setCandidate} onArtifactAccepted={async (_artifact, nextProject) => { if (nextProject) onProjectChange(nextProject); await onReloadDraft(); }} onOpenSettings={(target) => target === 'agent' ? onOpenAgentSettings() : onOpenModelSettings()}/>
+      <ProjectAgent projectId={project.id} stage="COPY" platform="WECHAT" selection={selection} hasAcceptedCopy={hasAcceptedCopy} blockedReason={copyActionBlockedReason} refreshToken={refreshToken} onClearSelection={() => setSelection(undefined)} onContextChange={setAgentContext} onArtifactOpen={setCandidate} onDraftGenerated={async () => { applyServerDraft(await onReloadDraft()); }} onOpenSettings={(target) => target === 'agent' ? onOpenAgentSettings() : onOpenModelSettings()}/>
     </div>
     {candidate && <CopyCandidateDialog artifact={candidate} current={content} busy={candidateBusy} onAccept={(title) => void acceptCandidate(title)} onReject={() => void rejectCandidate()} onClose={() => candidateBusy === 'idle' && setCandidate(null)}/>}
   </section>;

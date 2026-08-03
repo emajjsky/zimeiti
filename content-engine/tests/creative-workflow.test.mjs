@@ -52,7 +52,9 @@ test('文案工作区支持 revision 保存、正文选区和明确采用候选'
   assert.doesNotMatch(copy, /enableProjectPlatform|onPlatform/);
   assert.match(copy, /selectionStart[\s\S]*selectionEnd/);
   assert.match(copy, /selection=\{selection\}/);
-  assert.match(copy, /blockedReason=.*正在保存创作设定/s);
+  assert.match(copy, /copyActionBlockedReason = strategyState === 'saving' \? '正在保存创作设定'/);
+  assert.match(copy, /saveState === 'dirty' \|\| saveState === 'saving' \? '正在保存正文'/);
+  assert.match(copy, /blockedReason=\{copyActionBlockedReason\}/);
   assert.doesNotMatch(copy, /请先保存写作策略/);
   assert.match(agent, /修改选中.*字/);
   assert.match(agent, /blockedReason/);

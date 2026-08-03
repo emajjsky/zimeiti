@@ -15,6 +15,7 @@ PROJECT_ID = "project-linear-1"
 DRAFT_ID = "11111111-1111-4111-8111-111111111111"
 XIAOHONGSHU_DRAFT_ID = "44444444-4444-4444-8444-444444444444"
 ADAPTATION_RUN_ID = "55555555-5555-4555-8555-555555555555"
+COPY_RUN_ID = "88888888-8888-4888-8888-888888888888"
 ASSET_A_ID = "66666666-6666-4666-8666-666666666666"
 ASSET_B_ID = "77777777-7777-4777-8777-777777777777"
 TEMPLATE_ID = "22222222-2222-4222-8222-222222222222"
@@ -156,6 +157,7 @@ with sync_playwright() as playwright:
         "derived": None,
         "adaptation_status": "DRAFT",
         "adaptation_polls": 0,
+        "copy_run_status": None,
         "brief": {
             "objective": "建立核验方法",
             "targetAudience": "内容创作者",
@@ -273,7 +275,31 @@ with sync_playwright() as playwright:
             return respond(route, {"inputs": [], "references": [], "assets": []})
         if path == f"/api/v1/creative/projects/{PROJECT_ID}/agent" and method == "GET":
             requested_stage = "COPY" if "stage=COPY" in request.url else "RESEARCH"
-            return respond(route, {"stage": requested_stage, "platform": "WECHAT" if requested_stage == "COPY" else None, "messages": [], "summaries": [], "activeRun": None, "artifacts": [], "usedMaterialIds": {"inputIds": [], "referenceIds": [], "assetIds": []}})
+            active_run = None
+            if requested_stage == "COPY" and state["copy_run_status"] in ("DRAFT", "QUEUED", "RUNNING"):
+                active_run = {
+                    "id": COPY_RUN_ID,
+                    "action": "GENERATE_DRAFT",
+                    "status": state["copy_run_status"],
+                    "request": "生成正文",
+                    "confirmation": {"model": "mock-writing-model", "promptVersion": "1", "skillNames": [], "materialCount": 0, "writeScope": "WECHAT"},
+                    "createdAt": NOW,
+                }
+                state["copy_run_status"] = "RUNNING" if state["copy_run_status"] == "QUEUED" else "SUCCEEDED"
+            elif requested_stage == "COPY" and state["copy_run_status"] == "SUCCEEDED" and not state["draft"]["body"]:
+                state["draft"]["title"] = "生成后立即显示的公众号正文"
+                state["draft"]["body"] = "正文生成完成后，当前页面应立即读取服务端正式草稿，不需要切换页面或刷新。" * 5
+                state["draft"]["revision"] += 1
+            return respond(route, {"stage": requested_stage, "platform": "WECHAT" if requested_stage == "COPY" else None, "messages": [], "summaries": [], "activeRun": active_run, "artifacts": [], "usedMaterialIds": {"inputIds": [], "referenceIds": [], "assetIds": []}})
+        if path == f"/api/v1/creative/projects/{PROJECT_ID}/agent/prepare" and method == "POST":
+            assert request.post_data_json["request"] == "生成正文"
+            state["copy_run_status"] = "DRAFT"
+            return respond(route, {"id": COPY_RUN_ID, "action": "GENERATE_DRAFT", "status": "DRAFT", "request": "生成正文", "confirmation": {"model": "mock-writing-model", "promptVersion": "1", "skillNames": [], "materialCount": 0, "writeScope": "WECHAT"}, "createdAt": NOW}, status=201)
+        if path == f"/api/v1/creative/agent-runs/{COPY_RUN_ID}/confirm" and method == "POST":
+            state["copy_run_status"] = "QUEUED"
+            return respond(route, {"id": COPY_RUN_ID, "status": "QUEUED", "jobId": "job-copy-1"}, status=202)
+        if path == f"/api/v1/creative/agent-runs/{COPY_RUN_ID}" and method == "GET":
+            return respond(route, {"id": COPY_RUN_ID, "action": "GENERATE_DRAFT", "status": state["copy_run_status"], "request": "生成正文", "confirmation": {"model": "mock-writing-model", "promptVersion": "1", "skillNames": [], "materialCount": 0, "writeScope": "WECHAT"}, "createdAt": NOW})
         if path == f"/api/v1/creative/projects/{PROJECT_ID}/research/skip" and method == "POST":
             state["project_stage"] = "MASTER_WRITING"
             return respond(route, {"project": current_project()})
@@ -394,6 +420,8 @@ with sync_playwright() as playwright:
     assert "stage=copy" in page.url
     page.reload(); page.wait_for_load_state("networkidle")
     page.locator(".copy-editor").wait_for()
+    copy_title = page.locator(".copy-document textarea").nth(0)
+    copy_body = page.locator(".copy-document textarea").nth(1)
     strategy = page.locator(".copy-strategy")
     assert strategy.get_by_text("题材", exact=True).count() == 1
     assert strategy.get_by_text("内容类型", exact=True).count() == 1
@@ -401,9 +429,20 @@ with sync_playwright() as playwright:
     for removed_option in ("内容结构", "渠道规则", "小红书分页图文", "知乎回答", "微博单条与串文"):
         assert strategy.get_by_text(removed_option, exact=True).count() == 0, removed_option
     assert state["brief_puts"], "旧多平台 Brief 未自动规范化"
-    page.get_by_label("标题", exact=True).fill("普通人如何核验 AI 工具的真实价值")
+
+    generated_body = "正文生成完成后，当前页面应立即读取服务端正式草稿，不需要切换页面或刷新。" * 5
+    page.get_by_role("button", name="生成正文", exact=True).click()
+    page.get_by_text("正在生成正文", exact=True).wait_for()
+    assert not copy_body.is_editable()
+    copy_body.wait_for(state="visible")
+    page.wait_for_function("expected => document.querySelector('textarea[placeholder^=\"输入公众号母稿\"]')?.value === expected", arg=generated_body, timeout=15000)
+    assert "stage=copy" in page.url
+    assert state["copy_run_status"] == "SUCCEEDED"
+    page.screenshot(path=ARTIFACTS / "generated-copy-immediate.png", full_page=True)
+
+    copy_title.fill("普通人如何核验 AI 工具的真实价值")
     body = "真正有价值的工具，必须在具体任务中稳定产出可以验证的结果。" * 6
-    page.get_by_label("正文", exact=True).fill(body)
+    copy_body.fill(body)
     page.get_by_role("button", name="确认正文，开始配图", exact=True).click()
 
     page.get_by_role("heading", name="公众号配图", exact=True).wait_for()

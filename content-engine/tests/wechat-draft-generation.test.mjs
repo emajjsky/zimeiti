@@ -65,6 +65,14 @@ test('生成任务 DTO 直接公开完整策略快照', () => {
   });
 });
 
+test('Agent 运行状态接口按当前工作空间读取终态', async () => {
+  const server = await readFile(new URL('../server/index.cjs', import.meta.url), 'utf8');
+  const status = section(server, "app.get('/api/v1/creative/agent-runs/:id'", "app.post('/api/v1/creative/agent-runs/:id/confirm'");
+  assert.match(status, /id = \$1 AND workspace_id = \$2/);
+  assert.match(status, /runView\(result\.rows\[0\]\)/);
+  assert.match(status, /statusCode = 404/);
+});
+
 test('缺失任务策略返回稳定错误码且图生图不回退到文生图', async () => {
   const server = await readFile(new URL('../server/index.cjs', import.meta.url), 'utf8');
   const routeResolver = section(server, 'async function textTaskRoute', 'function analysisItem');

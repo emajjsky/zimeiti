@@ -218,6 +218,7 @@ export const webCreative = {
     return request<ProjectAgentContext>(`/creative/projects/${encodeURIComponent(projectId)}/agent?${params}`);
   },
   prepareAgent: (projectId: string, input: ProjectAgentPrepareInput) => request<ProjectAgentPrepareResult>(`/creative/projects/${encodeURIComponent(projectId)}/agent/prepare`, { method: 'POST', body: JSON.stringify(input) }),
+  agentRun: (runId: string) => request<ProjectAgentRun>(`/creative/agent-runs/${encodeURIComponent(runId)}`),
   confirmAgentRun: (runId: string) => request<{ id: string; status: 'QUEUED'; jobId: string }>(`/creative/agent-runs/${encodeURIComponent(runId)}/confirm`, { method: 'POST', body: '{}' }),
   cancelAgentRun: (runId: string) => request<ProjectAgentRun>(`/creative/agent-runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST', body: '{}' }),
   prepareResearchSources: (projectId: string, planArtifactId: string) => request<ProjectAgentRun>(`/creative/projects/${encodeURIComponent(projectId)}/research/sources/prepare`, { method: 'POST', body: JSON.stringify({ planArtifactId }) }),
