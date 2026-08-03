@@ -168,6 +168,34 @@ const stylePresets = [
     id: 'CYBER_TECH', name: '清透赛博', group: 'TECHNOLOGY', description: '高对比数字空间，适合前沿科技、未来产业与数字文化', swatches: ['#0B1020', '#20D9D2', '#F24F8A', '#E8F4FF'],
     prompt: '明亮克制的赛博编辑摄影；石墨灰与冷白为主，电光青配极少玫红；透明光学材质和精确光路自然融入真实人物工作场景，面部与物件细节清楚，技术氛围优雅，不用代码雨、廉价 HUD 或过暗霓虹',
   },
+  {
+    id: 'KIDS_DOODLE', name: '儿童涂鸦', group: 'CREATIVE', description: '天真、松弛，适合亲子、教育和轻量科普', swatches: ['#FFF7D7', '#F56B6B', '#4FB7E5', '#7BC96F'],
+    prompt: 'Playful childlike doodle editorial artwork; warm cream paper, crayon red, sky blue, grass green and sunny yellow; creator workspace becomes a sincere hand-drawn scene with uneven crayon lines, simple shapes, joyful mistakes and tactile paper texture; expressive but still readable and polished; avoid messy handwriting, childish brand mascots, sticker clutter and low-effort scribbles',
+  },
+  {
+    id: 'COSMIC_HORROR', name: '克苏鲁', group: 'CREATIVE', description: '神秘压迫，适合悬疑、暗黑科幻和深度隐喻', swatches: ['#101719', '#244A4A', '#6F7E65', '#C28E5C'],
+    prompt: 'Elegant cosmic-horror editorial illustration; deep green-black, oxidized teal, fog gray and antique amber; a creator studies strange research photographs and sea-worn artifacts at a desk while impossible shadows and tentacle-like negative space suggest vast unknown intelligence; atmospheric, literary and restrained; avoid gore, monsters attacking people, occult symbols, horror movie posters and unreadable text',
+  },
+  {
+    id: 'STICK_FIGURE', name: '火柴人', group: 'CREATIVE', description: '极简幽默，适合流程、观点和轻教程', swatches: ['#FFFFFF', '#111111', '#F05A3B', '#3D7BFF'],
+    prompt: 'Minimal stick-figure editorial cartoon; white paper, black ink, small red and cobalt accents; a creator workflow is shown through simple stick figures, sparse desk props, confident line economy and witty physical action in one coherent scene; smart and intentional rather than childish; avoid text bubbles, labels, interface boxes, worksheet layout and sloppy random doodles',
+  },
+  {
+    id: 'SATIRICAL_CARTOON', name: '讽刺漫画', group: 'CREATIVE', description: '锐利幽默，适合评论、观察和反差表达', swatches: ['#F8F1DC', '#1D1A16', '#D94A38', '#5C7C8A'],
+    prompt: 'Sharp satirical editorial cartoon; warm newsprint paper, black ink, brick red and muted blue-gray; a creator desk scene exaggerates social tension, absurd workload or tool overload through clever visual metaphor, elastic poses and confident ink wash; witty but not cruel; avoid speech bubbles, captions, hateful caricature, political logos and dense newspaper layout',
+  },
+  {
+    id: 'WARM_3D_ANIMATION', name: '皮克斯', group: 'CREATIVE', description: '温暖 3D 动画电影感，适合故事、成长和产品角色', swatches: ['#FFF2D8', '#F2A65A', '#6EC6C4', '#2E4057'],
+    prompt: 'Warm feature-animation inspired 3D editorial scene without copying any specific studio or franchise; golden cream light, gentle teal, apricot orange and deep blue-gray; expressive creator character with appealing proportions, tactile desk objects, cinematic depth of field and sincere story emotion; polished family-film warmth; avoid recognizable movie characters, toy plastic, studio logos and exaggerated mascot cuteness',
+  },
+  {
+    id: 'POP_NOSTALGIA', name: '波普怀旧', group: 'CREATIVE', description: '高能复古，适合娱乐、消费文化和轻松观点', swatches: ['#FFF0B8', '#F0526B', '#24A7A1', '#27315D'],
+    prompt: 'Bold pop-nostalgia editorial artwork; butter yellow, punchy coral red, turquoise and deep indigo; creator workspace is transformed by retro consumer graphics, halftone texture, chunky shapes and playful screen-print color while remaining one coherent scene; energetic, witty and modern; avoid poster text, brand logos, comic speech bubbles, childish stickers and visual clutter',
+  },
+  {
+    id: 'PIXEL_GAME', name: '像素游戏', group: 'CREATIVE', description: '游戏化叙事，适合工具教程、成长任务和复古科技', swatches: ['#1A2540', '#4EC9B0', '#F6C85F', '#F25F5C'],
+    prompt: 'Editorial pixel-game artwork; deep navy, mint teal, quest gold and coral red; a creator desk becomes an isometric game-like workspace rendered in crisp intentional pixels with inventory-like physical objects, clear depth and a sense of progress through action; nostalgic but publication-grade; avoid game UI, health bars, score numbers, copyrighted characters and tiny unreadable icons',
+  },
 ];
 
 const styleCases = {
@@ -202,6 +230,13 @@ const styleCases = {
   MACARON_CARTOON: { caseLabel: '轻松教程', caseTitle: '每天十分钟，整理自己的信息流', caseMeta: '亲和人物 · 清新套色' },
   PIXEL_RETRO: { caseLabel: '科技回看', caseTitle: '从工具箱到智能工作流', caseMeta: '像素叙事 · 现代网格' },
   CYBER_TECH: { caseLabel: '数字前沿', caseTitle: '智能体如何协同完成工作', caseMeta: '透明界面 · 电光强调' },
+  KIDS_DOODLE: { caseLabel: '儿童科普', caseTitle: '把复杂问题画得像游戏一样', caseMeta: '蜡笔线条 · 天真秩序' },
+  COSMIC_HORROR: { caseLabel: '暗黑隐喻', caseTitle: '当信息深处传来回声', caseMeta: '深海阴影 · 神秘物件' },
+  STICK_FIGURE: { caseLabel: '轻教程', caseTitle: '三条线也能讲清一个流程', caseMeta: '极简动作 · 黑白幽默' },
+  SATIRICAL_CARTOON: { caseLabel: '讽刺观察', caseTitle: '工具越多，越要知道自己在做什么', caseMeta: '夸张姿态 · 锐利隐喻' },
+  WARM_3D_ANIMATION: { caseLabel: '成长故事', caseTitle: '一个想法终于被看见', caseMeta: '温暖角色 · 电影光线' },
+  POP_NOSTALGIA: { caseLabel: '复古观点', caseTitle: '旧海报里的新问题', caseMeta: '网点套色 · 高能复古' },
+  PIXEL_GAME: { caseLabel: '任务闯关', caseTitle: '把创作拆成可以完成的小关卡', caseMeta: '等距像素 · 进度叙事' },
 };
 
 const featuredStylePreviews = {
@@ -234,6 +269,13 @@ const featuredStylePreviews = {
   AI_LAB: '/visual-style-previews/ai-lab.png',
   CLEAN_ENERGY: '/visual-style-previews/clean-energy.png',
   INDUSTRIAL_MEDIA: '/visual-style-previews/industrial-media.png',
+  KIDS_DOODLE: '/visual-style-previews/kids-doodle.png',
+  COSMIC_HORROR: '/visual-style-previews/cosmic-horror.png',
+  STICK_FIGURE: '/visual-style-previews/stick-figure.png',
+  SATIRICAL_CARTOON: '/visual-style-previews/satirical-cartoon.png',
+  WARM_3D_ANIMATION: '/visual-style-previews/warm-3d-animation.png',
+  POP_NOSTALGIA: '/visual-style-previews/pop-nostalgia.png',
+  PIXEL_GAME: '/visual-style-previews/pixel-game.png',
 };
 
 const visualTemplates = {

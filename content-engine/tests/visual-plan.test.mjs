@@ -225,7 +225,7 @@ test('项目风格默认继承且单张图片可以独立覆盖', () => {
 test('项目风格库覆盖编辑、知识、插画、文化和科技，并提供可执行视觉约束', () => {
   const styles = visualStylePresets();
   assert.ok(styles.length >= 25);
-  assert.deepEqual(new Set(styles.map((style) => style.group)), new Set(['EDITORIAL', 'KNOWLEDGE', 'ILLUSTRATION', 'CULTURAL', 'TECHNOLOGY']));
+  assert.deepEqual(new Set(styles.map((style) => style.group)), new Set(['EDITORIAL', 'KNOWLEDGE', 'ILLUSTRATION', 'CREATIVE', 'CULTURAL', 'TECHNOLOGY']));
   assert.ok(styles.every((style) => style.description.length >= 8 && style.swatches.length === 4 && style.prompt.length >= 60));
   assert.ok(styles.every((style) => style.caseLabel && style.caseTitle && style.caseMeta));
   const retro = styles.find((style) => style.id === 'RETRO_POP');
@@ -236,8 +236,9 @@ test('项目风格库覆盖编辑、知识、插画、文化和科技，并提�
 
 test('正式风格选择器只使用真实案例图清单并覆盖核心视觉方向', () => {
   const featured = visualStylePresets().filter((style) => style.featured);
-  assert.equal(featured.length, 29);
+  assert.equal(featured.length, 36);
   assert.ok(featured.every((style) => /^\/visual-style-previews\/[a-z0-9-]+\.png$/.test(style.previewImage)));
+  assert.equal(featured.filter((style) => style.group === 'CREATIVE').length, 7);
   assert.equal(featured.filter((style) => style.group === 'CULTURAL').length, 5);
   assert.equal(featured.filter((style) => style.group === 'TECHNOLOGY').length, 5);
   assert.ok(featured.some((style) => style.id === 'MACARON_CARTOON' && /卡通/.test(style.name)));
@@ -250,6 +251,10 @@ test('正式风格选择器只使用真实案例图清单并覆盖核心视觉�
   assert.ok(featured.some((style) => style.id === 'MINERAL_FRESCO'));
   assert.ok(featured.some((style) => style.id === 'AI_LAB'));
   assert.ok(featured.some((style) => style.id === 'CLEAN_ENERGY'));
+  assert.ok(featured.some((style) => style.id === 'KIDS_DOODLE'));
+  assert.ok(featured.some((style) => style.id === 'COSMIC_HORROR'));
+  assert.ok(featured.some((style) => style.id === 'WARM_3D_ANIMATION'));
+  assert.ok(featured.some((style) => style.id === 'PIXEL_GAME'));
   assert.ok(featured.some((style) => style.id === 'SOFT_3D'));
   assert.ok(featured.some((style) => style.id === 'MINIMAL_KNOWLEDGE'));
 });

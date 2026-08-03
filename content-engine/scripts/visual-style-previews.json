@@ -145,6 +145,41 @@
       "id": "INDUSTRIAL_MEDIA",
       "filename": "industrial-media.png",
       "style": "Modern industrial documentary media photography, cool gray, steel blue, desaturated cyan-gray and a small safety orange accent, creator reviewing factory photos, material samples and field notes on a robust desk, clear scale, practical light, sharp equipment detail, no sci-fi factory, no fake brand logos, no HDR propaganda look"
+    },
+    {
+      "id": "KIDS_DOODLE",
+      "filename": "kids-doodle.png",
+      "style": "Playful childlike doodle editorial artwork, warm cream paper, crayon red, sky blue, grass green and sunny yellow, creator workspace as a sincere hand-drawn scene with uneven crayon lines, simple shapes, joyful mistakes and tactile paper texture, expressive but still readable and polished, no messy handwriting, childish brand mascots, sticker clutter or low-effort scribbles"
+    },
+    {
+      "id": "COSMIC_HORROR",
+      "filename": "cosmic-horror.png",
+      "style": "Elegant cosmic-horror editorial illustration, deep green-black, oxidized teal, fog gray and antique amber, creator studying strange research photographs and sea-worn artifacts at a desk while impossible shadows and tentacle-like negative space suggest vast unknown intelligence, atmospheric, literary and restrained, no gore, monsters attacking people, occult symbols, horror movie posters or unreadable text"
+    },
+    {
+      "id": "STICK_FIGURE",
+      "filename": "stick-figure.png",
+      "style": "Minimal stick-figure editorial cartoon, white paper, black ink, small red and cobalt accents, creator workflow shown through simple stick figures, sparse desk props, confident line economy and witty physical action in one coherent scene, smart and intentional rather than childish, no text bubbles, labels, interface boxes, worksheet layout or sloppy random doodles"
+    },
+    {
+      "id": "SATIRICAL_CARTOON",
+      "filename": "satirical-cartoon.png",
+      "style": "Sharp satirical editorial cartoon, warm newsprint paper, black ink, brick red and muted blue-gray, creator desk scene exaggerating social tension, absurd workload or tool overload through clever visual metaphor, elastic poses and confident ink wash, witty but not cruel, no speech bubbles, captions, hateful caricature, political logos or dense newspaper layout"
+    },
+    {
+      "id": "WARM_3D_ANIMATION",
+      "filename": "warm-3d-animation.png",
+      "style": "Warm feature-animation inspired 3D editorial scene without copying any specific studio or franchise, golden cream light, gentle teal, apricot orange and deep blue-gray, expressive creator character with appealing proportions, tactile desk objects, cinematic depth of field and sincere story emotion, polished family-film warmth, no recognizable movie characters, toy plastic, studio logos or exaggerated mascot cuteness"
+    },
+    {
+      "id": "POP_NOSTALGIA",
+      "filename": "pop-nostalgia.png",
+      "style": "Bold pop-nostalgia editorial artwork, butter yellow, punchy coral red, turquoise and deep indigo, creator workspace transformed by retro consumer graphics, halftone texture, chunky shapes and playful screen-print color while remaining one coherent scene, energetic, witty and modern, no poster text, brand logos, comic speech bubbles, childish stickers or visual clutter"
+    },
+    {
+      "id": "PIXEL_GAME",
+      "filename": "pixel-game.png",
+      "style": "Editorial pixel-game artwork, deep navy, mint teal, quest gold and coral red, creator desk becoming an isometric game-like workspace rendered in crisp intentional pixels with inventory-like physical objects, clear depth and a sense of progress through action, nostalgic but publication-grade, no game UI, health bars, score numbers, copyrighted characters or tiny unreadable icons"
     }
   ]
 }

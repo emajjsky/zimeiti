@@ -37,7 +37,7 @@ const referenceModes: { id: string; name: string; uses: CreativeVisualReferenceU
 const allVisualStyles = visualStylePresets();
 const visualStyles = allVisualStyles.filter((style) => style.featured);
 const visualStyleGroupLabels = {
-  EDITORIAL: '编辑与纪实', KNOWLEDGE: '知识与信息', ILLUSTRATION: '插画与创意', CULTURAL: '东方与文化', TECHNOLOGY: '科技与产业',
+  EDITORIAL: '编辑与纪实', KNOWLEDGE: '知识与信息', ILLUSTRATION: '插画与创意', CREATIVE: '创意画', CULTURAL: '东方与文化', TECHNOLOGY: '科技与产业',
 } as const;
 const visualStyleGroups = Object.entries(visualStyleGroupLabels).map(([id, name]) => ({
   id: id as keyof typeof visualStyleGroupLabels,
