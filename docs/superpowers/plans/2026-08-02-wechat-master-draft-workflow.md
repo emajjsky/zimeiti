@@ -162,7 +162,7 @@ git commit -m "feat: define master draft workflow"
 
 ### Task 2: Add Safe Archive And Migration Contracts
 
-**Status (2026-08-02): Completed and verified in `c676df0`; the production database has not applied migration 028.**
+**Status (2026-08-03): Completed and verified in `c676df0`; migration 028 was applied to the production database after backup and restore rehearsal. Migration 029 remains unapplied.**
 
 **Files:**
 - Create: `content-engine/scripts/export-zhihu-archive.cjs`
@@ -354,7 +354,7 @@ git commit -m "feat: add content draft api"
 
 ### Task 4: Persist WeChat Copy And Visuals Into The Draft Domain
 
-**Status (2026-08-02): Completed and verified in `398851d`; migration 028 was rehearsed only on a disposable database copy.**
+**Status (2026-08-03): Completed and verified in `398851d`; migration 028 was rehearsed on a restored database copy and then applied to production with matching counts and content hashes.**
 
 **Files:**
 - Modify: `content-engine/server/services/project-copy-action.cjs`
@@ -417,7 +417,7 @@ git commit -m "refactor: persist wechat creation as drafts"
 
 ### Task 5: Build WeChat Template Service And Safe Renderer
 
-**Status (2026-08-02): Completed and verified locally; the production database has not applied migration 028.**
+**Status (2026-08-03): Completed and verified locally; migration 028 is now applied to the production database.**
 
 **Files:**
 - Create: `content-engine/server/services/wechat-layout-renderer.cjs`
@@ -487,7 +487,7 @@ git commit -m "feat: add wechat layout templates"
 
 ### Task 6: Build Template Gallery And Real Layout Preview
 
-**Status (2026-08-02): Completed and verified; migration 028 remains unapplied to the production database.**
+**Status (2026-08-03): Completed and verified; migration 028 is now applied to the production database.**
 
 Verification: 413/413 Node tests, TypeScript typecheck, production build, server syntax checks, production dependency audit, and Playwright desktop/mobile acceptance passed. The browser acceptance verifies six rendered template previews, authenticated draft images rendered inside script-disabled sandboxed iframes, no horizontal overflow or mobile action-bar overlap, no console errors, and direct completion to a WeChat draft. Public WeChat page read failures return the stable `LAYOUT_TEMPLATE_SOURCE_UNREADABLE` business code.
 
@@ -539,7 +539,7 @@ git commit -m "feat: render wechat layout previews"
 
 ### Task 7: Replace The Two-Dimensional Creation UI With One Linear Workflow
 
-**Status (2026-08-02): Completed and verified; migrations 028 and 029 remain unapplied to the production database.**
+**Status (2026-08-03): Completed and verified; migration 028 is applied to production and migration 029 remains unapplied.**
 
 Verification: 414/414 Node tests, TypeScript typecheck, production build, and Playwright desktop/mobile acceptance passed. The browser acceptance traverses content preparation, optional research skip, WeChat copy, visual planning, layout, and saved draft; refreshes and restores every stage; removes the platform URL parameter; exposes all five steps without horizontal scrolling at 390px; preserves long draft titles without truncation; and reports no horizontal overflow or console errors.
 
@@ -613,7 +613,7 @@ git commit -m "refactor: make wechat the creation workflow"
 
 ### Task 8: Add Explicit Xiaohongshu And Weibo Adaptation Jobs
 
-**Status (2026-08-02): Completed and verified; migrations 028 and 029 remain unapplied to the production database.**
+**Status (2026-08-03): Completed and verified; migration 028 is applied to production and migration 029 remains unapplied.**
 
 Verification: 426/426 Node tests, TypeScript typecheck, production build, server syntax checks, and production dependency audit passed. The adaptation contract resolves only `XIAOHONGSHU_ADAPTATION` or `WEIBO_ADAPTATION`, freezes the current completed WeChat version and visible policy, creates no derived draft before explicit confirmation and strict parse success, rejects stale sources before model usage, limits suggestions to nine source-bound images, exposes run status for the editor, and never overwrites immutable versions.
 
@@ -738,12 +738,14 @@ Expected: PASS at 1440px and 390px with no console errors.
 
 Verified on 2026-08-03: focused tests, `432/432` full Node tests, TypeScript, production build, server syntax, 1440px/390px Playwright, console-error checks, refresh recovery, asset preview before/after selection, and `npm audit --omit=dev` all passed. The image generation route accepts only `WECHAT`, `XIAOHONGSHU`, and `WEIBO`, and returns the actual `TEXT_TO_IMAGE` or `IMAGE_TO_IMAGE` policy snapshot.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add content-engine/src/workspaces/create/PlatformDraftEditor.tsx content-engine/src/workspaces/create/DraftResultWorkspace.tsx content-engine/src/workspaces/create/CreateWorkspace.tsx content-engine/src/styles.css content-engine/tests/platform-draft-editor.test.mjs content-engine/tests/creative-workspace.e2e.py
 git commit -m "feat: add social draft editor"
 ```
+
+Committed as `fe21f17`.
 
 ### Task 10: Replace Fake Authorization With Real Publishing Accounts
 
@@ -1002,6 +1004,8 @@ git commit -m "refactor: remove legacy platform workflow"
 
 ### Task 14: Rehearse Migration, Run End-To-End Acceptance, And Update Implementation Docs
 
+**Partial deployment status (2026-08-03): Migration 028 only is complete.** The live database was backed up to `F:\zimeitiyunying\backups\content-drafts-20260803-082615`, restored into a separate rehearsal database, migrated, and reconciled before the same migration was applied in a production write-stop window. The dump SHA-256 is `c2f7c5f616ad3f4633b0ca3aab4856fe524c5d86ec8e7f50d25b39f51220ce2c`; all 40 upload files matched; old business-table counts and 128 current content hashes matched; broken references and orphan derived drafts were zero. The current preflight contains 7 Zhihu projects. A real logged-in Chrome refresh of the reported project restored the WeChat version 4 editor with no application error banner, application console error, or horizontal overflow. Task 14 remains open because migration 029, the publishing-account flow, all final browser suites, and the complete end-to-end publishing acceptance have not been implemented or run.
+
 **Files:**
 - Modify: `content-engine/tests/creative-workspace.e2e.py`
 - Modify: `content-engine/tests/visual-workspace.e2e.py`
@@ -1037,7 +1041,7 @@ Create a new directory under `F:\zimeitiyunying\backups\wechat-master-drafts-<ti
 npm run archive:zhihu -- --output "F:\zimeitiyunying\backups\wechat-master-drafts-<timestamp>\zhihu"
 ```
 
-Expected: archive reports 6 Zhihu projects based on the 2026-08-02 preflight, unless the live database has legitimately changed; any changed count must be reviewed before continuing.
+Expected: archive reports 7 Zhihu projects based on the 2026-08-03 preflight, unless the live database has legitimately changed; any changed count must be reviewed before continuing.
 
 - [ ] **Step 3: Rehearse restore and migration on a separate database**
 

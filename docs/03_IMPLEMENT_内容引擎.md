@@ -8,7 +8,16 @@
 - 小红书缺少 3:4 内容图时在同页显示明确任务。AI 生图只在用户打开任务面板并确认后运行；面板从任务策略 API 显示 `TEXT_TO_IMAGE` 或 `IMAGE_TO_IMAGE` 的实际 Provider/Model。服务端生图平台白名单扩展为 `WECHAT / XIAOHONGSHU / WEIBO`，公众号配图策划仍只接受 `WECHAT`；生图响应返回实际执行策略快照，不接受浏览器模型覆盖，也不回退其它模型。
 - 派生编辑器使用 `draft` URL 参数恢复具体草稿，刷新后重新读取服务端工作副本；旧 `platform` 参数仍会被清理。无效或已删除的草稿 ID 会退出编辑器并恢复公众号流程导航。
 - 自动化覆盖公众号完成、派生策略准备/确认/轮询、进入小红书编辑器、正文 revision 保存、素材选择前后预览、两图排序、裁切、删除、刷新恢复、1440px/390px 无横向溢出和无控制台错误。`npm test` 为 `432/432`，类型检查、生产构建、服务端语法检查、Playwright 和 `npm audit --omit=dev` 全部通过，依赖漏洞为 0。
-- 本次没有执行数据库迁移。`028_content_draft_foundation.sql` 与 `029_remove_legacy_platform_workflow.sql` 仍未应用正式数据库；下一步是发布账号管理与平台草稿任务，不把当前占位发布页记为已交付。
+- `028_content_draft_foundation.sql` 已于 2026-08-03 在正式数据库应用；`029_remove_legacy_platform_workflow.sql` 尚未创建或应用。下一步仍是发布账号管理与平台草稿任务，不把当前占位发布页记为已交付，也不提前删除旧平台表或项目 JSON 字段。
+
+### 公众号母稿草稿域真实迁移与验收
+
+- 迁移前停止 API 与 Worker 写入，只读确认正式库仅缺少 `028`。基线为 67 个用户、67 个工作空间、56 个项目、20 条旧平台版本、40 个空间素材、40 条项目素材关系、77 条生成运行和 94 条 API 用量记录；`content_drafts` 等新表当时不存在，原项目和素材数据仍完整。
+- 新备份位于 `F:\zimeitiyunying\backups\content-drafts-20260803-082615`。PostgreSQL 自定义格式 dump 为 `content_engine.dump`，1,320,050 字节，SHA-256 为 `c2f7c5f616ad3f4633b0ca3aab4856fe524c5d86ec8e7f50d25b39f51220ce2c`；迁移前清单 `preflight\manifest.json` 的 SHA-256 为 `eb74e48a1a2ef282cbec8b935b20b96aa27f6cc0869970f5fa3d39698b7126f2`。
+- 上传目录已完整复制到备份目录。40/40 个文件、68,701,643 字节逐文件对照数据库大小与 SHA-256，缺失 0、哈希不一致 0；`backup-integrity.json` 记录完整校验结果。迁移前归档识别到 7 个涉及知乎的项目、1 条知乎平台版本、2 条知乎策略、1 条知乎产物和 1 条知乎阶段摘要；`028` 不删除这些数据。
+- dump 先恢复到独立数据库 `content_engine_rehearsal_20260803_082615`，只应用 `028` 并完成内容哈希、计数和引用核对后，才在停写窗口应用到正式库。正式库 `schema_migrations` 现为 28 条，最后一条为 `028_content_draft_foundation.sql`；`029` 未执行。
+- 迁移后旧数据基线全部保持不变；新增 119 个正式草稿（公众号 56、小红书 56、微博 7）、128 个不可变草稿版本、58 条草稿素材关系、402 个系统模板和 402 个模板版本。标题/正文内容哈希不一致 0、断裂草稿素材引用 0、缺少公众号来源的派生草稿 0。完整结果记录在 `migration-result.json`。
+- API 与 Worker 已恢复，`GET /health` 返回正常。真实 Chrome 登录态刷新原宇树科技项目后，公众号正文、版本 4 和完整正文均恢复，`relation "content_drafts" does not exist` 不再出现；可见错误横幅 0、页面横向溢出 0、项目自身控制台错误/警告 0。浏览器扩展自身的脚本错误不计入项目结果。
 
 ## 2026-08-01 实现：多工作空间与空间素材底座
 
