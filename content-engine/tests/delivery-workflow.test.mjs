@@ -99,7 +99,8 @@ test('视觉导演保存完整策划字段并支持参考图真实图生图', ()
   assert.match(api, /VISUAL_PLANNING_SCOPE/);
   assert.doesNotMatch(api, /VISUAL_PLANNING_FALLBACK_SCOPE/);
   assert.match(api, /'WECHAT_VISUAL_PLANNING'/);
-  assert.match(api, /bodyItemCount:\s*z\.number\(\)\.int\(\)\.min\(0\)\.max\(11\)/);
+  assert.match(api, /quantityMode:\s*z\.enum\(\['AUTO', 'MANUAL'\]\)/);
+  assert.match(api, /bodyItemCount:\s*z\.number\(\)\.int\(\)\.min\(2\)\.max\(11\)\.optional\(\)/);
   assert.match(api, /currentPlan:\s*z\.array\(z\.record[\s\S]*?\.max\(12\)/);
   assert.match(api, /plan:\s*z\.array\(visualPlanItemInput\)\.max\(12\)/);
 });
@@ -118,9 +119,15 @@ test('配图策划使用独立可见任务策略，不静默回退到文案模�
   assert.match(api, /const scope = VISUAL_PLANNING_SCOPE;[\s\S]*?textTaskRoute\(workspace\.id, scope, '配图策划'\)/);
   assert.match(client, /WECHAT_VISUAL_PLANNING: '公众号配图策划'/);
   assert.match(workspace, /实际策略：公众号配图策划/);
+  assert.match(workspace, /type="checkbox" checked=\{quantityMode === 'AUTO'\}/);
+  assert.match(workspace, /<select aria-label="正文插图数量"/);
+  assert.match(workspace, /quantityMode === 'MANUAL' \? \{ bodyItemCount \} : \{\}/);
+  assert.match(workspace, /legacy\.length \? 'MANUAL' : 'AUTO'/);
   assert.match(migration, /SELECT workspace_id, 'WECHAT_VISUAL_PLANNING'/);
   assert.equal((route.match(/textRunner\.runText/g) ?? []).length, 1);
   assert.doesNotMatch(route, /RepairPrompt|repaired/);
+  assert.match(route, /tools:\s*prompt\.tools/);
+  assert.match(route, /requiredToolName:\s*prompt\.requiredToolName/);
   assert.match(api, /VISUAL_PLANNING_INPUT_INVALID/);
   assert.match(api, /VISUAL_PLANNING_OUTPUT_INVALID/);
 });

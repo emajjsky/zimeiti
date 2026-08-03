@@ -389,7 +389,7 @@ with sync_playwright() as playwright:
             return respond(route, [{"task": "TEXT_TO_IMAGE", "provider": "BAILIAN_CLI", "model": "qwen-image-2.0"}, {"task": "IMAGE_TO_IMAGE", "provider": "BAILIAN_CLI", "model": "qwen-image-2.0"}])
         if path == f"/api/v1/creative/projects/{PROJECT_ID}/visual/plan" and method == "POST":
             visual = {"id": "cover", "role": "COVER", "visualType": "HERO_VISUAL", "title": "文章封面", "purpose": "概括核心观点", "size": "16:9", "insertAfter": None, "informationPoints": ["先验证再判断"], "searchQueries": ["AI tool verification workflow"], "sourceExcerpt": "", "contentBlocks": [], "avoidConcepts": ["文字海报"], "prompt": "editorial photograph of a creator verifying an AI workflow", "references": [], "assetId": None}
-            return respond(route, {"plan": [visual], "strategy": "公众号内容型配图", "policy": {"scope": "WECHAT_VISUAL_PLANNING", "provider": "BAILIAN_CLI", "connectionId": None, "model": "qwen-max", "promptVersion": "wechat-visual:1"}})
+            return respond(route, {"plan": [visual], "bodyItemCount": 0, "quantityMode": "AUTO", "strategy": "公众号内容型配图", "policy": {"scope": "WECHAT_VISUAL_PLANNING", "provider": "BAILIAN_CLI", "connectionId": None, "model": "qwen-max", "promptVersion": "wechat-visual:1"}})
         if path == "/api/v1/wechat-layout-templates" and method == "GET":
             return respond(route, {"templates": [template]})
         if path == f"/api/v1/wechat-layout-templates/{TEMPLATE_ID}/preview" and method == "POST":

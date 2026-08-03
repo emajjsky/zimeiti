@@ -23,7 +23,7 @@ const { createWorkspaceStore, workspaceView } = require('./services/workspaces.c
 const { createWorkspaceAccess } = require('./services/workspace-context.cjs');
 const { accountVoiceInput, accountVoiceCalibrationInput, createAccountVoiceStore } = require('./services/accountVoices.cjs');
 const { accountVoiceCalibrationDraftInput, buildVoiceCalibrationPrompt, buildVoiceCalibrationRepairPrompt, parseVoiceCalibrationDraft, voiceCalibrationErrorMessage } = require('./services/voiceCalibration.cjs');
-const { createTextModelRunner } = require('./services/text-model.cjs');
+const { createTextModelRunner, ModelToolCallError } = require('./services/text-model.cjs');
 const {
   VISUAL_PLANNING_SCOPE,
   VISUAL_PLANNING_OPERATION,
@@ -142,7 +142,8 @@ const visualPlanItemInput = z.object({
 });
 const visualPlanningInput = z.object({
   platform: z.literal('WECHAT'),
-  bodyItemCount: z.number().int().min(0).max(11),
+  quantityMode: z.enum(['AUTO', 'MANUAL']),
+  bodyItemCount: z.number().int().min(2).max(11).optional(),
   styleProfile: z.object({
     preset: visualStylePreset,
     customPrompt: z.string().trim().max(1_200).default(''),
@@ -151,14 +152,22 @@ const visualPlanningInput = z.object({
   currentItemId: z.string().trim().min(1).max(100).optional(),
   currentPlan: z.array(z.record(z.string(), z.unknown())).max(12).default([]),
   keepAssignedAssets: z.boolean().default(true),
+}).superRefine((value, context) => {
+  if (value.quantityMode === 'MANUAL' && value.bodyItemCount === undefined) {
+    context.addIssue({ code: 'custom', path: ['bodyItemCount'], message: '手动规划必须选择正文插图数量。' });
+  }
+  if (value.quantityMode === 'AUTO' && value.bodyItemCount !== undefined) {
+    context.addIssue({ code: 'custom', path: ['bodyItemCount'], message: '自动规划不能提交手动数量。' });
+  }
 });
 
 function parseVisualPlanningRequest(value) {
   const parsed = visualPlanningInput.safeParse(value);
   if (parsed.success) return parsed.data;
   const path = parsed.error.issues[0]?.path ?? [];
-  let message = '配图设置缺少必要信息，请重新选择项目风格和图片数量。';
-  if (path[0] === 'bodyItemCount') message = '正文插图数量必须是 0 到 11 张。';
+  let message = '配图设置缺少必要信息，请重新选择数量模式和项目风格。';
+  if (path[0] === 'quantityMode') message = '请选择自动规划或手动指定配图数量。';
+  else if (path[0] === 'bodyItemCount') message = '手动模式下正文插图数量必须是 2 到 11 张；自动模式无需提交数量。';
   else if (path[0] === 'styleProfile') message = '项目配图风格无效，请重新选择。';
   else if (path[0] === 'request') message = '单图修改要求不能超过 2000 字。';
   else if (path[0] === 'currentItemId' || path[0] === 'currentPlan') message = '当前配图方案数据已失效，请重新进入配图页面。';
@@ -1208,6 +1217,7 @@ app.post('/api/v1/creative/projects/:projectId/visual/plan', { preHandler: works
       versionBody: draft.body,
     },
     platform: input.platform,
+    quantityMode: input.quantityMode,
     bodyItemCount: input.bodyItemCount,
     styleProfile: input.styleProfile,
     request: input.request,
@@ -1217,12 +1227,22 @@ app.post('/api/v1/creative/projects/:projectId/visual/plan', { preHandler: works
   let inputTokens = 0;
   let outputTokens = 0;
   try {
-    const result = await textRunner.runText({ provider: route.provider, model: route.model, system: prompt.system, message: prompt.message, maxTokens: 16_000, temperature: 0.15, ...connectionInput });
+    let result;
+    try {
+      result = await textRunner.runText({ provider: route.provider, model: route.model, system: prompt.system, message: prompt.message, tools: prompt.tools, requiredToolName: prompt.requiredToolName, maxTokens: 16_000, temperature: 0.15, ...connectionInput });
+    } catch (executionError) {
+      if (executionError instanceof ModelToolCallError) {
+        inputTokens += executionError.inputTokens ?? 0;
+        outputTokens += executionError.outputTokens ?? 0;
+        throw visualPlanningOutputError(executionError);
+      }
+      throw executionError;
+    }
     inputTokens += result.inputTokens ?? 0;
     outputTokens += result.outputTokens ?? 0;
     let parsed;
     try {
-      parsed = parseVisualPlanningContent(result.content, { platform: input.platform, bodyItemCount: input.bodyItemCount, singleItem: Boolean(input.currentItemId) });
+      parsed = parseVisualPlanningContent(result.content, { platform: input.platform, quantityMode: input.quantityMode, bodyItemCount: input.bodyItemCount, singleItem: Boolean(input.currentItemId) });
     } catch (validationError) {
       throw visualPlanningOutputError(validationError);
     }
@@ -1233,10 +1253,13 @@ app.post('/api/v1/creative/projects/:projectId/visual/plan', { preHandler: works
       currentItemId: input.currentItemId,
       keepAssignedAssets: input.keepAssignedAssets,
     });
+    const bodyItemCount = plan.filter((item) => item.role === 'BODY').length;
     await query(`INSERT INTO api_usage_logs (workspace_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens)
       VALUES ($1, $2, $3, $4, 'SUCCESS', $5, $6, $7)`, [workspace.id, route.provider, route.model, VISUAL_PLANNING_OPERATION, Date.now() - startedAt, inputTokens || null, outputTokens || null]);
     reply.code(201).send({
       plan,
+      bodyItemCount,
+      quantityMode: input.quantityMode,
       strategy: parsed.strategy,
       policy: {
         scope,

@@ -186,9 +186,10 @@ with sync_playwright() as playwright:
                         item["focus"] = "用航天器、中继卫星、地面站三层关系解释双向数据链路"
                         item["purpose"] = "按用户意见突出三方通信关系"
                         item["prompt"] += " 用户要求：" + payload.get("request", "")
-                return respond(route, {"plan": plan, "strategy": "逐图解释文章。", "policy": {"scope": "WECHAT_VISUAL_PLANNING", "model": "qwen-plus", "provider": "BAILIAN_CLI", "connectionId": None, "promptVersion": "1.1.0"}}, status=201)
-            plan = planned_items(payload["bodyItemCount"], payload.get("currentPlan"), payload.get("styleProfile", {}).get("customPrompt", ""))
-            return respond(route, {"plan": plan, "strategy": "封面建立识别，正文图解释通信关系。", "policy": {"scope": "WECHAT_VISUAL_PLANNING", "model": "qwen-plus", "provider": "BAILIAN_CLI", "connectionId": None, "promptVersion": "1.1.0"}}, status=201)
+                return respond(route, {"plan": plan, "bodyItemCount": len([item for item in plan if item["role"] == "BODY"]), "quantityMode": payload["quantityMode"], "strategy": "逐图解释文章。", "policy": {"scope": "WECHAT_VISUAL_PLANNING", "model": "qwen-plus", "provider": "BAILIAN_CLI", "connectionId": None, "promptVersion": "1.2.0"}}, status=201)
+            body_item_count = 4 if payload["quantityMode"] == "AUTO" else payload["bodyItemCount"]
+            plan = planned_items(body_item_count, payload.get("currentPlan"), payload.get("styleProfile", {}).get("customPrompt", ""))
+            return respond(route, {"plan": plan, "bodyItemCount": body_item_count, "quantityMode": payload["quantityMode"], "strategy": "封面建立识别，正文图解释通信关系。", "policy": {"scope": "WECHAT_VISUAL_PLANNING", "model": "qwen-plus", "provider": "BAILIAN_CLI", "connectionId": None, "promptVersion": "1.2.0"}}, status=201)
         if path == f"/api/v1/creative/projects/{PROJECT_ID}/visual/generate" and method == "POST":
             state["generations"] += 1
             state["generation_payloads"].append(json.loads(request.post_data or "{}"))
@@ -239,7 +240,8 @@ with sync_playwright() as playwright:
     stage_nav = page.locator(".creative-stage-nav").bounding_box()
     assert stage_nav and stage_nav["height"] <= 48, f"桌面公众号母稿流程导航过高: {stage_nav}"
     assert page.locator(".creative-stage-nav button").count() == 5
-    page.get_by_text(re.compile(r"^封面 1 张，正文插图 2 张｜任务策略：公众号配图策划（WECHAT_VISUAL_PLANNING）$")).wait_for()
+    page.get_by_text(re.compile(r"^自动规划数量｜封面 1 张，正文插图由 Agent 决定｜任务策略：公众号配图策划（WECHAT_VISUAL_PLANNING）$")).wait_for()
+    assert page.get_by_label("正文插图数量", exact=True).count() == 0
     page.get_by_role("heading", name="让核心 Agent 先读正文，再安排每一张图", exact=True).wait_for()
     assert page.get_by_text("视觉结构", exact=True).count() == 0
     assert page.get_by_text("版式模板", exact=True).count() == 0
@@ -247,9 +249,10 @@ with sync_playwright() as playwright:
     page.screenshot(path=ARTIFACTS / "visual-plan-empty.png", full_page=True)
     page.get_by_role("button", name="生成配图方案", exact=True).click()
     page.get_by_role("button", name=re.compile(r"文章封面")).wait_for()
-    page.get_by_role("button", name=re.compile(r"正文插图 1")).wait_for()
+    page.get_by_role("button", name=re.compile(r"正文插图 4")).wait_for()
     assert len(state["planning_calls"]) == 1
-    assert state["planning_calls"][0]["bodyItemCount"] == 2
+    assert state["planning_calls"][0]["quantityMode"] == "AUTO"
+    assert "bodyItemCount" not in state["planning_calls"][0]
     assert not state["searches"], "生成配图方案时不应自动搜索图片"
     for _ in range(20):
         if state["visual_writes"]:
@@ -257,12 +260,19 @@ with sync_playwright() as playwright:
         page.wait_for_timeout(100)
     assert state["visual_writes"] >= 1, "AI 配图方案没有自动保存"
     assert state["draft"]["visualPlan"]["planVersion"] == 7
+    assert state["draft"]["visualPlan"]["quantityMode"] == "AUTO"
+    assert state["draft"]["visualPlan"]["bodyItemCount"] == 4
 
-    page.get_by_role("button", name="增加正文插图").click()
-    page.get_by_text(re.compile(r"^封面 1 张，正文插图 3 张｜任务策略：公众号配图策划（WECHAT_VISUAL_PLANNING）$")).wait_for()
+    page.get_by_text(re.compile(r"^自动规划｜封面 1 张，正文插图 4 张｜任务策略：公众号配图策划（WECHAT_VISUAL_PLANNING）$")).wait_for()
+    page.get_by_label("自动规划数量", exact=True).uncheck()
+    page.get_by_label("正文插图数量", exact=True).select_option("3")
+    page.get_by_text(re.compile(r"^手动指定｜封面 1 张，正文插图 3 张｜任务策略：公众号配图策划（WECHAT_VISUAL_PLANNING）$")).wait_for()
+    assert page.get_by_role("button", name="确认素材，进入排版", exact=True).is_disabled()
     page.get_by_role("button", name="更新方案", exact=True).click()
     page.get_by_role("button", name=re.compile(r"正文插图 3")).wait_for()
     assert len(state["planning_calls"]) == 2
+    assert state["planning_calls"][1]["quantityMode"] == "MANUAL"
+    assert state["planning_calls"][1]["bodyItemCount"] == 3
 
     page.locator(".visual-query-chips button").first.click()
     page.get_by_text("Satellite launch", exact=True).wait_for()
@@ -319,6 +329,17 @@ with sync_playwright() as playwright:
     page.get_by_role("button", name="AI 生图", exact=True).click()
     page.locator(".visual-generated-preview img").wait_for()
     assert "清新波普怀旧" in page.get_by_role("button", name="设置项目配图风格", exact=True).inner_text()
+    assert not page.get_by_label("自动规划数量", exact=True).is_checked()
+    assert page.get_by_label("正文插图数量", exact=True).input_value() == "3"
+    del state["draft"]["visualPlan"]["quantityMode"]
+    del state["draft"]["visualPlan"]["bodyItemCount"]
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    assert not page.get_by_label("自动规划数量", exact=True).is_checked(), "旧方案缺少数量模式时应按手动模式恢复"
+    assert page.get_by_label("正文插图数量", exact=True).input_value() == "3"
+    page.get_by_role("button", name=re.compile(r"正文插图 1")).click()
+    page.get_by_role("button", name="AI 生图", exact=True).click()
+    page.locator(".visual-generated-preview img").wait_for()
     page.screenshot(path=ARTIFACTS / "visual-generated-preview.png", full_page=True)
     assert_no_overflow(page, "1440px 配图工作台")
     page.screenshot(path=ARTIFACTS / "visual-workspace-desktop.png", full_page=True)

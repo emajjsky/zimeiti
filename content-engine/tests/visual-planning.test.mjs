@@ -3,7 +3,7 @@ import test from 'node:test';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { buildVisualPlanningPrompt, parseVisualPlanningContent, mergePlannedItems, validateVisualPlanImageCount } = require('../server/services/visual-planning.cjs');
+const { buildVisualPlanningPrompt, parseVisualPlanningContent, mergePlannedItems, validateVisualPlanImageCount, VISUAL_PLANNING_TOOL_NAME } = require('../server/services/visual-planning.cjs');
 
 const item = (role, title, placement) => ({
   role,
@@ -28,7 +28,7 @@ const item = (role, title, placement) => ({
 test('配图策划提示词读取完整正文并禁止空泛占位词', () => {
   const prompt = buildVisualPlanningPrompt({
     project: { title: '天链三号01星', planning: { title: '天链三号01星', category: '科技', coreMessage: '解释中继卫星的作用' }, versionTitle: '中继卫星有什么用', versionBody: '中继卫星承担航天器与地面站之间的数据转发任务。' },
-    platform: 'WECHAT', bodyItemCount: 2, styleProfile: { preset: 'RETRO_POP', customPrompt: '薄荷绿边框' }, request: '',
+    platform: 'WECHAT', quantityMode: 'MANUAL', bodyItemCount: 2, styleProfile: { preset: 'RETRO_POP', customPrompt: '薄荷绿边框' }, request: '',
   });
   assert.match(prompt.system, /禁止用“关键、节点、时间/);
   assert.match(prompt.message, /中继卫星承担航天器与地面站之间的数据转发任务/);
@@ -41,6 +41,9 @@ test('配图策划提示词读取完整正文并禁止空泛占位词', () => {
   assert.match(prompt.message, /封面 1 张 \+ 正文插图 2 张/);
   assert.match(prompt.message, /bodyItemCount 不是总数/);
   assert.match(prompt.message, /"totalImageCount":3/);
+  assert.equal(prompt.requiredToolName, VISUAL_PLANNING_TOOL_NAME);
+  assert.equal(prompt.tools[0].function.name, VISUAL_PLANNING_TOOL_NAME);
+  assert.match(prompt.system, /必须调用且只能调用一次 submit_visual_plan/);
 });
 
 test('母稿配图只接受公众号并限制为十二张', () => {
@@ -54,11 +57,42 @@ test('母稿配图只接受公众号并限制为十二张', () => {
 test('清透赛博风格支持封面一张加正文十一张的公众号方案', () => {
   const prompt = buildVisualPlanningPrompt({
     project: { title: '从Prompt到State：AI协作的下一站', planning: {}, versionTitle: '从Prompt到State：AI协作的下一站', versionBody: '这是一篇完整的公众号正文，用于验证配图策划读取母稿后自主安排插图位置。' },
-    platform: 'WECHAT', bodyItemCount: 11, styleProfile: { preset: 'CYBER_TECH', customPrompt: '' }, request: '',
+    platform: 'WECHAT', quantityMode: 'MANUAL', bodyItemCount: 11, styleProfile: { preset: 'CYBER_TECH', customPrompt: '' }, request: '',
   });
   assert.match(prompt.message, /清透赛博/);
   assert.match(prompt.message, /封面 1 张 \+ 正文插图 11 张/);
   assert.match(prompt.message, /"totalImageCount":12/);
+});
+
+test('自动规划由模型在两到十一张正文图之间决定数量', () => {
+  for (const bodyCount of [2, 7, 11]) {
+    const items = [item('COVER', '文章封面', '发布首图'), ...Array.from({ length: bodyCount }, (_, index) => item('BODY', `正文插图 ${index + 1}`, `正文第 ${index + 1} 段后`))];
+    const parsed = parseVisualPlanningContent(JSON.stringify({ strategy: '按正文信息密度安排封面和不重复的正文图片。', items }), { platform: 'WECHAT', quantityMode: 'AUTO' });
+    assert.equal(parsed.items.length, bodyCount + 1);
+  }
+  const prompt = buildVisualPlanningPrompt({
+    project: { title: '自动规划', planning: {}, versionTitle: '自动规划', versionBody: '完整公众号正文用于判断视觉节奏和信息密度。' },
+    platform: 'WECHAT', quantityMode: 'AUTO', styleProfile: { preset: 'FRESH_EDITORIAL', customPrompt: '' }, request: '',
+  });
+  assert.match(prompt.message, /自主选择 2 到 11 张正文插图/);
+  assert.match(prompt.message, /"minTotalImageCount":3/);
+  assert.match(prompt.message, /"maxTotalImageCount":12/);
+});
+
+test('自动规划拒绝零张、一张或十二张正文图以及错误角色顺序', () => {
+  const plan = (bodyCount) => ({ strategy: '按正文信息密度安排封面和不重复的正文图片。', items: [item('COVER', '文章封面', '发布首图'), ...Array.from({ length: bodyCount }, (_, index) => item('BODY', `正文插图 ${index + 1}`, `正文第 ${index + 1} 段后`))] });
+  assert.throws(() => parseVisualPlanningContent(JSON.stringify(plan(0)), { platform: 'WECHAT', quantityMode: 'AUTO' }), /至少 2 张正文插图/);
+  assert.throws(() => parseVisualPlanningContent(JSON.stringify(plan(1)), { platform: 'WECHAT', quantityMode: 'AUTO' }), /至少 2 张正文插图/);
+  assert.throws(() => parseVisualPlanningContent(JSON.stringify(plan(12)), { platform: 'WECHAT', quantityMode: 'AUTO' }));
+  const wrong = plan(2); wrong.items[1].role = 'COVER';
+  assert.throws(() => parseVisualPlanningContent(JSON.stringify(wrong), { platform: 'WECHAT', quantityMode: 'AUTO' }), /第 2 张图角色不正确/);
+});
+
+test('手动规划严格匹配用户选择的正文图数量', () => {
+  const valid = { strategy: '严格按用户选择安排封面和三张正文插图。', items: [item('COVER', '文章封面', '发布首图'), ...Array.from({ length: 3 }, (_, index) => item('BODY', `正文插图 ${index + 1}`, `正文第 ${index + 1} 段后`))] };
+  assert.doesNotThrow(() => parseVisualPlanningContent(JSON.stringify(valid), { platform: 'WECHAT', quantityMode: 'MANUAL', bodyItemCount: 3 }));
+  assert.throws(() => parseVisualPlanningContent(JSON.stringify(valid), { platform: 'WECHAT', quantityMode: 'MANUAL', bodyItemCount: 4 }), /配图数量不正确/);
+  assert.throws(() => parseVisualPlanningContent(JSON.stringify(valid), { platform: 'WECHAT', quantityMode: 'MANUAL', bodyItemCount: 1 }), /正文插图数量必须是 2 到 11 张/);
 });
 
 test('模型方案必须返回平台所需数量和具体内容', () => {

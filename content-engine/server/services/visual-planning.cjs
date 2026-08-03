@@ -2,7 +2,8 @@ const { z } = require('zod');
 
 const VISUAL_PLANNING_SCOPE = 'WECHAT_VISUAL_PLANNING';
 const VISUAL_PLANNING_OPERATION = 'WECHAT_VISUAL_PLANNING';
-const VISUAL_PLANNING_PROMPT_VERSION = '1.1.0';
+const VISUAL_PLANNING_PROMPT_VERSION = '1.2.0';
+const VISUAL_PLANNING_TOOL_NAME = 'submit_visual_plan';
 
 const platformNames = {
   WECHAT: '公众号',
@@ -65,6 +66,50 @@ const visualPlanSchema = z.object({
   items: z.array(plannedItemSchema).min(1).max(12),
 });
 
+const visualPlanningTool = Object.freeze({
+  type: 'function',
+  function: {
+    name: VISUAL_PLANNING_TOOL_NAME,
+    description: '提交一套完整的公众号配图方案，或按任务要求提交单张图片的重策划结果。',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['strategy', 'items'],
+      properties: {
+        strategy: { type: 'string', minLength: 8, maxLength: 500, description: '一句话说明整套图片如何服务文章叙事，不能写空泛设计口号。' },
+        items: {
+          type: 'array', minItems: 1, maxItems: 12,
+          items: {
+            type: 'object', additionalProperties: false,
+            required: ['role', 'title', 'placement', 'purpose', 'visualType', 'focus', 'searchQueries', 'generationMode', 'informationPoints', 'sourceExcerpt', 'contentBlocks', 'prompt', 'size'],
+            properties: {
+              role: { type: 'string', enum: role.options, description: '图片在公众号方案中的角色。完整方案只能是首项 COVER、其余 BODY。' },
+              title: { type: 'string', minLength: 2, maxLength: 80, description: '用户可读的具体图片名称。' },
+              placement: { type: 'string', minLength: 2, maxLength: 160, description: '图片应插入正文的准确段落或句子之后。' },
+              purpose: { type: 'string', minLength: 8, maxLength: 300, description: '说明为什么正文需要这张图以及它承担的阅读任务。' },
+              visualType: { type: 'string', enum: visualType.options, description: '与正文信息关系匹配的视觉类型。' },
+              focus: { type: 'string', minLength: 8, maxLength: 300, description: '画面中具体可见的主体、动作、关系和场景。' },
+              searchQueries: { type: 'array', minItems: 2, maxItems: 4, description: '能搜索到画面内容的具体短语，不得包含模板、排版、图标、PPT 等设计形式词。', items: { type: 'string', minLength: 2, maxLength: 60 } },
+              generationMode: { type: 'string', enum: generationMode.options, description: '照片、场景和主视觉使用 ILLUSTRATION；结构关系图使用 INFOGRAPHIC。' },
+              informationPoints: { type: 'array', minItems: 1, maxItems: 6, description: '图片必须准确传达且能由正文支持的具体信息。', items: { type: 'string', minLength: 4, maxLength: 100 } },
+              sourceExcerpt: { type: 'string', minLength: 8, maxLength: 1200, description: '支持本图的正文原句或忠实摘要。' },
+              contentBlocks: {
+                type: 'array', maxItems: 6,
+                items: {
+                  type: 'object', additionalProperties: false, required: ['label', 'detail'],
+                  properties: { label: { type: 'string', minLength: 2, maxLength: 40 }, detail: { type: 'string', minLength: 6, maxLength: 180 } },
+                },
+              },
+              prompt: { type: 'string', minLength: 80, maxLength: 6000, description: '可直接交给图片模型的最终中文指令，以画面内容为主，默认不生成文字。' },
+              size: { type: 'string', enum: size.options, description: '适合公众号阅读和画面任务的图片比例。' },
+            },
+          },
+        },
+      },
+    },
+  },
+});
+
 const genericOnly = /^(关键|节点|时间|重点|核心|内容|信息|主题|场景|要点|结论|背景|价值|问题|方法|流程|数据|人物|事件|图片|配图)[一二三四五六七八九十\d\s、，：:.-]*$/;
 const searchNoise = /(模板|矢量|图标|字体|字效|排版|版式|PPT|信息卡|知识卡|海报|素材|图表)/i;
 
@@ -88,12 +133,20 @@ function stripCodeFence(content) {
 }
 
 function expectedRoles(platform, bodyItemCount) {
+  if (!Number.isInteger(bodyItemCount) || bodyItemCount < 2 || bodyItemCount > 11) throw new Error('正文插图数量必须是 2 到 11 张。');
   validateVisualPlanImageCount(platform, bodyItemCount + 1);
   return ['COVER', ...Array.from({ length: bodyItemCount }, () => 'BODY')];
 }
 
-function quantityInstruction(platform, bodyItemCount, singleItem = false) {
+function quantityInstruction(platform, quantityMode, bodyItemCount, singleItem = false) {
   if (singleItem) return { bodyImageCount: null, totalImageCount: 1, exactRoleSequence: ['当前图片角色'], instruction: 'items 数组必须且只能包含 1 项。' };
+  if (quantityMode === 'AUTO') {
+    return {
+      mode: 'AUTO', coverImageCount: 1, minBodyImageCount: 2, maxBodyImageCount: 11, minTotalImageCount: 3, maxTotalImageCount: 12,
+      roleRule: '第 1 项必须是 COVER，其余项目必须全部是 BODY',
+      instruction: '先根据完整正文的篇幅、段落结构、信息密度和视觉价值，自主选择 2 到 11 张正文插图；封面固定 1 张，总数必须是 3 到 12 张。不要为了凑数重复表达。',
+    };
+  }
   const roles = expectedRoles(platform, bodyItemCount);
   const bodyName = '正文插图';
   const coverCount = 1;
@@ -106,18 +159,27 @@ function quantityInstruction(platform, bodyItemCount, singleItem = false) {
   };
 }
 
-function parseVisualPlanningContent(content, { platform, bodyItemCount, singleItem = false } = {}) {
+function parseVisualPlanningContent(content, { platform, quantityMode = 'MANUAL', bodyItemCount, singleItem = false } = {}) {
+  if (quantityMode !== 'AUTO' && quantityMode !== 'MANUAL') throw new Error('配图数量模式无效。');
   let value;
   try { value = JSON.parse(stripCodeFence(content)); }
   catch { throw new Error('模型返回的配图方案不是有效 JSON。'); }
   const parsed = assertSpecificPlan(visualPlanSchema.parse(value));
-  const expected = singleItem ? 1 : expectedRoles(platform, bodyItemCount).length;
-  if (parsed.items.length !== expected) {
-    const quantity = quantityInstruction(platform, bodyItemCount, singleItem);
-    throw new Error(`配图数量不正确，${quantity.instruction}实际返回 ${parsed.items.length} 张。`);
+  if (singleItem && parsed.items.length !== 1) throw new Error(`单图重策划必须返回 1 张，实际返回 ${parsed.items.length} 张。`);
+  if (!singleItem && quantityMode === 'AUTO') {
+    validateVisualPlanImageCount(platform, parsed.items.length);
+    if (parsed.items.length < 3) throw new Error(`自动规划必须包含 1 张封面和至少 2 张正文插图，实际返回 ${parsed.items.length} 张。`);
+    parsed.items.forEach((item, index) => {
+      const expectedRole = index === 0 ? 'COVER' : 'BODY';
+      if (item.role !== expectedRole) throw new Error(`第 ${index + 1} 张图角色不正确，应为 ${expectedRole}。`);
+    });
   }
-  if (!singleItem) {
+  if (!singleItem && quantityMode === 'MANUAL') {
     const roles = expectedRoles(platform, bodyItemCount);
+    if (parsed.items.length !== roles.length) {
+      const quantity = quantityInstruction(platform, quantityMode, bodyItemCount, false);
+      throw new Error(`配图数量不正确，${quantity.instruction}实际返回 ${parsed.items.length} 张。`);
+    }
     parsed.items.forEach((item, index) => {
       if (item.role !== roles[index]) throw new Error(`第 ${index + 1} 张图角色不正确，应为 ${roles[index]}。`);
     });
@@ -125,12 +187,12 @@ function parseVisualPlanningContent(content, { platform, bodyItemCount, singleIt
   return parsed;
 }
 
-function buildVisualPlanningPrompt({ project, platform, bodyItemCount, styleProfile, request, currentItem }) {
+function buildVisualPlanningPrompt({ project, platform, quantityMode, bodyItemCount, styleProfile, request, currentItem }) {
   const platformName = platformNames[platform] ?? platform;
   const styleName = styleNames[styleProfile?.preset] ?? styleProfile?.preset ?? '清新编辑';
   const singleItem = Boolean(currentItem);
-  const roles = expectedRoles(platform, bodyItemCount);
-  const quantity = quantityInstruction(platform, bodyItemCount, singleItem);
+  const roles = singleItem ? [currentItem.role] : quantityMode === 'AUTO' ? ['COVER', 'BODY...'] : expectedRoles(platform, bodyItemCount);
+  const quantity = quantityInstruction(platform, quantityMode, bodyItemCount, singleItem);
   const system = [
     '你是资深内容视觉导演。你的工作不是罗列设计参数，而是把已完成正文转成可直接执行的配图方案。',
     '先理解文章叙事和每一段的传播任务，再决定真实场景图、资料图、主体主视觉或确有必要的结构图。整套方案必须以图片内容为主、文字为辅，不能做成文字型 PPT、课程卡片或大段文字海报。',
@@ -139,15 +201,12 @@ function buildVisualPlanningPrompt({ project, platform, bodyItemCount, styleProf
     '搜索词必须描述能在图片中直接看到的主体、动作、地点、器物或真实场景，优先“专有主体 + 可见动作/场景”。每条搜索词不超过 60 个字符。禁止把模板、矢量、图标、字体、排版、PPT、信息卡、知识卡、海报、素材、图表当作搜索词。不得使用完整句子。',
     'NEWS_PHOTO、HERO_VISUAL、SCENE 等照片或场景画面应使用 ILLUSTRATION，contentBlocks 必须返回空数组；只有需要在图内表达流程、时间、对比、数据或结构关系时才使用 INFOGRAPHIC，此时 contentBlocks 必须包含 1 至 6 个必要短标签及其准确内容。',
     'prompt 是直接交给图片模型的最终中文指令，必须先写清画面主体、动作、环境、镜头与构图，再写项目风格和平台比例。默认不生成文字；确需图解时只允许一个短标题和最多四个必要短标签，禁止正文段落、说明文字和 PPT 式模块堆叠。不要单独输出负面提示词字段。',
-    '只返回 JSON，不要代码围栏、解释或备选方案。',
+    `必须调用且只能调用一次 ${VISUAL_PLANNING_TOOL_NAME} 提交最终方案；不要输出普通文本、代码围栏、解释或备选方案。`,
   ].join('\n');
   const message = JSON.stringify({
     task: singleItem ? '根据用户意见只重做当前这一张的策划' : '生成完整配图方案',
-    outputShape: {
-      strategy: '一句话说明整套图片如何服务文章',
-      items: [{ role: 'COVER|BODY|CARD|MAIN', title: '用户可读的图片名称', placement: '准确插入位置', purpose: '为什么需要这张图', visualType: '允许的视觉类型代码', focus: '具体要画什么或展示什么', searchQueries: ['不超过60字符的具体搜索词1', '不超过60字符的具体搜索词2'], generationMode: 'ILLUSTRATION|INFOGRAPHIC', informationPoints: ['图片必须传达的具体信息'], sourceExcerpt: '对应正文原句或准确摘要', contentBlocks: [{ label: '必要短标签', detail: '正文支持的准确内容' }], prompt: '可直接交给图片模型的完整指令', size: '平台比例' }],
-      contentBlockRule: 'ILLUSTRATION 的 contentBlocks 必须为 []；INFOGRAPHIC 的 contentBlocks 必须为 1 至 6 项数组',
-    },
+    submissionTool: VISUAL_PLANNING_TOOL_NAME,
+    contentBlockRule: 'ILLUSTRATION 的 contentBlocks 必须为 []；INFOGRAPHIC 的 contentBlocks 必须为 1 至 6 项数组',
     allowedVisualTypes: visualType.options,
     platform: { code: platform, name: platformName },
     requiredRoles: singleItem ? [currentItem.role] : roles,
@@ -173,7 +232,7 @@ function buildVisualPlanningPrompt({ project, platform, bodyItemCount, styleProf
       sourceExcerpt: currentItem.sourceExcerpt,
     } : null,
   });
-  return { system, message };
+  return { system, message, tools: [visualPlanningTool], requiredToolName: VISUAL_PLANNING_TOOL_NAME };
 }
 
 function itemId(platform, item, index) {
@@ -215,6 +274,8 @@ module.exports = {
   VISUAL_PLANNING_SCOPE,
   VISUAL_PLANNING_OPERATION,
   VISUAL_PLANNING_PROMPT_VERSION,
+  VISUAL_PLANNING_TOOL_NAME,
+  visualPlanningTool,
   visualPlanSchema,
   buildVisualPlanningPrompt,
   parseVisualPlanningContent,

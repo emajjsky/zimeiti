@@ -1,4 +1,4 @@
-import { Check, Image, LoaderCircle, Minus, Palette, Plus, RefreshCw, Save, Search, Sparkles, Trash2, Upload, X } from 'lucide-react';
+import { Check, Image, LoaderCircle, Palette, Plus, RefreshCw, Save, Search, Sparkles, Trash2, Upload, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { webAssets, webCreative, webDrafts } from '../../data/webApi';
 import { type ContentProject, type CreativeVisualPlanItem, type CreativeVisualReferenceUse, type CreativeVisualStyleProfile } from '../../domain/content';
@@ -12,6 +12,8 @@ import { visualPlanCountRange, visualStylePresets, VISUAL_PLAN_VERSION } from '.
 type ImageSearchResult = { id: string; title: string; thumbnailUrl: string; imageUrl: string; sourceUrl: string; license: string; attribution: string };
 type SourceView = 'search' | 'generate' | 'library';
 type PlanningRoute = { scope: string; provider: string; model: string };
+type QuantityMode = 'AUTO' | 'MANUAL';
+type VisualSnapshot = { plan: CreativeVisualPlanItem[]; styleProfile: CreativeVisualStyleProfile; quantityMode: QuantityMode; bodyItemCount: number };
 
 function usableVisualReference(item: ProjectAsset) {
   return item.kind === 'IMAGE' && item.mimeType.startsWith('image/');
@@ -87,9 +89,10 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
   onOpenModelSettings: () => void;
 }) {
   const platform: CreativePlatform = 'WECHAT';
-  const persistedVisual = draft.visualPlan as { planVersion?: number; plan?: unknown; styleProfile?: CreativeVisualStyleProfile; workflowStatus?: string };
+  const persistedVisual = draft.visualPlan as { planVersion?: number; plan?: unknown; styleProfile?: CreativeVisualStyleProfile; quantityMode?: QuantityMode; bodyItemCount?: number; workflowStatus?: string };
   const [plan, setPlan] = useState<CreativeVisualPlanItem[]>([]);
   const [bodyItemCount, setBodyItemCount] = useState(0);
+  const [quantityMode, setQuantityMode] = useState<QuantityMode>('AUTO');
   const [styleProfile, setStyleProfile] = useState<CreativeVisualStyleProfile>({ preset: 'FRESH_EDITORIAL', customPrompt: '' });
   const [styleDraft, setStyleDraft] = useState<CreativeVisualStyleProfile>({ preset: 'FRESH_EDITORIAL', customPrompt: '' });
   const [styleDialogOpen, setStyleDialogOpen] = useState(false);
@@ -140,13 +143,19 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
     const switchedProject = hydratedProjectKey.current !== projectKey;
     const persisted = persistedVisual.planVersion === VISUAL_PLAN_VERSION ? safePlan(persistedVisual.plan) : [];
     const legacy = safePlan(persistedVisual.plan);
-    const persistedCount = persistedVisual.planVersion === VISUAL_PLAN_VERSION
-      ? legacy.filter((item) => item.role === 'BODY' || item.role === 'CARD').length
-      : 0;
-    const nextCount = persistedCount || recommendedBodyItemCount(platform, draft.body);
+    const planBodyItemCount = legacy.filter((item) => item.role === 'BODY' || item.role === 'CARD').length;
+    const hasSavedCount = Number.isInteger(persistedVisual.bodyItemCount) && Number(persistedVisual.bodyItemCount) >= countRange.min && Number(persistedVisual.bodyItemCount) <= countRange.max;
+    const nextMode: QuantityMode = persistedVisual.quantityMode === 'AUTO' || persistedVisual.quantityMode === 'MANUAL'
+      ? persistedVisual.quantityMode
+      : legacy.length ? 'MANUAL' : 'AUTO';
+    const nextCount = nextMode === 'MANUAL' && hasSavedCount
+      ? Number(persistedVisual.bodyItemCount)
+      : planBodyItemCount || recommendedBodyItemCount(platform, draft.body);
+    const quantityNeedsRefresh = nextMode === 'MANUAL' && persisted.length > 0 && planBodyItemCount !== nextCount;
     const nextStyleProfile = { preset: persistedVisual.styleProfile?.preset ?? 'FRESH_EDITORIAL' as const, customPrompt: persistedVisual.styleProfile?.customPrompt ?? '' };
     setPlan((current) => JSON.stringify(current) === JSON.stringify(persisted) ? current : persisted);
     setBodyItemCount(nextCount);
+    setQuantityMode(nextMode);
     setStyleProfile((current) => JSON.stringify(current) === JSON.stringify(nextStyleProfile) ? current : nextStyleProfile);
     setActiveItemId((current) => !switchedProject && persisted.some((item) => item.id === current) ? current : persisted[0]?.id ?? '');
     if (switchedProject) {
@@ -154,21 +163,21 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
       setSearchResults([]);
       setSourceView('search');
       setReferencePickerOpen(false);
-      setPlanNeedsRefresh(false);
+      setPlanNeedsRefresh(quantityNeedsRefresh);
       setPlanningRoute(null);
     }
     hydratedProjectKey.current = projectKey;
     setHydratedPlanKey(projectKey);
-    lastSavedSignature.current = persisted.length ? JSON.stringify({ plan: persisted, styleProfile: nextStyleProfile }) : '';
+    lastSavedSignature.current = persisted.length ? JSON.stringify({ plan: persisted, styleProfile: nextStyleProfile, quantityMode: nextMode, bodyItemCount: nextCount }) : '';
   }, [draft.id]);
 
   useEffect(() => { draftRef.current = draft; }, [draft]);
 
-  const persistVisual = (snapshot: { plan: CreativeVisualPlanItem[]; styleProfile: CreativeVisualStyleProfile }, workflowStatus = persistedVisual.workflowStatus) => {
+  const persistVisual = (snapshot: VisualSnapshot, workflowStatus = persistedVisual.workflowStatus) => {
     const queued = saveQueue.current.catch(() => draftRef.current).then(async () => {
       let saved = await webDrafts.patch(draftRef.current.id, {
         revision: draftRef.current.revision,
-        visualPlan: { planVersion: VISUAL_PLAN_VERSION, plan: snapshot.plan, styleProfile: snapshot.styleProfile, ...(workflowStatus ? { workflowStatus } : {}) },
+        visualPlan: { planVersion: VISUAL_PLAN_VERSION, plan: snapshot.plan, styleProfile: snapshot.styleProfile, quantityMode: snapshot.quantityMode, bodyItemCount: snapshot.bodyItemCount, ...(workflowStatus ? { workflowStatus } : {}) },
       });
       const seen = new Set<string>();
       const orderedAssets = snapshot.plan.flatMap((item) => {
@@ -221,12 +230,12 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
   useEffect(() => {
     if (!hasCopy || !plan.length) return;
     if (hydratedPlanKey !== `${project.id}:${platform}`) return;
-    const signature = JSON.stringify({ plan, styleProfile });
+    const signature = JSON.stringify({ plan, styleProfile, quantityMode, bodyItemCount });
     if (signature === lastSavedSignature.current) return;
     const revision = ++saveRevision.current;
     setSaveState('saving');
     const timer = window.setTimeout(() => {
-      void persistVisual({ plan, styleProfile }).then(() => {
+      void persistVisual({ plan, styleProfile, quantityMode, bodyItemCount }).then(() => {
         if (revision !== saveRevision.current) return;
         lastSavedSignature.current = signature;
         setSaveState('saved');
@@ -237,7 +246,7 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
       });
     }, 650);
     return () => window.clearTimeout(timer);
-  }, [hasCopy, hydratedPlanKey, plan, project.id, styleProfile]);
+  }, [bodyItemCount, hasCopy, hydratedPlanKey, plan, project.id, quantityMode, styleProfile]);
 
   const runSearch = async (query: string) => {
     const normalized = query.trim();
@@ -345,8 +354,8 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
   const save = async () => {
     setBusy('save'); setError('');
     try {
-      await persistVisual({ plan, styleProfile });
-      lastSavedSignature.current = JSON.stringify({ plan, styleProfile });
+      await persistVisual({ plan, styleProfile, quantityMode, bodyItemCount });
+      lastSavedSignature.current = JSON.stringify({ plan, styleProfile, quantityMode, bodyItemCount });
       setSaveState('saved');
     } catch (reason) { setSaveState('error'); setError(reason instanceof Error ? reason.message : '保存配图方案失败。'); }
     finally { setBusy(null); }
@@ -356,8 +365,8 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
     if (!hasCopy) { setError('请先完成当前渠道正文，再确认配图进入排版。'); return; }
     setBusy('complete'); setError('');
     try {
-      await persistVisual({ plan, styleProfile }, 'COMPLETE');
-      lastSavedSignature.current = JSON.stringify({ plan, styleProfile });
+      await persistVisual({ plan, styleProfile, quantityMode, bodyItemCount }, 'COMPLETE');
+      lastSavedSignature.current = JSON.stringify({ plan, styleProfile, quantityMode, bodyItemCount });
       onContinue();
     } catch (reason) { setError(reason instanceof Error ? reason.message : '确认配图失败。'); }
     finally { setBusy(null); }
@@ -369,7 +378,8 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
     try {
       const result = await webCreative.planVisual(project.id, {
         platform: 'WECHAT',
-        bodyItemCount,
+        quantityMode,
+        ...(quantityMode === 'MANUAL' ? { bodyItemCount } : {}),
         styleProfile,
         request,
         currentItemId,
@@ -378,6 +388,7 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
       });
       const next = safePlan(result.plan);
       setPlan(next);
+      setBodyItemCount(result.bodyItemCount);
       setPlanningRoute({ scope: result.policy.scope, provider: result.policy.provider, model: result.policy.model });
       setPlanNeedsRefresh(false);
       setActiveItemId((current) => currentItemId && next.some((item) => item.id === currentItemId) ? currentItemId : next.some((item) => item.id === current) ? current : next[0]?.id ?? '');
@@ -393,15 +404,25 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
     }
   };
 
-  const changeBodyItemCount = (delta: number) => {
-    const target = Math.max(countRange.min, Math.min(countRange.max, bodyItemCount + delta));
+  const changeBodyItemCount = (requested: number) => {
+    const target = Math.max(countRange.min, Math.min(countRange.max, requested));
     if (target === bodyItemCount) return;
     setBodyItemCount(target);
     if (plan.length) setPlanNeedsRefresh(true);
     setNotice(plan.length ? '图片数量已调整。点击“更新方案”后重新安排位置。' : '');
   };
 
-  const planCountSummary = `封面 1 张，正文插图 ${bodyItemCount} 张`;
+  const changeQuantityMode = (nextMode: QuantityMode) => {
+    if (nextMode === quantityMode) return;
+    setQuantityMode(nextMode);
+    if (plan.length) setPlanNeedsRefresh(true);
+    setNotice(plan.length ? nextMode === 'AUTO' ? '已改为自动规划数量。点击“更新方案”后，Agent 将按正文重新决定数量。' : '已改为手动指定数量。选择数量后点击“更新方案”。' : '');
+  };
+
+  const actualBodyItemCount = plan.filter((item) => item.role === 'BODY').length;
+  const planCountSummary = quantityMode === 'AUTO'
+    ? plan.length ? `自动规划｜封面 1 张，正文插图 ${actualBodyItemCount} 张` : '自动规划数量｜封面 1 张，正文插图由 Agent 决定'
+    : `手动指定｜封面 1 张，正文插图 ${bodyItemCount} 张`;
 
   const assetSrc = (asset: ProjectAsset | undefined) => asset ? fileUrls[asset.id] : undefined;
 
@@ -410,10 +431,9 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
       <div><h2>公众号配图</h2><p>{planCountSummary}｜任务策略：公众号配图策划（WECHAT_VISUAL_PLANNING）</p></div>
       <div className="visual-plan-actions">
         <button className="visual-project-style" type="button" aria-label="设置项目配图风格" onClick={openStyleDialog}><Palette size={15}/><span>项目风格</span><b>{allVisualStyles.find((style) => style.id === styleProfile.preset)?.name ?? visualStyles[0].name}</b></button>
-        <div className="visual-count-stepper" aria-label="配图数量">
-          <button type="button" aria-label="减少正文插图" disabled={bodyItemCount <= countRange.min} onClick={() => changeBodyItemCount(-1)}><Minus size={14}/></button>
-          <output aria-label="正文插图数量">{bodyItemCount}</output>
-          <button type="button" aria-label="增加正文插图" disabled={bodyItemCount >= countRange.max} onClick={() => changeBodyItemCount(1)}><Plus size={14}/></button>
+        <div className="visual-quantity-control">
+          <label className="visual-auto-quantity"><input type="checkbox" checked={quantityMode === 'AUTO'} onChange={(event) => changeQuantityMode(event.target.checked ? 'AUTO' : 'MANUAL')}/><span>自动规划数量</span></label>
+          {quantityMode === 'MANUAL' && <label className="visual-manual-quantity"><span>正文插图</span><select aria-label="正文插图数量" value={bodyItemCount} onChange={(event) => changeBodyItemCount(Number(event.target.value))}>{Array.from({ length: countRange.max - countRange.min + 1 }, (_, index) => countRange.min + index).map((count) => <option value={count} key={count}>{count} 张</option>)}</select></label>}
         </div>
         {plan.length > 0 && <button className="button" type="button" disabled={planBusy || !hasCopy} onClick={() => void planWithAI()}>{planBusy ? <LoaderCircle size={15}/> : <RefreshCw size={15}/>} {planNeedsRefresh ? '更新方案' : '重新策划'}</button>}
       </div>
@@ -513,7 +533,7 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
       </main>}
     </div>}
 
-    {plan.length > 0 && <footer className="delivery-workspace-footer"><span>{saveState === 'saving' ? '正在自动保存配图方案' : planningRoute ? `实际策略：公众号配图策划（${planningRoute.scope}） · ${planningRoute.provider} / ${planningRoute.model}` : boundCount ? `已绑定 ${boundCount}/${plan.length} 张图片｜策略：公众号配图策划（WECHAT_VISUAL_PLANNING）` : '策略：公众号配图策划（WECHAT_VISUAL_PLANNING）｜可从第一张开始选图'}</span><div><button className="text-button" type="button" onClick={onOpenModelSettings}>查看任务策略</button><button className="button" type="button" disabled={busy !== null} onClick={() => void save()}>{busy === 'save' ? <LoaderCircle size={16}/> : <Save size={16}/>}保存</button><button className="button primary" type="button" disabled={busy !== null || !hasCopy} onClick={() => void complete()}>{busy === 'complete' ? <LoaderCircle size={16}/> : null}确认素材，进入排版</button></div></footer>}
+    {plan.length > 0 && <footer className="delivery-workspace-footer"><span>{saveState === 'saving' ? '正在自动保存配图方案' : planningRoute ? `实际策略：公众号配图策划（${planningRoute.scope}） · ${planningRoute.provider} / ${planningRoute.model}` : boundCount ? `已绑定 ${boundCount}/${plan.length} 张图片｜策略：公众号配图策划（WECHAT_VISUAL_PLANNING）` : '策略：公众号配图策划（WECHAT_VISUAL_PLANNING）｜可从第一张开始选图'}</span><div><button className="text-button" type="button" onClick={onOpenModelSettings}>查看任务策略</button><button className="button" type="button" disabled={busy !== null} onClick={() => void save()}>{busy === 'save' ? <LoaderCircle size={16}/> : <Save size={16}/>}保存</button><button className="button primary" type="button" disabled={busy !== null || !hasCopy || planNeedsRefresh} onClick={() => void complete()}>{busy === 'complete' ? <LoaderCircle size={16}/> : null}确认素材，进入排版</button></div></footer>}
 
     {styleDialogOpen && <div className="visual-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setStyleDialogOpen(false); }}>
       <section className="visual-style-dialog" role="dialog" aria-modal="true" aria-labelledby="visual-style-dialog-title">
