@@ -75,6 +75,7 @@ export interface WorkspaceLocationState {
   legacyTopicId: string | null;
   projectId: string | null;
   stage: CreateStageRoute | null;
+  draftId: string | null;
 }
 
 export interface WorkspaceLocationTarget {

@@ -104,7 +104,7 @@ const projectPlanningInput = z.object({
   constraints: z.string().max(8_000),
 });
 const visualGenerationInput = z.object({
-  platform: z.literal('WECHAT'),
+  platform: z.enum(['WECHAT', 'XIAOHONGSHU', 'WEIBO']),
   prompt: z.string().trim().min(4).max(8_000),
   size: z.enum(['1:1', '3:4', '4:3', '9:16', '16:9']).default('3:4'),
   assetIds: z.array(z.string().uuid()).max(3).default([]),
@@ -1295,7 +1295,11 @@ app.post('/api/v1/creative/projects/:projectId/visual/generate', { preHandler: w
     });
     await query(`INSERT INTO api_usage_logs (workspace_id, provider, model, operation, status, duration_ms)
       VALUES ($1, 'BAILIAN_CLI', $2, $3, 'SUCCESS', $4)`, [workspace.id, model, operation, Date.now() - startedAt]);
-    reply.code(created.created ? 201 : 200).send({ asset: created.asset, projectAsset });
+    reply.code(created.created ? 201 : 200).send({
+      asset: created.asset,
+      projectAsset,
+      policy: { scope: operation, provider: policy.rows[0].provider, model },
+    });
   } catch (error) {
     if (!assetPersisted) await fs.rm(jobFolder, { recursive: true, force: true }).catch(() => {});
     await query(`INSERT INTO api_usage_logs (workspace_id, provider, model, operation, status, duration_ms, error)

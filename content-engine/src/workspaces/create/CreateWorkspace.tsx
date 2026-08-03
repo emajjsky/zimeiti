@@ -74,12 +74,15 @@ function draftRoute(project: ContentProject, draft: ContentDraft | null): Create
   return routeOrder[Math.max(routeOrder.indexOf(projectRoute), routeOrder.indexOf(resourceRoute))] ?? 'preparation';
 }
 
-export function CreateWorkspace({ project, stage, onStage, onExitProject, onProjectAccepted, onOpenModelSettings, onOpenAgentSettings, onOpenSearchSettings, onOpenVoiceSettings }: {
+export function CreateWorkspace({ project, stage, activeDerivedDraftId, onStage, onActiveDerivedDraftChange, onExitProject, onProjectAccepted, onPublish, onOpenModelSettings, onOpenAgentSettings, onOpenSearchSettings, onOpenVoiceSettings }: {
   project: ContentProject | undefined;
   stage: CreateStageRoute | null;
+  activeDerivedDraftId: string;
   onStage: (stage: CreateStageRoute) => void;
+  onActiveDerivedDraftChange: (draftId: string) => void;
   onExitProject: () => void;
   onProjectAccepted: (project: ContentProject) => void;
+  onPublish: () => void;
   onOpenModelSettings: () => void;
   onOpenAgentSettings: () => void;
   onOpenSearchSettings: () => void;
@@ -90,36 +93,56 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, onProj
   const [brief, setBrief] = useState<WritingBriefInput | null>(null);
   const [briefState, setBriefState] = useState<'loading' | 'saving' | 'saved' | 'error'>('loading');
   const [wechatDraft, setWechatDraft] = useState<ContentDraft | null>(null);
+  const [projectDrafts, setProjectDrafts] = useState<ContentDraft[]>([]);
   const [completedVersion, setCompletedVersion] = useState<ContentDraftVersion | null>(null);
   const [loadingDraft, setLoadingDraft] = useState(true);
   const [error, setError] = useState('');
 
-  const loadWechatDraft = useCallback(async () => {
+  const loadProjectDrafts = useCallback(async () => {
     if (!project) throw new Error('没有可读取的内容项目。');
     const result = await webDrafts.list(project.id);
     let draft = result.drafts.find((item) => item.platform === 'WECHAT') ?? null;
+    let drafts = result.drafts;
     if (!draft) {
       const version = project.versions.find((item) => item.platform === 'WECHAT');
       draft = await webDrafts.upsertWechat(project.id, { title: version?.title ?? project.title, body: version?.body ?? '' });
+      drafts = [draft, ...drafts];
     }
+    setProjectDrafts(drafts);
     setWechatDraft(draft);
-    return draft;
+    return drafts;
   }, [project?.id]);
+
+  const loadWechatDraft = useCallback(async () => {
+    const drafts = await loadProjectDrafts();
+    const draft = drafts.find((item) => item.platform === 'WECHAT');
+    if (!draft) throw new Error('公众号母稿读取失败。');
+    return draft;
+  }, [loadProjectDrafts]);
+
+  const updateProjectDraft = useCallback((updated: ContentDraft) => {
+    setProjectDrafts((current) => current.some(({ id }) => id === updated.id)
+      ? current.map((item) => item.id === updated.id ? updated : item)
+      : [...current, updated]);
+    if (updated.platform === 'WECHAT') setWechatDraft(updated);
+  }, []);
 
   useEffect(() => {
     if (!project) return;
     let cancelled = false;
     setLoadingDraft(true); setError(''); setCompletedVersion(null);
-    void loadWechatDraft().then((draft) => {
-      if (cancelled || draft.status !== 'READY') return;
-      return webDrafts.versions(draft.id).then(({ versions }) => { if (!cancelled) setCompletedVersion(versions[0] ?? null); });
+    void loadProjectDrafts().then((drafts) => {
+      const draft = drafts.find((item) => item.platform === 'WECHAT');
+      if (cancelled || !draft || draft.status !== 'READY') return;
+      return webDrafts.versions(draft.id).then(({ versions }) => { if (!cancelled) setCompletedVersion(versions.find(({ id }) => id === draft.currentVersionId) ?? versions[0] ?? null); });
     }).catch((reason) => { if (!cancelled) setError(reason instanceof Error ? reason.message : '读取公众号草稿失败。'); })
       .finally(() => { if (!cancelled) setLoadingDraft(false); });
     return () => { cancelled = true; };
-  }, [loadWechatDraft, project?.id]);
+  }, [loadProjectDrafts, project?.id]);
 
   const currentRoute = useMemo(() => project ? draftRoute(project, wechatDraft) : 'preparation', [project, wechatDraft]);
   const visibleStage = loadingDraft && stage ? stage : stage && routeOrder.indexOf(stage) <= routeOrder.indexOf(currentRoute) ? stage : currentRoute;
+  const hasActiveDerivedDraft = projectDrafts.some(({ id, platform }) => id === activeDerivedDraftId && platform !== 'WECHAT');
   useEffect(() => { if (project && stage !== visibleStage) onStage(visibleStage); }, [onStage, project?.id, stage, visibleStage]);
 
   useEffect(() => {
@@ -159,13 +182,17 @@ export function CreateWorkspace({ project, stage, onStage, onExitProject, onProj
   if (!project) return <section className="empty-workbench"><h1>还没有内容项目</h1></section>;
   return <section className="creative-workspace">
     <header className="creative-workspace-head"><button className="text-button" type="button" onClick={onExitProject}><ArrowLeft size={16}/>项目中心</button><div><h1>{project.title}</h1><span>{projectStageName[project.stage]}</span></div></header>
-    <nav className="creative-stage-nav" aria-label="公众号母稿流程">{creativeStages.map((item) => { const enabled = canOpenCreateStage(project.stage, item.id) || routeOrder.indexOf(item.id) <= routeOrder.indexOf(currentRoute); return <button type="button" key={item.id} className={visibleStage === item.id ? 'active' : ''} disabled={!enabled} onClick={() => enabled && onStage(item.id)}><span>{item.label}</span></button>; })}</nav>
+    {!hasActiveDerivedDraft && <nav className="creative-stage-nav" aria-label="公众号母稿流程">{creativeStages.map((item) => { const enabled = canOpenCreateStage(project.stage, item.id) || routeOrder.indexOf(item.id) <= routeOrder.indexOf(currentRoute); return <button type="button" key={item.id} className={visibleStage === item.id ? 'active' : ''} disabled={!enabled} onClick={() => enabled && onStage(item.id)}><span>{item.label}</span></button>; })}</nav>}
     {error && <div className="creative-stage-error" role="alert"><CircleAlert size={18}/><span>{error}</span></div>}
     {loadingDraft && visibleStage !== 'preparation' && <div className="creative-stage-loading"><LoaderCircle size={20}/><span>正在读取公众号母稿</span></div>}
     {visibleStage === 'preparation' && <PreparationWorkspace project={project} onProjectChange={onProjectAccepted} onContinue={() => onStage('copy')} onOpenAgentSettings={onOpenAgentSettings} onOpenSearchSettings={onOpenSearchSettings}/>}
-    {visibleStage === 'copy' && wechatDraft && <CopyWorkspace project={project} draft={wechatDraft} brief={brief} briefState={briefState} skills={skills} accountVoices={accountVoices} onProjectChange={onProjectAccepted} onDraftChange={setWechatDraft} onReloadDraft={loadWechatDraft} onSaveBrief={saveBrief} onContinue={() => onStage('visual')} onOpenModelSettings={onOpenModelSettings} onOpenAgentSettings={onOpenAgentSettings} onOpenVoiceSettings={onOpenVoiceSettings}/>}
-    {visibleStage === 'visual' && wechatDraft && <VisualWorkspace project={project} draft={wechatDraft} onDraftChange={setWechatDraft} onContinue={() => onStage('layout')} onOpenModelSettings={onOpenModelSettings}/>}
-    {visibleStage === 'layout' && wechatDraft && <LayoutWorkspace draft={wechatDraft} onDraftChange={setWechatDraft} onComplete={({ draft, version }) => { setWechatDraft(draft); setCompletedVersion(version); onStage('drafts'); }}/>}
-    {visibleStage === 'drafts' && wechatDraft && <DraftResultWorkspace draft={wechatDraft} version={completedVersion}/>}
+    {visibleStage === 'copy' && wechatDraft && <CopyWorkspace project={project} draft={wechatDraft} brief={brief} briefState={briefState} skills={skills} accountVoices={accountVoices} onProjectChange={onProjectAccepted} onDraftChange={updateProjectDraft} onReloadDraft={loadWechatDraft} onSaveBrief={saveBrief} onContinue={() => onStage('visual')} onOpenModelSettings={onOpenModelSettings} onOpenAgentSettings={onOpenAgentSettings} onOpenVoiceSettings={onOpenVoiceSettings}/>}
+    {visibleStage === 'visual' && wechatDraft && <VisualWorkspace project={project} draft={wechatDraft} onDraftChange={updateProjectDraft} onContinue={() => onStage('layout')} onOpenModelSettings={onOpenModelSettings}/>}
+    {visibleStage === 'layout' && wechatDraft && <LayoutWorkspace
+      draft={wechatDraft}
+      onDraftChange={updateProjectDraft}
+      onComplete={({ draft, version }) => { updateProjectDraft(draft); setCompletedVersion(version); onStage('drafts'); }}
+    />}
+    {visibleStage === 'drafts' && wechatDraft && <DraftResultWorkspace draft={wechatDraft} version={completedVersion} derivedDrafts={projectDrafts.filter((item) => item.platform !== 'WECHAT')} activeDraftId={activeDerivedDraftId} onActiveDraftChange={onActiveDerivedDraftChange} onDraftChange={updateProjectDraft} onReloadDrafts={loadProjectDrafts} onPublish={onPublish} onOpenModelSettings={onOpenModelSettings}/>}
   </section>;
 }

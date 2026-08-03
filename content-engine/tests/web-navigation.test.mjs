@@ -72,7 +72,7 @@ test('主入口监听视图变化并复位浏览器滚动位置', async () => {
   assert.match(source, /useLayoutEffect\(\(\) => \{\s*resetViewport\(\);\s*\}, \[view\]\)/);
 });
 
-test('刷新地址只恢复创作项目和五步流程阶段', () => {
+test('刷新地址恢复创作项目、五步流程阶段和显式派生草稿', () => {
   assert.deepEqual(navigation.readWorkspaceLocation({ search: '?view=create&project=project-42&stage=visual&platform=XIAOHONGSHU' }), {
     view: 'create',
     discoverSection: 'inbox',
@@ -82,6 +82,7 @@ test('刷新地址只恢复创作项目和五步流程阶段', () => {
     legacyTopicId: null,
     projectId: 'project-42',
     stage: 'visual',
+    draftId: null,
   });
 });
 
@@ -95,6 +96,7 @@ test('旧规划和选题编辑 URL 兼容映射到创作项目中心', () => {
     legacyTopicId: 'topic-1',
     projectId: null,
     stage: null,
+    draftId: null,
   });
   assert.equal(navigation.readWorkspaceLocation({ search: '?view=topicEditor' }).view, 'create');
 });
@@ -106,6 +108,15 @@ test('创作地址只保存项目和五步流程阶段', () => {
   }, { href: 'http://127.0.0.1:5173/' });
   assert.equal(url, '/?view=create&project=project-1&stage=layout');
   assert.equal(navigation.readWorkspaceLocation({ search: '?view=create&project=project-1&stage=master&platform=WECHAT' }).stage, null);
+});
+
+test('完成草稿阶段用草稿 ID 恢复平台编辑器且不恢复旧平台参数', () => {
+  const url = navigation.workspaceLocationUrl({
+    view: 'create', discoverSection: 'inbox', settingsSection: 'workspace', modelSection: null,
+    intelligenceId: null, legacyTopicId: null, projectId: 'project-1', stage: 'drafts', draftId: 'derived-1',
+  }, { href: 'http://127.0.0.1:5173/?platform=XIAOHONGSHU' });
+  assert.equal(url, '/?view=create&project=project-1&stage=drafts&draft=derived-1');
+  assert.equal(navigation.readWorkspaceLocation({ search: url.split('?')[1] ? `?${url.split('?')[1]}` : '' }).draftId, 'derived-1');
 });
 
 test('页面地址只保留当前工作区相关参数', () => {

@@ -74,13 +74,14 @@ export function readWorkspaceLocation(locationTarget = globalThis.location) {
     legacyTopicId: isLegacyCreative ? params.get('topic') || null : null,
     projectId: params.get('project') || null,
     stage: allowed(params.get('stage'), createStages),
+    draftId: params.get('draft') || null,
   };
 }
 
 export function workspaceLocationUrl(route, locationTarget = globalThis.location) {
   const url = new URL(locationTarget?.href ?? 'http://localhost/');
   const params = url.searchParams;
-  ['discover', 'settings', 'model', 'intel', 'topic', 'project', 'stage', 'platform'].forEach((key) => params.delete(key));
+  ['discover', 'settings', 'model', 'intel', 'topic', 'project', 'stage', 'draft', 'platform'].forEach((key) => params.delete(key));
   params.set('view', allowed(route.view, views, 'today'));
   if (route.view === 'discover') {
     params.set('discover', allowed(route.discoverSection, discoverSections, 'inbox'));
@@ -95,6 +96,7 @@ export function workspaceLocationUrl(route, locationTarget = globalThis.location
   }
   if (route.view === 'create') {
     if (route.projectId && allowed(route.stage, createStages)) params.set('stage', route.stage);
+    if (route.projectId && route.stage === 'drafts' && route.draftId) params.set('draft', route.draftId);
   }
   return `${url.pathname}${url.search}${url.hash}`;
 }

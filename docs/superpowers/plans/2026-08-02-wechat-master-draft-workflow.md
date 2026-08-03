@@ -684,11 +684,20 @@ git commit -m "feat: derive social platform drafts"
 
 ### Task 9: Build The One-Page Derived Draft Editor
 
+**Status (2026-08-03): Completed and verified.**
+
 **Files:**
+- Create: `content-engine/src/domain/platform-draft-editor.mjs`
+- Create: `content-engine/src/domain/platform-draft-editor.d.mts`
 - Create: `content-engine/src/workspaces/create/PlatformDraftEditor.tsx`
 - Modify: `content-engine/src/workspaces/create/DraftResultWorkspace.tsx`
 - Modify: `content-engine/src/workspaces/create/CreateWorkspace.tsx`
 - Modify: `content-engine/src/styles.css`
+- Modify: `content-engine/src/app/navigation.mjs`
+- Modify: `content-engine/src/app/navigation.d.mts`
+- Modify: `content-engine/src/data/webApi.ts`
+- Modify: `content-engine/src/main.tsx`
+- Modify: `content-engine/server/index.cjs`
 - Create: `content-engine/tests/platform-draft-editor.test.mjs`
 - Modify: `content-engine/tests/creative-workspace.e2e.py`
 
@@ -696,25 +705,25 @@ git commit -m "feat: derive social platform drafts"
 - Consumes: derived draft working copy, revision PATCH, ordered asset replacement, adaptation job status, asset picker, image generator.
 - Produces a single page for text and images; no step navigation.
 
-- [ ] **Step 1: Write failing UI and E2E expectations**
+- [x] **Step 1: Write failing UI and E2E expectations**
 
 Assert both target platforms share one editor, text and ordered images are visible together, image preview works before and after selection, crop/replace/remove/reorder controls exist, max 9 is stable, and “配图/排版/审核” step labels do not exist.
 
-- [ ] **Step 2: Run focused UI test and verify failure**
+- [x] **Step 2: Run focused UI test and verify failure**
 
 Run: `node --test tests/platform-draft-editor.test.mjs`
 
 Expected: FAIL because editor does not exist.
 
-- [ ] **Step 3: Implement draft result actions and stale state**
+- [x] **Step 3: Implement draft result actions and stale state**
 
 Show WeChat preview plus “生成小红书草稿”, “生成微博草稿”, and “去发布”. When the master version changes, show the frozen source version versus current version and require explicit regenerate; never run adaptation on page load.
 
-- [ ] **Step 4: Implement one-page editor**
+- [x] **Step 4: Implement one-page editor**
 
 Use debounced revision PATCH for text and explicit asset-order saves. Reuse `AssetPreviewDialog` and `AssetPickerDialog`. A missing 3:4 Xiaohongshu card is a visible task in the same page; AI generation runs only after button click and displays `TEXT_TO_IMAGE` or `IMAGE_TO_IMAGE` strategy.
 
-- [ ] **Step 5: Run tests and browser E2E**
+- [x] **Step 5: Run tests and browser E2E**
 
 Run:
 
@@ -726,6 +735,8 @@ python C:\Users\Administrator\.agents\skills\webapp-testing\scripts\with_server.
 ```
 
 Expected: PASS at 1440px and 390px with no console errors.
+
+Verified on 2026-08-03: focused tests, `432/432` full Node tests, TypeScript, production build, server syntax, 1440px/390px Playwright, console-error checks, refresh recovery, asset preview before/after selection, and `npm audit --omit=dev` all passed. The image generation route accepts only `WECHAT`, `XIAOHONGSHU`, and `WEIBO`, and returns the actual `TEXT_TO_IMAGE` or `IMAGE_TO_IMAGE` policy snapshot.
 
 - [ ] **Step 6: Commit**
 
