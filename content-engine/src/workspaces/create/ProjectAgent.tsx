@@ -33,6 +33,7 @@ function SimplifiedResearchAgent({ projectId, refreshToken = 0, onContextChange,
   const [showResearchSupplement, setShowResearchSupplement] = useState(false);
   const [busy, setBusy] = useState<'idle' | 'loading' | 'starting' | 'accepting' | 'skipping' | 'cancelling'>('loading');
   const [error, setError] = useState('');
+  const acceptingRef = useRef(false);
 
   const reload = async () => {
     const result = await webCreative.agentContext(projectId, { stage: 'RESEARCH', history: 'CURRENT' });
@@ -73,13 +74,14 @@ function SimplifiedResearchAgent({ projectId, refreshToken = 0, onContextChange,
   };
 
   const acceptResearchResult = async () => {
-    if (!resultArtifact || busy !== 'idle') return;
+    if (!resultArtifact || busy !== 'idle' || acceptingRef.current) return;
+    acceptingRef.current = true;
     setBusy('accepting'); setError('');
     try {
       const accepted = await webCreative.acceptResearchResult(resultArtifact.id);
       onArtifactAccepted(accepted.artifact, accepted.project);
     } catch (reason) { setError(reason instanceof Error ? reason.message : '采用研究结果失败。'); }
-    finally { setBusy('idle'); }
+    finally { acceptingRef.current = false; setBusy('idle'); }
   };
 
   const skipResearch = async () => {

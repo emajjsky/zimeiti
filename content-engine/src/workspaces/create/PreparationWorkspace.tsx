@@ -38,7 +38,7 @@ export function PreparationWorkspace({ project, onProjectChange, onContinue, onO
     {planningConfirmed && <>
       <div className="project-research-layout">
         <ProjectMaterials project={project} platforms={['WECHAT']}/>
-        <ProjectAgent projectId={project.id} stage="RESEARCH" onArtifactAccepted={(_artifact, nextProject) => { if (nextProject) onProjectChange(nextProject); }} onOpenSettings={(target) => target === 'search' ? onOpenSearchSettings() : onOpenAgentSettings()}/>
+        <ProjectAgent projectId={project.id} stage="RESEARCH" onArtifactAccepted={(_artifact, nextProject) => { if (nextProject) { onProjectChange(nextProject); onContinue(); } }} onOpenSettings={(target) => target === 'search' ? onOpenSearchSettings() : onOpenAgentSettings()}/>
       </div>
       {error && <div className="creative-stage-error" role="alert"><CircleAlert size={18}/><span>{error}</span></div>}
       <footer className="preparation-primary-action">

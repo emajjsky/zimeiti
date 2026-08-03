@@ -1459,14 +1459,21 @@ app.post('/api/v1/creative/research-results/:artifactId/accept', { preHandler: w
   const artifactId = z.string().uuid().parse(request.params.artifactId);
   const workspace = request.workspace;
   return transaction(async (client) => {
-    const result = await client.query(`SELECT a.*, r.id AS research_result_id, r.output_json
+    const result = await client.query(`SELECT a.*, r.id AS research_result_id, r.output_json, p.project_json
       FROM project_artifacts a
       JOIN project_research_results r ON r.artifact_id = a.id
+      JOIN content_projects p ON p.workspace_id = a.workspace_id AND p.project_id = a.project_id
       WHERE a.id = $1 AND a.workspace_id = $2
-        AND a.artifact_type = 'RESEARCH_RESULT' AND a.status = 'CANDIDATE'
-      FOR UPDATE OF a, r`, [artifactId, workspace.id]);
+        AND a.artifact_type = 'RESEARCH_RESULT' AND a.status IN ('CANDIDATE', 'ACCEPTED')
+      FOR UPDATE OF a, r, p`, [artifactId, workspace.id]);
     if (!result.rowCount) { const error = new Error('这份研究结果当前不能采用。'); error.statusCode = 409; throw error; }
     const candidate = result.rows[0];
+    if (candidate.status === 'ACCEPTED') {
+      return {
+        artifact: artifactView({ ...candidate, payload_json: candidate.output_json, version_number: 1 }),
+        project: candidate.project_json,
+      };
+    }
     if (!researchResultHasUsableFacts(candidate.output_json)) {
       const error = new Error('这份研究结果还没有可用事实，请补充研究后再采用。');
       error.statusCode = 409;

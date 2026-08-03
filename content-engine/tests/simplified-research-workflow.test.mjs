@@ -169,6 +169,8 @@ test('accepted research replaces stale candidates and running research can be ca
   const cancelEnd = server.indexOf("app.post('/api/v1/creative/projects/:projectId/research/sources/prepare'", cancelStart);
 
   assert.match(server.slice(acceptStart, acceptEnd), /status IN \('CANDIDATE', 'ACCEPTED'\)/);
+  assert.match(server.slice(acceptStart, acceptEnd), /candidate\.status === 'ACCEPTED'/);
+  assert.match(server.slice(acceptStart, acceptEnd), /project: candidate\.project_json/);
   assert.match(server.slice(cancelStart, cancelEnd), /SIMPLIFIED_RESEARCH_WORKFLOW_VERSION/);
   assert.match(server.slice(cancelStart, cancelEnd), /status IN \('DRAFT', 'QUEUED', 'RUNNING'\)/);
   assert.match(fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8'), /研究任务已取消或中断/);

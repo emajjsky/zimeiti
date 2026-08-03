@@ -8,7 +8,8 @@
 - 统一研究结果新增 `sourceAttempts`、动作总数和失败数，保留 `CAPTURED/FAILED/NEEDS_USER`。前端按 `COMPLETE/PARTIAL/FAILED` 显示真实状态、核验说明和失败动作，不再把任意研究产物显示为“已就绪”。
 - 证据校验继续要求引用可在来源摘要中直接定位。第一次严格校验失败后，修复输出按主张隔离仍不合法的引用；对应主张降为 `NEEDS_REVIEW`，其它合法结论保留，并将结果标为部分完成。
 - 新增前后端双门禁：研究结果至少包含一条 `VERIFIED` 或 `SINGLE_SOURCE` 主张才可采用。服务端采用接口在零可用事实时返回 409，页面同步禁用按钮并保留补充研究入口。
-- 回归新增公众号分析契约、热点项目平台、原文加两次检索、奇点逃逸主体匹配、失败来源持久化、坏引用隔离、真实状态展示和采用门禁测试。全量 `npm test` 为 `440/440`，`npm run typecheck`、`npm run build`、`node --check server/index.cjs`、`node --check server/worker.cjs` 与 `git diff --check` 均通过。
+- 采用成功后，内容准备页立即切换到公众号正文，不再停留在旧研究候选上。客户端使用同步 ref 锁阻止同一按钮在 React 状态提交前被快速重复触发；服务端采用接口对已经 `ACCEPTED` 的同一产物幂等返回当前产物和项目，不重复写消息，也不返回误导性的 409。
+- 回归新增公众号分析契约、热点项目平台、原文加两次检索、奇点逃逸主体匹配、失败来源持久化、坏引用隔离、真实状态展示、采用门禁和采用幂等测试。全量 `npm test` 为 `441/441`，`npm run typecheck`、`npm run build`、`node --check server/index.cjs`、`node --check server/worker.cjs` 与 `git diff --check` 均通过。
 
 ## 2026-08-03 实现：公众号母稿派生与社交平台单页编辑器
 

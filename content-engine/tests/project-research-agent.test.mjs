@@ -225,3 +225,12 @@ test('research result separates usable, single-source, and review claims', () =>
   assert.match(agent, /sourceAttempts/);
   assert.match(agent, /暂无可用事实，请先补充研究/);
 });
+
+test('采用研究结果防止重复提交并立即进入公众号正文', () => {
+  const agent = fs.readFileSync(new URL('../src/workspaces/create/ProjectAgent.tsx', import.meta.url), 'utf8');
+  const preparation = fs.readFileSync(new URL('../src/workspaces/create/PreparationWorkspace.tsx', import.meta.url), 'utf8');
+
+  assert.match(agent, /acceptingRef\.current/);
+  assert.match(agent, /busy !== 'idle' \|\| acceptingRef\.current/);
+  assert.match(preparation, /onProjectChange\(nextProject\); onContinue\(\)/);
+});
