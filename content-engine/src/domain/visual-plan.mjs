@@ -102,15 +102,27 @@ const stylePresets = [
   },
   {
     id: 'INK_WASH', name: '水墨留白', group: 'CULTURAL', description: '轻墨与大留白，适合诗词、哲思与人文内容', swatches: ['#F7F6F1', '#262B2C', '#899A91', '#B75A4A'],
-    prompt: '当代水墨留白视觉；纸白、墨黑、灰绿与一点朱红；墨色有干湿浓淡，主体笔触简练，大片留白承担节奏；可融入极少现代几何或编辑标注；避免满幅山水模板、书法乱码、古装人物脸谱化和廉价卷轴边框',
+    prompt: 'Contemporary ink-wash editorial artwork; xuan-paper white, ink black, gray green and one cinnabar accent; a modern creator workspace is rendered with dry-wet ink variation, restrained brush texture, calm negative space and a few precise physical research objects; subtle modern geometry may appear only as spatial rhythm; avoid scroll borders, calligraphy gibberish, costume drama faces and generic landscape templates',
   },
   {
     id: 'GUOCHAO_POSTER', name: '现代国潮', group: 'CULTURAL', description: '高对比东方图形，适合节日、历史与强传播封面', swatches: ['#F0E8D8', '#D33C32', '#216A70', '#202329'],
-    prompt: '现代国潮海报视觉；纸白、正红、孔雀青与炭黑；传统纹样只做结构性点缀，结合大胆裁切、层叠图形和现代中文海报网格；印刷套色清楚，画面有力量且不过度繁复；避免大面积金色、龙凤祥云堆叠、旅游纪念品感和文字花哨变形',
+    prompt: 'Modern guochao editorial art direction translated into one full scene; rice-white paper, vivid red, peacock teal and carbon black; creator desk, cultural objects and research photos are unified through bold crop, layered graphic shapes and controlled overprint color; traditional patterns appear only as small structural accents; avoid gold overload, dragon-phoenix clouds, tourist souvenir styling and decorative lettering',
+  },
+  {
+    id: 'MINERAL_FRESCO', name: '矿物壁画', group: 'CULTURAL', description: '矿物色与壁画质感，适合历史、人文与非遗主题', swatches: ['#F3E6C8', '#2F6F83', '#B95D36', '#6D8B55'],
+    prompt: 'Contemporary mineral-pigment fresco editorial image; warm lime-plaster ground, malachite green, lapis blue, cinnabar and muted ochre; creator studies cultural material samples, photographs and paper fragments in a quiet studio scene with matte fresco texture, softened edges and layered mineral color; respectful museum-grade atmosphere; avoid religious iconography, tourist murals, antique yellow wash, fake symbols and unreadable text',
   },
   {
     id: 'TECH_MEDIA', name: '科技媒体', group: 'TECHNOLOGY', description: '精准、冷静，适合 AI、互联网与产业科技', swatches: ['#F3F6F8', '#2864DC', '#29A38A', '#1E293B'],
-    prompt: '现代科技媒体编辑视觉；浅冷灰底、钴蓝、青绿和深石墨色；使用精确网格、真实产品或技术结构、克制的数据元素与细线连接；画面明亮清晰，重点关系可解释；避免紫蓝霓虹渐变、发光大脑、机器人剪影、代码雨、HUD界面和无依据未来城市',
+    prompt: 'Modern technology media editorial photography; pale cool gray, cobalt blue, teal green and deep graphite; a real creator workspace with hardware samples, research photos and transparent optical links arranged with precision and calm hierarchy; bright clean light and explainable relationships; avoid purple neon gradients, glowing brains, robot silhouettes, code rain, HUD interfaces and imaginary future cities',
+  },
+  {
+    id: 'AI_LAB', name: 'AI 实验室', group: 'TECHNOLOGY', description: '清洁实验室感，适合 AI 产品、模型与自动化主题', swatches: ['#F5F9FB', '#7FD0DA', '#2A67C7', '#242D3B'],
+    prompt: 'Clean AI lab editorial photography; frosted white, pale cyan, precise cobalt and soft graphite; creator evaluates model outputs through physical notes, translucent material samples and gentle computational light in a realistic studio-lab workspace; sterile but warm, high clarity, accurate reflections and disciplined composition; avoid server-room cliches, humanoid robots, floating dashboards, matrix code and blue sci-fi darkness',
+  },
+  {
+    id: 'CLEAN_ENERGY', name: '清洁能源', group: 'TECHNOLOGY', description: '明亮低碳产业感，适合新能源、制造升级与可持续', swatches: ['#F4F7F2', '#74A982', '#5D8AA8', '#D7B15C'],
+    prompt: 'Clean-energy industrial editorial photography; warm white, leaf green, muted steel blue and a small brass sunlight accent; creator reviews renewable material samples, field photographs and engineering notes on a practical desk with natural daylight and subtle outdoor industrial context; optimistic but factual, tactile and grounded; avoid greenwashing symbols, stock wind-turbine collage, fake logos, dashboards and glossy corporate brochure staging',
   },
   {
     id: 'MONO_EDITORIAL', name: '黑白刊物', group: 'EDITORIAL', description: '高反差黑白，适合人物观点与深度专题', swatches: ['#F7F7F4', '#171717', '#737373', '#D8D8D2'],
@@ -181,8 +193,11 @@ const styleCases = {
   NEW_CHINESE: { caseLabel: '文化专题', caseTitle: '古人的时间观', caseMeta: '东方留白 · 现代网格' },
   INK_WASH: { caseLabel: '哲思随笔', caseTitle: '留白，也是一种表达', caseMeta: '轻墨层次 · 朱红落点' },
   GUOCHAO_POSTER: { caseLabel: '历史封面', caseTitle: '从一件器物看见时代', caseMeta: '大胆裁切 · 现代套色' },
+  MINERAL_FRESCO: { caseLabel: '非遗观察', caseTitle: '颜色里保存着手艺的时间', caseMeta: '矿物色层 · 壁画质感' },
   WOODCUT_PRINT: { caseLabel: '民俗人物', caseTitle: '土地上生长出的故事', caseMeta: '刀痕块面 · 有限套色' },
   TECH_MEDIA: { caseLabel: '前沿科技', caseTitle: '智能体正在重写工作流', caseMeta: '结构数据 · 明亮冷静' },
+  AI_LAB: { caseLabel: '模型实验', caseTitle: '让模型输出变得可验证', caseMeta: '透明材料 · 精准冷光' },
+  CLEAN_ENERGY: { caseLabel: '低碳产业', caseTitle: '新的效率来自更干净的系统', caseMeta: '自然光线 · 工业样本' },
   INDUSTRIAL_MEDIA: { caseLabel: '产业现场', caseTitle: '制造业里的新效率', caseMeta: '真实设备 · 工业尺度' },
   MACARON_CARTOON: { caseLabel: '轻松教程', caseTitle: '每天十分钟，整理自己的信息流', caseMeta: '亲和人物 · 清新套色' },
   PIXEL_RETRO: { caseLabel: '科技回看', caseTitle: '从工具箱到智能工作流', caseMeta: '像素叙事 · 现代网格' },
@@ -202,6 +217,9 @@ const featuredStylePreviews = {
   PAPER_COLLAGE: '/visual-style-previews/paper-collage.png',
   HAND_DRAWN_NOTES: '/visual-style-previews/hand-drawn-notes.png',
   NEW_CHINESE: '/visual-style-previews/new-chinese.png',
+  INK_WASH: '/visual-style-previews/ink-wash.png',
+  GUOCHAO_POSTER: '/visual-style-previews/guochao-poster.png',
+  MINERAL_FRESCO: '/visual-style-previews/mineral-fresco.png',
   DATA_VISUAL: '/visual-style-previews/data-visual.png',
   CINEMATIC_DOCUMENTARY: '/visual-style-previews/cinematic-documentary.png',
   MONO_EDITORIAL: '/visual-style-previews/mono-editorial.png',
@@ -212,6 +230,9 @@ const featuredStylePreviews = {
   FLAT_GEOMETRIC: '/visual-style-previews/flat-geometric.png',
   PENCIL_SKETCH: '/visual-style-previews/pencil-sketch.png',
   WOODCUT_PRINT: '/visual-style-previews/woodcut-print.png',
+  TECH_MEDIA: '/visual-style-previews/tech-media.png',
+  AI_LAB: '/visual-style-previews/ai-lab.png',
+  CLEAN_ENERGY: '/visual-style-previews/clean-energy.png',
   INDUSTRIAL_MEDIA: '/visual-style-previews/industrial-media.png',
 };
 

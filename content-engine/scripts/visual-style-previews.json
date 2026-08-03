@@ -62,6 +62,21 @@
       "style": "Contemporary Chinese editorial photography and illustration blend, xuan-paper white, mineral gray-green, cinnabar and ink black, calm vertical rhythm within a landscape frame, modern creator desk with restrained wood, ceramic and paper forms, eastern negative space, no antique costume or decorative folklore"
     },
     {
+      "id": "INK_WASH",
+      "filename": "ink-wash.png",
+      "style": "Contemporary ink-wash editorial artwork, xuan-paper white, ink black, gray green and one cinnabar accent, a modern creator workspace rendered with dry-wet ink variation, restrained brush texture, calm negative space and a few precise physical research objects, no scroll borders, calligraphy gibberish, costume drama faces or generic landscape templates"
+    },
+    {
+      "id": "GUOCHAO_POSTER",
+      "filename": "guochao-poster.png",
+      "style": "Modern guochao editorial art direction translated into one full scene, rice-white paper, vivid red, peacock teal and carbon black, creator desk, cultural objects and research photos unified through bold crop, layered graphic shapes and controlled overprint color, traditional patterns only as small structural accents, no gold overload, dragon-phoenix clouds or tourist souvenir styling"
+    },
+    {
+      "id": "MINERAL_FRESCO",
+      "filename": "mineral-fresco.png",
+      "style": "Contemporary mineral-pigment fresco editorial image, warm lime-plaster ground, malachite green, lapis blue, cinnabar and muted ochre, creator studying cultural material samples, photographs and paper fragments in a quiet studio scene with matte fresco texture, softened edges and layered mineral color, no religious iconography, tourist murals, fake symbols or unreadable text"
+    },
+    {
       "id": "DATA_VISUAL",
       "filename": "data-visual.png",
       "style": "Editorial data-inspired visual without charts or labels, cool white, clear blue-green and one amber accent, real creator scene where streams of photographs and notes visibly converge, filter and reorganize through precise spatial motion, consistent color semantics, crisp depth, no dashboard or infographic panels"
@@ -110,6 +125,21 @@
       "id": "WOODCUT_PRINT",
       "filename": "woodcut-print.png",
       "style": "Contemporary woodcut print editorial image, rice-white paper, deep ink black, brick red and peacock teal, creator workspace carved through strong blocks, visible knife marks, limited overprint color and tactile paper pressure, focused composition with real subject matter, no tourist folklore pattern or antique yellow wash"
+    },
+    {
+      "id": "TECH_MEDIA",
+      "filename": "tech-media.png",
+      "style": "Modern technology media editorial photography, pale cool gray, cobalt blue, teal green and deep graphite, real creator workspace with hardware samples, research photos and transparent optical links arranged with precision and calm hierarchy, bright clean light and explainable relationships, no purple neon gradients, glowing brains, robot silhouettes, code rain, HUD interfaces or imaginary future cities"
+    },
+    {
+      "id": "AI_LAB",
+      "filename": "ai-lab.png",
+      "style": "Clean AI lab editorial photography, frosted white, pale cyan, precise cobalt and soft graphite, creator evaluating model outputs through physical notes, translucent material samples and gentle computational light in a realistic studio-lab workspace, sterile but warm, high clarity, accurate reflections and disciplined composition, no server-room cliches, humanoid robots, floating dashboards, matrix code or blue sci-fi darkness"
+    },
+    {
+      "id": "CLEAN_ENERGY",
+      "filename": "clean-energy.png",
+      "style": "Clean-energy industrial editorial photography, warm white, leaf green, muted steel blue and a small brass sunlight accent, creator reviewing renewable material samples, field photographs and engineering notes on a practical desk with natural daylight and subtle outdoor industrial context, optimistic but factual, tactile and grounded, no greenwashing symbols, stock wind-turbine collage, fake logos, dashboards or glossy corporate brochure staging"
     },
     {
       "id": "INDUSTRIAL_MEDIA",

@@ -336,7 +336,7 @@ with sync_playwright() as playwright:
     page.get_by_role("heading", name="项目艺术方向", exact=True).wait_for()
     assert page.locator(".visual-style-card").count() == 7
     assert page.locator(".visual-style-preview").count() == 8
-    assert page.get_by_text("23 套全画幅视觉案例", exact=True).is_visible()
+    assert page.get_by_text("29 套全画幅视觉案例", exact=True).is_visible()
     page.screenshot(path=ARTIFACTS / "visual-style-dialog.png", full_page=True)
     page.get_by_role("button", name=re.compile(r"插画与创意")).click()
     page.get_by_role("button", name=re.compile(r"清新波普怀旧")).click()
