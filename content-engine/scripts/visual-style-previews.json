@@ -7,6 +7,11 @@
       "style": "Bright contemporary editorial photography, pearl white workspace, mist blue and pale coral accents, soft north-window daylight, tactile paper and linen, asymmetrical magazine composition, natural human gesture, spacious but not empty, crisp realistic detail"
     },
     {
+      "id": "BUSINESS_EDITORIAL",
+      "filename": "business-editorial.png",
+      "style": "Modern business editorial photography, cool white and graphite workspace, steel blue and muted brass accents, precise but human desk scene with printed market notes and research photos, disciplined composition, mature lighting, premium magazine finish, no finance cliches or luxury black-gold tone"
+    },
+    {
       "id": "RETRO_POP",
       "filename": "retro-pop.png",
       "style": "Sophisticated retro pop editorial illustration, mint green, baby blue, coral pink, butter yellow and deep navy, silkscreen halftone and subtle misregistration, bold cropped shapes, energetic human gesture, flat ink texture, clean visual hierarchy, never childish"
@@ -65,6 +70,51 @@
       "id": "CINEMATIC_DOCUMENTARY",
       "filename": "cinematic-documentary.png",
       "style": "Cinematic documentary photography, blue-gray shadows, natural warm skin and low-saturation room colors, authentic independent creator working late near a window, motivated side light, layered foreground and background, restrained film grain, emotional but factual, every detail readable, not underexposed"
+    },
+    {
+      "id": "MONO_EDITORIAL",
+      "filename": "mono-editorial.png",
+      "style": "Contemporary black-and-white independent magazine photography, paper white, carbon black and nuanced gray tones, bold crop, asymmetric negative space, visible paper grain and natural midtones, creator reviewing documentary photos and notes, one tiny neutral accent only, no fashion ad gloss or crushed shadows"
+    },
+    {
+      "id": "NEWSPAPER_EDITORIAL",
+      "filename": "newspaper-editorial.png",
+      "style": "Modern newspaper editorial art direction, soft newsprint white, ink black, dark red and gray-green accents, creator desk with clippings, archive photographs and field notes arranged in a readable journalistic rhythm, subtle offset print texture, no fake masthead, no columns of text, no old yellowed nostalgia"
+    },
+    {
+      "id": "LIFESTYLE_PHOTO",
+      "filename": "lifestyle-photo.png",
+      "style": "Contemporary lifestyle editorial photography, warm natural daylight, sage green, pale coral and neutral gray-blue accents, relaxed real workspace with daily objects, notes, camera and coffee, approachable but polished composition, natural empty areas for visual breathing, no influencer cafe staging or glossy filter"
+    },
+    {
+      "id": "CONSULTING_REPORT",
+      "filename": "consulting-report.png",
+      "style": "Premium consulting-report inspired editorial scene without actual charts or text, cool white, deep navy, steel blue and restrained amber accents, creator organizing structured research stacks and decision evidence on a precise grid-like desk, high information density yet calm, no PowerPoint look or fake numbers"
+    },
+    {
+      "id": "SCIENCE_ATLAS",
+      "filename": "science-atlas.png",
+      "style": "Modern science atlas editorial illustration, clean pale gray-white field, deep teal, botanical green and small orange accents, creator workspace where research objects, photographs and magnified material details are arranged like an accurate atlas plate, refined natural drawing texture, no unreadable labels or childish textbook style"
+    },
+    {
+      "id": "FLAT_GEOMETRIC",
+      "filename": "flat-geometric.png",
+      "style": "Refined flat geometric editorial illustration, neutral bright field, cobalt blue, teal and warm orange, simplified creator and desk objects built from crisp geometric shapes with unified perspective, clear relationships and confident negative space, no generic corporate stock illustration or purple AI gradient"
+    },
+    {
+      "id": "PENCIL_SKETCH",
+      "filename": "pencil-sketch.png",
+      "style": "Elegant pencil sketch editorial artwork, warm white sketch paper, graphite gray, muted sage and tiny dusty coral accents, creator sorting research materials with sensitive line weight, hatching and erased construction marks, mature design-process feeling, no messy handwriting, no cartoon exaggeration"
+    },
+    {
+      "id": "WOODCUT_PRINT",
+      "filename": "woodcut-print.png",
+      "style": "Contemporary woodcut print editorial image, rice-white paper, deep ink black, brick red and peacock teal, creator workspace carved through strong blocks, visible knife marks, limited overprint color and tactile paper pressure, focused composition with real subject matter, no tourist folklore pattern or antique yellow wash"
+    },
+    {
+      "id": "INDUSTRIAL_MEDIA",
+      "filename": "industrial-media.png",
+      "style": "Modern industrial documentary media photography, cool gray, steel blue, desaturated cyan-gray and a small safety orange accent, creator reviewing factory photos, material samples and field notes on a robust desk, clear scale, practical light, sharp equipment detail, no sci-fi factory, no fake brand logos, no HDR propaganda look"
     }
   ]
 }

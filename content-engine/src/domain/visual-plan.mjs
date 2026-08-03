@@ -50,7 +50,7 @@ const stylePresets = [
   },
   {
     id: 'BUSINESS_EDITORIAL', name: '商业杂志', group: 'EDITORIAL', description: '克制、成熟，适合财经、公司与行业分析', swatches: ['#F3F5F7', '#25324B', '#7EA0C4', '#C9A86A'],
-    prompt: '现代商业杂志视觉；冷白、石墨蓝、钢蓝和少量低饱和金色；严谨网格，主体裁切大胆但不过分；图表与照片保持同一编辑秩序；细腻铜版纸质感，明暗对比清楚；避免交易软件截图感、金钱符号堆叠、黑金土豪风和夸张成功学视觉',
+    prompt: 'Mature contemporary business editorial photography; cool white, graphite blue, steel blue and muted brass; disciplined real creator workspace with printed research, market evidence, photographs and calm decision-making energy; precise lighting, premium magazine finish, confident crop, tactile paper and metal details; avoid trading-screen cliches, money symbols, luxury black-gold tone and success-coach theatrics',
   },
   {
     id: 'SWISS_GRID', name: '瑞士网格', group: 'EDITORIAL', description: '强网格与高对比，适合观点、清单与专题封面', swatches: ['#F5F4F0', '#171717', '#E74B3C', '#2F67C7'],
@@ -90,7 +90,7 @@ const stylePresets = [
   },
   {
     id: 'FLAT_GEOMETRIC', name: '扁平几何', group: 'ILLUSTRATION', description: '简洁现代，适合概念、商业与产品场景', swatches: ['#F6F7F2', '#5A8DEE', '#64C2A6', '#F2A65A'],
-    prompt: '现代扁平几何插画；明亮中性底、钴蓝、青绿和暖橙；用清楚的几何形、简化人物与对象表达关系，透视统一，轮廓干净；构图留白充分，重点对象比例明确；避免企业素材库套图感、紫蓝AI渐变、过度圆润和无意义漂浮元素',
+    prompt: 'Refined flat geometric editorial illustration; neutral bright field, cobalt blue, teal and warm orange; simplified creator and desk objects built from crisp geometric shapes with unified perspective and confident negative space; relationships are readable through scale, overlap and gesture; avoid generic corporate stock art, purple AI gradients, floating blobs and over-rounded toy shapes',
   },
   {
     id: 'SOFT_3D', name: '柔和 3D', group: 'ILLUSTRATION', description: '有体积但不过分卡通，适合产品与概念主视觉', swatches: ['#F2F5F7', '#9CC8E8', '#B9D6B0', '#F0B6A8'],
@@ -114,35 +114,35 @@ const stylePresets = [
   },
   {
     id: 'MONO_EDITORIAL', name: '黑白刊物', group: 'EDITORIAL', description: '高反差黑白，适合人物观点与深度专题', swatches: ['#F7F7F4', '#171717', '#737373', '#D8D8D2'],
-    prompt: '现代黑白独立刊物视觉；以纸白、炭黑和两级灰度建立层次，只保留一个极小的灰色强调；使用大胆裁切、非对称栏目网格、醒目的留白和克制编号；照片保持真实颗粒与清楚中间调；避免黑底白字铺满、奢侈品广告感、装饰线滥用和过暗细节丢失',
+    prompt: 'Modern black-and-white independent magazine photography; paper white, carbon black and layered grays; bold crop, asymmetric breathing room, natural midtones, tactile paper grain and quiet human focus; creator reviews documentary photos and notes with restrained emotional weight; avoid glossy fashion advertising, crushed shadows and decorative line clutter',
   },
   {
     id: 'NEWSPAPER_EDITORIAL', name: '现代报刊', group: 'EDITORIAL', description: '栏目与标题感强，适合时事、评论与历史', swatches: ['#F5F2EA', '#202020', '#A52D2D', '#7F8A82'],
-    prompt: '现代中文报刊专题视觉；柔和新闻纸底、墨黑正文结构、暗红重点和灰绿辅助；多栏网格、醒目标题、细分隔线与资料图片形成清楚阅读秩序；保留轻微油墨渗透和纸纤维；避免仿旧发黄过度、英文假报头、密集小字和复古贴纸拼盘',
+    prompt: 'Contemporary journalistic editorial photography; soft newsprint white, ink black, muted red and gray-green; creator desk with archive photographs, clippings, field notes and a clear investigative mood; subtle offset ink texture and sober pacing; avoid fake mastheads, dense text fields, old-yellow nostalgia and sticker collage',
   },
   {
     id: 'LIFESTYLE_PHOTO', name: '生活方式摄影', group: 'EDITORIAL', description: '自然松弛，适合成长、职场与生活经验', swatches: ['#F7F4EE', '#9DB8AD', '#D7A48F', '#4B5960'],
-    prompt: '当代生活方式编辑摄影；柔和自然日光、低饱和鼠尾草绿、浅珊瑚和中性灰蓝；记录真实空间、手部动作与日常物件，构图松弛但主体明确，保留可用于标题的自然留白；材质真实不过度磨皮；避免摆拍微笑、网红奶油滤镜、空洞咖啡桌和无关装饰物',
+    prompt: 'Contemporary lifestyle editorial photography; warm natural daylight, sage green, pale coral and neutral gray-blue; relaxed real workspace with daily objects, notes, camera and coffee; approachable but polished composition, tactile materials and natural visual breathing room; avoid influencer cafe staging, glossy filters and decorative objects unrelated to the work',
   },
   {
     id: 'CONSULTING_REPORT', name: '咨询报告', group: 'KNOWLEDGE', description: '结论先行，适合策略、行业与商业框架', swatches: ['#F7F8FA', '#173B73', '#5B83B4', '#D9A441'],
-    prompt: '专业咨询报告信息视觉；冷白底、深海军蓝、钢蓝和少量琥珀色强调；结论置顶，使用矩阵、阶段箭头、结构树和关键数字建立咨询式阅读路径；网格严谨、标签简短、信息密度高但不拥挤；避免PPT默认SmartArt、彩虹配色、虚构数据和大段正文塞进图片',
+    prompt: 'Premium strategic editorial photography without literal business diagrams; cool white, deep navy, steel blue and restrained amber; creator organizes evidence, printed research and decision materials into a calm high-clarity desk scene; mature corporate intelligence feeling, polished lighting, precise object relationships; avoid PowerPoint aesthetics, fake numbers, stock handshake imagery and decorative dashboard screens',
   },
   {
     id: 'SCIENCE_ATLAS', name: '科普图谱', group: 'KNOWLEDGE', description: '结构准确，适合自然、医学与技术科普', swatches: ['#F5F8F7', '#2D6B66', '#85B8A5', '#E3A55B'],
-    prompt: '现代科普图谱视觉；清洁浅灰白底、深青绿、植物绿与少量橙色标注；以剖面、局部放大、编号引线和尺度关系解释结构，主体准确、标注对应明确；兼具自然绘图质感和现代编辑网格；避免伪科学器官结构、无意义分子式、儿童教材卡通化和无法辨认的小标签',
+    prompt: 'Modern science-atlas editorial illustration; clean pale gray-white field, deep teal, botanical green and small orange accents; creator workspace where research objects, material samples, photographs and magnified textures feel accurate and carefully observed; refined natural drawing texture with clear subject hierarchy; avoid fake formulas, tiny unreadable annotations and childish textbook style',
   },
   {
     id: 'PENCIL_SKETCH', name: '铅笔线稿', group: 'ILLUSTRATION', description: '轻巧克制，适合思考、教程与人物故事', swatches: ['#FAF8F2', '#353A40', '#9AA6A0', '#D68A78'],
-    prompt: '精致编辑型铅笔线稿；暖白素描纸、石墨灰、灰绿和少量陶粉色；线条有轻重与停顿，使用局部排线表达体积，构图像设计手稿而非儿童涂鸦；主体清楚，旁注与箭头保持克制；避免脏乱擦痕、漫画夸张表情、满页手写字和机械描边感',
+    prompt: 'Elegant pencil sketch editorial artwork; warm white sketch paper, graphite gray, muted sage and tiny dusty coral accents; creator sorting research materials with sensitive line weight, hatching, erased construction marks and mature design-process feeling; clear focal subject and calm hand-made texture; avoid messy handwriting, cartoon faces and mechanical outline tracing',
   },
   {
     id: 'WOODCUT_PRINT', name: '木刻版画', group: 'CULTURAL', description: '粗粝有力，适合历史、民俗与人物主题', swatches: ['#F2EBDD', '#1F2724', '#B63C31', '#315F61'],
-    prompt: '当代木刻版画海报视觉；米白纸、深墨黑、砖红和孔雀青；用粗细刀痕、黑白块面对比和有限套色塑造人物或历史场景，构图集中而有力量；保留真实印刷压痕与轻微套色偏差；避免旅游纪念品图案、满版传统纹样、仿古棕黄和过度血腥戏剧化',
+    prompt: 'Contemporary woodcut print editorial image; rice-white paper, deep ink black, brick red and peacock teal; creator workspace carved through strong blocks, visible knife marks, limited overprint color and tactile paper pressure; focused human scene with real subject matter and powerful silhouette; avoid tourist folklore patterns, antique yellow wash and theatrical gore',
   },
   {
     id: 'INDUSTRIAL_MEDIA', name: '工业纪实', group: 'TECHNOLOGY', description: '真实硬朗，适合制造、汽车与产业现场', swatches: ['#EEF1F2', '#39464F', '#6F8F93', '#E18B47'],
-    prompt: '现代工业纪实媒体视觉；冷灰、钢铁蓝、低饱和青灰和安全橙点缀；真实工厂、设备、材料与作业关系优先，使用清晰透视、自然工业光和适度广角交代尺度；细节锐利但不过分HDR；避免科幻工厂、无人物空车间、蓝色霓虹、虚构品牌标识和廉价宣传片光效',
+    prompt: 'Modern industrial documentary media photography; cool gray, steel blue, desaturated cyan-gray and a small safety orange accent; creator reviews factory photos, material samples and field notes on a robust desk; clear scale, practical light and sharp equipment detail; avoid sci-fi factories, empty showroom drama, fake brand marks, blue neon and HDR propaganda sheen',
   },
   {
     id: 'MACARON_CARTOON', name: '马卡龙卡通', group: 'ILLUSTRATION', description: '轻松亲和，适合生活方式、工具教程与小红书图文', swatches: ['#FFF9F2', '#A8DDE0', '#F5B8CA', '#F4D56A'],
@@ -191,6 +191,7 @@ const styleCases = {
 
 const featuredStylePreviews = {
   FRESH_EDITORIAL: '/visual-style-previews/fresh-editorial.png',
+  BUSINESS_EDITORIAL: '/visual-style-previews/business-editorial.png',
   RETRO_POP: '/visual-style-previews/retro-pop.png',
   MACARON_CARTOON: '/visual-style-previews/macaron-cartoon.png',
   SOFT_3D: '/visual-style-previews/soft-3d.png',
@@ -203,6 +204,15 @@ const featuredStylePreviews = {
   NEW_CHINESE: '/visual-style-previews/new-chinese.png',
   DATA_VISUAL: '/visual-style-previews/data-visual.png',
   CINEMATIC_DOCUMENTARY: '/visual-style-previews/cinematic-documentary.png',
+  MONO_EDITORIAL: '/visual-style-previews/mono-editorial.png',
+  NEWSPAPER_EDITORIAL: '/visual-style-previews/newspaper-editorial.png',
+  LIFESTYLE_PHOTO: '/visual-style-previews/lifestyle-photo.png',
+  CONSULTING_REPORT: '/visual-style-previews/consulting-report.png',
+  SCIENCE_ATLAS: '/visual-style-previews/science-atlas.png',
+  FLAT_GEOMETRIC: '/visual-style-previews/flat-geometric.png',
+  PENCIL_SKETCH: '/visual-style-previews/pencil-sketch.png',
+  WOODCUT_PRINT: '/visual-style-previews/woodcut-print.png',
+  INDUSTRIAL_MEDIA: '/visual-style-previews/industrial-media.png',
 };
 
 const visualTemplates = {

@@ -236,11 +236,15 @@ test('项目风格库覆盖编辑、知识、插画、文化和科技，并提�
 
 test('正式风格选择器只使用真实案例图清单并覆盖核心视觉方向', () => {
   const featured = visualStylePresets().filter((style) => style.featured);
-  assert.equal(featured.length, 13);
+  assert.equal(featured.length, 23);
   assert.ok(featured.every((style) => /^\/visual-style-previews\/[a-z0-9-]+\.png$/.test(style.previewImage)));
   assert.ok(featured.some((style) => style.id === 'MACARON_CARTOON' && /卡通/.test(style.name)));
   assert.ok(featured.some((style) => style.id === 'CYBER_TECH' && /赛博/.test(style.name)));
   assert.ok(featured.some((style) => style.id === 'PIXEL_RETRO' && /像素/.test(style.name)));
+  assert.ok(featured.some((style) => style.id === 'BUSINESS_EDITORIAL'));
+  assert.ok(featured.some((style) => style.id === 'SCIENCE_ATLAS'));
+  assert.ok(featured.some((style) => style.id === 'INDUSTRIAL_MEDIA'));
+  assert.ok(featured.some((style) => style.id === 'WOODCUT_PRINT'));
   assert.ok(featured.some((style) => style.id === 'SOFT_3D'));
   assert.ok(featured.some((style) => style.id === 'MINIMAL_KNOWLEDGE'));
 });
