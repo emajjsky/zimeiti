@@ -59,7 +59,7 @@ const { detectFileType, safePath, saveUploadedAsset, saveRemoteImageAsset, openA
 const { PROJECT_RESEARCH_ACTION_VERSION, PROJECT_RESEARCH_SCOPE, researchRunView, researchPlanView } = require('./services/project-research.cjs');
 const { PROJECT_RESEARCH_SOURCES_VERSION, researchSourceActions } = require('./services/project-research-sources.cjs');
 const { SOURCE_VERIFICATION_SCOPE, SOURCE_VERIFICATION_VERSION, defaultSourceVerificationTemplate, validateSourceVerificationTemplate } = require('./services/source-verification.cjs');
-const { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION } = require('./services/simplified-research.cjs');
+const { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, researchResultHasUsableFacts } = require('./services/simplified-research.cjs');
 const { OUTLINE_ACTION_VERSION, OUTLINE_SCOPE, OUTLINE_TEMPLATE_SCOPES, outlineTemplateScope, validateOutlineTemplate, defaultOutlineTemplate, outlineCandidateView } = require('./services/creative-outline.cjs');
 const { DRAFT_ACTION_VERSION, DRAFT_SCOPE, DRAFT_TEMPLATE_SCOPES, draftTemplateScope, validateDraftTemplate, defaultDraftTemplate, draftCandidateView } = require('./services/creative-draft.cjs');
 const {
@@ -747,21 +747,25 @@ function analysisItem(row) {
 }
 
 app.post('/api/v1/intelligence/items/:id/analyses/prepare', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
-  const input = z.object({ platforms: z.array(analysisPlatform).min(1).max(5) }).parse(request.body);
+  z.object({}).strict().parse(request.body ?? {});
   const workspace = request.workspace;
   const itemResult = await query('SELECT * FROM intelligence_items WHERE id = $1 AND workspace_id = $2', [request.params.id, workspace.id]);
   if (!itemResult.rowCount) { const error = new Error('未找到这条资讯。'); error.statusCode = 404; throw error; }
   const [profile, route, template] = await Promise.all([analysisProfile(workspace.id), analysisRoute(workspace.id), templateStore.get(workspace.id, ANALYSIS_SCOPE)]);
-  const prepared = prepareAnalysisInput({ item: analysisItem(itemResult.rows[0]), profile, platforms: input.platforms, template, route });
+  const prepared = prepareAnalysisInput({ item: analysisItem(itemResult.rows[0]), profile, platforms: ['WECHAT'], template, route });
   const run = await query(`INSERT INTO generation_runs (workspace_id, skill_version_id, status, source_snapshot_json, input_json, model, prompt_version, estimated_cost)
     VALUES ($1, 'intelligence-analysis:1.0.0', 'DRAFT', $2, $3, $4, $5, $6)
     RETURNING id, status, created_at`, [workspace.id, JSON.stringify(prepared.sourceSnapshot), JSON.stringify(prepared.input), route.model, String(template.version), JSON.stringify(null)]);
-  reply.code(201).send({ id: run.rows[0].id, status: run.rows[0].status, createdAt: run.rows[0].created_at, confirmation: { sourceCount: 1, platforms: prepared.input.selectedPlatforms, model: route.model, promptVersion: template.version, generalAudienceWarning: prepared.generalAudienceWarning, costEstimate: null } });
+  reply.code(201).send({ id: run.rows[0].id, status: run.rows[0].status, createdAt: run.rows[0].created_at, confirmation: { sourceCount: 1, platform: 'WECHAT', model: route.model, promptVersion: template.version, generalAudienceWarning: prepared.generalAudienceWarning, costEstimate: null } });
 });
 
 app.post('/api/v1/generation-runs/:id/confirm', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const workspace = request.workspace;
-  const run = await query("UPDATE generation_runs SET status = 'QUEUED' WHERE id = $1 AND workspace_id = $2 AND status = 'DRAFT' RETURNING id, workspace_id, status", [request.params.id, workspace.id]);
+  const run = await query(`UPDATE generation_runs SET status = 'QUEUED'
+    WHERE id = $1 AND workspace_id = $2 AND status = 'DRAFT'
+      AND skill_version_id = 'intelligence-analysis:1.0.0'
+      AND input_json->'selectedPlatforms' = '["WECHAT"]'::jsonb
+    RETURNING id, workspace_id, status`, [request.params.id, workspace.id]);
   if (!run.rowCount) { const error = new Error('该分析任务当前不能确认。'); error.statusCode = 409; throw error; }
   const job = await query("INSERT INTO jobs (workspace_id, job_type, payload_json) VALUES ($1, 'INTELLIGENCE_ANALYSIS', $2) RETURNING *", [workspace.id, JSON.stringify({ runId: run.rows[0].id })]);
   try { await enqueue(job.rows[0]); }
@@ -811,7 +815,7 @@ app.get('/api/v1/intelligence/items/:id/analyses/latest-run', { preHandler: work
     createdAt: row.created_at,
     confirmation: {
       sourceCount: 1,
-      platforms: row.input_json?.selectedPlatforms ?? [],
+      platform: 'WECHAT',
       model: row.model,
       promptVersion: Number(row.prompt_version),
       generalAudienceWarning: !String(row.source_snapshot_json?.profile?.accountPositioning ?? '').trim() || !String(row.source_snapshot_json?.profile?.targetAudience ?? '').trim(),
@@ -1463,6 +1467,11 @@ app.post('/api/v1/creative/research-results/:artifactId/accept', { preHandler: w
       FOR UPDATE OF a, r`, [artifactId, workspace.id]);
     if (!result.rowCount) { const error = new Error('这份研究结果当前不能采用。'); error.statusCode = 409; throw error; }
     const candidate = result.rows[0];
+    if (!researchResultHasUsableFacts(candidate.output_json)) {
+      const error = new Error('这份研究结果还没有可用事实，请补充研究后再采用。');
+      error.statusCode = 409;
+      throw error;
+    }
     const now = new Date().toISOString();
     await client.query(`UPDATE project_artifacts SET status = 'REJECTED', updated_at = now()
       WHERE workspace_id = $1 AND project_id = $2 AND artifact_type = 'RESEARCH_RESULT'

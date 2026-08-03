@@ -157,13 +157,24 @@ export interface ResearchResult {
   cautions: { claim: string; status: 'SINGLE_SOURCE' | 'CONFLICTING' | 'NEEDS_REVIEW'; explanation: string; evidence: unknown[] }[];
   angles: string[];
   sources: { id: string; title: string; url: string | null; source: string }[];
+  sourceAttempts?: {
+    id: string;
+    action: 'SEARCH_WEB' | 'READ_LINK' | 'ASK_USER';
+    purpose: string;
+    target: string;
+    status: 'CAPTURED' | 'FAILED' | 'NEEDS_USER';
+    title: string;
+    url: string | null;
+    source: string;
+    error: string | null;
+  }[];
   materialContext: {
     userContent: { id: string; title: string; body: string | null; kind: string }[];
     creativeReferences: { id: string; title: string; role: string }[];
     visualAssets: { id: string; title: string; role: string }[];
     verificationCandidates: { id: string; title: string; role: string }[];
   };
-  process: { phase: 'COMPLETE'; sourceCount: number; verificationStatus?: 'COMPLETE' | 'PARTIAL' | 'FAILED'; verificationMessage?: string };
+  process: { phase: 'COMPLETE'; sourceCount: number; sourceAttemptCount?: number; failedSourceCount?: number; verificationStatus?: 'COMPLETE' | 'PARTIAL' | 'FAILED'; verificationMessage?: string };
 }
 
 export interface ProjectArtifact {

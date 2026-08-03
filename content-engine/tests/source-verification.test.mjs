@@ -89,6 +89,21 @@ test('引用归一化后不能为空', () => {
   }), context), /无法在来源摘要中定位/);
 });
 
+test('修复输出中的坏引用只隔离对应主张，不污染其它有效结论', () => {
+  const recovered = parseSourceVerification(JSON.stringify({
+    ...validOutput,
+    claims: [
+      validOutput.claims[0],
+      { ...validOutput.claims[1], status: 'SINGLE_SOURCE', evidence: [{ sourceId: 'source-b', relation: 'SUPPORTS', quote: '摘要中不存在的原文', note: '无效引用。' }] },
+    ],
+  }), { ...context, recoverInvalidClaims: true });
+
+  assert.equal(recovered.claims[0].status, 'SINGLE_SOURCE');
+  assert.equal(recovered.claims[1].status, 'NEEDS_REVIEW');
+  assert.equal(recovered.claims[1].evidence.length, 0);
+  assert.equal(recovered.claims[1].evidenceValidationFailed, true);
+});
+
 test('多源通过状态不能同时包含冲突证据', () => {
   const sourceC = { id: 'source-c', title: '第二份公告', url: 'https://example.com/c', source: '公告平台', summary: '产品已向全部免费用户开放。' };
   assert.throws(() => parseSourceVerification(JSON.stringify({

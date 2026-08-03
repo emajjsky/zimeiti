@@ -34,19 +34,30 @@ function parseSourceVerification(content, context) {
   return {
     ...output,
     claims: output.claims.map((claim) => {
-      const evidence = claim.evidence.map((item) => {
-        const source = sources.get(item.sourceId);
-        if (!source) throw new Error(`核验结果引用了未选来源：${item.sourceId}。`);
-        if (!includesQuote(source.summary, item.quote)) throw new Error(`引用无法在来源摘要中定位：${item.sourceId}。`);
-        return { ...item, title: source.title, url: source.url, source: source.source };
-      });
-      const supportingSources = new Set(evidence.filter((item) => item.relation === 'SUPPORTS').map((item) => item.sourceId));
-      const conflictingSources = new Set(evidence.filter((item) => item.relation === 'CONFLICTS').map((item) => item.sourceId));
-      if (claim.status === 'VERIFIED' && supportingSources.size < 2) throw new Error('VERIFIED 状态至少两个独立支持来源。');
-      if (claim.status === 'VERIFIED' && conflictingSources.size) throw new Error('VERIFIED 状态不能包含冲突证据。');
-      if (claim.status === 'SINGLE_SOURCE' && (supportingSources.size !== 1 || conflictingSources.size)) throw new Error('SINGLE_SOURCE 状态必须且只能包含一个支持来源。');
-      if (claim.status === 'CONFLICTING' && (!supportingSources.size || !conflictingSources.size)) throw new Error('CONFLICTING 状态必须同时包含支持和冲突证据。');
-      return { ...claim, evidence };
+      try {
+        const evidence = claim.evidence.map((item) => {
+          const source = sources.get(item.sourceId);
+          if (!source) throw new Error(`核验结果引用了未选来源：${item.sourceId}。`);
+          if (!includesQuote(source.summary, item.quote)) throw new Error(`引用无法在来源摘要中定位：${item.sourceId}。`);
+          return { ...item, title: source.title, url: source.url, source: source.source };
+        });
+        const supportingSources = new Set(evidence.filter((item) => item.relation === 'SUPPORTS').map((item) => item.sourceId));
+        const conflictingSources = new Set(evidence.filter((item) => item.relation === 'CONFLICTS').map((item) => item.sourceId));
+        if (claim.status === 'VERIFIED' && supportingSources.size < 2) throw new Error('VERIFIED 状态至少两个独立支持来源。');
+        if (claim.status === 'VERIFIED' && conflictingSources.size) throw new Error('VERIFIED 状态不能包含冲突证据。');
+        if (claim.status === 'SINGLE_SOURCE' && (supportingSources.size !== 1 || conflictingSources.size)) throw new Error('SINGLE_SOURCE 状态必须且只能包含一个支持来源。');
+        if (claim.status === 'CONFLICTING' && (!supportingSources.size || !conflictingSources.size)) throw new Error('CONFLICTING 状态必须同时包含支持和冲突证据。');
+        return { ...claim, evidence };
+      } catch (error) {
+        if (!context?.recoverInvalidClaims) throw error;
+        return {
+          claim: claim.claim,
+          status: 'NEEDS_REVIEW',
+          explanation: `该主张的证据未通过直接引用校验：${error instanceof Error ? error.message : '证据无效'}`,
+          evidence: [],
+          evidenceValidationFailed: true,
+        };
+      }
     }),
   };
 }

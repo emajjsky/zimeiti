@@ -6,8 +6,9 @@ let buildResearchResult;
 let workflowSourceActionsForProject;
 let projectOriginalSource;
 let sourceMatchesProject;
+let researchResultHasUsableFacts;
 try {
-  ({ buildResearchResult, workflowSourceActionsForProject, projectOriginalSource, sourceMatchesProject } = await import('../server/services/simplified-research.cjs'));
+  ({ buildResearchResult, workflowSourceActionsForProject, projectOriginalSource, sourceMatchesProject, researchResultHasUsableFacts } = await import('../server/services/simplified-research.cjs'));
 } catch {}
 
 test('研究工作流优先读取项目原始资讯链接，再执行补充检索', () => {
@@ -30,7 +31,8 @@ test('研究工作流优先读取项目原始资讯链接，再执行补充检�
   assert.equal(actions[0].action, 'READ_LINK');
   assert.equal(actions[0].target, 'https://www.ithome.com/0/983/890.htm');
   assert.equal(actions.filter((item) => item.target === actions[0].target).length, 1);
-  assert.equal(actions.filter((item) => ['SEARCH_WEB', 'READ_LINK'].includes(item.action)).length, 2);
+  assert.equal(actions.filter((item) => ['SEARCH_WEB', 'READ_LINK'].includes(item.action)).length, 3);
+  assert.deepEqual(actions.slice(1).map((item) => item.target), ['宇树科技 IPO 官方公告', '宇树科技 上市进展']);
 });
 
 test('研究优先复用项目已保存的原文快照，不依赖再次联网读取', () => {
@@ -59,6 +61,15 @@ test('补充检索只保留与项目主体相关的来源', () => {
   assert.equal(sourceMatchesProject({ title: '成都迈科康生物科技股份有限公司', summary: '发行公告' }, project), false);
 });
 
+test('补充检索使用研究主体和关键词，不再受营销新闻标题误导', () => {
+  const project = { sourceSnapshot: { intelligence: { title: '让Agent在协作中自进化，清华00后博士获千万元融资' } } };
+  const plan = { researchBrief: { subject: '奇点逃逸（Singularity Escape）', keywords: ['奇点逃逸', '薛传奕', 'Nexus'] } };
+
+  assert.equal(sourceMatchesProject({ title: '奇点逃逸完成新一轮融资', summary: '薛传奕介绍 Nexus 产品。' }, project, plan), true);
+  assert.equal(sourceMatchesProject({ title: '另一家协作软件获融资', summary: '与奇点逃逸无关。'.replace('奇点逃逸', '') }, project, plan), false);
+  assert.equal(sourceMatchesProject({ title: '奇点逃逸发布新产品', summary: '' }, project, { researchBrief: { subject: '奇点逃逸融资与产品进展', keywords: [] } }), true);
+});
+
 test('研究结果只把已核验事实交给正文，并保留用户草稿', () => {
   assert.equal(typeof buildResearchResult, 'function');
 
@@ -78,7 +89,9 @@ test('研究结果只把已核验事实交给正文，并保留用户草稿', ()
       ],
     },
     sources: [{
-      id: 'source-official', status: 'CAPTURED', title: '官方公告', url: 'https://example.com/announcement', summary: '公司宣布完成融资。', source: '官方公告', metadata: { sourceType: 'OFFICIAL' },
+      id: 'source-official', action: 'READ_LINK', purpose: '读取官方公告', target: 'https://example.com/announcement', status: 'CAPTURED', title: '官方公告', url: 'https://example.com/announcement', summary: '公司宣布完成融资。', source: '官方公告', metadata: { sourceType: 'OFFICIAL' }, error: null,
+    }, {
+      id: 'source-failed', action: 'SEARCH_WEB', purpose: '寻找投资机构公告', target: '一思智能 投资机构 公告', status: 'FAILED', title: '寻找投资机构公告', url: null, summary: '', source: '网页搜索', error: '搜索服务未返回结果。',
     }],
     verification: {
       summary: '融资有证据，交付尚未找到证据。',
@@ -95,6 +108,20 @@ test('研究结果只把已核验事实交给正文，并保留用户草稿', ()
   assert.deepEqual(result.materialContext.userContent.map((item) => item.id), ['draft-1']);
   assert.equal(result.researchBrief.subject, '一思智能融资与交付进展');
   assert.deepEqual(result.researchBrief.directions, ['核验融资事件', '核验批量交付状态']);
+  assert.equal(result.sourceAttempts.length, 2);
+  assert.equal(result.sourceAttempts[1].status, 'FAILED');
+  assert.equal(result.process.failedSourceCount, 1);
+  assert.equal(researchResultHasUsableFacts(result), true);
+});
+
+test('没有多源或单一来源事实的研究结果不可采用', () => {
+  assert.equal(researchResultHasUsableFacts({ facts: [], cautions: [{ claim: '尚待核验', status: 'NEEDS_REVIEW' }] }), false);
+  assert.equal(researchResultHasUsableFacts({ facts: [], cautions: [{ claim: '单一来源事实', status: 'SINGLE_SOURCE' }] }), true);
+  const server = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
+  const acceptStart = server.indexOf("app.post('/api/v1/creative/research-results/:artifactId/accept'");
+  const acceptEnd = server.indexOf("app.post('/api/v1/creative/projects/:projectId/research/skip'", acceptStart);
+  assert.match(server.slice(acceptStart, acceptEnd), /researchResultHasUsableFacts\(candidate\.output_json\)/);
+  assert.match(server.slice(acceptStart, acceptEnd), /statusCode = 409/);
 });
 
 test('迁移允许研究结果作为项目级候选产物保存', () => {

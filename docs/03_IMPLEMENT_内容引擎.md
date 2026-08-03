@@ -1,5 +1,15 @@
 # 内容引擎技术实施方案
 
+## 2026-08-03 修复：热点固定公众号母稿与研究结果真实性
+
+- 发现页删除 `defaultPlatforms`、平台 checkbox、本地平台状态和平台建议结果块。`prepareAnalysis` 改为空请求体，服务端使用 strict 空对象校验并固定 `['WECHAT']`；确认旧分析草稿时再次校验冻结平台，历史跨平台草稿不能进入队列。
+- `createProjectFromIntelligence` 不再继承 `analysis.selectedPlatforms`，热点项目规划始终写入 `targetPlatforms: ['WECHAT']`。历史分析和项目数据不迁移、不删除。
+- 研究来源预算改为原始资讯独立读取，再执行最多两项计划内自动动作。搜索结果相关性读取 `researchBrief.subject/keywords`，只有计划缺少主体信息时才回退项目标题。
+- 统一研究结果新增 `sourceAttempts`、动作总数和失败数，保留 `CAPTURED/FAILED/NEEDS_USER`。前端按 `COMPLETE/PARTIAL/FAILED` 显示真实状态、核验说明和失败动作，不再把任意研究产物显示为“已就绪”。
+- 证据校验继续要求引用可在来源摘要中直接定位。第一次严格校验失败后，修复输出按主张隔离仍不合法的引用；对应主张降为 `NEEDS_REVIEW`，其它合法结论保留，并将结果标为部分完成。
+- 新增前后端双门禁：研究结果至少包含一条 `VERIFIED` 或 `SINGLE_SOURCE` 主张才可采用。服务端采用接口在零可用事实时返回 409，页面同步禁用按钮并保留补充研究入口。
+- 回归新增公众号分析契约、热点项目平台、原文加两次检索、奇点逃逸主体匹配、失败来源持久化、坏引用隔离、真实状态展示和采用门禁测试。全量 `npm test` 为 `440/440`，`npm run typecheck`、`npm run build`、`node --check server/index.cjs`、`node --check server/worker.cjs` 与 `git diff --check` 均通过。
+
 ## 2026-08-03 实现：公众号母稿派生与社交平台单页编辑器
 
 - 完成草稿页现在展示公众号冻结排版预览，并提供“生成小红书草稿”“生成微博草稿”和“去发布”。首次点击只准备派生任务并展示真实 `Scope / Provider / Model / Prompt version`；用户确认后才创建队列任务，页面加载不会自动派生。公众号当前版本变化时，旧派生稿明确标为来源过期，必须由用户基于当前母稿重新生成。

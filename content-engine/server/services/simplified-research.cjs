@@ -10,6 +10,18 @@ const materialContextSchema = z.object({
   verificationCandidates: z.array(z.object({ id: z.string(), title: z.string(), role: z.string() })),
 });
 
+const sourceAttemptSchema = z.object({
+  id: z.string(),
+  action: z.enum(['SEARCH_WEB', 'READ_LINK', 'ASK_USER']),
+  purpose: z.string(),
+  target: z.string(),
+  status: z.enum(['CAPTURED', 'FAILED', 'NEEDS_USER']),
+  title: z.string(),
+  url: z.string().nullable(),
+  source: z.string(),
+  error: z.string().nullable(),
+});
+
 const researchResultSchema = z.object({
   summary: z.string(),
   researchBrief: z.object({
@@ -23,10 +35,13 @@ const researchResultSchema = z.object({
   cautions: z.array(z.object({ claim: z.string(), status: z.enum(['SINGLE_SOURCE', 'CONFLICTING', 'NEEDS_REVIEW']), explanation: z.string(), evidence: z.array(z.unknown()) })),
   angles: z.array(z.string()),
   sources: z.array(z.object({ id: z.string(), title: z.string(), url: z.string().nullable(), source: z.string() })),
+  sourceAttempts: z.array(sourceAttemptSchema),
   materialContext: materialContextSchema,
   process: z.object({
     phase: z.literal('COMPLETE'),
     sourceCount: z.number().int().nonnegative(),
+    sourceAttemptCount: z.number().int().nonnegative(),
+    failedSourceCount: z.number().int().nonnegative(),
     verificationStatus: z.enum(['COMPLETE', 'PARTIAL', 'FAILED']).optional(),
     verificationMessage: z.string().optional(),
   }),
@@ -60,12 +75,15 @@ function workflowSourceActions(plan) {
 }
 
 function workflowSourceActionsForProject(plan, project) {
-  const actions = workflowSourceActions(plan);
   const origin = project?.sourceSnapshot?.intelligence;
   const url = typeof origin?.url === 'string' && /^https?:\/\//i.test(origin.url) ? origin.url : '';
-  if (!url) return actions;
-  if (actions.some((action) => action?.action === 'READ_LINK' && action.target === url)) return actions;
-  return [{ action: 'READ_LINK', purpose: '读取项目原始资讯', target: url }, ...actions].slice(0, WORKFLOW_MAX_AUTOMATIC_SOURCE_ACTIONS);
+  if (!url) return workflowSourceActions(plan);
+  const supplementalActions = (Array.isArray(plan?.nextActions) ? plan.nextActions : [])
+    .filter((action) => !(action?.action === 'READ_LINK' && action.target === url));
+  return [
+    { action: 'READ_LINK', purpose: '读取项目原始资讯', target: url },
+    ...workflowSourceActions({ ...plan, nextActions: supplementalActions }),
+  ];
 }
 
 function projectOriginalSource(project) {
@@ -85,11 +103,36 @@ function projectOriginalSource(project) {
   };
 }
 
-function sourceMatchesProject(result, project) {
-  const terms = projectSubjectTerms(project);
+function sourceMatchesProject(result, project, plan = null) {
+  const terms = researchSubjectTerms(plan, project);
   if (!terms.length) return true;
   const haystack = `${String(result?.title ?? '')} ${String(result?.summary ?? '')}`.toLowerCase().replace(/\s+/g, '');
   return terms.some((term) => haystack.includes(term));
+}
+
+const genericResearchTerms = new Set(['融资', '投资', '逻辑', '千万元', '背后', '公司', '企业', '团队', '技术', '产品', '项目', '官方', '最新', '进展', '消息', '研究']);
+
+function researchSubjectTerms(plan, project) {
+  if (plan) {
+    const brief = researchBriefForPlan(plan);
+    const plannedTerms = [brief.subject, ...brief.keywords].flatMap(distinctiveTerms);
+    if (plannedTerms.length) return [...new Set(plannedTerms)];
+  }
+  return projectSubjectTerms(project);
+}
+
+function distinctiveTerms(value) {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (!normalized) return [];
+  const cjkChunks = normalized.match(/[\u3400-\u9fff]{2,}/g) ?? [];
+  const terms = [
+    ...cjkChunks,
+    ...cjkChunks.flatMap((chunk) => chunk.split(/(?:融资|投资|逻辑|背后|公司|企业|团队|技术|产品|项目|官方|最新|进展|消息|研究|以及|与|和|及|的)/u)),
+    ...(normalized.match(/[a-z][a-z0-9._-]{2,}/g) ?? []),
+  ];
+  return terms
+    .map((term) => term.replace(/\s+/g, ''))
+    .filter((term) => term.length >= 2 && term.length <= 40 && !genericResearchTerms.has(term));
 }
 
 function projectSubjectTerms(project) {
@@ -124,6 +167,7 @@ function buildResearchResult({ plan = {}, sources = [], verification = null, mat
   const facts = claims.filter((item) => usableStatuses.has(item.status));
   const cautions = claims.filter((item) => !usableStatuses.has(item.status));
   const capturedSources = (Array.isArray(sources) ? sources : []).filter((item) => item?.status === 'CAPTURED');
+  const sourceAttempts = (Array.isArray(sources) ? sources : []).filter((item) => ['CAPTURED', 'FAILED', 'NEEDS_USER'].includes(item?.status));
 
   return researchResultSchema.parse({
     summary: String(verification?.summary ?? plan.summary ?? '研究完成，等待采用。'),
@@ -132,14 +176,32 @@ function buildResearchResult({ plan = {}, sources = [], verification = null, mat
     cautions: cautions.map((item) => ({ claim: item.claim, status: item.status ?? 'NEEDS_REVIEW', explanation: item.explanation ?? '尚未确认。', evidence: item.evidence ?? [] })),
     angles: Array.isArray(plan.angles) ? plan.angles.filter((item) => typeof item === 'string') : [],
     sources: capturedSources.map((item) => ({ id: String(item.id), title: String(item.title ?? '未命名来源'), url: item.url ?? null, source: String(item.source ?? '网页来源') })),
+    sourceAttempts: sourceAttempts.map((item) => ({
+      id: String(item.id),
+      action: item.action,
+      purpose: String(item.purpose ?? ''),
+      target: String(item.target ?? ''),
+      status: item.status,
+      title: String(item.title ?? '未命名来源'),
+      url: item.url ?? null,
+      source: String(item.source ?? '网页来源'),
+      error: item.error ? String(item.error) : null,
+    })),
     materialContext: classifyMaterials(materials),
     process: {
       phase: 'COMPLETE',
       sourceCount: capturedSources.length,
+      sourceAttemptCount: sourceAttempts.length,
+      failedSourceCount: sourceAttempts.filter((item) => item.status === 'FAILED').length,
       ...(verificationStatus ? { verificationStatus } : {}),
       ...(verificationMessage ? { verificationMessage } : {}),
     },
   });
 }
 
-module.exports = { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, WORKFLOW_MAX_AUTOMATIC_SOURCE_ACTIONS, researchResultSchema, classifyMaterials, workflowSourceActions, workflowSourceActionsForProject, projectOriginalSource, sourceMatchesProject, researchBriefForPlan, buildResearchResult };
+function researchResultHasUsableFacts(result) {
+  const claims = [...(Array.isArray(result?.facts) ? result.facts : []), ...(Array.isArray(result?.cautions) ? result.cautions : [])];
+  return claims.some((item) => ['VERIFIED', 'SINGLE_SOURCE'].includes(item?.status) && String(item?.claim ?? '').trim());
+}
+
+module.exports = { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, WORKFLOW_MAX_AUTOMATIC_SOURCE_ACTIONS, researchResultSchema, classifyMaterials, workflowSourceActions, workflowSourceActionsForProject, projectOriginalSource, sourceMatchesProject, researchBriefForPlan, buildResearchResult, researchResultHasUsableFacts };

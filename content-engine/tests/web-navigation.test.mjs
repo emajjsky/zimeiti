@@ -162,6 +162,25 @@ test('已完成分析的资讯卡片显示已分析状态', async () => {
   assert.match(source, /entry\.analysis && <em className="analyzed">已分析<\/em>/);
 });
 
+test('热点分析固定为公众号母稿且不再显示多平台选择或平台建议', async () => {
+  const inbox = await readFile(new URL('../src/workspaces/discover/IntelligenceInbox.tsx', import.meta.url), 'utf8');
+  const api = await readFile(new URL('../src/data/webApi.ts', import.meta.url), 'utf8');
+  const server = await readFile(new URL('../server/index.cjs', import.meta.url), 'utf8');
+  const prepareStart = server.indexOf("app.post('/api/v1/intelligence/items/:id/analyses/prepare'");
+  const prepareEnd = server.indexOf("app.post('/api/v1/generation-runs/:id/confirm'", prepareStart);
+  const prepareRoute = server.slice(prepareStart, prepareEnd);
+  const confirmStart = prepareEnd;
+  const confirmEnd = server.indexOf("app.post('/api/v1/generation-runs/:id/cancel'", confirmStart);
+  const confirmRoute = server.slice(confirmStart, confirmEnd);
+
+  assert.doesNotMatch(inbox, /defaultPlatforms|type="checkbox"|平台建议|analysis-platform-result/);
+  assert.match(inbox, /按公众号母稿评估/);
+  assert.match(api, /prepareAnalysis: \(itemId: string\).*body: '\{\}'/);
+  assert.match(prepareRoute, /z\.object\(\{\}\)\.strict\(\)/);
+  assert.match(prepareRoute, /platforms: \['WECHAT'\]/);
+  assert.match(confirmRoute, /input_json->'selectedPlatforms' = '\["WECHAT"\]'::jsonb/);
+});
+
 test('创作项目中心取代旧规划和选题编辑页面', async () => {
   const source = await readFile(new URL('../src/main.tsx', import.meta.url), 'utf8');
   assert.match(source, /<CreativeProjectCenter/);

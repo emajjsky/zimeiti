@@ -101,7 +101,7 @@ function SimplifiedResearchAgent({ projectId, refreshToken = 0, onContextChange,
   };
 
   return <aside className="simplified-research" aria-label="资料研究">
-    <header className="simplified-research-head"><div><Bot size={19}/><div><h2>资料研究</h2><span>{result ? '研究结果已就绪' : isRunning ? researchRunLabel(activeRun?.confirmation.phase) : '用已保存资料补足外部事实'}</span></div></div></header>
+    <header className="simplified-research-head"><div><Bot size={19}/><div><h2>资料研究</h2><span>{result ? researchResultStatusLabel(result) : isRunning ? researchRunLabel(activeRun?.confirmation.phase) : '用已保存资料补足外部事实'}</span></div></div></header>
     {busy === 'loading' && <div className="simplified-research-skeleton" aria-label="正在读取研究状态"><i/><i/><i/></div>}
     {busy !== 'loading' && isRunning && <div className="simplified-research-running" aria-live="polite"><LoaderCircle size={18}/><div><b>{researchRunLabel(activeRun?.confirmation.phase)}</b><span>{activeRun?.status === 'QUEUED' ? '任务已排队' : '完成后会自动显示结果'}</span></div><button className="text-button" type="button" disabled={busy !== 'idle'} onClick={() => void cancelResearch()}>{busy === 'cancelling' ? '取消中' : '取消任务'}</button></div>}
     {busy !== 'loading' && !isRunning && resultArtifact && result && <ResearchResultPreview result={result} accepted={resultArtifact.status === 'ACCEPTED'} busy={busy !== 'idle'} onAccept={() => void acceptResearchResult()}/>}
@@ -118,14 +118,17 @@ function ResearchResultPreview({ result, accepted, busy, onAccept }: { result: R
   const verifiedFacts = result.facts.filter((item) => item.status === 'VERIFIED');
   const singleSource = [...result.facts, ...result.cautions].filter((item) => item.status === 'SINGLE_SOURCE');
   const needsReview = result.cautions.filter((item) => item.status !== 'SINGLE_SOURCE');
+  const canAccept = hasUsableResearchFacts(result);
+  const incompleteAttempts = (result.sourceAttempts ?? []).filter((attempt) => attempt.status !== 'CAPTURED');
   return <section className="research-result-preview">
-    <p className="research-result-summary">{researchResultSummary(result)}</p>
+    <p className={`research-result-summary ${String(result.process.verificationStatus ?? 'COMPLETE').toLowerCase()}`}>{researchResultSummary(result)}</p>
+    {result.process.verificationMessage && <div className="research-verification-message" role={result.process.verificationStatus === 'FAILED' ? 'alert' : undefined}><CircleAlert size={15}/><span>{result.process.verificationMessage}</span></div>}
     {result.researchBrief && <ResearchBriefPreview brief={result.researchBrief}/>}
     <ResultList title="可直接使用" items={verifiedFacts} empty="还没有可直接写入正文的事实。" tone="verified"/>
     <ResultList title="可参考（单一来源）" items={singleSource} empty="没有单一来源事实。" tone="single-source"/>
     <ResultList title="需要补充核验" items={needsReview} empty="没有需要补充核验的事实。" tone="caution"/>
-    <details className="research-result-details"><summary>来源与研究说明</summary><div>{result.sources.map((source) => <a key={source.id} href={source.url ?? undefined} target={source.url ? '_blank' : undefined} rel="noreferrer">{source.source}：{source.title}</a>)}</div></details>
-    {!accepted && <footer><button className="button primary" type="button" disabled={busy} onClick={onAccept}>{busy ? <LoaderCircle size={16}/> : <Check size={16}/>}采用并进入正文</button></footer>}
+    <details className="research-result-details"><summary>来源与研究说明</summary><div>{result.sources.map((source) => <a key={source.id} href={source.url ?? undefined} target={source.url ? '_blank' : undefined} rel="noreferrer">{source.source}：{source.title}</a>)}{!result.sources.length && <span>没有读取到可用来源。</span>}{incompleteAttempts.map((attempt) => <section className={`research-source-attempt ${attempt.status.toLowerCase()}`} key={attempt.id}><b>{attempt.status === 'FAILED' ? '检索失败' : '需要补充'}：{attempt.purpose}</b><span>{attempt.target}</span>{attempt.error && <small>{attempt.error}</small>}</section>)}</div></details>
+    {!accepted && <footer>{!canAccept && <span>暂无可用事实，请先补充研究。</span>}<button className="button primary" type="button" disabled={busy || !canAccept} onClick={onAccept}>{busy ? <LoaderCircle size={16}/> : <Check size={16}/>}采用并进入正文</button></footer>}
   </section>;
 }
 
@@ -155,8 +158,22 @@ function researchResultSummary(result: ResearchResult) {
   const verifiedFacts = result.facts.filter((item) => item.status === 'VERIFIED').length;
   const singleSource = [...result.facts, ...result.cautions].filter((item) => item.status === 'SINGLE_SOURCE').length;
   const needsReview = result.cautions.filter((item) => item.status !== 'SINGLE_SOURCE').length;
-  if (!result.sources.length) return '还没有读取到可用来源，暂时不能形成事实结论。';
-  return `已整理 ${result.sources.length} 条来源：${verifiedFacts} 条可直接使用，${singleSource} 条可参考，${needsReview} 条需要补充核验。`;
+  const status = result.process.verificationStatus;
+  if (!result.sources.length) return '没有读取到可用来源，当前无法形成事实结论。';
+  const counts = `已整理 ${result.sources.length} 条来源：${verifiedFacts} 条可直接使用，${singleSource} 条可参考，${needsReview} 条需要补充核验。`;
+  if (status === 'FAILED') return `事实核验失败。${counts}`;
+  if (status === 'PARTIAL') return `研究部分完成。${counts}`;
+  return counts;
+}
+
+function hasUsableResearchFacts(result: ResearchResult) {
+  return [...result.facts, ...result.cautions].some((item) => ['VERIFIED', 'SINGLE_SOURCE'].includes(item.status) && item.claim.trim());
+}
+
+function researchResultStatusLabel(result: ResearchResult) {
+  if (result.process.verificationStatus === 'FAILED') return '事实核验失败';
+  if (result.process.verificationStatus === 'PARTIAL') return '研究部分完成';
+  return hasUsableResearchFacts(result) ? '研究结果已就绪' : '研究完成，暂无可用事实';
 }
 
 function asResearchResult(payload: Record<string, unknown>): ResearchResult | null {

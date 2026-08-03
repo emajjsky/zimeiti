@@ -212,7 +212,6 @@ function createProjectFromIntelligence(item, analysis, angleIndex = 0, now = new
   const timestamp = stableTimestamp(now, new Date().toISOString());
   const angle = analysis?.angles?.[angleIndex];
   const title = String(angle?.title ?? item?.title ?? '').trim() || '未命名热点创作';
-  const platforms = uniquePlatforms(analysis?.selectedPlatforms, DEFAULT_PLATFORMS);
   return normalizeProject({
     id: `project-${randomUUID()}`,
     title,
@@ -226,7 +225,7 @@ function createProjectFromIntelligence(item, analysis, angleIndex = 0, now = new
       angle: analysis?.decisionReason,
       targetAudience: angle?.targetAudience,
       coreMessage: angle?.coreViewpoint ?? item?.summary,
-      targetPlatforms: platforms,
+      targetPlatforms: ['WECHAT'],
       timing: analysis?.timingWindow,
       sourceRequirements: (analysis?.factsToVerify ?? []).join('；'),
     }),

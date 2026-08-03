@@ -221,4 +221,7 @@ test('research result separates usable, single-source, and review claims', () =>
   assert.match(agent, /researchResultSummary/);
   assert.match(agent, /single-source/);
   assert.match(agent, /needsReview/);
+  assert.match(agent, /事实核验失败/);
+  assert.match(agent, /sourceAttempts/);
+  assert.match(agent, /暂无可用事实，请先补充研究/);
 });

@@ -126,7 +126,7 @@ async function captureWorkflowSources(workspaceId, plan, project) {
     try {
       if (action.action === 'SEARCH_WEB') {
         const searched = await searchTavily(workspaceId, { query: action.target, category: '其他', domains: [] });
-        const results = normalizeSearchResults(action, searched.filter((item) => sourceMatchesProject(item, project)));
+        const results = normalizeSearchResults(action, searched.filter((item) => sourceMatchesProject(item, project, plan)));
         captured.push(...(results.length ? results : [failedSourceSnapshot(action, new Error('网页搜索没有返回可保存的结果。'))]));
       } else if (action.action === 'READ_LINK') {
         const original = projectOriginalSource(project);
@@ -149,10 +149,13 @@ async function runWorkflowVerificationAttempt(workspaceId, plan, selectedSources
   } catch (error) {
     const validationError = error instanceof Error ? error.message : '事实核验输出不符合 JSON 契约。';
     const repaired = await textRunner.runText({ provider: route.provider, model: route.model, system: buildSourceVerificationRepairPrompt(prompt.system, validationError), message: first.content, ...connectionInput });
+    const output = parseSourceVerification(repaired.content, { claims: plan.claims, sources: selectedSources, recoverInvalidClaims: true });
+    const recoveredClaims = output.claims.filter((claim) => claim.evidenceValidationFailed).length;
     return {
-      output: parseSourceVerification(repaired.content, { claims: plan.claims, sources: selectedSources }),
+      output,
       inputTokens: (first.inputTokens ?? 0) + (repaired.inputTokens ?? 0),
       outputTokens: (first.outputTokens ?? 0) + (repaired.outputTokens ?? 0),
+      recoveredClaims,
     };
   }
 }
@@ -162,7 +165,12 @@ async function verifyWorkflowClaims(workspaceId, plan, sources, route, template)
   const selectedSources = sources.filter((source) => selectedIds.has(source.id) && String(source.summary ?? '').trim());
   if (!route || !selectedSources.length || !Array.isArray(plan.claims) || !plan.claims.length) return null;
   try {
-    return { ...(await runWorkflowVerificationAttempt(workspaceId, plan, selectedSources, route, template)), recovered: false };
+    const verified = await runWorkflowVerificationAttempt(workspaceId, plan, selectedSources, route, template);
+    return {
+      ...verified,
+      recovered: Boolean(verified.recoveredClaims),
+      ...(verified.recoveredClaims ? { warning: `${verified.recoveredClaims} 条主张的证据引用无效，已隔离为待补充核验。` } : {}),
+    };
   } catch (primaryError) {
     const results = [];
     const failures = [];
@@ -769,7 +777,7 @@ async function prepareCopyResearchContext(workspaceId, snapshot, input) {
     sources,
     verification: verification?.output ?? null,
     materials: snapshot.materials ?? [],
-    verificationStatus: verification?.recovered ? 'PARTIAL' : verification ? 'COMPLETE' : 'NOT_REQUESTED',
+    verificationStatus: verification?.recovered ? 'PARTIAL' : verification ? 'COMPLETE' : 'FAILED',
     verificationMessage: verification?.warning ?? '',
   });
   return {

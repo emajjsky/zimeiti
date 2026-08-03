@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { PageHeader } from '../../components/workspace/PageHeader';
 import type { LocalState } from '../../data/localRepository';
 import { webIntelligence, type AnalysisPreparation } from '../../data/webApi';
-import { platformName, type IntelligenceAnalysis, type Platform } from '../../domain/content';
+import type { IntelligenceAnalysis } from '../../domain/content';
 import { filterIntelligenceItems, intelligenceSourceLabel } from '../../../shared/intelligence-filters.mjs';
 import { formatIntelligenceTime, projectForIntelligence, toneForValue } from '../../../shared/intelligence-presentation.mjs';
 
@@ -15,13 +15,12 @@ const decisionNames = { FOLLOW: '建议跟进', WATCH: '继续观察', SKIP: '�
 const timingNames = { TODAY: '建议今天发布', THREE_DAYS: '三天内有效', ONE_WEEK: '一周内有效', EVERGREEN: '可长期跟进' } as const;
 
 export function IntelligenceInbox({
-  item, intelligence, sources, projects, defaultPlatforms, onSelect, onAddToCreative, onOpenProject, onSaveAnalysis, onRefresh, onOpenSources, refreshFeedback,
+  item, intelligence, sources, projects, onSelect, onAddToCreative, onOpenProject, onSaveAnalysis, onRefresh, onOpenSources, refreshFeedback,
 }: {
   item?: LocalState['intelligence'][number];
   intelligence: LocalState['intelligence'];
   sources: LocalState['sources'];
   projects: LocalState['projects'];
-  defaultPlatforms: Platform[];
   onSelect: (id: string) => void;
   onAddToCreative: (itemId: string, analysis?: IntelligenceAnalysis, angleIndex?: number) => void;
   onOpenProject: (projectId: string) => void;
@@ -36,7 +35,6 @@ export function IntelligenceInbox({
   const [projectState, setProjectState] = useState<'ALL' | 'PROJECTED' | 'UNPROJECTED'>('ALL');
   const [query, setQuery] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [platforms, setPlatforms] = useState<Platform[]>(defaultPlatforms);
   const [prepared, setPrepared] = useState<AnalysisPreparation | null>(null);
   const [analysis, setAnalysis] = useState<IntelligenceAnalysis | undefined>();
   const [analysisState, setAnalysisState] = useState<AnalysisState>({ status: 'idle', message: '' });
@@ -71,7 +69,7 @@ export function IntelligenceInbox({
 
   useEffect(() => {
     if (!drawerOpen || !selected) return;
-    setPlatforms(defaultPlatforms); setPrepared(null); setAngleIndex(0); setAnalysis(selected.analysis); setAnalysisState({ status: 'idle', message: '' });
+    setPrepared(null); setAngleIndex(0); setAnalysis(selected.analysis); setAnalysisState({ status: 'idle', message: '' });
     void Promise.all([webIntelligence.latestAnalysis(selected.id), webIntelligence.latestAnalysisRun(selected.id)]).then(([result, run]) => {
       if (result) { setAnalysis(result); onSaveAnalysis(selected.id, result); }
       if (!run || run.status === 'SUCCEEDED' || run.status === 'CANCELLED') return;
@@ -90,14 +88,13 @@ export function IntelligenceInbox({
   }, [drawerOpen, selected?.id]);
 
   const select = (id: string) => { onSelect(id); setDrawerOpen(true); };
-  const togglePlatform = (platform: Platform) => setPlatforms((current) => current.includes(platform) ? current.filter((item) => item !== platform) : [...current, platform]);
   const keywordTags = (entry: LocalState['intelligence'][number]) => [...new Set(entry.keywords ?? [])].filter((keyword) => keyword && keyword !== entry.category).slice(0, 2);
 
   const prepare = async () => {
-    if (!selected || !platforms.length) return;
+    if (!selected) return;
     setAnalysisState({ status: 'preparing', message: '' });
     try {
-      const result = await webIntelligence.prepareAnalysis(selected.id, platforms);
+      const result = await webIntelligence.prepareAnalysis(selected.id);
       setPrepared(result); setAnalysisState({ status: 'idle', message: '' });
     } catch (error) { setAnalysisState({ status: 'error', message: error instanceof Error ? error.message : '准备分析失败。' }); }
   };
@@ -131,11 +128,11 @@ export function IntelligenceInbox({
       {analysis && <AnalysisResult analysis={analysis} angleIndex={angleIndex} onAngle={setAngleIndex} />}
       {selected.url && <a className="source-link" href={selected.url} target="_blank" rel="noreferrer">查看原文</a>}
       {analysisState.status === 'error' && <p className="inline-notice error">{analysisState.message}</p>}
-      {prepared ? <section className="analysis-confirmation"><div><b>{prepared.confirmation.model}</b><small>模板 V{prepared.confirmation.promptVersion} · {prepared.confirmation.platforms.map((platform) => platformName[platform]).join('、')}</small></div>{prepared.confirmation.generalAudienceWarning && <p>将按通用受众分析</p>}<footer><button className="button" type="button" onClick={() => void cancelPrepared()}>取消</button><button className="button primary" type="button" onClick={() => void confirm()} disabled={analysisState.status === 'confirming'}>{analysisState.status === 'confirming' ? '提交中' : '确认分析'}</button></footer></section> : <section className="analysis-controls"><div className="analysis-platforms">{defaultPlatforms.map((platform) => <label key={platform}><input type="checkbox" checked={platforms.includes(platform)} onChange={() => togglePlatform(platform)} disabled={analysisState.status === 'running'} />{platformName[platform]}</label>)}</div><button className="button" type="button" disabled={!platforms.length || analysisState.status === 'preparing' || analysisState.status === 'running'} onClick={() => void prepare()}>{analysisState.status === 'running' ? <LoaderCircle className="spin" size={16} /> : <BrainCircuit size={16} />}{analysisState.status === 'preparing' ? '准备中' : analysisState.status === 'running' ? '分析中' : 'AI 分析'}</button></section>}
+      {prepared ? <section className="analysis-confirmation"><div><b>{prepared.confirmation.model}</b><small>模板 V{prepared.confirmation.promptVersion} · 公众号母稿</small></div>{prepared.confirmation.generalAudienceWarning && <p>将按通用受众分析</p>}<footer><button className="button" type="button" onClick={() => void cancelPrepared()}>取消</button><button className="button primary" type="button" onClick={() => void confirm()} disabled={analysisState.status === 'confirming'}>{analysisState.status === 'confirming' ? '提交中' : '确认分析'}</button></footer></section> : <section className="analysis-controls"><span>按公众号母稿评估</span><button className="button" type="button" disabled={analysisState.status === 'preparing' || analysisState.status === 'running'} onClick={() => void prepare()}>{analysisState.status === 'running' ? <LoaderCircle className="spin" size={16} /> : <BrainCircuit size={16} />}{analysisState.status === 'preparing' ? '准备中' : analysisState.status === 'running' ? '分析中' : 'AI 分析'}</button></section>}
       <footer>{projectForIntelligence(projects, selected.id) ? <button className="button primary" type="button" onClick={() => onOpenProject(projectForIntelligence(projects, selected.id)!.id)}>继续创作</button> : <button className="button primary" type="button" onClick={() => onAddToCreative(selected.id, analysis, angleIndex)}>加入创作</button>}</footer></aside></>}
   </div>;
 }
 
 function AnalysisResult({ analysis, angleIndex, onAngle }: { analysis: IntelligenceAnalysis; angleIndex: number; onAngle: (index: number) => void }) {
-  return <section className="analysis-result"><header className="analysis-result-head"><div><span className={`analysis-decision ${analysis.decision.toLowerCase()}`}>{decisionNames[analysis.decision]}</span><b>{analysis.overallScore}</b><small>/ 100</small></div><p>{timingNames[analysis.timingWindow]}</p></header><p className="analysis-reason">{analysis.decisionReason}</p><div className="analysis-dimensions">{(Object.keys(dimensionNames) as (keyof typeof dimensionNames)[]).map((key) => <div key={key}><span>{dimensionNames[key]}</span><b>{analysis.dimensions[key].score}</b><p>{analysis.dimensions[key].reason}</p></div>)}</div>{analysis.angles.length > 0 && <section className="analysis-angles"><h3>推荐角度</h3>{analysis.angles.map((angle, index) => <button type="button" className={angleIndex === index ? 'selected' : ''} key={angle.title} onClick={() => onAngle(index)}><CheckCircle2 size={16}/><span><b>{angle.title}</b><small>{angle.coreViewpoint}</small></span></button>)}</section>}{analysis.platforms.length > 0 && <section className="analysis-platform-result"><h3>平台建议</h3>{analysis.platforms.map((platform) => <div key={platform.platform}><b>{platformName[platform.platform]} · {platform.fitScore}</b><span>{platform.recommendedFormat}</span><p>{platform.reason}</p></div>)}</section>}{(analysis.factsToVerify.length > 0 || analysis.risks.length > 0) && <section className="analysis-risks">{analysis.factsToVerify.length > 0 && <div><h3>待核验</h3><p>{analysis.factsToVerify.join('；')}</p></div>}{analysis.risks.length > 0 && <div><h3>风险提示</h3><p>{analysis.risks.join('；')}</p></div>}</section>}</section>;
+  return <section className="analysis-result"><header className="analysis-result-head"><div><span className={`analysis-decision ${analysis.decision.toLowerCase()}`}>{decisionNames[analysis.decision]}</span><b>{analysis.overallScore}</b><small>/ 100</small></div><p>{timingNames[analysis.timingWindow]}</p></header><p className="analysis-reason">{analysis.decisionReason}</p><div className="analysis-dimensions">{(Object.keys(dimensionNames) as (keyof typeof dimensionNames)[]).map((key) => <div key={key}><span>{dimensionNames[key]}</span><b>{analysis.dimensions[key].score}</b><p>{analysis.dimensions[key].reason}</p></div>)}</div>{analysis.angles.length > 0 && <section className="analysis-angles"><h3>推荐角度</h3>{analysis.angles.map((angle, index) => <button type="button" className={angleIndex === index ? 'selected' : ''} key={angle.title} onClick={() => onAngle(index)}><CheckCircle2 size={16}/><span><b>{angle.title}</b><small>{angle.coreViewpoint}</small></span></button>)}</section>}{(analysis.factsToVerify.length > 0 || analysis.risks.length > 0) && <section className="analysis-risks">{analysis.factsToVerify.length > 0 && <div><h3>待核验</h3><p>{analysis.factsToVerify.join('；')}</p></div>}{analysis.risks.length > 0 && <div><h3>风险提示</h3><p>{analysis.risks.join('；')}</p></div>}</section>}</section>;
 }

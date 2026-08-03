@@ -67,7 +67,7 @@ test('旧内容项目按既有状态补齐统一阶段且保留正文版本', ()
   assert.equal(state.projects[0].versions[0].body, '旧正文');
 });
 
-test('热点分析创建项目时冻结角度、受众、平台、时效和待核验项', () => {
+test('热点分析创建项目时冻结角度、受众、公众号母稿、时效和待核验项', () => {
   const project = createProjectFromIntelligence({
     id: 'intel-1',
     title: '模型价格下降',
@@ -97,7 +97,7 @@ test('热点分析创建项目时冻结角度、受众、平台、时效和待�
   assert.equal(project.planning.title, '模型降价后，创作者真正应该关注什么');
   assert.equal(project.planning.angle, '适合立即跟进');
   assert.equal(project.planning.targetAudience, '使用模型 API 的个人创作者');
-  assert.deepEqual(project.planning.targetPlatforms, ['WECHAT', 'ZHIHU']);
+  assert.deepEqual(project.planning.targetPlatforms, ['WECHAT']);
   assert.equal(project.planning.timing, 'TODAY');
   assert.deepEqual(project.factChecks, ['核对生效日期']);
   assert.equal(project.versions.length, 0);
