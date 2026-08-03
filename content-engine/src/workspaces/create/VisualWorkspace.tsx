@@ -7,9 +7,9 @@ import type { ContentDraft } from '../../domain/content-drafts';
 import type { ProjectAsset, WorkspaceAsset } from '../../domain/assets';
 import { AssetPreviewDialog } from '../../components/assets/AssetPreviewDialog';
 import { AssetPickerDialog } from '../../components/assets/AssetPickerDialog';
-import { visualPlanCountRange, visualStylePresets, VISUAL_PLAN_VERSION } from '../../domain/visual-plan.mjs';
+import { buildVisualGenerationSpec, updateVisualPlanItem, visualImageSize, visualPlanCountRange, visualStylePresets, VISUAL_PLAN_VERSION } from '../../domain/visual-plan.mjs';
 
-type ImageSearchResult = { id: string; title: string; thumbnailUrl: string; imageUrl: string; sourceUrl: string; license: string; attribution: string };
+type ImageSearchResult = { id: string; title: string; thumbnailUrl: string; imageUrl: string; sourceUrl: string; license: string; attribution: string; copyrightStatus: 'PENDING' | 'OPEN_LICENSE' };
 type SourceView = 'search' | 'generate' | 'library';
 type PlanningRoute = { scope: string; provider: string; model: string };
 type QuantityMode = 'AUTO' | 'MANUAL';
@@ -50,7 +50,7 @@ type VisualStyleDefinition = (typeof visualStyles)[number];
 function VisualStylePreview({ style, large = false }: { style: VisualStyleDefinition; large?: boolean }) {
   const [failed, setFailed] = useState(false);
   return <span className={'visual-style-preview' + (large ? ' large' : '')} data-style={style.id}>
-    {!failed && style.previewImage ? <img src={style.previewImage} alt={`${style.name}风格的多平台配图案例`} onError={() => setFailed(true)}/> : <span className="visual-style-preview-missing"><Image size={large ? 26 : 18}/><b>案例图待生成</b></span>}
+    {!failed && style.previewImage ? <img src={style.previewImage} alt={`${style.name}艺术方向案例`} onError={() => setFailed(true)}/> : <span className="visual-style-preview-missing"><Image size={large ? 26 : 18}/><b>方向案例待生成</b></span>}
   </span>;
 }
 
@@ -77,6 +77,7 @@ function safePlan(items: unknown): CreativeVisualPlanItem[] {
     contentBlocks: Array.isArray(item.contentBlocks) ? item.contentBlocks : [],
     references: Array.isArray(item.references) ? item.references : [],
     prompt: String(item.prompt ?? ''),
+    size: visualImageSize('WECHAT', item.role),
     assetId: item.assetId ?? null,
   }));
 }
@@ -113,6 +114,9 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<ImageSearchResult[]>([]);
   const [searchBusy, setSearchBusy] = useState(false);
+  const [searchAttempted, setSearchAttempted] = useState(false);
+  const [searchProvider, setSearchProvider] = useState('');
+  const [searchError, setSearchError] = useState('');
   const [importingId, setImportingId] = useState<string | null>(null);
   const [generateBusy, setGenerateBusy] = useState(false);
   const [referencePickerOpen, setReferencePickerOpen] = useState(false);
@@ -128,7 +132,7 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
   const saveQueue = useRef<Promise<ContentDraft>>(Promise.resolve(draft));
   const visualAssets = useMemo(() => assets.filter(usableVisualReference), [assets]);
   const activeItem = plan.find((item) => item.id === activeItemId) ?? plan[0];
-  const activePrompt = String(activeItem?.prompt ?? '').trim();
+  const activePrompt = activeItem ? buildVisualGenerationSpec(activeItem, { platform, title: draft.title }, activeItem.generationMode, styleProfile).prompt.trim() : '';
   const assignedAsset = activeItem?.assetId ? visualAssets.find((item) => item.id === activeItem.assetId) : undefined;
   const assignedAssetSrc = assignedAsset ? fileUrls[assignedAsset.id] : undefined;
   const referenceAssets = activeItem?.references.map((item) => ({ config: item, asset: visualAssets.find((asset) => asset.id === item.assetId) })).filter((item) => item.asset) ?? [];
@@ -141,7 +145,7 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
   useEffect(() => {
     const projectKey = `${project.id}:${platform}`;
     const switchedProject = hydratedProjectKey.current !== projectKey;
-    const persisted = persistedVisual.planVersion === VISUAL_PLAN_VERSION ? safePlan(persistedVisual.plan) : [];
+    const persisted = Number(persistedVisual.planVersion ?? 0) <= VISUAL_PLAN_VERSION ? safePlan(persistedVisual.plan) : [];
     const legacy = safePlan(persistedVisual.plan);
     const planBodyItemCount = legacy.filter((item) => item.role === 'BODY' || item.role === 'CARD').length;
     const hasSavedCount = Number.isInteger(persistedVisual.bodyItemCount) && Number(persistedVisual.bodyItemCount) >= countRange.min && Number(persistedVisual.bodyItemCount) <= countRange.max;
@@ -161,6 +165,9 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
     if (switchedProject) {
       setSearchQuery(persisted[0]?.searchQueries[0] ?? '');
       setSearchResults([]);
+      setSearchAttempted(false);
+      setSearchProvider('');
+      setSearchError('');
       setSourceView('search');
       setReferencePickerOpen(false);
       setPlanNeedsRefresh(quantityNeedsRefresh);
@@ -175,12 +182,13 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
 
   const persistVisual = (snapshot: VisualSnapshot, workflowStatus = persistedVisual.workflowStatus) => {
     const queued = saveQueue.current.catch(() => draftRef.current).then(async () => {
+      const compiledPlan = snapshot.plan.map((item) => updateVisualPlanItem(item, {}, { platform, title: draftRef.current.title }, snapshot.styleProfile));
       let saved = await webDrafts.patch(draftRef.current.id, {
         revision: draftRef.current.revision,
-        visualPlan: { planVersion: VISUAL_PLAN_VERSION, plan: snapshot.plan, styleProfile: snapshot.styleProfile, quantityMode: snapshot.quantityMode, bodyItemCount: snapshot.bodyItemCount, ...(workflowStatus ? { workflowStatus } : {}) },
+        visualPlan: { planVersion: VISUAL_PLAN_VERSION, plan: compiledPlan, styleProfile: snapshot.styleProfile, quantityMode: snapshot.quantityMode, bodyItemCount: snapshot.bodyItemCount, ...(workflowStatus ? { workflowStatus } : {}) },
       });
       const seen = new Set<string>();
-      const orderedAssets = snapshot.plan.flatMap((item) => {
+      const orderedAssets = compiledPlan.flatMap((item) => {
         if (!item.assetId || seen.has(item.assetId)) return [];
         seen.add(item.assetId);
         return [{ assetId: item.assetId, role: item.role }];
@@ -253,13 +261,20 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
     if (normalized.length < 2) return;
     const revision = ++searchRevision.current;
     setSearchQuery(normalized);
+    setSearchResults([]);
     setSearchBusy(true);
+    setSearchAttempted(true);
+    setSearchProvider('');
+    setSearchError('');
     setError('');
     try {
       const result = await webCreative.searchImages(normalized);
-      if (revision === searchRevision.current) setSearchResults(result.results);
+      if (revision === searchRevision.current) {
+        setSearchResults(result.results);
+        setSearchProvider(result.provider);
+      }
     } catch (reason) {
-      if (revision === searchRevision.current) setError(reason instanceof Error ? reason.message : '搜索图片失败。');
+      if (revision === searchRevision.current) setSearchError(reason instanceof Error ? reason.message : '搜索图片失败。');
     } finally {
       if (revision === searchRevision.current) setSearchBusy(false);
     }
@@ -269,11 +284,14 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
     setActiveItemId(item.id);
     setSearchQuery(item.searchQueries[0] ?? '');
     setSearchResults([]);
+    setSearchAttempted(false);
+    setSearchProvider('');
+    setSearchError('');
     setNotice('');
     setReferencePickerOpen(false);
   };
 
-  const updateActiveItem = (patch: Partial<CreativeVisualPlanItem>, _compile = false) => {
+  const updateActiveItem = (patch: Partial<CreativeVisualPlanItem>) => {
     if (!activeItem) return;
     setPlan((current) => current.map((item) => item.id === activeItem.id ? { ...item, ...patch } : item));
   };
@@ -294,7 +312,7 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
   const applyProjectStyle = () => {
     changeProjectStyle(styleDraft);
     setStyleDialogOpen(false);
-    setNotice(plan.length ? '项目风格已更新。点击“更新方案”后应用到全部图片。' : '项目风格已更新。');
+    setNotice(plan.length ? '项目艺术方向已更新。点击“更新方案”后应用到全部图片。' : '项目艺术方向已更新。');
   };
 
   const addReference = (reference: ProjectAsset) => {
@@ -331,7 +349,7 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
     try {
       const existing = assets.find((item) => item.sourceUrl?.trim() === result.imageUrl.trim());
       if (existing) { assignAsset(existing); return; }
-      const imported = await webAssets.import({ title: result.title, url: result.imageUrl, sourceNote: `Wikimedia Commons｜许可：${result.license}｜署名：${result.attribution}｜来源：${result.sourceUrl}`, copyrightStatus: 'OPEN_LICENSE' });
+      const imported = await webAssets.import({ title: result.title, url: result.imageUrl, sourceNote: `${result.attribution}｜许可：${result.license}｜来源：${result.sourceUrl}`, copyrightStatus: result.copyrightStatus });
       const linked = await webAssets.link(project.id, imported.asset.id, { role: 'VISUAL', scope: 'IMAGING', title: imported.asset.title, notes: imported.asset.sourceNote, platforms: [platform] });
       assignAsset(linked);
     } catch (reason) { setError(reason instanceof Error ? reason.message : '导入图片失败。'); }
@@ -343,7 +361,7 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
     setGenerateBusy(true); setError('');
     try {
       const { projectAsset } = await webCreative.generateImage(project.id, {
-        platform, prompt: activePrompt, size: activeItem.size,
+        platform: 'WECHAT', visualItemId: activeItem.id,
         assetIds: activeItem.references.map((item) => item.assetId),
       });
       assignAsset(projectAsset);
@@ -395,6 +413,9 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
       const selected = currentItemId ? next.find((item) => item.id === currentItemId) : next[0];
       setSearchQuery(selected?.searchQueries[0] ?? '');
       setSearchResults([]);
+      setSearchAttempted(false);
+      setSearchProvider('');
+      setSearchError('');
       setItemRequest('');
       setNotice(currentItemId ? '这一张已按修改意见重新策划。' : `配图方案已由“配图策划”任务策略完成，共 ${next.length} 张。`);
     } catch (reason) {
@@ -430,7 +451,7 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
     <header className="delivery-workspace-head visual-workspace-head">
       <div><h2>公众号配图</h2><p>{planCountSummary}｜任务策略：公众号配图策划（WECHAT_VISUAL_PLANNING）</p></div>
       <div className="visual-plan-actions">
-        <button className="visual-project-style" type="button" aria-label="设置项目配图风格" onClick={openStyleDialog}><Palette size={15}/><span>项目风格</span><b>{allVisualStyles.find((style) => style.id === styleProfile.preset)?.name ?? visualStyles[0].name}</b></button>
+        <button className="visual-project-style" type="button" aria-label="设置项目艺术方向" onClick={openStyleDialog}><Palette size={15}/><span>艺术方向</span><b>{allVisualStyles.find((style) => style.id === styleProfile.preset)?.name ?? visualStyles[0].name}</b></button>
         <div className="visual-quantity-control">
           <label className="visual-auto-quantity"><input type="checkbox" checked={quantityMode === 'AUTO'} onChange={(event) => changeQuantityMode(event.target.checked ? 'AUTO' : 'MANUAL')}/><span>自动规划数量</span></label>
           {quantityMode === 'MANUAL' && <label className="visual-manual-quantity"><span>正文插图</span><select aria-label="正文插图数量" value={bodyItemCount} onChange={(event) => changeBodyItemCount(Number(event.target.value))}>{Array.from({ length: countRange.max - countRange.min + 1 }, (_, index) => countRange.min + index).map((count) => <option value={count} key={count}>{count} 张</option>)}</select></label>}
@@ -465,7 +486,7 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
       {activeItem && <main className="visual-task-panel">
         <header className="visual-task-head">
           <div><span>{roleName(activeItem.role)} / {visualTypeName(activeItem.visualType)} / {activeItem.placement}</span><h3>{activeItem.title}</h3></div>
-          {assignedAsset && <div className="visual-assigned-asset"><Check size={17}/><span><b>已绑定</b><small>{assignedAsset.title}</small></span><button type="button" title="移除当前配图" onClick={() => updateActiveItem({ assetId: null }, false)}><Trash2 size={15}/></button></div>}
+          {assignedAsset && <div className="visual-assigned-asset"><Check size={17}/><span><b>已绑定</b><small>{assignedAsset.title}</small></span><button type="button" title="移除当前配图" onClick={() => updateActiveItem({ assetId: null })}><Trash2 size={15}/></button></div>}
         </header>
 
         {assignedAsset && sourceView !== 'generate' && <section className="visual-selected-preview" aria-label="当前选中图片预览">
@@ -480,15 +501,18 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
         </nav>
 
         {sourceView === 'search' && <section className="visual-source-workspace">
-          <div className="visual-query-chips">{activeItem.searchQueries.map((query) => <button type="button" className={query === searchQuery ? 'active' : ''} key={query} onClick={() => void runSearch(query)}>{query}</button>)}</div>
+          <div className="visual-query-chips">{activeItem.searchQueries.map((query) => <button type="button" className={query === searchQuery ? 'active' : ''} aria-pressed={query === searchQuery && searchAttempted} disabled={searchBusy} key={query} onClick={() => void runSearch(query)}>{query}</button>)}</div>
           <form className="visual-search-form" onSubmit={(event) => { event.preventDefault(); void runSearch(searchQuery); }}>
             <label><span>搜索词</span><input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} /></label>
             <button className="button primary" type="submit" disabled={searchBusy || searchQuery.trim().length < 2}>{searchBusy ? <LoaderCircle size={16}/> : <Search size={16}/>}搜索</button>
           </form>
-          {searchBusy && !searchResults.length && <div className="visual-result-state"><LoaderCircle size={18}/>正在搜索公开许可图片</div>}
-          {!searchBusy && searchResults.length === 0 && !error && <div className="visual-result-state">选择推荐词或输入关键词后搜索</div>}
+          {searchBusy && <div className="visual-result-state" role="status"><LoaderCircle size={18}/>正在搜索“{searchQuery}”</div>}
+          {!searchBusy && searchError && <div className="visual-result-state error" role="alert">{searchError}</div>}
+          {!searchBusy && searchAttempted && !searchError && searchResults.length === 0 && <div className="visual-result-state">没有找到与“{searchQuery}”匹配的图片，请换一个具体主体或场景。</div>}
+          {!searchBusy && !searchAttempted && <div className="visual-result-state">点击推荐词会立即搜索，也可以输入关键词后搜索</div>}
+          {!searchBusy && searchResults.length > 0 && <div className="visual-search-summary" role="status">{searchProvider} · {searchResults.length} 张候选图</div>}
           {searchResults.length > 0 && <div className="visual-search-grid">{searchResults.map((result) => <article className="visual-search-card" key={result.id}>
-            <button className="visual-search-preview-button" type="button" onClick={() => setPreviewAsset({ id: '', kind: 'IMAGE', origin: 'WEB_IMPORT', status: 'ACTIVE', title: result.title, originalFilename: result.title, mimeType: 'image/jpeg', sizeBytes: 0, sha256: '', sourceUrl: result.imageUrl, sourceNote: result.sourceUrl, copyrightStatus: 'OPEN_LICENSE', projectCount: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() })}><img src={result.thumbnailUrl} alt=""/></button><div><b>{result.title}</b><small>{result.license}</small></div>
+            <button className="visual-search-preview-button" type="button" onClick={() => setPreviewAsset({ id: '', kind: 'IMAGE', origin: 'WEB_IMPORT', status: 'ACTIVE', title: result.title, originalFilename: result.title, mimeType: 'image/jpeg', sizeBytes: 0, sha256: '', sourceUrl: result.imageUrl, sourceNote: result.sourceUrl, copyrightStatus: result.copyrightStatus, projectCount: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() })}><img src={result.thumbnailUrl} alt=""/></button><div><b>{result.title}</b><small>{result.license}</small></div>
             <footer><a href={result.sourceUrl} target="_blank" rel="noreferrer">查看来源</a><button className="button" type="button" disabled={importingId !== null} onClick={() => void importResult(result)}>{importingId === result.id ? <LoaderCircle size={15}/> : <Check size={15}/>}用于此处</button></footer>
           </article>)}</div>}
         </section>}
@@ -537,16 +561,16 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
 
     {styleDialogOpen && <div className="visual-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setStyleDialogOpen(false); }}>
       <section className="visual-style-dialog" role="dialog" aria-modal="true" aria-labelledby="visual-style-dialog-title">
-        <header><div><h2 id="visual-style-dialog-title">项目配图风格</h2><span>{visualStyles.length} 套案例模板</span></div><button className="icon-button" type="button" aria-label="关闭风格设置" onClick={() => setStyleDialogOpen(false)}><X size={18}/></button></header>
+        <header><div><h2 id="visual-style-dialog-title">项目艺术方向</h2><span>{visualStyles.length} 套全画幅视觉案例</span></div><button className="icon-button" type="button" aria-label="关闭艺术方向设置" onClick={() => setStyleDialogOpen(false)}><X size={18}/></button></header>
         <div className="visual-style-dialog-body">
-          <nav className="visual-style-tabs" aria-label="风格分类">{visualStyleGroups.map((group) => <button type="button" className={group.id === activeStyleGroup ? 'active' : ''} key={group.id} onClick={() => setActiveStyleGroup(group.id)}><span>{group.name}</span><small>{group.styles.length}</small></button>)}</nav>
+          <nav className="visual-style-tabs" aria-label="艺术方向分类">{visualStyleGroups.map((group) => <button type="button" className={group.id === activeStyleGroup ? 'active' : ''} key={group.id} onClick={() => setActiveStyleGroup(group.id)}><span>{group.name}</span><small>{group.styles.length}</small></button>)}</nav>
           <div className="visual-style-browser">
-            <section className="visual-style-gallery" aria-label={visibleStyleGroup.name + '案例模板'}>
+            <section className="visual-style-gallery" aria-label={visibleStyleGroup.name + '艺术方向'}>
               {visibleStyleGroup.styles.map((style) => <button aria-label={style.name + '：' + style.description} className={'visual-style-card' + (styleDraft.preset === style.id ? ' active' : '')} type="button" key={style.id} onClick={() => setStyleDraft((current) => ({ ...current, preset: style.id }))}><VisualStylePreview style={style}/><span className="visual-style-card-copy"><b>{style.name}</b><small>{style.description}</small></span>{styleDraft.preset === style.id && <span className="visual-style-selected"><Check size={13}/>已选</span>}</button>)}
             </section>
             <aside className="visual-style-inspector">
               <VisualStylePreview style={selectedStyle} large/>
-              <div className="visual-style-inspector-head"><div><b>{selectedStyle.name}</b><span>{selectedStyle.description}</span></div><span className="visual-style-palette" aria-label="模板配色">{selectedStyle.swatches.map((color) => <i key={color} style={{ background: color }}/>)}</span></div>
+              <div className="visual-style-inspector-head"><div><b>{selectedStyle.name}</b><span>{selectedStyle.description}</span></div><span className="visual-style-palette" aria-label="方向配色">{selectedStyle.swatches.map((color) => <i key={color} style={{ background: color }}/>)}</span></div>
               <label className="visual-style-custom"><span>统一补充要求</span><textarea maxLength={1200} value={styleDraft.customPrompt ?? ''} onChange={(event) => setStyleDraft((current) => ({ ...current, customPrompt: event.target.value }))} placeholder="可补充品牌色、构图偏好、参考质感或必须保留的视觉元素"/><small>{styleDraft.customPrompt?.length ?? 0}/1200</small></label>
             </aside>
           </div>

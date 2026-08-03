@@ -1,4 +1,4 @@
-export const VISUAL_PLAN_VERSION = 7;
+export const VISUAL_PLAN_VERSION = 8;
 
 const platformLabels = {
   WECHAT: '公众号',
@@ -46,7 +46,7 @@ const visualTypeLabels = {
 const stylePresets = [
   {
     id: 'FRESH_EDITORIAL', name: '清新杂志', group: 'EDITORIAL', description: '明亮留白，适合人物、生活方式与通用长文', swatches: ['#F7FAFC', '#B9D8F2', '#F5C8D8', '#24324A'],
-    prompt: '清新中文杂志编辑风格；珍珠白底，雾蓝、浅珊瑚粉与少量深海军蓝；自然光或柔和棚拍光；非对称编辑构图，大面积留白，主体与信息层级分明；纸张轻纹理，边缘干净；避免奶油黄滤镜、廉价素材拼贴和过度装饰',
+    prompt: '明亮当代编辑摄影；珍珠白环境，雾蓝、浅珊瑚粉与少量深海军蓝；柔和北向窗光，纸张与亚麻材质真实；人物动作自然，非对称全画幅构图，空间通透但不空洞，细节清晰克制',
   },
   {
     id: 'BUSINESS_EDITORIAL', name: '商业杂志', group: 'EDITORIAL', description: '克制、成熟，适合财经、公司与行业分析', swatches: ['#F3F5F7', '#25324B', '#7EA0C4', '#C9A86A'],
@@ -54,7 +54,7 @@ const stylePresets = [
   },
   {
     id: 'SWISS_GRID', name: '瑞士网格', group: 'EDITORIAL', description: '强网格与高对比，适合观点、清单与专题封面', swatches: ['#F5F4F0', '#171717', '#E74B3C', '#2F67C7'],
-    prompt: '瑞士国际主义平面设计；暖白底、纯黑文字结构、信号红与钴蓝点缀；严格模数网格，不对称排版，几何块面和明确对齐；无衬线字体气质，字号层级强；哑光印刷质感；避免圆润卡通、渐变光效、装饰性花纹和随意居中',
+    prompt: '瑞士国际主义艺术方向；暖白、纯黑、信号红与钴蓝；把不对称几何、严格对齐和大胆裁切融入真实主体与环境，画面节奏利落，保留哑光印刷颗粒，不出现文字海报感',
   },
   {
     id: 'DOCUMENTARY', name: '纪实报道', group: 'EDITORIAL', description: '真实自然，适合新闻、人物与现场资料', swatches: ['#E7E4DE', '#6F786F', '#A98D70', '#28312F'],
@@ -62,15 +62,15 @@ const stylePresets = [
   },
   {
     id: 'CINEMATIC_DOCUMENTARY', name: '电影纪实', group: 'EDITORIAL', description: '叙事光影更强，适合故事、人物与社会议题', swatches: ['#17212B', '#54707D', '#D49B72', '#D9D5CC'],
-    prompt: '电影感纪实摄影；蓝灰阴影、自然暖肤色和低饱和环境色；使用真实可解释的侧光或窗光，宽银幕式层次和前中后景；克制胶片颗粒与柔和高光；画面有叙事张力但保持事实边界；避免赛博霓虹、过暗看不清、虚构现场和夸张灾难感',
+    prompt: '电影感纪实摄影；蓝灰阴影、自然暖肤色和低饱和环境色；真实可解释的侧光或窗光，前中后景层次清楚；克制胶片颗粒与柔和高光，人物动作真实，画面有叙事张力但保持事实边界，所有关键细节可辨',
   },
   {
     id: 'MINIMAL_KNOWLEDGE', name: '极简知识图', group: 'KNOWLEDGE', description: '少色高密度，适合方法、结构与知识解释', swatches: ['#FAFAF7', '#DCE8F5', '#F3D58A', '#27364A'],
-    prompt: '极简中文知识图解；近白底、雾蓝、浅黄和深灰蓝；信息先于装饰，使用细线、简洁图标、编号与清晰分区；网格稳定，模块间留白充分，手机缩略图仍可读；扁平印刷质感；避免渐变背景、伪3D图表、密集小字、无意义图标和模板化卡片堆叠',
+    prompt: '极简知识型编辑艺术；近白空间，雾蓝、浅黄和深灰蓝；以一个真实核心主体和少量精确物理线索表现收集、筛选与综合，细技术线只作克制辅助，负空间严谨，扁平印刷质感，不做文字化示意板',
   },
   {
     id: 'DATA_VISUAL', name: '数据可视化', group: 'KNOWLEDGE', description: '数据关系优先，适合趋势、对比与财经信息', swatches: ['#F7F9FB', '#2D6CDF', '#22A67A', '#F0B44D'],
-    prompt: '专业编辑数据可视化；冷白底、蓝绿主数据色与琥珀强调色；图表类型必须匹配数据关系，坐标、单位、图例和来源区清晰；关键数字优先，辅助线克制，颜色具有一致语义；避免仪表盘截图、3D饼图、彩虹配色、虚构精确数据和无依据趋势线',
+    prompt: '数据启发的编辑艺术；冷白、清晰蓝绿与一个琥珀色落点；让照片、笔记或真实对象在空间中呈现汇入、过滤和重组的可见运动，色彩语义一致，景深清楚，关系准确，不做仪表盘或信息面板',
   },
   {
     id: 'BLUEPRINT_DIAGRAM', name: '蓝图图解', group: 'KNOWLEDGE', description: '工程结构感，适合技术原理、流程与系统关系', swatches: ['#EAF2F7', '#315A78', '#7CA5BC', '#F2B66D'],
@@ -78,15 +78,15 @@ const stylePresets = [
   },
   {
     id: 'HAND_DRAWN_NOTES', name: '手绘笔记', group: 'KNOWLEDGE', description: '亲和、有温度，适合教程、读书与个人经验', swatches: ['#FFFDF5', '#466B5B', '#E5A65B', '#D97873'],
-    prompt: '整洁的手绘知识笔记；柔白纸张、墨绿线条、橙黄和珊瑚红重点；真实手写线条气质但文字必须清晰，使用箭头、圈注、小图标与分区框建立阅读路径；轻微纸纤维质感；避免儿童涂鸦、过多贴纸、荧光笔铺满和无法识别的手写字',
+    prompt: '干净的手绘编辑纪实；暖白纸、墨绿色线条、赭黄与珊瑚红点缀；以有轻重和停顿的观察性线条描绘人物整理真实资料，箭头和圈线只作为无文字动作痕迹，保留笔压与纸纤维，成熟克制',
   },
   {
     id: 'RETRO_POP', name: '清新波普怀旧', group: 'ILLUSTRATION', description: '马卡龙撞色与复古印刷，轻快但不俗气', swatches: ['#BFE3E0', '#F7B7C5', '#F6D76B', '#315D8A'],
-    prompt: '清新波普怀旧编辑插画；薄荷绿、婴儿蓝、珊瑚粉、奶油黄与少量深蓝描边，禁止棕黄旧照片主色；采用复古丝网印刷网点、剪纸几何块、粗细有节奏的黑色轮廓和轻微错版质感；构图活泼但信息区整齐，主体简洁有记忆点；避免霓虹渐变、厚重做旧、廉价卡通和元素堆满',
+    prompt: '成熟的复古波普编辑插画；薄荷绿、婴儿蓝、珊瑚粉、奶油黄与深海军蓝；丝网印刷网点、轻微错版和大胆裁切形状贯穿全画面，人物动作有活力，扁平油墨质感，视觉重心明确但不幼稚',
   },
   {
     id: 'PAPER_COLLAGE', name: '纸感拼贴', group: 'ILLUSTRATION', description: '照片与纸片混合，适合人文、历史与观点表达', swatches: ['#F1EEE8', '#91A8A4', '#D88373', '#3B4252'],
-    prompt: '现代纸感编辑拼贴；灰白纸、鼠尾草绿、陶土红和深灰蓝；使用真实照片裁片、色纸、撕边和少量铅笔线组合，保持清楚的视觉中心与层次；纸张阴影浅而真实；避免素材随意堆叠、复古棕色滤镜、邮票贴纸泛滥和版权标识',
+    prompt: '现代纸感编辑拼贴；灰白纸、鼠尾草绿、陶土红和深灰蓝；以纪实照片裁片、撕边色纸和少量铅笔线组成单一连贯场景，视觉中心清楚，纸张阴影浅而真实，避免剪贴簿式杂乱',
   },
   {
     id: 'FLAT_GEOMETRIC', name: '扁平几何', group: 'ILLUSTRATION', description: '简洁现代，适合概念、商业与产品场景', swatches: ['#F6F7F2', '#5A8DEE', '#64C2A6', '#F2A65A'],
@@ -94,11 +94,11 @@ const stylePresets = [
   },
   {
     id: 'SOFT_3D', name: '柔和 3D', group: 'ILLUSTRATION', description: '有体积但不过分卡通，适合产品与概念主视觉', swatches: ['#F2F5F7', '#9CC8E8', '#B9D6B0', '#F0B6A8'],
-    prompt: '柔和编辑型3D视觉；冷白背景、雾蓝、嫩绿和浅珊瑚；使用哑光材质、柔和环境光、清晰接触阴影和简洁实体模型；主体集中，空间关系可解释，边缘精致；避免塑料玩具感、糖果色过饱和、漂浮球体装饰、金属炫光和复杂科幻场景',
+    prompt: '柔和编辑型 3D 场景；冷白空间，雾蓝、嫩绿和浅珊瑚；哑光陶瓷与纸张材质，柔和全局光和精确接触阴影；人物、资料和工具之间的物理关系清楚，雕塑式构图优雅，不呈现塑料玩具感',
   },
   {
     id: 'NEW_CHINESE', name: '新中式', group: 'CULTURAL', description: '东方秩序与现代编辑感，适合文化、国学与品牌', swatches: ['#F4F1EA', '#4D665A', '#B84A3A', '#28312E'],
-    prompt: '现代新中式编辑视觉；宣纸白、松石灰绿、朱砂红和墨黑；使用东方留白、竖向节奏、窗棂或器物轮廓等克制元素，与现代网格结合；材质为细腻纸张、木、陶或织物；避免宫廷金色堆砌、龙凤祥云滥用、影楼古风和仿古棕黄滤镜',
+    prompt: '当代新中式编辑艺术；宣纸白、矿物灰绿、朱砂红和墨黑；现代人物工作场景中使用克制的木、陶、纸与织物，东方负空间和纵向节奏融入横向全画幅，气质安静清醒，不用古装或民俗装饰堆砌',
   },
   {
     id: 'INK_WASH', name: '水墨留白', group: 'CULTURAL', description: '轻墨与大留白，适合诗词、哲思与人文内容', swatches: ['#F7F6F1', '#262B2C', '#899A91', '#B75A4A'],
@@ -146,15 +146,15 @@ const stylePresets = [
   },
   {
     id: 'MACARON_CARTOON', name: '马卡龙卡通', group: 'ILLUSTRATION', description: '轻松亲和，适合生活方式、工具教程与小红书图文', swatches: ['#FFF9F2', '#A8DDE0', '#F5B8CA', '#F4D56A'],
-    prompt: '清新马卡龙编辑卡通；珍珠白底，薄荷青、樱花粉、奶油黄与少量深蓝描边；人物和物件造型简洁、有自然动作与真实使用关系，轮廓圆润但不幼儿化；画面有明确前中后层次和标题安全区；避免廉价贴纸感、过度卖萌、表情包、糖果色过饱和、漂浮装饰和素材库套图感',
+    prompt: '精致的成人编辑卡通；珍珠白、低饱和薄荷青、樱花粉与柔和奶油黄；创作者人物表情自然，桌面物件简化但准确，线条自信，前中后层次清楚，圆润造型保持克制，呈现高级杂志插画质感',
   },
   {
     id: 'PIXEL_RETRO', name: '像素复古', group: 'ILLUSTRATION', description: '像素叙事与现代排版，适合科技、游戏、历史回看与轻科普', swatches: ['#F5F0E8', '#345995', '#E86A5A', '#58A88A'],
-    prompt: '现代编辑型像素艺术；使用有限但清新的复古调色板、清晰像素网格和有层次的场景叙事，主体轮廓在手机缩略图中仍然可辨；像素插画与现代留白网格结合，保留标题安全区；避免低清放大截图、霓虹紫蓝渐变、杂乱游戏UI、版权角色、8位素材拼盘和无法辨认的小字',
+    prompt: '现代编辑型像素艺术；暖白、钴蓝、莓红与青绿的有限色板；用清晰而有意图的像素簇表现连贯创作者场景，人物动作和空间深度明确，局部细节精确，整体构图当代而完整，不出现游戏界面或版权角色',
   },
   {
     id: 'CYBER_TECH', name: '清透赛博', group: 'TECHNOLOGY', description: '高对比数字空间，适合前沿科技、未来产业与数字文化', swatches: ['#0B1020', '#20D9D2', '#F24F8A', '#E8F4FF'],
-    prompt: '清透克制的现代赛博编辑视觉；深墨黑与冷白建立强对比，以电光青和少量玫红作功能强调；使用真实可解释的数字界面层次、透明材质、精确透视和细密光线，主体清楚并保留标题安全区；避免通篇紫蓝渐变、代码雨、发光大脑、廉价HUD堆叠、未来城市套图和过暗细节丢失',
+    prompt: '明亮克制的赛博编辑摄影；石墨灰与冷白为主，电光青配极少玫红；透明光学材质和精确光路自然融入真实人物工作场景，面部与物件细节清楚，技术氛围优雅，不用代码雨、廉价 HUD 或过暗霓虹',
   },
 ];
 
@@ -317,7 +317,7 @@ function bodyCandidates(body, subject, coreMessage) {
   return unique([...sections, ...clauses, coreMessage, subject]);
 }
 
-function sizeFor(platform, role) {
+export function visualImageSize(platform, role) {
   if (platform === 'XIAOHONGSHU') return '3:4';
   if (platform === 'WEIBO') return '1:1';
   if (role === 'BODY') return '4:3';
@@ -338,6 +338,12 @@ function stylePrompt(stylePreset, styleProfile = { preset: 'FRESH_EDITORIAL' }) 
   const presetPrompt = stylePresets.find((item) => item.id === resolved)?.prompt ?? stylePresets[0].prompt;
   const customPrompt = clean(styleProfile?.customPrompt).slice(0, 1_200);
   return customPrompt ? `${presetPrompt}；项目统一补充要求：${customPrompt}` : presetPrompt;
+}
+
+function projectContinuityPrompt(stylePreset, styleProfile) {
+  const resolved = stylePreset && stylePreset !== 'INHERIT' ? stylePreset : styleProfile?.preset ?? 'FRESH_EDITORIAL';
+  const name = stylePresets.find((item) => item.id === resolved)?.name ?? stylePresets[0].name;
+  return `本图属于同一项目的“${name}”视觉系列，必须与项目其他图片保持一致的主色比例、光线方向、材质处理、镜头气质和细节完成度；只改变当前段落要求的主体与场景，不自行混入其他艺术风格`;
 }
 
 function templateFor(type, templatePreset) {
@@ -424,6 +430,7 @@ export function buildVisualGenerationSpec(item, context, mode = item.generationM
   const roleLabel = item.role === 'COVER' ? '封面' : item.role === 'CARD' ? '图文卡片' : item.role === 'MAIN' ? '主图' : '正文插图';
   const avoid = item.avoidConcepts.length ? `不要重复表现：${item.avoidConcepts.join('、')}。` : '';
   const style = stylePrompt(item.stylePreset, styleProfile);
+  const continuity = projectContinuityPrompt(item.stylePreset, styleProfile);
   const template = templateFor(item.visualType, item.templatePreset);
   const structure = structureInstruction(item);
   const reference = referenceInstruction(item.references);
@@ -433,12 +440,12 @@ export function buildVisualGenerationSpec(item, context, mode = item.generationM
     const labelText = labels.join('、');
     return {
       generationMode: mode,
-      prompt: `为${platformLabel}内容《${title}》制作一张${roleLabel}${visualTypeLabels[item.visualType]}。画面内容优先：${item.focus}。用图形、对象、空间关系、时间顺序或数据形态直接讲清楚“${item.purpose}”，不要做成文字型 PPT、课程卡片或大段文字海报。视觉风格：${style}。构图参考：${template.prompt}。${structure}图内文字必须极少：${item.role === 'COVER' || item.role === 'MAIN' || item.role === 'CARD' ? `只允许一个短标题“${headline}”` : '不要文章标题'}${labelText ? `，以及必要短标签“${labelText}”` : ''}；不生成正文段落、解释句、序号清单或装饰性文字。平台版式：${infographicStyle(platform)}。${reference}${avoid}不得出现错别字、乱码、文字变形、水印、Logo、二维码；不得自行添加数据、机构、人物引语或未经正文支持的结论。`,
+      prompt: `为${platformLabel}内容《${title}》制作一张${roleLabel}${visualTypeLabels[item.visualType]}。画面内容优先：${item.focus}。用图形、对象、空间关系、时间顺序或数据形态直接讲清楚“${item.purpose}”，不要做成文字型 PPT、课程卡片或大段文字海报。项目统一视觉方向：${style}。系列一致性：${continuity}。构图参考：${template.prompt}。${structure}图内文字必须极少：${item.role === 'COVER' || item.role === 'MAIN' || item.role === 'CARD' ? `只允许一个短标题“${headline}”` : '不要文章标题'}${labelText ? `，以及必要短标签“${labelText}”` : ''}；不生成正文段落、解释句、序号清单或装饰性文字。平台版式：${infographicStyle(platform)}。${reference}${avoid}不得出现错别字、乱码、文字变形、水印、Logo、二维码；不得自行添加数据、机构、人物引语或未经正文支持的结论。`,
     };
   }
   return {
     generationMode: mode,
-    prompt: `为${platformLabel}内容《${title}》制作一张${roleLabel}${visualTypeLabels[item.visualType]}。画面主体：${item.focus}。先表现可见的主体、动作、环境和关键关系，让读者不看文字也能理解“${item.purpose}”。视觉风格：${style}。构图参考：${template.prompt}。${visualStyle(platform, item.role)}。${reference}${avoid}图片内容必须占主导，不做文字型 PPT、信息卡片或大段文字海报；只生成视觉素材，不在图片内生成文字、Logo、二维码或水印。画面真实、准确、干净，细节清晰；涉及新闻事件时采用概念视觉，不伪造新闻现场，不虚构具体机构标识。`,
+    prompt: `为${platformLabel}内容《${title}》制作一张${roleLabel}${visualTypeLabels[item.visualType]}。画面主体：${item.focus}。先表现可见的主体、动作、环境和关键关系，让读者不看文字也能理解“${item.purpose}”。项目统一视觉方向：${style}。系列一致性：${continuity}。构图参考：${template.prompt}。${visualStyle(platform, item.role)}。${reference}${avoid}图片内容必须占主导，不做文字型 PPT、信息卡片或大段文字海报；只生成视觉素材，不在图片内生成文字、Logo、二维码或水印。画面真实、准确、干净，细节清晰；涉及新闻事件时采用概念视觉，不伪造新闻现场，不虚构具体机构标识。`,
   };
 }
 
@@ -455,6 +462,7 @@ export function updateVisualPlanItem(item, patch, context, styleProfile = { pres
     sourceExcerpt: patch.sourceExcerpt ?? item.sourceExcerpt ?? '',
     contentBlocks: patch.contentBlocks ?? item.contentBlocks ?? contentBlocksFor(visualType, item.sourceExcerpt ?? item.purpose, item.focus, item.purpose),
     references: patch.references ?? item.references ?? [],
+    size: visualImageSize(context.platform, item.role),
   };
   delete next.negativePrompt;
   return { ...next, ...buildVisualGenerationSpec(next, context, next.generationMode, styleProfile) };
@@ -532,7 +540,7 @@ export function buildVisualPlan(input, platform, options = {}) {
     generationMode: defaultGenerationMode(coverRole, coverType), informationPoints: coverPurposePoints,
     stylePreset: 'INHERIT', templatePreset: visualTemplatesFor(coverType)[0].id,
     sourceExcerpt: clean(coreMessage || title), contentBlocks: contentBlocksFor(coverType, coreMessage || title, coverFocus, coverPurpose), references: [],
-    size: sizeFor(platform, coverRole), assetId: null,
+    size: visualImageSize(platform, coverRole), assetId: null,
   };
   plan.push({ ...coverItem, ...buildVisualGenerationSpec(coverItem, { platform, title }) });
 
@@ -563,7 +571,7 @@ export function buildVisualPlan(input, platform, options = {}) {
       generationMode: defaultGenerationMode(role, visualType), informationPoints,
       stylePreset: 'INHERIT', templatePreset: visualTemplatesFor(visualType)[0].id,
       sourceExcerpt: clean(section), contentBlocks: contentBlocksFor(visualType, section, focus, purpose), references: [],
-      size: sizeFor(platform, role), assetId: null,
+      size: visualImageSize(platform, role), assetId: null,
     };
     plan.push({ ...item, ...buildVisualGenerationSpec(item, { platform, title }) });
   }

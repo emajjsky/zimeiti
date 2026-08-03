@@ -64,12 +64,13 @@ async function searchTavilyImages(workspaceId, queryText) {
     const description = typeof image === 'object' ? String(image?.description ?? '').trim() : '';
     return [{
       id: `tavily-${index}-${crypto.createHash('sha256').update(url).digest('hex').slice(0, 12)}`,
-      title: description || `网页候选图 ${index + 1}`,
+      title: (description || `网页候选图 ${index + 1}`).slice(0, 200),
       thumbnailUrl: url,
       imageUrl: url,
       sourceUrl: url,
       license: '使用前确认版权与授权',
       attribution: 'Tavily 网页图片检索',
+      copyrightStatus: 'PENDING',
     }];
   }).slice(0, 12);
 }

@@ -49,6 +49,7 @@ export interface VisualTemplateDefinition {
 }
 
 export function visualPlanCountRange(platform: Exclude<Platform, 'VIDEO_CHANNEL'>): VisualPlanCountRange;
+export function visualImageSize(platform: Exclude<Platform, 'VIDEO_CHANNEL'>, role: CreativeVisualPlanItem['role']): CreativeVisualPlanItem['size'];
 export function visualStylePresets(): VisualStylePresetDefinition[];
 export function visualTemplatesFor(type: CreativeVisualType): VisualTemplateDefinition[];
 export function buildVisualGenerationSpec(item: CreativeVisualPlanItem, context: VisualGenerationContext, mode?: CreativeVisualGenerationMode, styleProfile?: CreativeVisualStyleProfile): VisualGenerationSpec;

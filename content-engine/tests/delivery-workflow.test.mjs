@@ -82,18 +82,21 @@ test('发布稿按渠道保留 HTML 或 Markdown 格式，且不需要外部平�
 
 test('视觉导演保存完整策划字段并支持参考图真实图生图', () => {
   const api = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
+  const generation = fs.readFileSync(new URL('../server/services/visual-generation.cjs', import.meta.url), 'utf8');
   const client = fs.readFileSync(new URL('../src/data/webApi.ts', import.meta.url), 'utf8');
-  assert.match(api, /assetIds:\s*z\.array\(z\.string\(\)\.uuid\(\)\)\.max\(3\)/);
+  assert.match(generation, /z\.array\(z\.string\(\)\.uuid\(\)\)\.max\(3\)/);
+  assert.match(generation, /visualItemId:/);
+  assert.match(generation, /resolveWechatVisualGenerationSpec/);
   assert.match(api, /stylePreset:\s*z\.union\(\[z\.literal\('INHERIT'\), visualStylePreset\]\)/);
   assert.match(api, /customPrompt:\s*z\.string\(\)\.trim\(\)\.max\(1_200\)/);
   assert.match(api, /contentBlocks:\s*z\.array/);
-  assert.ok((api.match(/prompt:\s*z\.string\(\)\.trim\(\)\.min\(4\)\.max\(8_000\)/g) ?? []).length >= 2);
+  assert.match(generation, /prompt:\s*z\.string\(\)\.trim\(\)\.min\(4\)\.max\(8_000\)/);
   assert.match(api, /references:\s*z\.array/);
   assert.match(api, /assetStore\.listProject\(workspace\.id, projectId\)/);
   assert.match(api, /assetStore\.getStored\(workspace\.id, assetId\)/);
-  assert.match(api, /input\.assetIds\.length \? 'edit' : 'generate'/);
+  assert.match(api, /generationSpec\.assetIds\.length \? 'edit' : 'generate'/);
   assert.match(api, /args\.push\('--image', image\)/);
-  assert.match(api, /operation = input\.assetIds\.length \? 'IMAGE_TO_IMAGE' : 'TEXT_TO_IMAGE'/);
+  assert.match(api, /operation = generationSpec\.assetIds\.length \? 'IMAGE_TO_IMAGE' : 'TEXT_TO_IMAGE'/);
   assert.match(client, /assetIds\?: string\[\]/);
   assert.match(client, /planVisual:/);
   assert.match(api, /VISUAL_PLANNING_SCOPE/);

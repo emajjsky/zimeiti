@@ -3,7 +3,7 @@ import test from 'node:test';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { buildVisualPlanningPrompt, parseVisualPlanningContent, mergePlannedItems, validateVisualPlanImageCount, VISUAL_PLANNING_TOOL_NAME } = require('../server/services/visual-planning.cjs');
+const { buildVisualPlanningPrompt, parseVisualPlanningContent, mergePlannedItems, compileVisualPlan, validateVisualPlanImageCount, VISUAL_PLANNING_TOOL_NAME } = require('../server/services/visual-planning.cjs');
 
 const item = (role, title, placement) => ({
   role,
@@ -12,7 +12,7 @@ const item = (role, title, placement) => ({
   purpose: '帮助普通读者理解中继卫星如何扩大航天器测控覆盖范围',
   visualType: role === 'COVER' ? 'HERO_VISUAL' : 'CONCEPT_DIAGRAM',
   focus: '中继卫星位于航天器与地面站之间，转发测控指令和业务数据',
-  searchQueries: ['中继卫星 地面站 通信', '航天器 数据中继 示意图'],
+  searchQueries: ['中继卫星 地面站 通信', '航天器 数据中继 传输'],
   generationMode: role === 'COVER' ? 'ILLUSTRATION' : 'INFOGRAPHIC',
   informationPoints: ['航天器把数据发送给中继卫星', '中继卫星把数据转发到地面站'],
   sourceExcerpt: '中继卫星承担航天器与地面站之间的数据转发任务，能够扩展测控覆盖范围。',
@@ -21,8 +21,6 @@ const item = (role, title, placement) => ({
     { label: '中继卫星', detail: '在轨接收并转发数据' },
     { label: '地面站', detail: '接收数据并发送控制指令' },
   ],
-  prompt: '为公众号制作一张中继卫星通信图，画面明确展示航天器、中继卫星和地面站三者的空间关系与双向数据链路，采用清新编辑风格，主体清楚，信息层级准确，所有简体中文必须严格使用给定文案，不添加正文没有的数据、标识或结论。',
-  size: role === 'COVER' ? '16:9' : '4:3',
 });
 
 test('配图策划提示词读取完整正文并禁止空泛占位词', () => {
@@ -36,13 +34,17 @@ test('配图策划提示词读取完整正文并禁止空泛占位词', () => {
   assert.match(prompt.message, /薄荷绿边框/);
   assert.match(prompt.system, /图片内容为主、文字为辅/);
   assert.match(prompt.system, /禁止把模板、矢量、图标/);
-  assert.match(prompt.system, /最多四个必要短标签/);
+  assert.match(prompt.system, /最终生图指令、项目统一艺术方向和图片比例由系统确定性编译/);
   assert.match(prompt.message, /ILLUSTRATION 的 contentBlocks 必须为 \[\]/);
   assert.match(prompt.message, /封面 1 张 \+ 正文插图 2 张/);
   assert.match(prompt.message, /bodyItemCount 不是总数/);
   assert.match(prompt.message, /"totalImageCount":3/);
   assert.equal(prompt.requiredToolName, VISUAL_PLANNING_TOOL_NAME);
   assert.equal(prompt.tools[0].function.name, VISUAL_PLANNING_TOOL_NAME);
+  const toolItem = prompt.tools[0].function.parameters.properties.items.items;
+  assert.ok(!toolItem.required.includes('prompt') && !toolItem.required.includes('size'));
+  assert.equal(toolItem.properties.prompt, undefined);
+  assert.equal(toolItem.properties.size, undefined);
   assert.match(prompt.system, /必须调用且只能调用一次 submit_visual_plan/);
 });
 
@@ -139,4 +141,49 @@ test('完整重策划保留已选图片，单图重策划只替换当前项', ()
   assert.equal(single[0].title, '文章封面');
   assert.equal(single[1].title, '时间线');
   assert.equal(single[1].assetId, current[1].assetId);
+});
+
+test('单图重策划拒绝模型改变当前配图角色', () => {
+  const wrongRole = JSON.stringify({ strategy: '只调整当前画面的具体主体和场景', items: [item('COVER', '错误封面', '正文第一段后')] });
+  assert.throws(() => parseVisualPlanningContent(wrongRole, {
+    platform: 'WECHAT',
+    quantityMode: 'AUTO',
+    singleItem: true,
+    expectedRole: 'BODY',
+  }), /单图重策划必须保持 BODY 角色/);
+});
+
+test('单图合并始终保留原配图角色', () => {
+  const current = [
+    { ...item('COVER', '封面', '发布首图'), id: 'wechat-cover', assetId: null },
+    { ...item('BODY', '正文图', '正文第一段后'), id: 'wechat-body-1', assetId: null },
+  ];
+  const merged = mergePlannedItems({
+    platform: 'WECHAT',
+    plannedItems: [item('COVER', '模型误报角色', '正文第一段后')],
+    currentPlan: current,
+    currentItemId: 'wechat-body-1',
+  });
+  assert.equal(merged[1].role, 'BODY');
+});
+
+test('系统统一编译公众号画幅和整套艺术方向，忽略模型自带比例与提示词', async () => {
+  const merged = mergePlannedItems({
+    platform: 'WECHAT',
+    plannedItems: [
+      { ...item('COVER', '文章封面', '发布首图'), size: '1:1', prompt: '模型自行提交的封面提示词' },
+      { ...item('BODY', '正文插图 1', '正文第一段后'), size: '3:4', prompt: '模型自行提交的正文提示词' },
+    ],
+  });
+  const compiled = await compileVisualPlan({
+    platform: 'WECHAT',
+    title: '中继卫星有什么用',
+    items: merged,
+    styleProfile: { preset: 'CYBER_TECH', customPrompt: '统一使用低饱和青色光线' },
+  });
+  assert.deepEqual(compiled.map((entry) => entry.size), ['16:9', '4:3']);
+  assert.ok(compiled.every((entry) => /项目统一视觉方向/.test(entry.prompt)));
+  assert.ok(compiled.every((entry) => /清透赛博/.test(entry.prompt) && /低饱和青色光线/.test(entry.prompt)));
+  assert.ok(compiled.every((entry) => /系列一致性/.test(entry.prompt)));
+  assert.ok(compiled.every((entry) => !/模型自行提交/.test(entry.prompt)));
 });

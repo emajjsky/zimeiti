@@ -29,7 +29,7 @@ foreach ($item in $items) {
     continue
   }
 
-  $prompt = $sharedPrompt + [Environment]::NewLine + 'Visual direction: ' + $item.style + '. Deliver a polished production template, not a concept sketch.'
+  $prompt = $sharedPrompt + [Environment]::NewLine + 'Art direction: ' + $item.style + '. Deliver a finished standalone editorial artwork, not a template or concept sketch.'
   Write-Host "Generating: $($item.id)"
   & python $generatorScript --prompt $prompt --model $Model --size '4:3' --resolution $Resolution --out-dir $outputDir --filename $item.filename
   if ($LASTEXITCODE -ne 0) { throw "Generation failed: $($item.id)" }

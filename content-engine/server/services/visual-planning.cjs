@@ -2,7 +2,7 @@ const { z } = require('zod');
 
 const VISUAL_PLANNING_SCOPE = 'WECHAT_VISUAL_PLANNING';
 const VISUAL_PLANNING_OPERATION = 'WECHAT_VISUAL_PLANNING';
-const VISUAL_PLANNING_PROMPT_VERSION = '1.2.0';
+const VISUAL_PLANNING_PROMPT_VERSION = '2.0.0';
 const VISUAL_PLANNING_TOOL_NAME = 'submit_visual_plan';
 
 const platformNames = {
@@ -30,8 +30,6 @@ const styleNames = {
 const visualType = z.enum(['NEWS_PHOTO', 'HERO_VISUAL', 'CONCEPT_DIAGRAM', 'SCENE', 'MIND_MAP', 'FLOWCHART', 'TIMELINE', 'COMPARISON', 'DATA_CHART', 'QUOTE_CARD', 'INFO_CARD', 'CHECKLIST_CARD']);
 const role = z.enum(['COVER', 'BODY', 'CARD', 'MAIN']);
 const generationMode = z.enum(['ILLUSTRATION', 'INFOGRAPHIC']);
-const size = z.enum(['1:1', '3:4', '4:3', '9:16', '16:9']);
-
 const contentBlockSchema = z.object({
   label: z.string().trim().min(2).max(40),
   detail: z.string().trim().min(6).max(180),
@@ -49,8 +47,6 @@ const plannedItemSchema = z.object({
   informationPoints: z.array(z.string().trim().min(4).max(100)).min(1).max(6),
   sourceExcerpt: z.string().trim().min(8).max(1_200),
   contentBlocks: z.array(contentBlockSchema).max(6),
-  prompt: z.string().trim().min(80).max(6_000),
-  size,
 }).superRefine((item, context) => {
   if (item.generationMode === 'INFOGRAPHIC' && item.contentBlocks.length === 0) {
     context.addIssue({
@@ -81,7 +77,7 @@ const visualPlanningTool = Object.freeze({
           type: 'array', minItems: 1, maxItems: 12,
           items: {
             type: 'object', additionalProperties: false,
-            required: ['role', 'title', 'placement', 'purpose', 'visualType', 'focus', 'searchQueries', 'generationMode', 'informationPoints', 'sourceExcerpt', 'contentBlocks', 'prompt', 'size'],
+            required: ['role', 'title', 'placement', 'purpose', 'visualType', 'focus', 'searchQueries', 'generationMode', 'informationPoints', 'sourceExcerpt', 'contentBlocks'],
             properties: {
               role: { type: 'string', enum: role.options, description: '图片在公众号方案中的角色。完整方案只能是首项 COVER、其余 BODY。' },
               title: { type: 'string', minLength: 2, maxLength: 80, description: '用户可读的具体图片名称。' },
@@ -100,8 +96,6 @@ const visualPlanningTool = Object.freeze({
                   properties: { label: { type: 'string', minLength: 2, maxLength: 40 }, detail: { type: 'string', minLength: 6, maxLength: 180 } },
                 },
               },
-              prompt: { type: 'string', minLength: 80, maxLength: 6000, description: '可直接交给图片模型的最终中文指令，以画面内容为主，默认不生成文字。' },
-              size: { type: 'string', enum: size.options, description: '适合公众号阅读和画面任务的图片比例。' },
             },
           },
         },
@@ -111,7 +105,7 @@ const visualPlanningTool = Object.freeze({
 });
 
 const genericOnly = /^(关键|节点|时间|重点|核心|内容|信息|主题|场景|要点|结论|背景|价值|问题|方法|流程|数据|人物|事件|图片|配图)[一二三四五六七八九十\d\s、，：:.-]*$/;
-const searchNoise = /(模板|矢量|图标|字体|字效|排版|版式|PPT|信息卡|知识卡|海报|素材|图表)/i;
+const searchNoise = /(模板|矢量|图标|字体|字效|排版|版式|PPT|信息卡|知识卡|海报|素材|图表|架构图|示意图|流程图|对比图|框架图|思维导图)/i;
 
 function assertSpecificPlan(plan) {
   const fields = [];
@@ -159,13 +153,16 @@ function quantityInstruction(platform, quantityMode, bodyItemCount, singleItem =
   };
 }
 
-function parseVisualPlanningContent(content, { platform, quantityMode = 'MANUAL', bodyItemCount, singleItem = false } = {}) {
+function parseVisualPlanningContent(content, { platform, quantityMode = 'MANUAL', bodyItemCount, singleItem = false, expectedRole } = {}) {
   if (quantityMode !== 'AUTO' && quantityMode !== 'MANUAL') throw new Error('配图数量模式无效。');
   let value;
   try { value = JSON.parse(stripCodeFence(content)); }
   catch { throw new Error('模型返回的配图方案不是有效 JSON。'); }
   const parsed = assertSpecificPlan(visualPlanSchema.parse(value));
   if (singleItem && parsed.items.length !== 1) throw new Error(`单图重策划必须返回 1 张，实际返回 ${parsed.items.length} 张。`);
+  if (singleItem && expectedRole && parsed.items[0]?.role !== expectedRole) {
+    throw new Error(`单图重策划必须保持 ${expectedRole} 角色，不能改为 ${parsed.items[0]?.role ?? '未知角色'}。`);
+  }
   if (!singleItem && quantityMode === 'AUTO') {
     validateVisualPlanImageCount(platform, parsed.items.length);
     if (parsed.items.length < 3) throw new Error(`自动规划必须包含 1 张封面和至少 2 张正文插图，实际返回 ${parsed.items.length} 张。`);
@@ -198,9 +195,9 @@ function buildVisualPlanningPrompt({ project, platform, quantityMode, bodyItemCo
     '先理解文章叙事和每一段的传播任务，再决定真实场景图、资料图、主体主视觉或确有必要的结构图。整套方案必须以图片内容为主、文字为辅，不能做成文字型 PPT、课程卡片或大段文字海报。',
     '每张图只能完成一个明确任务，必须绑定正文中的具体事实、关系、场景或结论。禁止用“关键、节点、时间、重点、核心、内容、信息”等空词代替具体内容。',
     '只有正文存在明确数据、时间顺序、对比关系或流程时，才能使用数据图、时间线、对比图或流程图；即便如此也应以可视化关系为主，只保留不可缺少的短标签。不得编造任何数据、事实、机构、人物、引语或新闻现场。',
-    '搜索词必须描述能在图片中直接看到的主体、动作、地点、器物或真实场景，优先“专有主体 + 可见动作/场景”。每条搜索词不超过 60 个字符。禁止把模板、矢量、图标、字体、排版、PPT、信息卡、知识卡、海报、素材、图表当作搜索词。不得使用完整句子。',
+    '搜索词必须描述能在图片中直接看到的主体、动作、地点、器物或真实场景，优先“专有主体 + 可见动作/场景”。每条搜索词不超过 60 个字符。禁止把模板、矢量、图标、字体、排版、PPT、信息卡、知识卡、海报、素材、图表、架构图、示意图、流程图、对比图、框架图、思维导图当作搜索词。不得使用完整句子。抽象关系由 AI 生图表达，不去网页图库搜索 PPT 图。',
     'NEWS_PHOTO、HERO_VISUAL、SCENE 等照片或场景画面应使用 ILLUSTRATION，contentBlocks 必须返回空数组；只有需要在图内表达流程、时间、对比、数据或结构关系时才使用 INFOGRAPHIC，此时 contentBlocks 必须包含 1 至 6 个必要短标签及其准确内容。',
-    'prompt 是直接交给图片模型的最终中文指令，必须先写清画面主体、动作、环境、镜头与构图，再写项目风格和平台比例。默认不生成文字；确需图解时只允许一个短标题和最多四个必要短标签，禁止正文段落、说明文字和 PPT 式模块堆叠。不要单独输出负面提示词字段。',
+    '你只负责策划画面主体、动作、环境、关系和正文依据。最终生图指令、项目统一艺术方向和图片比例由系统确定性编译，不得在工具参数中自行提交。',
     `必须调用且只能调用一次 ${VISUAL_PLANNING_TOOL_NAME} 提交最终方案；不要输出普通文本、代码围栏、解释或备选方案。`,
   ].join('\n');
   const message = JSON.stringify({
@@ -248,6 +245,7 @@ function mergePlannedItems({ platform, plannedItems, currentPlan = [], currentIt
       ...item,
       ...replacement,
       id: item.id,
+      role: item.role,
       stylePreset: 'INHERIT',
       templatePreset: 'AI_DIRECTED',
       references: Array.isArray(item.references) ? item.references : [],
@@ -270,6 +268,11 @@ function mergePlannedItems({ platform, plannedItems, currentPlan = [], currentIt
   });
 }
 
+async function compileVisualPlan({ platform, title, items, styleProfile }) {
+  const { updateVisualPlanItem } = await import('../../src/domain/visual-plan.mjs');
+  return items.map((item) => updateVisualPlanItem(item, {}, { platform, title }, styleProfile));
+}
+
 module.exports = {
   VISUAL_PLANNING_SCOPE,
   VISUAL_PLANNING_OPERATION,
@@ -280,5 +283,6 @@ module.exports = {
   buildVisualPlanningPrompt,
   parseVisualPlanningContent,
   mergePlannedItems,
+  compileVisualPlan,
   validateVisualPlanImageCount,
 };

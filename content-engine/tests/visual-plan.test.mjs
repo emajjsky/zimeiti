@@ -230,8 +230,8 @@ test('项目风格库覆盖编辑、知识、插画、文化和科技，并提�
   assert.ok(styles.every((style) => style.caseLabel && style.caseTitle && style.caseMeta));
   const retro = styles.find((style) => style.id === 'RETRO_POP');
   assert.match(retro.prompt, /薄荷绿.*婴儿蓝.*珊瑚粉.*奶油黄/);
-  assert.match(retro.prompt, /丝网印刷网点|错版质感/);
-  assert.match(retro.prompt, /避免霓虹渐变|禁止棕黄/);
+  assert.match(retro.prompt, /丝网印刷网点|轻微错版/);
+  assert.match(retro.prompt, /人物动作.*不幼稚/);
 });
 
 test('正式风格选择器只使用真实案例图清单并覆盖核心视觉方向', () => {
@@ -245,12 +245,24 @@ test('正式风格选择器只使用真实案例图清单并覆盖核心视觉�
   assert.ok(featured.some((style) => style.id === 'MINIMAL_KNOWLEDGE'));
 });
 
-test('genimage 模板清单与正式风格案例路径一一对应', () => {
+test('艺术方向清单与正式案例路径一一对应且禁止平台拼图', () => {
   const manifest = JSON.parse(readFileSync(new URL('../scripts/visual-style-previews.json', import.meta.url), 'utf8'));
   const expected = new Map(visualStylePresets().filter((style) => style.featured).map((style) => [style.id, style.previewImage.split('/').at(-1)]));
   assert.equal(manifest.items.length, expected.size);
-  assert.ok(manifest.sharedPrompt.includes('公众号') && manifest.sharedPrompt.includes('小红书') && manifest.sharedPrompt.includes('微博') && manifest.sharedPrompt.includes('知乎'));
+  assert.match(manifest.sharedPrompt, /single coherent scene/i);
+  assert.match(manifest.sharedPrompt, /No poster layout, no presentation slide, no platform collage, no split panels/i);
   assert.deepEqual(new Map(manifest.items.map((item) => [item.id, item.filename])), expected);
+});
+
+test('精选艺术方向只控制视觉质感，不向最终生图指令注入版式模板', () => {
+  const forbiddenLayoutLanguage = /PPT|卡片|标题安全区|多栏|字号层级|界面层|信息密度|图表|矩阵|结构树|步骤|编号|标签/;
+  for (const style of visualStylePresets().filter((item) => item.featured)) {
+    const plan = buildVisualPlan({ title: '创作者怎样整理研究资料', body: '创作者在桌前整理采访照片、研究笔记和事实依据，并从中筛选出文章真正需要的内容。' }, 'WECHAT');
+    const compiled = buildVisualGenerationSpec(plan[0], { platform: 'WECHAT', title: '创作者怎样整理研究资料' }, 'ILLUSTRATION', { preset: style.id, customPrompt: '' });
+    const artDirection = compiled.prompt.match(/项目统一视觉方向：(.+?)。系列一致性：/)?.[1] ?? '';
+    assert.ok(artDirection, `${style.id} 缺少项目统一视觉方向`);
+    assert.doesNotMatch(artDirection, forbiddenLayoutLanguage, `${style.id} 仍混入版式模板语言`);
+  }
 });
 
 test('正式风格案例资产全部落盘且为有效 PNG', () => {
@@ -325,7 +337,7 @@ test('第三版方案升级视觉导演字段时保留用户内容和最终图�
     assetId: `asset-${index}`,
   }));
   const upgraded = mergeVisualPlan(generated, oldPlan, 3);
-  assert.equal(VISUAL_PLAN_VERSION, 7);
+  assert.equal(VISUAL_PLAN_VERSION, 8);
   assert.deepEqual(upgraded.map((item) => item.assetId), oldPlan.map((item) => item.assetId));
   assert.deepEqual(upgraded.map((item) => item.purpose), oldPlan.map((item) => item.purpose));
   assert.deepEqual(upgraded.map((item) => item.informationPoints), oldPlan.map((item) => item.informationPoints));

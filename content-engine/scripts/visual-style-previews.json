@@ -1,70 +1,70 @@
 {
-  "sharedPrompt": "请生成一张高完成度的中文自媒体视觉风格案例板，统一主题是‘普通人如何用 AI 建立每日信息工作流’。画面为整洁的 4:3 横向设计展示板，包含四个彼此清楚分隔、但属于同一视觉系统的成品画幅：公众号横向封面、小红书 3:4 图文封面、微博方形信息图、知乎横向题图。每个画幅都要体现‘收集、筛选、创作、发布、复盘’的信息关系，并根据平台调整信息密度和留白。仅使用简体中文，文字只允许出现‘每日信息工作流’‘收集’‘筛选’‘创作’‘发布’‘复盘’以及平台名；文字必须正确清楚。不要品牌 Logo、二维码、水印、虚构数据、无意义英文、乱码、模板网站界面或设备样机边框。四个画幅不是重复裁切，而是同一风格在四个平台的真实版式适配。",
+  "sharedPrompt": "Create one full-bleed 4:3 art-direction reference image for a Chinese creator workflow product. Show a single coherent scene: an independent creator at a real desk reviewing notes, photographs and research with subtle AI assistance represented through light, objects or spatial relationships. The image itself must carry the idea through subject, action, environment and composition. No poster layout, no presentation slide, no platform collage, no split panels, no UI mockup, no dashboard, no cards, no charts, no title area, no readable text, no letters, no logos, no watermark. Keep the scene visually inspectable, polished and publication-grade. The selected art direction must control the entire frame consistently.",
   "items": [
-  {
-    "id": "FRESH_EDITORIAL",
-    "filename": "fresh-editorial.png",
-    "style": "清新中文编辑摄影，珍珠白、雾蓝、浅珊瑚粉和少量深海军蓝，自然日光，真实桌面和人物手部，非对称杂志网格，大面积呼吸感留白，细腻纸张质感"
-  },
-  {
-    "id": "RETRO_POP",
-    "filename": "retro-pop.png",
-    "style": "清新波普怀旧插画，薄荷绿、婴儿蓝、珊瑚粉、奶油黄和深蓝描边，丝网印刷网点、轻微错版、剪纸几何，活泼但信息区整齐"
-  },
-  {
-    "id": "MACARON_CARTOON",
-    "filename": "macaron-cartoon.png",
-    "style": "精致马卡龙编辑卡通，珍珠白、薄荷青、樱花粉、奶油黄，亲和的创作者人物、电脑、手机、便签和素材卡片，圆润但不幼儿化，层次清楚"
-  },
-  {
-    "id": "SOFT_3D",
-    "filename": "soft-3d.png",
-    "style": "柔和编辑型3D，冷白背景、雾蓝、嫩绿、浅珊瑚，哑光材质，柔和环境光，清楚接触阴影，用立体文件夹、信息卡、画笔和发布节点表达工作流"
-  },
-  {
-    "id": "MINIMAL_KNOWLEDGE",
-    "filename": "minimal-knowledge.png",
-    "style": "极简高密度中文知识图解，近白底、雾蓝、浅黄和深灰蓝，结论优先，细线、编号、步骤和清楚分区，手机缩略图仍然可读"
-  },
-  {
-    "id": "SWISS_GRID",
-    "filename": "swiss-grid.png",
-    "style": "瑞士国际主义平面设计，暖白、纯黑、信号红和钴蓝，严格模数网格，非对称排版，大胆几何块面，强字号层级，哑光印刷质感"
-  },
-  {
-    "id": "CYBER_TECH",
-    "filename": "cyber-tech.png",
-    "style": "清透克制的现代赛博编辑视觉，深墨黑与冷白强对比，电光青和少量玫红，透明信息层、精确透视、细密光线与真实数字工作台，明亮清晰"
-  },
-  {
-    "id": "PIXEL_RETRO",
-    "filename": "pixel-retro.png",
-    "style": "现代编辑型像素艺术，米白、钴蓝、珊瑚红和青绿的有限色板，清晰像素网格，创作者从收集、筛选到发布的连续场景，现代留白网格"
-  },
-  {
-    "id": "PAPER_COLLAGE",
-    "filename": "paper-collage.png",
-    "style": "现代纸感编辑拼贴，灰白纸、鼠尾草绿、陶土红和深灰蓝，真实照片裁片、色纸、撕边、铅笔线和浅纸张阴影，视觉中心明确"
-  },
-  {
-    "id": "HAND_DRAWN_NOTES",
-    "filename": "hand-drawn-notes.png",
-    "style": "整洁的手绘知识笔记，柔白纸张、墨绿线条、橙黄和珊瑚红重点，真实笔触、箭头、圈注、步骤和小图标，亲和但专业"
-  },
-  {
-    "id": "NEW_CHINESE",
-    "filename": "new-chinese.png",
-    "style": "现代新中式编辑视觉，宣纸白、松石灰绿、朱砂红和墨黑，东方留白、竖向节奏、器物轮廓与现代网格结合，细腻纸木陶材质"
-  },
-  {
-    "id": "DATA_VISUAL",
-    "filename": "data-visual.png",
-    "style": "专业编辑数据图解，冷白底、蓝绿主数据色和琥珀强调，清楚展示信息进入、筛选、创作、发布、复盘的流向和数量关系，图表语义统一"
-  },
-  {
-    "id": "CINEMATIC_DOCUMENTARY",
-    "filename": "cinematic-documentary.png",
-    "style": "电影感纪实摄影，蓝灰阴影、自然暖肤色和低饱和环境色，真实创作者工作场景，窗光与侧光，宽银幕叙事层次，克制颗粒"
-  }
+    {
+      "id": "FRESH_EDITORIAL",
+      "filename": "fresh-editorial.png",
+      "style": "Bright contemporary editorial photography, pearl white workspace, mist blue and pale coral accents, soft north-window daylight, tactile paper and linen, asymmetrical magazine composition, natural human gesture, spacious but not empty, crisp realistic detail"
+    },
+    {
+      "id": "RETRO_POP",
+      "filename": "retro-pop.png",
+      "style": "Sophisticated retro pop editorial illustration, mint green, baby blue, coral pink, butter yellow and deep navy, silkscreen halftone and subtle misregistration, bold cropped shapes, energetic human gesture, flat ink texture, clean visual hierarchy, never childish"
+    },
+    {
+      "id": "MACARON_CARTOON",
+      "filename": "macaron-cartoon.png",
+      "style": "Refined adult editorial cartoon, pearl white, muted mint, cherry-blossom pink and soft yellow, expressive creator character, simplified but accurate desk objects, confident line work, layered depth, restrained rounded forms, high-end magazine illustration rather than cute stickers"
+    },
+    {
+      "id": "SOFT_3D",
+      "filename": "soft-3d.png",
+      "style": "Editorial soft 3D scene, cool white studio, mist blue, tender green and pale coral, matte ceramic and paper materials, gentle global illumination, precise contact shadows, clear physical relationship between creator, notes and tools, elegant sculptural composition, no toy-like plastic"
+    },
+    {
+      "id": "MINIMAL_KNOWLEDGE",
+      "filename": "minimal-knowledge.png",
+      "style": "Minimal knowledge editorial art, near-white field with mist blue, pale yellow and deep blue-gray, one real central subject surrounded by a few precise physical cues that reveal collection, filtering and synthesis, thin technical lines used sparingly, rigorous negative space, no labeled diagram"
+    },
+    {
+      "id": "SWISS_GRID",
+      "filename": "swiss-grid.png",
+      "style": "Swiss international style transformed into a single editorial image, warm white, pure black, signal red and cobalt blue, dynamic asymmetric geometry integrated into the photographed creator scene, strict alignment and bold cropping, matte print grain, no typography or poster copy"
+    },
+    {
+      "id": "CYBER_TECH",
+      "filename": "cyber-tech.png",
+      "style": "Bright restrained cyber editorial photography, graphite and cool white base, electric cyan with very small magenta accents, transparent optical layers and precise light paths integrated into a real desk scene, clear facial and object detail, elegant technical atmosphere, no HUD, no code rain, no neon darkness"
+    },
+    {
+      "id": "PIXEL_RETRO",
+      "filename": "pixel-retro.png",
+      "style": "Modern editorial pixel art, limited warm white, cobalt, raspberry and teal palette, a coherent creator workspace rendered with crisp intentional pixel clusters, strong depth and gesture, selective high-resolution details, contemporary composition, no game UI or icons"
+    },
+    {
+      "id": "PAPER_COLLAGE",
+      "filename": "paper-collage.png",
+      "style": "Modern editorial paper collage, gray-white stock, sage green, terracotta and deep slate, one coherent creator scene assembled from documentary photo fragments, torn color paper and a few pencil marks, shallow realistic paper shadows, strong focal point, no scrapbook clutter"
+    },
+    {
+      "id": "HAND_DRAWN_NOTES",
+      "filename": "hand-drawn-notes.png",
+      "style": "Clean hand-drawn editorial reportage, warm white paper, ink-green line, ochre and coral accents, confident observational drawing of a creator sorting physical research, expressive arrows and circles only as nonverbal gestures, visible pen pressure and paper fiber, no handwriting or worksheet layout"
+    },
+    {
+      "id": "NEW_CHINESE",
+      "filename": "new-chinese.png",
+      "style": "Contemporary Chinese editorial photography and illustration blend, xuan-paper white, mineral gray-green, cinnabar and ink black, calm vertical rhythm within a landscape frame, modern creator desk with restrained wood, ceramic and paper forms, eastern negative space, no antique costume or decorative folklore"
+    },
+    {
+      "id": "DATA_VISUAL",
+      "filename": "data-visual.png",
+      "style": "Editorial data-inspired visual without charts or labels, cool white, clear blue-green and one amber accent, real creator scene where streams of photographs and notes visibly converge, filter and reorganize through precise spatial motion, consistent color semantics, crisp depth, no dashboard or infographic panels"
+    },
+    {
+      "id": "CINEMATIC_DOCUMENTARY",
+      "filename": "cinematic-documentary.png",
+      "style": "Cinematic documentary photography, blue-gray shadows, natural warm skin and low-saturation room colors, authentic independent creator working late near a window, motivated side light, layered foreground and background, restrained film grain, emotional but factual, every detail readable, not underexposed"
+    }
   ]
 }

@@ -11,6 +11,8 @@ const { query, transaction } = require('./db.cjs');
 const { encrypt, decrypt, hashPassword, verifyPassword } = require('./crypto.cjs');
 const { clipPublicLink, readPublicArticle, fetchPublicPage } = require('./services/public-web.cjs');
 const { searchTavily, searchTavilyImages } = require('./services/tavily.cjs');
+const { searchImagesWithFallback, searchWikimediaImages } = require('./services/image-search.cjs');
+const { parseVisualGenerationRequest, resolveWechatVisualGenerationSpec } = require('./services/visual-generation.cjs');
 const { listSources, createSources, updateSource, removeSource, listItems, saveItem, refreshWorkspaceRss } = require('./services/intelligenceRepository.cjs');
 const { enqueue } = require('./queue.cjs');
 const { listAvailableSkills } = require('./agent/skillRegistry.cjs');
@@ -31,6 +33,7 @@ const {
   buildVisualPlanningPrompt,
   parseVisualPlanningContent,
   mergePlannedItems,
+  compileVisualPlan,
   validateVisualPlanImageCount,
 } = require('./services/visual-planning.cjs');
 const {
@@ -101,12 +104,6 @@ const projectPlanningInput = z.object({
   plannedPublishAt: z.string().trim().max(80).optional(),
   sourceRequirements: z.string().max(8_000),
   constraints: z.string().max(8_000),
-});
-const visualGenerationInput = z.object({
-  platform: z.enum(['WECHAT', 'XIAOHONGSHU', 'WEIBO']),
-  prompt: z.string().trim().min(4).max(8_000),
-  size: z.enum(['1:1', '3:4', '4:3', '9:16', '16:9']).default('3:4'),
-  assetIds: z.array(z.string().uuid()).max(3).default([]),
 });
 const visualStylePreset = z.enum([
   'FRESH_EDITORIAL', 'BUSINESS_EDITORIAL', 'SWISS_GRID', 'DOCUMENTARY', 'CINEMATIC_DOCUMENTARY', 'MONO_EDITORIAL', 'NEWSPAPER_EDITORIAL', 'LIFESTYLE_PHOTO',
@@ -432,6 +429,23 @@ const assetMetadata = z.object({
   sourceNote: z.string().max(4_000).default(''),
   copyrightStatus: assetCopyrightStatus.default('PENDING'),
 });
+const assetImportInput = assetMetadata.extend({
+  url: z.string().url().max(2_000).refine((value) => /^https?:\/\//i.test(value), '只支持 HTTP(S) 公开图片。'),
+});
+
+function parseAssetImportRequest(value) {
+  const parsed = assetImportInput.safeParse(value);
+  if (parsed.success) return parsed.data;
+  const field = parsed.error.issues[0]?.path?.[0];
+  const message = field === 'title'
+    ? '候选图片标题无效，请换一张图片后重试。'
+    : field === 'url'
+      ? '候选图片地址无效或过长，无法导入素材库。'
+      : field === 'sourceNote'
+        ? '候选图片来源信息过长，无法导入素材库。'
+        : '候选图片缺少可导入的来源信息。';
+  throw businessError(400, 'ASSET_IMPORT_INPUT_INVALID', message);
+}
 const assetLinkInput = z.object({
   role: projectReferenceRole,
   scope: projectScope,
@@ -478,9 +492,7 @@ app.post('/api/v1/assets', { preHandler: workspaceAccess.forRole('EDITOR') }, as
 });
 
 app.post('/api/v1/assets/import', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
-  const input = assetMetadata.extend({
-    url: z.string().url().max(2_000).refine((value) => /^https?:\/\//i.test(value), '只支持 HTTP(S) 公开图片。'),
-  }).parse(request.body);
+  const input = parseAssetImportRequest(request.body);
   const stored = await saveRemoteImageAsset(config.uploadRoot, request.workspace.id, input.url);
   const result = await persistStoredAsset(request.workspace, request.user.sub, stored, {
     origin: 'WEB_IMPORT',
@@ -1141,55 +1153,13 @@ app.delete('/api/v1/creative/project-inputs/:id', { preHandler: workspaceAccess.
   reply.code(204).send();
 });
 
-function plainMetadata(value, maxLength = 300) {
-  return String(value ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, maxLength);
-}
-
-async function searchWikimediaImages(queryText) {
-  const params = new URLSearchParams({
-    action: 'query', format: 'json', formatversion: '2', generator: 'search', gsrnamespace: '6',
-    gsrsearch: queryText, gsrlimit: '12', prop: 'imageinfo', iiprop: 'url|extmetadata', iiurlwidth: '640', origin: '*',
-  });
-  let response;
-  try {
-    response = await fetch(`https://commons.wikimedia.org/w/api.php?${params}`, { signal: AbortSignal.timeout(12_000) });
-  } catch (error) {
-    throw new Error(`开放图库连接失败（${error instanceof Error ? error.message : '网络错误'}）`);
-  }
-  if (!response.ok) throw new Error(`图片搜索服务返回 HTTP ${response.status}`);
-  const payload = await response.json();
-  const results = (payload?.query?.pages ?? []).flatMap((page) => {
-    const info = page?.imageinfo?.[0];
-    if (!info?.url || !info?.thumburl) return [];
-    const metadata = info.extmetadata ?? {};
-    const license = plainMetadata(metadata.LicenseShortName?.value || metadata.UsageTerms?.value || '请查看来源页');
-    const attribution = plainMetadata(metadata.Artist?.value || metadata.Credit?.value || 'Wikimedia Commons');
-    return [{
-      id: String(page.pageid), title: String(page.title || 'Wikimedia Commons 图片').replace(/^File:/i, ''),
-      thumbnailUrl: info.thumburl, imageUrl: info.url, sourceUrl: info.descriptionurl || `https://commons.wikimedia.org/?curid=${page.pageid}`,
-      license, attribution,
-    }];
-  });
-  if (!results.length) throw new Error('开放图库没有匹配图片');
-  return results;
-}
-
 app.get('/api/v1/creative/image-search', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
   const input = z.object({ q: z.string().trim().min(2).max(120) }).parse(request.query);
   const workspace = request.workspace;
-  const searches = [
-    searchTavilyImages(workspace.id, input.q).then((results) => {
-      if (!results.length) throw new Error('未配置 Tavily 或没有网页候选图');
-      return { provider: 'Tavily 图片搜索', results };
-    }),
-    searchWikimediaImages(input.q).then((results) => ({ provider: 'Wikimedia Commons', results })),
-  ];
-  try {
-    return await Promise.any(searches);
-  } catch (error) {
-    const messages = error instanceof AggregateError ? error.errors.map((item) => item instanceof Error ? item.message : String(item)) : [error instanceof Error ? error.message : '未知错误'];
-    throw new Error(`图片搜索暂时不可用：${messages.join('；')}。`);
-  }
+  return searchImagesWithFallback(input.q, {
+    searchPrimary: () => searchTavilyImages(workspace.id, input.q),
+    searchFallback: () => searchWikimediaImages(input.q),
+  });
 });
 
 app.post('/api/v1/creative/projects/:projectId/visual/plan', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
@@ -1242,16 +1212,22 @@ app.post('/api/v1/creative/projects/:projectId/visual/plan', { preHandler: works
     outputTokens += result.outputTokens ?? 0;
     let parsed;
     try {
-      parsed = parseVisualPlanningContent(result.content, { platform: input.platform, quantityMode: input.quantityMode, bodyItemCount: input.bodyItemCount, singleItem: Boolean(input.currentItemId) });
+      parsed = parseVisualPlanningContent(result.content, { platform: input.platform, quantityMode: input.quantityMode, bodyItemCount: input.bodyItemCount, singleItem: Boolean(input.currentItemId), expectedRole: currentItem?.role });
     } catch (validationError) {
       throw visualPlanningOutputError(validationError);
     }
-    const plan = mergePlannedItems({
+    const mergedPlan = mergePlannedItems({
       platform: input.platform,
       plannedItems: parsed.items,
       currentPlan,
       currentItemId: input.currentItemId,
       keepAssignedAssets: input.keepAssignedAssets,
+    });
+    const plan = await compileVisualPlan({
+      platform: input.platform,
+      title: draft.title,
+      items: mergedPlan,
+      styleProfile: input.styleProfile,
     });
     const bodyItemCount = plan.filter((item) => item.role === 'BODY').length;
     await query(`INSERT INTO api_usage_logs (workspace_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens)
@@ -1283,19 +1259,26 @@ function generatedImageMime(filename) {
 
 app.post('/api/v1/creative/projects/:projectId/visual/generate', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
-  const input = visualGenerationInput.parse(request.body);
+  const input = parseVisualGenerationRequest(request.body ?? {});
   const workspace = request.workspace;
   await creativeProject(workspace.id, projectId);
-  const operation = input.assetIds.length ? 'IMAGE_TO_IMAGE' : 'TEXT_TO_IMAGE';
+  let generationSpec = input;
+  if (input.platform === 'WECHAT') {
+    const drafts = await draftStore.listProject(workspace.id, projectId);
+    const draft = drafts.find((item) => item.platform === 'WECHAT');
+    if (!draft) throw businessError(409, 'WECHAT_DRAFT_REQUIRED', '请先创建公众号母稿和配图方案，再执行生图。');
+    generationSpec = await resolveWechatVisualGenerationSpec({ input, draft, parseItem: (item) => visualPlanItemInput.parse(item) });
+  }
+  const operation = generationSpec.assetIds.length ? 'IMAGE_TO_IMAGE' : 'TEXT_TO_IMAGE';
   const policy = await query('SELECT provider, model FROM agent_model_policies WHERE workspace_id = $1 AND scope = $2', [workspace.id, operation]);
   if (!policy.rowCount) throw businessError(409, 'TASK_POLICY_REQUIRED', `请先在“模型与 API”中为${operation === 'IMAGE_TO_IMAGE' ? '图生图' : '文生图'}选择模型。`, { scope: operation });
   if (policy.rows[0].provider !== 'BAILIAN_CLI') { const error = new Error('当前版本的 AI 生图仅支持已配置的百炼 CLI 文生图模型。'); error.statusCode = 400; throw error; }
   const model = policy.rows[0].model;
   const apiKey = await credentialSecret(workspace.id, 'BAILIAN');
-  const linkedAssets = input.assetIds.length ? await assetStore.listProject(workspace.id, projectId) : [];
+  const linkedAssets = generationSpec.assetIds.length ? await assetStore.listProject(workspace.id, projectId) : [];
   const linkedAssetIds = new Set(linkedAssets.map((asset) => asset.id));
-  if (input.assetIds.some((assetId) => !linkedAssetIds.has(assetId))) throw businessError(400, 'PROJECT_ASSET_REQUIRED', '参考图必须先关联到当前项目。');
-  const referenceAssets = await Promise.all(input.assetIds.map((assetId) => assetStore.getStored(workspace.id, assetId)));
+  if (generationSpec.assetIds.some((assetId) => !linkedAssetIds.has(assetId))) throw businessError(400, 'PROJECT_ASSET_REQUIRED', '参考图必须先关联到当前项目。');
+  const referenceAssets = await Promise.all(generationSpec.assetIds.map((assetId) => assetStore.getStored(workspace.id, assetId)));
   const referenceImages = referenceAssets.map((asset) => {
     if (!asset.mime_type?.startsWith('image/')) throw businessError(400, 'ASSET_NOT_IMAGE', `“${asset.title}”不是可用的参考图片。`);
     return safePath(config.uploadRoot, asset.storage_key);
@@ -1305,8 +1288,8 @@ app.post('/api/v1/creative/projects/:projectId/visual/generate', { preHandler: w
   let assetPersisted = false;
   try {
     await fs.mkdir(jobFolder, { recursive: true });
-    const command = input.assetIds.length ? 'edit' : 'generate';
-    const args = ['image', command, '--prompt', input.prompt, '--model', model, '--size', input.size, '--n', '1', '--out-dir', jobFolder, '--out-prefix', 'visual', '--output', 'json', '--quiet'];
+    const command = generationSpec.assetIds.length ? 'edit' : 'generate';
+    const args = ['image', command, '--prompt', generationSpec.prompt, '--model', model, '--size', generationSpec.size, '--n', '1', '--out-dir', jobFolder, '--out-prefix', 'visual', '--output', 'json', '--quiet'];
     for (const image of referenceImages) args.push('--image', image);
     await runBailianCli(args, apiKey, 180_000);
     const files = await fs.readdir(jobFolder, { withFileTypes: true });
@@ -1327,7 +1310,7 @@ app.post('/api/v1/creative/projects/:projectId/visual/generate', { preHandler: w
     };
     const created = await assetStore.createFromStoredFile(workspace.id, request.user.sub, stored, {
       origin: 'AI_GENERATED',
-      title: `AI 配图 · ${input.prompt.slice(0, 38)}`,
+      title: `AI 配图 · ${generationSpec.prompt.slice(0, 38)}`,
       sourceNote: `AI 生图｜模型：${model}｜比例：${input.size}${referenceImages.length ? `｜参考图：${referenceImages.length} 张` : ''}`,
       copyrightStatus: 'OWNED',
     });

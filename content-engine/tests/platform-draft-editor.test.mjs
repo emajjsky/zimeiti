@@ -50,7 +50,10 @@ test('小红书和微博共用单页编辑器并复用素材预览选择器', as
 
 test('生图接口只允许三个产品平台并返回实际任务策略', async () => {
   const server = await readFile(new URL('../server/index.cjs', import.meta.url), 'utf8');
-  assert.match(server, /platform: z\.enum\(\['WECHAT', 'XIAOHONGSHU', 'WEIBO'\]\)/);
+  const generation = await readFile(new URL('../server/services/visual-generation.cjs', import.meta.url), 'utf8');
+  assert.match(generation, /platform: z\.literal\('WECHAT'\)/);
+  assert.match(generation, /platform: z\.enum\(\['XIAOHONGSHU', 'WEIBO'\]\)/);
+  assert.match(generation, /z\.discriminatedUnion\('platform'/);
   assert.match(server, /policy: \{ scope: operation, provider: policy\.rows\[0\]\.provider, model \}/);
   assert.match(server, /const visualPlanningInput = z\.object\(\{\s*platform: z\.literal\('WECHAT'\)/);
 });

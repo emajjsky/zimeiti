@@ -17,6 +17,7 @@ NOW = "2026-07-30T08:00:00.000Z"
 COVER_ID = "11111111-1111-4111-8111-111111111111"
 BODY_ID = "22222222-2222-4222-8222-222222222222"
 GENERATED_ID = "33333333-3333-4333-8333-333333333333"
+IMPORTED_ID = "77777777-7777-4777-8777-777777777777"
 ONE_PIXEL_GIF = "R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="
 GENERATED_SVG = """<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675"><rect width="1200" height="675" fill="#dceeff"/><rect x="70" y="70" width="1060" height="535" rx="16" fill="#fff" stroke="#17203b" stroke-width="6"/><text x="110" y="165" font-family="sans-serif" font-size="54" font-weight="700" fill="#17203b">天链三号 01 星</text><text x="110" y="235" font-family="sans-serif" font-size="28" fill="#40506f">中继卫星如何提升测控与数据传输</text><rect x="110" y="300" width="280" height="190" rx="12" fill="#ffd9e3"/><rect x="460" y="300" width="280" height="190" rx="12" fill="#fff1c7"/><rect x="810" y="300" width="280" height="190" rx="12" fill="#ccefdc"/></svg>"""
 SESSION = {
@@ -144,7 +145,7 @@ with sync_playwright() as playwright:
     def project_asset(asset_id, link_id, title, origin="UPLOAD", filename="image.gif", mime_type="image/gif", notes=""):
         return {"id": asset_id, "linkId": link_id, "projectId": PROJECT_ID, "kind": "IMAGE", "origin": origin, "status": "ACTIVE", "title": title, "originalFilename": filename, "mimeType": mime_type, "sizeBytes": 35, "sha256": asset_id.replace("-", "") * 2, "sourceUrl": None, "sourceNote": notes, "copyrightStatus": "OWNED", "projectCount": 1, "role": "VISUAL", "scope": "IMAGING", "platforms": ["WECHAT"], "notes": notes, "createdAt": NOW, "updatedAt": NOW}
 
-    state = {"project": project(), "draft": wechat_draft(), "searches": [], "planning_calls": [], "visual_writes": 0, "generations": 0, "generation_payloads": [], "unexpected": [], "console_errors": [], "assets": [
+    state = {"project": project(), "draft": wechat_draft(), "searches": [], "imports": [], "links": [], "planning_calls": [], "visual_writes": 0, "generations": 0, "generation_payloads": [], "unexpected": [], "console_errors": [], "assets": [
         project_asset(COVER_ID, "44444444-4444-4444-8444-444444444444", "旧封面"),
         project_asset(BODY_ID, "55555555-5555-4555-8555-555555555555", "旧正文火箭图"),
     ]}
@@ -189,7 +190,7 @@ with sync_playwright() as playwright:
                 return respond(route, {"plan": plan, "bodyItemCount": len([item for item in plan if item["role"] == "BODY"]), "quantityMode": payload["quantityMode"], "strategy": "逐图解释文章。", "policy": {"scope": "WECHAT_VISUAL_PLANNING", "model": "qwen-plus", "provider": "BAILIAN_CLI", "connectionId": None, "promptVersion": "1.2.0"}}, status=201)
             body_item_count = 4 if payload["quantityMode"] == "AUTO" else payload["bodyItemCount"]
             plan = planned_items(body_item_count, payload.get("currentPlan"), payload.get("styleProfile", {}).get("customPrompt", ""))
-            return respond(route, {"plan": plan, "bodyItemCount": body_item_count, "quantityMode": payload["quantityMode"], "strategy": "封面建立识别，正文图解释通信关系。", "policy": {"scope": "WECHAT_VISUAL_PLANNING", "model": "qwen-plus", "provider": "BAILIAN_CLI", "connectionId": None, "promptVersion": "1.2.0"}}, status=201)
+            return respond(route, {"plan": plan, "bodyItemCount": body_item_count, "quantityMode": payload["quantityMode"], "strategy": "封面建立识别，正文图解释通信关系。", "policy": {"scope": "WECHAT_VISUAL_PLANNING", "model": "qwen-plus", "provider": "BAILIAN_CLI", "connectionId": None, "promptVersion": "2.0.0"}}, status=201)
         if path == f"/api/v1/creative/projects/{PROJECT_ID}/visual/generate" and method == "POST":
             state["generations"] += 1
             state["generation_payloads"].append(json.loads(request.post_data or "{}"))
@@ -205,9 +206,25 @@ with sync_playwright() as playwright:
             query = request.url.split("q=", 1)[-1]
             state["searches"].append(query)
             return respond(route, {"provider": "Wikimedia Commons", "results": [
-                {"id": "image-1", "title": "Satellite launch", "thumbnailUrl": "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=", "imageUrl": "https://commons.wikimedia.org/wiki/File:Satellite.jpg", "sourceUrl": "https://commons.wikimedia.org/", "license": "CC BY-SA", "attribution": "Test"},
-                {"id": "image-2", "title": "Relay satellite", "thumbnailUrl": "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=", "imageUrl": "https://commons.wikimedia.org/wiki/File:Relay_satellite.jpg", "sourceUrl": "https://commons.wikimedia.org/", "license": "Public domain", "attribution": "Test"},
+                {"id": "image-1", "title": "Satellite launch", "thumbnailUrl": "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=", "imageUrl": "https://upload.wikimedia.org/satellite.jpg", "sourceUrl": "https://commons.wikimedia.org/wiki/File:Satellite.jpg", "license": "CC BY-SA", "attribution": "Test", "copyrightStatus": "OPEN_LICENSE"},
+                {"id": "image-2", "title": "Relay satellite", "thumbnailUrl": "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=", "imageUrl": "https://commons.wikimedia.org/wiki/File:Relay_satellite.jpg", "sourceUrl": "https://commons.wikimedia.org/", "license": "Public domain", "attribution": "Test", "copyrightStatus": "OPEN_LICENSE"},
             ]})
+        if path == "/api/v1/assets/import" and method == "POST":
+            payload = json.loads(request.post_data or "{}")
+            state["imports"].append(payload)
+            imported_asset = project_asset(IMPORTED_ID, "77777777-7777-4777-8777-777777777778", payload["title"], "WEB_IMPORT", "satellite.gif", "image/gif", payload["sourceNote"])
+            imported_asset["sourceUrl"] = payload["url"]
+            imported_asset["copyrightStatus"] = payload["copyrightStatus"]
+            workspace_asset = {key: value for key, value in imported_asset.items() if key not in ("linkId", "projectId", "role", "scope", "platforms", "notes")}
+            return respond(route, {"created": True, "asset": workspace_asset}, status=201)
+        if path == f"/api/v1/projects/{PROJECT_ID}/assets/{IMPORTED_ID}" and method == "POST":
+            payload = json.loads(request.post_data or "{}")
+            state["links"].append(payload)
+            linked_asset = project_asset(IMPORTED_ID, "77777777-7777-4777-8777-777777777778", payload["title"], "WEB_IMPORT", "satellite.gif", "image/gif", payload["notes"])
+            linked_asset["sourceUrl"] = state["imports"][-1]["url"]
+            linked_asset["copyrightStatus"] = state["imports"][-1]["copyrightStatus"]
+            state["assets"] = [linked_asset, *[item for item in state["assets"] if item["id"] != IMPORTED_ID]]
+            return respond(route, linked_asset, status=201)
         if path == f"/api/v1/content-drafts/{DRAFT_ID}" and method == "PATCH":
             payload = json.loads(request.post_data or "{}")
             assert payload["revision"] == state["draft"]["revision"], payload
@@ -259,7 +276,7 @@ with sync_playwright() as playwright:
             break
         page.wait_for_timeout(100)
     assert state["visual_writes"] >= 1, "AI 配图方案没有自动保存"
-    assert state["draft"]["visualPlan"]["planVersion"] == 7
+    assert state["draft"]["visualPlan"]["planVersion"] == 8
     assert state["draft"]["visualPlan"]["quantityMode"] == "AUTO"
     assert state["draft"]["visualPlan"]["bodyItemCount"] == 4
 
@@ -276,7 +293,29 @@ with sync_playwright() as playwright:
 
     page.locator(".visual-query-chips button").first.click()
     page.get_by_text("Satellite launch", exact=True).wait_for()
+    page.get_by_text("Wikimedia Commons · 2 张候选图", exact=True).wait_for()
     assert len(state["searches"]) == 1, "点击推荐关键词后应只执行一次图片检索"
+    page.get_by_role("article").filter(has_text="Satellite launch").get_by_role("button", name="用于此处", exact=True).click()
+    page.get_by_text("图片已绑定到当前配图位置。", exact=True).wait_for()
+    page.get_by_label("当前选中图片预览", exact=True).locator("img").wait_for()
+    assert state["imports"] == [{
+        "title": "Satellite launch",
+        "url": "https://upload.wikimedia.org/satellite.jpg",
+        "sourceNote": "Test｜许可：CC BY-SA｜来源：https://commons.wikimedia.org/wiki/File:Satellite.jpg",
+        "copyrightStatus": "OPEN_LICENSE",
+    }]
+    assert state["links"] == [{
+        "role": "VISUAL",
+        "scope": "IMAGING",
+        "title": "Satellite launch",
+        "notes": "Test｜许可：CC BY-SA｜来源：https://commons.wikimedia.org/wiki/File:Satellite.jpg",
+        "platforms": ["WECHAT"],
+    }]
+    for _ in range(20):
+        if state["draft"]["visualPlan"]["plan"][0]["assetId"] == IMPORTED_ID:
+            break
+        page.wait_for_timeout(100)
+    assert state["draft"]["visualPlan"]["plan"][0]["assetId"] == IMPORTED_ID
     page.get_by_role("button", name=re.compile(r"正文插图 1")).click()
     assert len(state["searches"]) == 1, "切换配图项时不应自动产生新的图片检索请求"
     page.get_by_role("button", name="AI 生图", exact=True).click()
@@ -293,11 +332,11 @@ with sync_playwright() as playwright:
     page.get_by_role("heading", name="三方通信关系图", exact=True).wait_for()
     assert len(state["planning_calls"]) == 3 and state["planning_calls"][-1]["currentItemId"] == "wechat-body-1"
 
-    page.get_by_role("button", name="设置项目配图风格", exact=True).click()
-    page.get_by_role("heading", name="项目配图风格", exact=True).wait_for()
+    page.get_by_role("button", name="设置项目艺术方向", exact=True).click()
+    page.get_by_role("heading", name="项目艺术方向", exact=True).wait_for()
     assert page.locator(".visual-style-card").count() == 3
     assert page.locator(".visual-style-preview").count() == 4
-    assert page.get_by_text("13 套案例模板", exact=True).is_visible()
+    assert page.get_by_text("13 套全画幅视觉案例", exact=True).is_visible()
     page.screenshot(path=ARTIFACTS / "visual-style-dialog.png", full_page=True)
     page.get_by_role("button", name=re.compile(r"插画与创意")).click()
     page.get_by_role("button", name=re.compile(r"清新波普怀旧")).click()
@@ -318,7 +357,9 @@ with sync_playwright() as playwright:
     assert preview and preview["width"] >= 360 and preview["height"] >= 240, f"生成结果预览尺寸不足: {preview}"
     assert state["generations"] == 1
     assert state["generation_payloads"][0]["assetIds"] == [BODY_ID]
-    assert "统一使用薄荷绿边框" in state["generation_payloads"][0]["prompt"]
+    assert state["generation_payloads"][0]["visualItemId"] == "wechat-body-1"
+    assert "prompt" not in state["generation_payloads"][0]
+    assert "size" not in state["generation_payloads"][0]
     page.get_by_role("button", name="搜图", exact=True).click()
     page.get_by_label("当前选中图片预览", exact=True).locator("img").wait_for()
     assert page.get_by_text("当前选中图片", exact=True).is_visible(), "搜图页签没有展示已绑定素材的大图预览"
@@ -328,7 +369,7 @@ with sync_playwright() as playwright:
     page.get_by_role("button", name=re.compile(r"正文插图 1")).click()
     page.get_by_role("button", name="AI 生图", exact=True).click()
     page.locator(".visual-generated-preview img").wait_for()
-    assert "清新波普怀旧" in page.get_by_role("button", name="设置项目配图风格", exact=True).inner_text()
+    assert "清新波普怀旧" in page.get_by_role("button", name="设置项目艺术方向", exact=True).inner_text()
     assert not page.get_by_label("自动规划数量", exact=True).is_checked()
     assert page.get_by_label("正文插图数量", exact=True).input_value() == "3"
     del state["draft"]["visualPlan"]["quantityMode"]
@@ -351,10 +392,10 @@ with sync_playwright() as playwright:
     assert mobile_stage_nav and mobile_stage_nav["height"] <= 104, f"移动端公众号母稿流程导航过高: {mobile_stage_nav}"
     assert page.locator(".creative-stage-nav").evaluate("element => element.scrollWidth <= element.clientWidth"), "390px 母稿流程导航仍需横向滚动"
     page.screenshot(path=ARTIFACTS / "visual-workspace-mobile.png", full_page=True)
-    page.get_by_role("button", name="设置项目配图风格", exact=True).click()
+    page.get_by_role("button", name="设置项目艺术方向", exact=True).click()
     assert page.locator(".visual-style-dialog").evaluate("element => element.scrollWidth <= element.clientWidth"), "移动端风格库存在横向溢出"
     page.screenshot(path=ARTIFACTS / "visual-style-dialog-mobile.png")
-    page.get_by_role("button", name="关闭风格设置", exact=True).click()
+    page.get_by_role("button", name="关闭艺术方向设置", exact=True).click()
     assert not state["unexpected"], state["unexpected"]
     assert not state["console_errors"], state["console_errors"]
     browser.close()

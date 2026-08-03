@@ -1018,3 +1018,18 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - 搜图词必须描述可直接看到的主体、动作、地点、器物或场景，每条不超过 60 个字符；继续拒绝模板、字体、排版、PPT、信息卡、海报等设计形式词。
 - 配图请求参数错误返回 `VISUAL_PLANNING_INPUT_INVALID`；模型方案错误返回 `VISUAL_PLANNING_OUTPUT_INVALID`。两类错误不再被统一映射为“提交内容不完整”，失败不会写入草稿或覆盖现有方案。
 - `VISUAL_PLANNING_PROMPT_VERSION` 升级为 `1.1.0`。本次无数据库迁移、无历史数据修改、无模型重跑。
+
+## 2026-08-03 实现：配图策划与生图指令职责分离
+
+- `server/services/visual-planning.cjs` 的工具 Schema 不再接收模型生成的 `prompt` 和 `size`，`VISUAL_PLANNING_PROMPT_VERSION` 升级为 `2.0.0`。模型只提交角色、位置、目的、画面主体、搜索词、正文依据和必要的信息块。
+- `compileVisualPlan()` 在服务端合并模型结果后调用 `src/domain/visual-plan.mjs` 的确定性编译器。`visualImageSize()` 固定公众号封面 `16:9`、正文 `4:3`，用户打开旧方案和每次保存时都会重新规范画幅。
+- `buildVisualGenerationSpec()` 为所有图片注入项目艺术方向和系列一致性，不再信任模型自带最终提示词；前端执行生图时也即时从当前方案与项目风格编译，避免旧缓存提示词泄漏。
+- 13 个精选艺术方向的执行描述只包含色彩、光线、材质、镜头、人物动作和全画幅构图。领域回归测试从最终生图指令截取艺术方向，拒绝 PPT、卡片、标题区、界面层、图表和编号等版式模板词。
+- `server/services/image-search.cjs` 统一清洗候选标题和元数据，限制 URL 与文本长度并区分版权状态。`searchImagesWithFallback()` 串行执行 Tavily 优先、Wikimedia 回退，避免 `Promise.any` 让较快但不够贴切的开放图库抢占结果；Wikimedia 保留直接原图 URL 与来源页，Tavily 网页图片保持待确认版权。
+- `VisualWorkspace.tsx` 用独立状态管理搜索进行中、已尝试、来源、结果数和局部错误。点击推荐词直接调用搜索；切换配图项只重置当前搜索视图，不产生隐式请求。
+- “用于此处”继续使用正式素材边界：`POST /assets/import` 下载并校验远程图片，随后 `POST /projects/:projectId/assets/:assetId` 建立项目关联，再更新当前配图位；页面立即显示绑定结果，自动保存最终写入草稿方案和草稿素材表。
+- 配图 E2E 新增真实交互断言，校验导入请求使用直接图片 URL、来源说明与版权状态，项目关联参数完整，绑定后大图可见，防抖保存后草稿中的 `assetId` 一致。
+- 本次不执行数据库迁移、不删除或重写历史项目数据，也不自动重跑任何模型任务。
+- `server/services/visual-generation.cjs` 使用按平台判别的严格请求 Schema。公众号分支只接收 `visualItemId/assetIds`，`resolveWechatVisualGenerationSpec()` 从当前草稿的 `visualPlan.plan` 和 `styleProfile` 调用统一编译器；请求中出现 `prompt/size` 会返回 `VISUAL_GENERATION_INPUT_INVALID`。
+- `/creative/projects/:projectId/visual/generate` 在公众号分支读取当前母稿并校验配图项，随后才选择文生图或图生图任务策略。传给百炼 CLI 的 `prompt/size` 均来自服务端编译结果，不再来自浏览器请求。
+- `parseVisualPlanningContent()` 接收当前项 `expectedRole` 并拒绝模型改变角色；`mergePlannedItems()` 在单图替换时显式保留原 `role`，形成解析与合并的双重结构约束。
