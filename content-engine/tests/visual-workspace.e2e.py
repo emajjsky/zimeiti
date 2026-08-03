@@ -12,6 +12,7 @@ BASE_URL = os.getenv("CONTENT_ENGINE_E2E_URL", "http://127.0.0.1:5173")
 ARTIFACTS = Path(tempfile.gettempdir()) / "content-engine-visual-workspace-e2e"
 ARTIFACTS.mkdir(exist_ok=True)
 PROJECT_ID = "visual-project-1"
+DRAFT_ID = "77777777-7777-4777-8777-777777777777"
 NOW = "2026-07-30T08:00:00.000Z"
 COVER_ID = "11111111-1111-4111-8111-111111111111"
 BODY_ID = "22222222-2222-4222-8222-222222222222"
@@ -115,13 +116,35 @@ def project():
     }
 
 
+def wechat_draft():
+    wechat_version = next(item for item in project()["versions"] if item["platform"] == "WECHAT")
+    return {
+        "id": DRAFT_ID,
+        "workspaceId": "workspace-1",
+        "projectId": PROJECT_ID,
+        "platform": "WECHAT",
+        "status": "EDITING",
+        "revision": 1,
+        "title": wechat_version["title"],
+        "body": wechat_version["body"],
+        "visualPlan": {},
+        "layoutTemplateVersionId": None,
+        "sourceDraftVersionId": None,
+        "sourceStale": False,
+        "currentVersionId": None,
+        "assets": [],
+        "createdAt": NOW,
+        "updatedAt": NOW,
+    }
+
+
 with sync_playwright() as playwright:
     browser = playwright.chromium.launch(headless=True, **({"executable_path": chrome_path()} if chrome_path() else {}))
     page = browser.new_page(viewport={"width": 1440, "height": 1000})
     def project_asset(asset_id, link_id, title, origin="UPLOAD", filename="image.gif", mime_type="image/gif", notes=""):
         return {"id": asset_id, "linkId": link_id, "projectId": PROJECT_ID, "kind": "IMAGE", "origin": origin, "status": "ACTIVE", "title": title, "originalFilename": filename, "mimeType": mime_type, "sizeBytes": 35, "sha256": asset_id.replace("-", "") * 2, "sourceUrl": None, "sourceNote": notes, "copyrightStatus": "OWNED", "projectCount": 1, "role": "VISUAL", "scope": "IMAGING", "platforms": ["WECHAT"], "notes": notes, "createdAt": NOW, "updatedAt": NOW}
 
-    state = {"project": project(), "searches": [], "planning_calls": [], "visual_writes": 0, "generations": 0, "generation_payloads": [], "unexpected": [], "console_errors": [], "assets": [
+    state = {"project": project(), "draft": wechat_draft(), "searches": [], "planning_calls": [], "visual_writes": 0, "generations": 0, "generation_payloads": [], "unexpected": [], "console_errors": [], "assets": [
         project_asset(COVER_ID, "44444444-4444-4444-8444-444444444444", "旧封面"),
         project_asset(BODY_ID, "55555555-5555-4555-8555-555555555555", "旧正文火箭图"),
     ]}
@@ -140,10 +163,14 @@ with sync_playwright() as playwright:
             return respond(route, {"workspace": SESSION["workspaces"][0], "state": {"workspace": {"name": "验收工作空间", "enabledPlatforms": ["WECHAT"], "setupCompleted": True}, "sources": [], "intelligence": [], "topics": [], "projects": [state["project"]]}, "revision": 1, "updatedAt": NOW})
         if path == "/api/v1/creative/projects" and method == "GET":
             return respond(route, {"projects": [state["project"]]})
+        if path == f"/api/v1/creative/projects/{PROJECT_ID}/drafts" and method == "GET":
+            return respond(route, {"drafts": [state["draft"]]})
         if path == "/api/v1/creative/skills":
             return respond(route, [])
         if path == f"/api/v1/creative/projects/{PROJECT_ID}/brief" and method == "GET":
             return respond(route, {"brief": {"objective": "让普通读者理解这次发射", "targetAudience": "普通读者", "coreMessage": "解释中继卫星", "sourceRequirements": "公开资料", "lengthTarget": "1500-2500 字", "selectedPlatforms": ["WECHAT"], "notes": "", "selectedSkills": {"SUBJECT": "", "CONTENT_TYPE": "", "VOICE": "", "LAYOUT": "", "CHANNEL": ""}, "platformSkills": {}, "accountVoiceProfileId": "", "voiceOffset": "DEFAULT"}})
+        if path == f"/api/v1/creative/projects/{PROJECT_ID}/brief" and method == "PUT":
+            return respond(route, {"brief": json.loads(request.post_data or "{}")})
         if path in ("/api/v1/settings/account-voices", "/api/v1/account-voices"):
             return respond(route, {"voices": []})
         if path == f"/api/v1/creative/projects/{PROJECT_ID}/materials":
@@ -159,9 +186,9 @@ with sync_playwright() as playwright:
                         item["focus"] = "用航天器、中继卫星、地面站三层关系解释双向数据链路"
                         item["purpose"] = "按用户意见突出三方通信关系"
                         item["prompt"] += " 用户要求：" + payload.get("request", "")
-                return respond(route, {"plan": plan, "strategy": "逐图解释文章。", "model": "qwen-plus", "provider": "BAILIAN_CLI", "scope": "AGENT_PLANNER"}, status=201)
+                return respond(route, {"plan": plan, "strategy": "逐图解释文章。", "policy": {"scope": "WECHAT_VISUAL_PLANNING", "model": "qwen-plus", "provider": "BAILIAN_CLI", "connectionId": None, "promptVersion": "1.1.0"}}, status=201)
             plan = planned_items(payload["bodyItemCount"], payload.get("currentPlan"), payload.get("styleProfile", {}).get("customPrompt", ""))
-            return respond(route, {"plan": plan, "strategy": "封面建立识别，正文图解释通信关系。", "model": "qwen-plus", "provider": "BAILIAN_CLI", "scope": "AGENT_PLANNER"}, status=201)
+            return respond(route, {"plan": plan, "strategy": "封面建立识别，正文图解释通信关系。", "policy": {"scope": "WECHAT_VISUAL_PLANNING", "model": "qwen-plus", "provider": "BAILIAN_CLI", "connectionId": None, "promptVersion": "1.1.0"}}, status=201)
         if path == f"/api/v1/creative/projects/{PROJECT_ID}/visual/generate" and method == "POST":
             state["generations"] += 1
             state["generation_payloads"].append(json.loads(request.post_data or "{}"))
@@ -180,33 +207,39 @@ with sync_playwright() as playwright:
                 {"id": "image-1", "title": "Satellite launch", "thumbnailUrl": "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=", "imageUrl": "https://commons.wikimedia.org/wiki/File:Satellite.jpg", "sourceUrl": "https://commons.wikimedia.org/", "license": "CC BY-SA", "attribution": "Test"},
                 {"id": "image-2", "title": "Relay satellite", "thumbnailUrl": "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=", "imageUrl": "https://commons.wikimedia.org/wiki/File:Relay_satellite.jpg", "sourceUrl": "https://commons.wikimedia.org/", "license": "Public domain", "attribution": "Test"},
             ]})
-        if path == f"/api/v1/creative/projects/{PROJECT_ID}/visual" and method == "PUT":
+        if path == f"/api/v1/content-drafts/{DRAFT_ID}" and method == "PATCH":
             payload = json.loads(request.post_data or "{}")
-            state["visual_writes"] += 1
-            state["project"]["delivery"]["platforms"]["WECHAT"]["visual"] = {
-                "planVersion": payload["planVersion"],
-                "styleProfile": payload["styleProfile"],
-                "coverAssetId": payload["coverAssetId"], "assetIds": payload["assetIds"],
-                "assets": [], "plan": payload["plan"], "updatedAt": NOW,
-            }
-            return respond(route, {"project": state["project"]})
+            assert payload["revision"] == state["draft"]["revision"], payload
+            if "visualPlan" in payload:
+                state["draft"]["visualPlan"] = payload["visualPlan"]
+                state["visual_writes"] += 1
+            state["draft"]["revision"] += 1
+            state["draft"]["updatedAt"] = NOW
+            return respond(route, state["draft"])
+        if path == f"/api/v1/content-drafts/{DRAFT_ID}/assets" and method == "PUT":
+            payload = json.loads(request.post_data or "{}")
+            assert payload["revision"] == state["draft"]["revision"], payload
+            state["draft"]["assets"] = [{
+                "id": f"draft-asset-{index}", "workspaceId": "workspace-1", "draftId": DRAFT_ID,
+                "draftVersionId": None, "assetId": item["assetId"], "role": item["role"],
+                "sortOrder": index, "createdAt": NOW,
+            } for index, item in enumerate(payload["assets"])]
+            state["draft"]["revision"] += 1
+            state["draft"]["updatedAt"] = NOW
+            return respond(route, state["draft"])
         if path in ("/api/v1/intelligence/sources", "/api/v1/intelligence/items"):
             return respond(route, [])
         state["unexpected"].append(f"{method} {path}")
         return respond(route, {"error": {"message": f"未配置接口: {method} {path}"}}, status=418)
 
     page.route("**/api/v1/**", handle_api)
-    page.goto(f"{BASE_URL}/?view=create&project={PROJECT_ID}&stage=master&platform=WECHAT")
+    page.goto(f"{BASE_URL}/?view=create&project={PROJECT_ID}&stage=visual")
     page.wait_for_load_state("networkidle")
     page.get_by_role("heading", name="公众号配图", exact=True).wait_for()
-    channel_nav = page.locator(".channel-workbench-nav").bounding_box()
-    platform_nav = page.locator(".channel-platform-tabs").bounding_box()
-    step_nav = page.locator(".channel-step-tabs").bounding_box()
-    channel_nav_style = page.locator(".channel-workbench-nav").evaluate("element => { const style = getComputedStyle(element); const platform = getComputedStyle(element.querySelector('.channel-platform-tabs')); const button = getComputedStyle(element.querySelector('.channel-platform-tabs button')); return { display: style.display, minHeight: style.minHeight, height: style.height, padding: style.padding, gap: style.gap, alignItems: style.alignItems, platformHeight: platform.height, platformPadding: platform.padding, buttonHeight: button.height, buttonMinHeight: button.minHeight, buttonPadding: button.padding } }")
-    assert channel_nav and channel_nav["height"] <= 64, f"桌面渠道导航过高: {channel_nav}, platform={platform_nav}, steps={step_nav}, style={channel_nav_style}"
-    assert platform_nav and step_nav and abs(platform_nav["y"] - step_nav["y"]) <= 4, "渠道与步骤导航没有在同一行"
-    assert page.locator(".channel-platform-tabs button").count() == 4
-    page.get_by_text(re.compile(r"^封面 1 张，正文插图 2 张｜任务策略：配图策划（VISUAL_PLANNING）$")).wait_for()
+    stage_nav = page.locator(".creative-stage-nav").bounding_box()
+    assert stage_nav and stage_nav["height"] <= 48, f"桌面公众号母稿流程导航过高: {stage_nav}"
+    assert page.locator(".creative-stage-nav button").count() == 5
+    page.get_by_text(re.compile(r"^封面 1 张，正文插图 2 张｜任务策略：公众号配图策划（WECHAT_VISUAL_PLANNING）$")).wait_for()
     page.get_by_role("heading", name="让核心 Agent 先读正文，再安排每一张图", exact=True).wait_for()
     assert page.get_by_text("视觉结构", exact=True).count() == 0
     assert page.get_by_text("版式模板", exact=True).count() == 0
@@ -223,10 +256,10 @@ with sync_playwright() as playwright:
             break
         page.wait_for_timeout(100)
     assert state["visual_writes"] >= 1, "AI 配图方案没有自动保存"
-    assert state["project"]["delivery"]["platforms"]["WECHAT"]["visual"]["planVersion"] == 7
+    assert state["draft"]["visualPlan"]["planVersion"] == 7
 
     page.get_by_role("button", name="增加正文插图").click()
-    page.get_by_text(re.compile(r"^封面 1 张，正文插图 3 张｜任务策略：配图策划（VISUAL_PLANNING）$")).wait_for()
+    page.get_by_text(re.compile(r"^封面 1 张，正文插图 3 张｜任务策略：公众号配图策划（WECHAT_VISUAL_PLANNING）$")).wait_for()
     page.get_by_role("button", name="更新方案", exact=True).click()
     page.get_by_role("button", name=re.compile(r"正文插图 3")).wait_for()
     assert len(state["planning_calls"]) == 2
@@ -293,9 +326,9 @@ with sync_playwright() as playwright:
     page.set_viewport_size({"width": 390, "height": 844})
     page.wait_for_timeout(150)
     assert_no_overflow(page, "390px 配图工作台")
-    mobile_channel_nav = page.locator(".channel-workbench-nav").bounding_box()
-    assert mobile_channel_nav and mobile_channel_nav["height"] <= 104, f"移动端渠道导航过高: {mobile_channel_nav}"
-    assert page.locator(".channel-platform-tabs").evaluate("element => element.scrollWidth <= element.clientWidth"), "390px 渠道栏仍需横向滚动"
+    mobile_stage_nav = page.locator(".creative-stage-nav").bounding_box()
+    assert mobile_stage_nav and mobile_stage_nav["height"] <= 104, f"移动端公众号母稿流程导航过高: {mobile_stage_nav}"
+    assert page.locator(".creative-stage-nav").evaluate("element => element.scrollWidth <= element.clientWidth"), "390px 母稿流程导航仍需横向滚动"
     page.screenshot(path=ARTIFACTS / "visual-workspace-mobile.png", full_page=True)
     page.get_by_role("button", name="设置项目配图风格", exact=True).click()
     assert page.locator(".visual-style-dialog").evaluate("element => element.scrollWidth <= element.clientWidth"), "移动端风格库存在横向溢出"

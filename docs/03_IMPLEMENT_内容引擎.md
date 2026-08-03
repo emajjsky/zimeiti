@@ -59,8 +59,8 @@
 
 ## 2026-07-31 实现：AI 配图导演 v6 与真实案例资产管线
 
-- 新增 `server/services/visual-planning.cjs`。服务优先读取 `AGENT_PLANNER`，未配置时复用 `CONTENT_WRITING`；提示词包含当前平台完整正文、图片数量、规划信息、项目风格和现有配图上下文，文本模型单次输出上限提高到任务级 6000 Token。
-- 新增 `POST /api/v1/creative/projects/:projectId/visual/plan`。接口支持整套策划和 `currentItemId + request` 单图重策划，成功调用记录为 `VISUAL_PLANNING`，并保留参考图和已有素材绑定。
+- 新增 `server/services/visual-planning.cjs`。服务只读取公开任务策略 `WECHAT_VISUAL_PLANNING`，不回退到正文或其它模型；提示词包含公众号完整正文、用户指定的正文图数量、项目风格和现有配图上下文。
+- 新增 `POST /api/v1/creative/projects/:projectId/visual/plan`。接口支持整套策划和 `currentItemId + request` 单图重策划，成功调用记录为 `WECHAT_VISUAL_PLANNING`，并保留参考图和已有素材绑定。
 - 服务端严格验证图片数量、平台角色、正文依据、画面任务、搜图词、信息点和最终生图指令；空泛占位内容直接返回稳定中文错误。`VISUAL_PLAN_VERSION = 6`，前端 `safePlan()` 兼容旧记录缺失数组或 `prompt` 的情况。
 - `VisualWorkspace.tsx` 首次进入显示主动生成入口。页头只保留图片数量和项目风格；当前配图项展示策划结果、参考图、单图自然语言修改、搜图、项目素材和“生成这一张”，不再暴露视觉结构、版式模板、单图风格或原始提示词。
 - `visualStylePresets()` 为 13 个核心风格提供 `previewImage/featured`，并新增马卡龙卡通、清透赛博和像素复古模型提示词。选择器只展示核心案例；旧风格 ID 继续保留在领域层，确保历史项目可读取。
@@ -1000,3 +1000,12 @@ V1 到 V2 迁移先生成只读预览，把现有 Brief、`sourceIds`、平台�
 - 真实登录 Chrome 已刷新宇树科技项目：写作策略标签为题材、内容类型、目标篇幅，五个旧字段/选项均不存在，状态为“已自动保存”，应用错误数和控制台错误均为 0，页面无横向溢出。
 - 最终验证通过：全量 `436/436` 单元测试、TypeScript 类型检查、生产构建、`server/index.cjs` 与 `server/worker.cjs` 语法检查、创作工作区 E2E 和差异检查。
 - 本修复未创建或执行迁移 `029`，未删除历史数据，也未把 Task 13 标记完成。
+
+## 2026-08-03 修复：公众号配图策划单次调用与图文职责
+
+- 用户只控制项目风格和正文插图数量；封面固定 1 张，公众号总量最多 12 张。核心 Agent 阅读完整母稿后自行决定每张图的插入段落、画面任务、视觉类型、正文依据、搜索词和生图指令。
+- `WECHAT_VISUAL_PLANNING` 是唯一配图策划任务策略。一次用户操作只调用一次所选模型；删除模型输出不合格后的隐藏二次修复，不回退到正文模型，也不自动产生额外 Token。
+- 策划输出契约按图片职责区分：照片、主体主视觉和真实场景使用 `ILLUSTRATION`，允许 `contentBlocks = []`，默认不生成图内文字；只有流程、时间、对比、数据或结构关系使用 `INFOGRAPHIC`，并要求 1 至 6 个必要短标签。
+- 搜图词必须描述可直接看到的主体、动作、地点、器物或场景，每条不超过 60 个字符；继续拒绝模板、字体、排版、PPT、信息卡、海报等设计形式词。
+- 配图请求参数错误返回 `VISUAL_PLANNING_INPUT_INVALID`；模型方案错误返回 `VISUAL_PLANNING_OUTPUT_INVALID`。两类错误不再被统一映射为“提交内容不完整”，失败不会写入草稿或覆盖现有方案。
+- `VISUAL_PLANNING_PROMPT_VERSION` 升级为 `1.1.0`。本次无数据库迁移、无历史数据修改、无模型重跑。

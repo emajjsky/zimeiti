@@ -110,10 +110,17 @@ test('配图策划使用独立可见任务策略，不静默回退到文案模�
   const client = fs.readFileSync(new URL('../src/main.tsx', import.meta.url), 'utf8');
   const workspace = fs.readFileSync(new URL('../src/workspaces/create/VisualWorkspace.tsx', import.meta.url), 'utf8');
   const migration = fs.readFileSync(new URL('../server/migrations/028_content_draft_foundation.sql', import.meta.url), 'utf8');
+  const routeStart = api.indexOf("app.post('/api/v1/creative/projects/:projectId/visual/plan'");
+  const routeEnd = api.indexOf('function generatedImageMime', routeStart);
+  const route = api.slice(routeStart, routeEnd);
   assert.match(service, /VISUAL_PLANNING_SCOPE = 'WECHAT_VISUAL_PLANNING'/);
   assert.doesNotMatch(service, /CONTENT_WRITING/);
   assert.match(api, /const scope = VISUAL_PLANNING_SCOPE;[\s\S]*?textTaskRoute\(workspace\.id, scope, '配图策划'\)/);
   assert.match(client, /WECHAT_VISUAL_PLANNING: '公众号配图策划'/);
   assert.match(workspace, /实际策略：公众号配图策划/);
   assert.match(migration, /SELECT workspace_id, 'WECHAT_VISUAL_PLANNING'/);
+  assert.equal((route.match(/textRunner\.runText/g) ?? []).length, 1);
+  assert.doesNotMatch(route, /RepairPrompt|repaired/);
+  assert.match(api, /VISUAL_PLANNING_INPUT_INVALID/);
+  assert.match(api, /VISUAL_PLANNING_OUTPUT_INVALID/);
 });

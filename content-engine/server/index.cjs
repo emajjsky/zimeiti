@@ -29,7 +29,6 @@ const {
   VISUAL_PLANNING_OPERATION,
   VISUAL_PLANNING_PROMPT_VERSION,
   buildVisualPlanningPrompt,
-  buildVisualPlanningRepairPrompt,
   parseVisualPlanningContent,
   mergePlannedItems,
   validateVisualPlanImageCount,
@@ -131,11 +130,15 @@ const visualPlanItemInput = z.object({
   stylePreset: z.union([z.literal('INHERIT'), visualStylePreset]),
   templatePreset: z.string().trim().min(1).max(80),
   sourceExcerpt: z.string().trim().max(4_000).default(''),
-  contentBlocks: z.array(z.object({ label: z.string().trim().min(1).max(80), detail: z.string().trim().min(1).max(300) })).min(1).max(8),
+  contentBlocks: z.array(z.object({ label: z.string().trim().min(1).max(80), detail: z.string().trim().min(1).max(300) })).max(8),
   references: z.array(z.object({ assetId: z.string().uuid(), uses: z.array(visualReferenceUse).min(1).max(5) })).max(3).default([]),
   prompt: z.string().trim().min(4).max(8_000),
   size: z.enum(['1:1', '3:4', '4:3', '9:16', '16:9']),
   assetId: z.string().uuid().nullable(),
+}).superRefine((item, context) => {
+  if (item.generationMode === 'INFOGRAPHIC' && item.contentBlocks.length === 0) {
+    context.addIssue({ code: 'custom', path: ['contentBlocks'], message: '信息图必须包含至少一个图内信息块' });
+  }
 });
 const visualPlanningInput = z.object({
   platform: z.literal('WECHAT'),
@@ -149,6 +152,34 @@ const visualPlanningInput = z.object({
   currentPlan: z.array(z.record(z.string(), z.unknown())).max(12).default([]),
   keepAssignedAssets: z.boolean().default(true),
 });
+
+function parseVisualPlanningRequest(value) {
+  const parsed = visualPlanningInput.safeParse(value);
+  if (parsed.success) return parsed.data;
+  const path = parsed.error.issues[0]?.path ?? [];
+  let message = '配图设置缺少必要信息，请重新选择项目风格和图片数量。';
+  if (path[0] === 'bodyItemCount') message = '正文插图数量必须是 0 到 11 张。';
+  else if (path[0] === 'styleProfile') message = '项目配图风格无效，请重新选择。';
+  else if (path[0] === 'request') message = '单图修改要求不能超过 2000 字。';
+  else if (path[0] === 'currentItemId' || path[0] === 'currentPlan') message = '当前配图方案数据已失效，请重新进入配图页面。';
+  throw businessError(400, 'VISUAL_PLANNING_INPUT_INVALID', message);
+}
+
+function visualPlanningOutputError(error) {
+  let reason = error instanceof Error ? error.message : '返回结构不完整';
+  if (error instanceof z.ZodError) {
+    const issue = error.issues[0];
+    const itemIndex = issue?.path?.[0] === 'items' && Number.isInteger(issue.path[1]) ? Number(issue.path[1]) + 1 : null;
+    const field = issue?.path?.[2];
+    if (itemIndex && field === 'searchQueries') reason = `第 ${itemIndex} 张图的搜索词不符合长度或数量要求`;
+    else if (itemIndex && field === 'contentBlocks') reason = `第 ${itemIndex} 张图缺少信息图所需的图内信息结构`;
+    else if (itemIndex) reason = `第 ${itemIndex} 张图的策划字段不完整`;
+    else reason = '返回的整体方案结构不完整';
+  }
+  const failure = businessError(422, 'VISUAL_PLANNING_OUTPUT_INVALID', `配图策划模型返回的方案未通过检查：${reason}。本次未保存任何更改；若重复出现，请在“模型与 API”中切换“公众号配图策划”模型。`);
+  failure.logMessage = error instanceof Error ? error.message : String(error);
+  return failure;
+}
 const createProjectInput = z.object({
   originType: z.enum(['MANUAL', 'DRAFT', 'IMPORT']).default('MANUAL'),
   title: z.string().trim().max(160).default(''),
@@ -1154,7 +1185,7 @@ app.get('/api/v1/creative/image-search', { preHandler: workspaceAccess.forRole('
 
 app.post('/api/v1/creative/projects/:projectId/visual/plan', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
-  const input = visualPlanningInput.parse(request.body ?? {});
+  const input = parseVisualPlanningRequest(request.body ?? {});
   const workspace = request.workspace;
   const [project, drafts] = await Promise.all([
     creativeProject(workspace.id, projectId),
@@ -1193,22 +1224,7 @@ app.post('/api/v1/creative/projects/:projectId/visual/plan', { preHandler: works
     try {
       parsed = parseVisualPlanningContent(result.content, { platform: input.platform, bodyItemCount: input.bodyItemCount, singleItem: Boolean(input.currentItemId) });
     } catch (validationError) {
-      const repaired = await textRunner.runText({
-        provider: route.provider,
-        model: route.model,
-        system: buildVisualPlanningRepairPrompt(prompt.system, validationError instanceof Error ? validationError.message : '输出结构不完整。', {
-          platform: input.platform,
-          bodyItemCount: input.bodyItemCount,
-          singleItem: Boolean(input.currentItemId),
-        }),
-        message: result.content,
-        maxTokens: 16_000,
-        temperature: 0.1,
-        ...connectionInput,
-      });
-      inputTokens += repaired.inputTokens ?? 0;
-      outputTokens += repaired.outputTokens ?? 0;
-      parsed = parseVisualPlanningContent(repaired.content, { platform: input.platform, bodyItemCount: input.bodyItemCount, singleItem: Boolean(input.currentItemId) });
+      throw visualPlanningOutputError(validationError);
     }
     const plan = mergePlannedItems({
       platform: input.platform,
@@ -1232,7 +1248,7 @@ app.post('/api/v1/creative/projects/:projectId/visual/plan', { preHandler: works
     });
   } catch (error) {
     await query(`INSERT INTO api_usage_logs (workspace_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens, error)
-      VALUES ($1, $2, $3, $4, 'ERROR', $5, $6, $7, $8)`, [workspace.id, route.provider, route.model, VISUAL_PLANNING_OPERATION, Date.now() - startedAt, inputTokens || null, outputTokens || null, (error instanceof Error ? error.message : '配图策划失败').slice(0, 2_000)]);
+      VALUES ($1, $2, $3, $4, 'ERROR', $5, $6, $7, $8)`, [workspace.id, route.provider, route.model, VISUAL_PLANNING_OPERATION, Date.now() - startedAt, inputTokens || null, outputTokens || null, String(error?.logMessage ?? (error instanceof Error ? error.message : '配图策划失败')).slice(0, 2_000)]);
     throw error;
   }
 });

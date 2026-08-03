@@ -3,7 +3,7 @@ import test from 'node:test';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { buildVisualPlanningPrompt, buildVisualPlanningRepairPrompt, parseVisualPlanningContent, mergePlannedItems, validateVisualPlanImageCount } = require('../server/services/visual-planning.cjs');
+const { buildVisualPlanningPrompt, parseVisualPlanningContent, mergePlannedItems, validateVisualPlanImageCount } = require('../server/services/visual-planning.cjs');
 
 const item = (role, title, placement) => ({
   role,
@@ -37,17 +37,10 @@ test('配图策划提示词读取完整正文并禁止空泛占位词', () => {
   assert.match(prompt.system, /图片内容为主、文字为辅/);
   assert.match(prompt.system, /禁止把模板、矢量、图标/);
   assert.match(prompt.system, /最多四个必要短标签/);
+  assert.match(prompt.message, /ILLUSTRATION 的 contentBlocks 必须为 \[\]/);
   assert.match(prompt.message, /封面 1 张 \+ 正文插图 2 张/);
   assert.match(prompt.message, /bodyItemCount 不是总数/);
   assert.match(prompt.message, /"totalImageCount":3/);
-});
-
-test('数量修复提示明确总数并要求重写完整数组', () => {
-  const repair = buildVisualPlanningRepairPrompt('系统规则', '实际返回 5 张', { platform: 'WECHAT', bodyItemCount: 5 });
-  assert.match(repair, /封面 1 张 \+ 正文插图 5 张/);
-  assert.match(repair, /恰好包含 6 项/);
-  assert.match(repair, /COVER → BODY → BODY → BODY → BODY → BODY/);
-  assert.match(repair, /不要只补缺失项/);
 });
 
 test('母稿配图只接受公众号并限制为十二张', () => {
@@ -58,6 +51,16 @@ test('母稿配图只接受公众号并限制为十二张', () => {
   assert.throws(() => validateVisualPlanImageCount('WEIBO', 1), /不支持的平台/);
 });
 
+test('清透赛博风格支持封面一张加正文十一张的公众号方案', () => {
+  const prompt = buildVisualPlanningPrompt({
+    project: { title: '从Prompt到State：AI协作的下一站', planning: {}, versionTitle: '从Prompt到State：AI协作的下一站', versionBody: '这是一篇完整的公众号正文，用于验证配图策划读取母稿后自主安排插图位置。' },
+    platform: 'WECHAT', bodyItemCount: 11, styleProfile: { preset: 'CYBER_TECH', customPrompt: '' }, request: '',
+  });
+  assert.match(prompt.message, /清透赛博/);
+  assert.match(prompt.message, /封面 1 张 \+ 正文插图 11 张/);
+  assert.match(prompt.message, /"totalImageCount":12/);
+});
+
 test('模型方案必须返回平台所需数量和具体内容', () => {
   const parsed = parseVisualPlanningContent(JSON.stringify({
     strategy: '封面建立主题识别，两张正文图分别解释通信关系和应用价值。',
@@ -65,6 +68,17 @@ test('模型方案必须返回平台所需数量和具体内容', () => {
   }), { platform: 'WECHAT', bodyItemCount: 2 });
   assert.equal(parsed.items.length, 3);
   assert.equal(parsed.items[1].focus, '中继卫星位于航天器与地面站之间，转发测控指令和业务数据');
+});
+
+test('照片和场景图不强制生成图内文字块，信息图必须提供结构化信息', () => {
+  const scene = { ...item('BODY', '真实工作场景', '正文第一段后'), visualType: 'SCENE', generationMode: 'ILLUSTRATION', contentBlocks: [] };
+  assert.doesNotThrow(() => parseVisualPlanningContent(JSON.stringify({ strategy: '用真实场景承接正文事实并减少图内文字。', items: [scene] }), { platform: 'WECHAT', bodyItemCount: 2, singleItem: true }));
+
+  const infographic = { ...scene, visualType: 'FLOWCHART', generationMode: 'INFOGRAPHIC' };
+  assert.throws(
+    () => parseVisualPlanningContent(JSON.stringify({ strategy: '用流程关系解释正文中的明确步骤。', items: [infographic] }), { platform: 'WECHAT', bodyItemCount: 2, singleItem: true }),
+    /信息图必须包含至少一个图内信息块/,
+  );
 });
 
 test('配图方案拒绝关键、节点、时间等空泛内容', () => {

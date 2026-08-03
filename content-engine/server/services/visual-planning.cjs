@@ -2,7 +2,7 @@ const { z } = require('zod');
 
 const VISUAL_PLANNING_SCOPE = 'WECHAT_VISUAL_PLANNING';
 const VISUAL_PLANNING_OPERATION = 'WECHAT_VISUAL_PLANNING';
-const VISUAL_PLANNING_PROMPT_VERSION = '1.0.0';
+const VISUAL_PLANNING_PROMPT_VERSION = '1.1.0';
 
 const platformNames = {
   WECHAT: '公众号',
@@ -31,6 +31,11 @@ const role = z.enum(['COVER', 'BODY', 'CARD', 'MAIN']);
 const generationMode = z.enum(['ILLUSTRATION', 'INFOGRAPHIC']);
 const size = z.enum(['1:1', '3:4', '4:3', '9:16', '16:9']);
 
+const contentBlockSchema = z.object({
+  label: z.string().trim().min(2).max(40),
+  detail: z.string().trim().min(6).max(180),
+});
+
 const plannedItemSchema = z.object({
   role,
   title: z.string().trim().min(2).max(80),
@@ -42,12 +47,17 @@ const plannedItemSchema = z.object({
   generationMode,
   informationPoints: z.array(z.string().trim().min(4).max(100)).min(1).max(6),
   sourceExcerpt: z.string().trim().min(8).max(1_200),
-  contentBlocks: z.array(z.object({
-    label: z.string().trim().min(2).max(40),
-    detail: z.string().trim().min(6).max(180),
-  })).min(1).max(6),
+  contentBlocks: z.array(contentBlockSchema).max(6),
   prompt: z.string().trim().min(80).max(6_000),
   size,
+}).superRefine((item, context) => {
+  if (item.generationMode === 'INFOGRAPHIC' && item.contentBlocks.length === 0) {
+    context.addIssue({
+      code: 'custom',
+      path: ['contentBlocks'],
+      message: '信息图必须包含至少一个图内信息块',
+    });
+  }
 });
 
 const visualPlanSchema = z.object({
@@ -126,7 +136,8 @@ function buildVisualPlanningPrompt({ project, platform, bodyItemCount, styleProf
     '先理解文章叙事和每一段的传播任务，再决定真实场景图、资料图、主体主视觉或确有必要的结构图。整套方案必须以图片内容为主、文字为辅，不能做成文字型 PPT、课程卡片或大段文字海报。',
     '每张图只能完成一个明确任务，必须绑定正文中的具体事实、关系、场景或结论。禁止用“关键、节点、时间、重点、核心、内容、信息”等空词代替具体内容。',
     '只有正文存在明确数据、时间顺序、对比关系或流程时，才能使用数据图、时间线、对比图或流程图；即便如此也应以可视化关系为主，只保留不可缺少的短标签。不得编造任何数据、事实、机构、人物、引语或新闻现场。',
-    '搜索词必须描述能在图片中直接看到的主体、动作、地点、器物或真实场景，优先“专有主体 + 可见动作/场景”。禁止把模板、矢量、图标、字体、排版、PPT、信息卡、知识卡、海报、素材、图表当作搜索词。不得使用完整句子。',
+    '搜索词必须描述能在图片中直接看到的主体、动作、地点、器物或真实场景，优先“专有主体 + 可见动作/场景”。每条搜索词不超过 60 个字符。禁止把模板、矢量、图标、字体、排版、PPT、信息卡、知识卡、海报、素材、图表当作搜索词。不得使用完整句子。',
+    'NEWS_PHOTO、HERO_VISUAL、SCENE 等照片或场景画面应使用 ILLUSTRATION，contentBlocks 必须返回空数组；只有需要在图内表达流程、时间、对比、数据或结构关系时才使用 INFOGRAPHIC，此时 contentBlocks 必须包含 1 至 6 个必要短标签及其准确内容。',
     'prompt 是直接交给图片模型的最终中文指令，必须先写清画面主体、动作、环境、镜头与构图，再写项目风格和平台比例。默认不生成文字；确需图解时只允许一个短标题和最多四个必要短标签，禁止正文段落、说明文字和 PPT 式模块堆叠。不要单独输出负面提示词字段。',
     '只返回 JSON，不要代码围栏、解释或备选方案。',
   ].join('\n');
@@ -134,7 +145,8 @@ function buildVisualPlanningPrompt({ project, platform, bodyItemCount, styleProf
     task: singleItem ? '根据用户意见只重做当前这一张的策划' : '生成完整配图方案',
     outputShape: {
       strategy: '一句话说明整套图片如何服务文章',
-      items: [{ role: 'COVER|BODY|CARD|MAIN', title: '用户可读的图片名称', placement: '准确插入位置', purpose: '为什么需要这张图', visualType: '允许的视觉类型代码', focus: '具体要画什么或展示什么', searchQueries: ['具体搜索词1', '具体搜索词2'], generationMode: 'ILLUSTRATION|INFOGRAPHIC', informationPoints: ['图片必须传达的具体信息'], sourceExcerpt: '对应正文原句或准确摘要', contentBlocks: [{ label: '图内信息标题', detail: '具体内容' }], prompt: '可直接交给图片模型的完整指令', size: '平台比例' }],
+      items: [{ role: 'COVER|BODY|CARD|MAIN', title: '用户可读的图片名称', placement: '准确插入位置', purpose: '为什么需要这张图', visualType: '允许的视觉类型代码', focus: '具体要画什么或展示什么', searchQueries: ['不超过60字符的具体搜索词1', '不超过60字符的具体搜索词2'], generationMode: 'ILLUSTRATION|INFOGRAPHIC', informationPoints: ['图片必须传达的具体信息'], sourceExcerpt: '对应正文原句或准确摘要', contentBlocks: [{ label: '必要短标签', detail: '正文支持的准确内容' }], prompt: '可直接交给图片模型的完整指令', size: '平台比例' }],
+      contentBlockRule: 'ILLUSTRATION 的 contentBlocks 必须为 []；INFOGRAPHIC 的 contentBlocks 必须为 1 至 6 项数组',
     },
     allowedVisualTypes: visualType.options,
     platform: { code: platform, name: platformName },
@@ -162,11 +174,6 @@ function buildVisualPlanningPrompt({ project, platform, bodyItemCount, styleProf
     } : null,
   });
   return { system, message };
-}
-
-function buildVisualPlanningRepairPrompt(system, validationError, { platform, bodyItemCount, singleItem = false } = {}) {
-  const quantity = quantityInstruction(platform, bodyItemCount, singleItem);
-  return `${system}\n上一次输出未通过校验。请重新返回一份完整 JSON，不要只补缺失项。${quantity.instruction}角色顺序必须严格为：${quantity.exactRoleSequence.join(' → ')}。校验错误：${validationError}`;
 }
 
 function itemId(platform, item, index) {
@@ -210,7 +217,6 @@ module.exports = {
   VISUAL_PLANNING_PROMPT_VERSION,
   visualPlanSchema,
   buildVisualPlanningPrompt,
-  buildVisualPlanningRepairPrompt,
   parseVisualPlanningContent,
   mergePlannedItems,
   validateVisualPlanImageCount,
