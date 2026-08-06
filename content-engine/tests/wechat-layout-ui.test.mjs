@@ -47,7 +47,8 @@ test('公众号排版工作台只接收草稿并提供模板库与真实预览',
   assert.match(picker, /我确认有权参考该文章的排版/);
   assert.match(picker, /duplicate|复制模板/);
   assert.match(picker, /onRemove|删除模板/);
-  assert.match(picker, /overflow:hidden;-ms-overflow-style:none;scrollbar-width:none/);
+  assert.match(picker, /srcDoc=\{preview\.html\}/);
+  assert.doesNotMatch(picker, /previewSrcDoc/);
 });
 
 test('模板客户端公开完整管理与服务端预览 API，导入不接受浏览器模型参数', async () => {

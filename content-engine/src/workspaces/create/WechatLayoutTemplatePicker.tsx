@@ -4,10 +4,6 @@ import type { WechatLayoutPreview, WechatLayoutTemplate } from '../../domain/con
 
 export type TemplateNotice = { tone: 'neutral' | 'success' | 'error'; message: string } | null;
 
-function previewSrcDoc(html: string) {
-  return `<!doctype html><html><head><style>html,body{margin:0;overflow:hidden;-ms-overflow-style:none;scrollbar-width:none;background:#fff;}body::-webkit-scrollbar{display:none}</style></head><body>${html}</body></html>`;
-}
-
 export function WechatLayoutTemplatePicker({
   templates,
   previews,
@@ -71,7 +67,7 @@ export function WechatLayoutTemplatePicker({
         return <article className={`wechat-template-card ${selected ? 'selected' : ''}`} key={template.id}>
           <button className="wechat-template-select" type="button" onClick={() => onSelect(template)} aria-pressed={selected}>
             <span className="wechat-template-mini-preview">
-              {preview ? <iframe title={`${template.name}预览`} sandbox="" srcDoc={previewSrcDoc(preview.html)}/> : <span>{busyTemplateId === template.id ? <LoaderCircle size={17}/> : '等待预览'}</span>}
+              {preview ? <iframe title={`${template.name}预览`} sandbox="" srcDoc={preview.html}/> : <span>{busyTemplateId === template.id ? <LoaderCircle size={17}/> : '等待预览'}</span>}
             </span>
             <span className="wechat-template-card-copy"><b>{template.name}</b><small>{template.kind === 'SYSTEM' ? '系统模板' : '自定义模板'} · V{template.currentVersionNumber}</small></span>
             {selected && <Check size={16} aria-hidden="true"/>}

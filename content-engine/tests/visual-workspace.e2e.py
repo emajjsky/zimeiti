@@ -401,6 +401,12 @@ with sync_playwright() as playwright:
     page.screenshot(path=ARTIFACTS / "visual-style-dialog-mobile.png")
     page.get_by_role("button", name="关闭艺术方向设置", exact=True).click()
     assert not state["unexpected"], state["unexpected"]
-    console_errors = [message for message in state["console_errors"] if "502 (Bad Gateway)" not in message]
+    expected_retry_502 = 1 if len(state["searches"]) >= 2 else 0
+    console_errors = []
+    for message in state["console_errors"]:
+        if expected_retry_502 and "502 (Bad Gateway)" in message:
+            expected_retry_502 -= 1
+            continue
+        console_errors.append(message)
     assert not console_errors, state["console_errors"]
     browser.close()
