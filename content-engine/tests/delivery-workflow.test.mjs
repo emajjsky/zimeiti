@@ -50,6 +50,15 @@ test('创作工作台提供真实配图与排版，并将公众号排版直接�
   assert.doesNotMatch(layout, /进入审核/);
 });
 
+test('配图完成按钮按素材绑定与数量一致性解锁，而不是被重策划提示卡住', () => {
+  const visual = fs.readFileSync(new URL('../src/workspaces/create/VisualWorkspace.tsx', import.meta.url), 'utf8');
+  assert.match(visual, /const allVisualsBound = plan\.length > 0 && boundCount === plan\.length/);
+  assert.match(visual, /const planQuantityMismatch = quantityMode === 'MANUAL' && plan\.length > 0 && actualBodyItemCount !== bodyItemCount/);
+  assert.match(visual, /const canCompleteVisual = hasCopy && allVisualsBound && !planQuantityMismatch/);
+  assert.match(visual, /disabled=\{busy !== null \|\| !canCompleteVisual\}/);
+  assert.doesNotMatch(visual, /disabled=\{busy !== null \|\| !hasCopy \|\| planNeedsRefresh\}/);
+});
+
 test('服务端拒绝为没有公众号正文的草稿保存配图方案', () => {
   const api = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
   const start = api.indexOf("app.put('/api/v1/creative/projects/:projectId/visual'");
@@ -87,6 +96,9 @@ test('视觉导演保存完整策划字段并支持参考图真实图生图', ()
   assert.match(generation, /z\.array\(z\.string\(\)\.uuid\(\)\)\.max\(3\)/);
   assert.match(generation, /visualItemId:/);
   assert.match(generation, /resolveWechatVisualGenerationSpec/);
+  assert.match(generation, /sanitizeBailianVisualPrompt/);
+  assert.match(generation, /buildBailianVisualGenerationError/);
+  assert.match(generation, /IMAGE_CONTENT_REJECTED/);
   assert.match(api, /stylePreset:\s*z\.union\(\[z\.literal\('INHERIT'\), visualStylePreset\]\)/);
   assert.match(api, /customPrompt:\s*z\.string\(\)\.trim\(\)\.max\(1_200\)/);
   assert.match(api, /contentBlocks:\s*z\.array/);
@@ -97,6 +109,14 @@ test('视觉导演保存完整策划字段并支持参考图真实图生图', ()
   assert.match(api, /generationSpec\.assetIds\.length \? 'edit' : 'generate'/);
   assert.match(api, /args\.push\('--image', image\)/);
   assert.match(api, /operation = generationSpec\.assetIds\.length \? 'IMAGE_TO_IMAGE' : 'TEXT_TO_IMAGE'/);
+  assert.match(api, /bailianImageSize\(generationSpec\.size\)/);
+  assert.match(api, /'1:1': '1280\*1280'/);
+  assert.match(api, /'4:3': '1472\*1104'/);
+  assert.match(api, /'16:9': '1696\*960'/);
+  assert.match(api, /'--negative-prompt', visualNegativePrompt/);
+  assert.match(api, /'--prompt-extend', 'false'/);
+  assert.match(api, /'--watermark', 'false'/);
+  assert.match(api, /比例：\$\{generationSpec\.size\}/);
   assert.match(client, /assetIds\?: string\[\]/);
   assert.match(client, /planVisual:/);
   assert.match(api, /VISUAL_PLANNING_SCOPE/);
@@ -121,6 +141,7 @@ test('配图策划使用独立可见任务策略，不静默回退到文案模�
   assert.doesNotMatch(service, /CONTENT_WRITING/);
   assert.match(api, /const scope = VISUAL_PLANNING_SCOPE;[\s\S]*?textTaskRoute\(workspace\.id, scope, '配图策划'\)/);
   assert.match(client, /WECHAT_VISUAL_PLANNING: '公众号配图策划'/);
+  assert.match(client, /WECHAT_LAYOUT_DESIGN: '公众号智能精排'/);
   assert.match(workspace, /实际策略：公众号配图策划/);
   assert.match(workspace, /type="checkbox" checked=\{quantityMode === 'AUTO'\}/);
   assert.match(workspace, /<select aria-label="正文插图数量"/);

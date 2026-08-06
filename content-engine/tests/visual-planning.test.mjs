@@ -123,9 +123,21 @@ test('配图方案拒绝关键、节点、时间等空泛内容', () => {
   assert.throws(() => parseVisualPlanningContent(JSON.stringify({ strategy: '按文章顺序解释具体关系。', items: [bad] }), { platform: 'WECHAT', bodyItemCount: 2, singleItem: true }), /过于空泛/);
 });
 
-test('配图方案拒绝描述模板和字体的伪搜索词', () => {
-  const bad = item('BODY', '股权结构图', '正文第一段后');
-  bad.searchQueries = ['饼图 图表 极简', '人民币 符号 图标'];
+test('配图方案会清洗描述模板和字体的伪搜索词', () => {
+  const noisy = item('BODY', '股权结构图', '正文第一段后');
+  noisy.searchQueries = ['饼图 图表 极简', '人民币 符号 图标'];
+  const parsed = parseVisualPlanningContent(JSON.stringify({ strategy: '用真实主体和场景解释正文。', items: [noisy] }), { platform: 'WECHAT', bodyItemCount: 2, singleItem: true });
+  assert.ok(parsed.items[0].searchQueries.length >= 2);
+  assert.deepEqual(parsed.items[0].searchQueries, [...new Set(parsed.items[0].searchQueries)]);
+  assert.ok(parsed.items[0].searchQueries.every((query) => !/(图表|图标|模板|PPT|排版|字体|风格)/.test(query)));
+});
+
+test('配图方案在伪搜索词无法清洗成具体内容时仍会拒绝', () => {
+  const bad = item('BODY', '模板风格图', '正文第一段后');
+  bad.focus = '模板 排版 风格';
+  bad.purpose = '模板 排版 风格';
+  bad.sourceExcerpt = '模板 排版 风格';
+  bad.searchQueries = ['模板 图标 PPT', '排版 字体 风格'];
   assert.throws(() => parseVisualPlanningContent(JSON.stringify({ strategy: '用真实主体和场景解释正文。', items: [bad] }), { platform: 'WECHAT', bodyItemCount: 2, singleItem: true }), /描述设计形式/);
 });
 

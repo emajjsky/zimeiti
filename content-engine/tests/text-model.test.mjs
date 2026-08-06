@@ -7,11 +7,48 @@ const payload = JSON.stringify({ choices: [{ message: { content: '{"ok":true}' }
 
 test('百炼策略通过 CLI 返回标准文本结果', async () => {
   let args;
-  const runner = createTextModelRunner({ runBailianCli: async (nextArgs) => { args = nextArgs; return payload; } });
+  let timeoutMs;
+  const runner = createTextModelRunner({ runBailianCli: async (nextArgs, _apiKey, nextTimeoutMs) => { args = nextArgs; timeoutMs = nextTimeoutMs; return payload; } });
   const result = await runner.runText({ provider: 'BAILIAN_CLI', apiKey: 'secret', model: 'qwen-plus', system: 'system', message: 'message', maxTokens: 6_000, temperature: 0.15 });
   assert.deepEqual(result, { content: '{"ok":true}', inputTokens: 12, outputTokens: 8 });
   assert.equal(args[args.indexOf('--max-tokens') + 1], '6000');
   assert.equal(args[args.indexOf('--temperature') + 1], '0.15');
+  assert.equal(timeoutMs, 180_000);
+});
+
+test('百炼未激活产品错误会转成可操作中文提示', async () => {
+  const runner = createTextModelRunner({
+    runBailianCli: async () => {
+      throw new Error('{ "error": { "message": "The product is not activated, please confirm that you have activated products and try again after activation.", "api_code": "invalid_request_error" } }');
+    },
+  });
+  await assert.rejects(
+    runner.runText({ provider: 'BAILIAN_CLI', apiKey: 'secret', model: 'ZHIPU/GLM-5.2', system: 'system', message: 'message' }),
+    (error) => error.message.includes('ZHIPU/GLM-5.2')
+      && error.message.includes('未开通或未激活')
+      && error.message.includes('模型任务策略')
+      && !error.message.includes('The product is not activated'),
+  );
+});
+
+test('百炼 CLI 超时错误会提示重试或切换更快模型', async () => {
+  const runner = createTextModelRunner({
+    runBailianCli: async () => { throw new Error('百炼 CLI 任务超时。'); },
+  });
+  await assert.rejects(
+    runner.runText({ provider: 'BAILIAN_CLI', apiKey: 'secret', model: 'qwen3.7-plus-2026-05-26', system: 'system', message: 'message' }),
+    (error) => error.message.includes('qwen3.7-plus-2026-05-26')
+      && error.message.includes('响应超时')
+      && error.message.includes('更快的文本模型')
+      && !error.message.includes('百炼 CLI 任务超时'),
+  );
+});
+
+test('百炼文本调用允许为慢任务覆盖等待时间', async () => {
+  let timeoutMs;
+  const runner = createTextModelRunner({ runBailianCli: async (_args, _apiKey, nextTimeoutMs) => { timeoutMs = nextTimeoutMs; return payload; } });
+  await runner.runText({ provider: 'BAILIAN_CLI', apiKey: 'secret', model: 'qwen-plus', system: 'system', message: 'message', timeoutMs: 240_000 });
+  assert.equal(timeoutMs, 240_000);
 });
 
 test('外部策略通过连接的 chat completions 返回标准文本结果', async () => {

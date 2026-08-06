@@ -71,3 +71,24 @@ test('公众号最终生图参数从当前草稿方案重新编译并固定正�
   assert.match(result.prompt, /统一使用柔和北向窗光/);
   assert.doesNotMatch(result.prompt, /旧客户端保存的任意提示词/);
 });
+
+test('公众号生图对 DataInspectionFailed 返回稳定业务错误', () => {
+  const { buildBailianVisualGenerationError, isBailianDataInspectionFailure } = loadVisualGenerationService();
+  const raw = new Error('{"error":{"code":1,"message":"Input data may contain inappropriate content. For details, see https://help.aliyun.com/zh/model-studio/error-code#inappropriate-content","http_status":400,"api_code":"DataInspectionFailed","request_id":"req-123"}}');
+  assert.equal(isBailianDataInspectionFailure(raw), true);
+  const failure = buildBailianVisualGenerationError(raw, { retried: true });
+  assert.equal(failure.statusCode, 400);
+  assert.equal(failure.code, 'IMAGE_CONTENT_REJECTED');
+  assert.match(failure.message, /仍未通过/);
+  assert.deepEqual(failure.details, { apiCode: 'DataInspectionFailed', requestId: 'req-123' });
+});
+
+test('公众号生图提示词清理会去掉高风险词并保留主体场景', () => {
+  const { sanitizeBailianVisualPrompt, isBailianDataInspectionFailure } = loadVisualGenerationService();
+  const prompt = '明亮的现代会议室，大屏幕上播放着一段精致的数据视频：中国地图上华东区高亮显示，动态增长曲线浮现，旁边伴有简洁的文字结论，参会者专注观看并点头。';
+  const sanitized = sanitizeBailianVisualPrompt(prompt);
+  assert.match(sanitized, /现代会议室/);
+  assert.match(sanitized, /动态增长曲线/);
+  assert.doesNotMatch(sanitized, /中国地图|二维码|水印|logo|签名/);
+  assert.equal(isBailianDataInspectionFailure(new Error('network down')), false);
+});

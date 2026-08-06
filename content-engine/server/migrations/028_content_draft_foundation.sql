@@ -93,9 +93,12 @@ CREATE TABLE content_draft_versions (
     REFERENCES content_drafts(workspace_id, id) ON DELETE CASCADE,
   UNIQUE (workspace_id, id),
   UNIQUE (workspace_id, draft_id, id),
-  UNIQUE (workspace_id, draft_id, version_number),
-  UNIQUE NULLS NOT DISTINCT (workspace_id, migration_source, migration_source_key)
+  UNIQUE (workspace_id, draft_id, version_number)
 );
+
+CREATE UNIQUE INDEX content_draft_versions_migration_source_key_idx
+  ON content_draft_versions (workspace_id, migration_source, migration_source_key)
+  WHERE migration_source IS NOT NULL;
 
 ALTER TABLE content_draft_versions
   ADD CONSTRAINT content_draft_versions_layout_template_fk
@@ -230,12 +233,12 @@ CREATE TABLE wechat_layout_system_presets (
 );
 
 INSERT INTO wechat_layout_system_presets (name, rules_json) VALUES
-  ('清爽阅读', '{"schemaVersion":1,"canvas":{"background":"#ffffff","textColor":"#273444","maxWidth":677},"title":{"fontSize":30,"fontWeight":700,"lineHeight":1.35,"color":"#111827"},"body":{"fontSize":16,"lineHeight":1.9,"paragraphSpacing":18},"heading":{"fontSize":21,"color":"#2563eb","borderColor":"#93c5fd"},"quote":{"background":"#f8fafc","borderColor":"#94a3b8"},"image":{"borderRadius":0,"spacing":20,"captionColor":"#64748b"},"divider":{"color":"#e2e8f0","thickness":1}}'),
-  ('商务报告', '{"schemaVersion":1,"canvas":{"background":"#ffffff","textColor":"#243044","maxWidth":677},"title":{"fontSize":29,"fontWeight":700,"lineHeight":1.35,"color":"#172554"},"body":{"fontSize":16,"lineHeight":1.85,"paragraphSpacing":16},"heading":{"fontSize":20,"color":"#1e3a8a","borderColor":"#1e3a8a"},"quote":{"background":"#eff6ff","borderColor":"#3b82f6"},"image":{"borderRadius":0,"spacing":18,"captionColor":"#64748b"},"divider":{"color":"#cbd5e1","thickness":1}}'),
-  ('科技媒体', '{"schemaVersion":1,"canvas":{"background":"#f8fbff","textColor":"#1e293b","maxWidth":677},"title":{"fontSize":31,"fontWeight":800,"lineHeight":1.3,"color":"#0f172a"},"body":{"fontSize":16,"lineHeight":1.85,"paragraphSpacing":18},"heading":{"fontSize":21,"color":"#0369a1","borderColor":"#38bdf8"},"quote":{"background":"#ecfeff","borderColor":"#06b6d4"},"image":{"borderRadius":8,"spacing":20,"captionColor":"#475569"},"divider":{"color":"#bae6fd","thickness":1}}'),
-  ('人文杂志', '{"schemaVersion":1,"canvas":{"background":"#fffdf8","textColor":"#3f3a34","maxWidth":677},"title":{"fontSize":30,"fontWeight":700,"lineHeight":1.4,"color":"#292524"},"body":{"fontSize":17,"lineHeight":2,"paragraphSpacing":20},"heading":{"fontSize":21,"color":"#9a3412","borderColor":"#d6b38a"},"quote":{"background":"#faf5ed","borderColor":"#c08457"},"image":{"borderRadius":0,"spacing":22,"captionColor":"#78716c"},"divider":{"color":"#ded4c5","thickness":1}}'),
-  ('现代报刊', '{"schemaVersion":1,"canvas":{"background":"#ffffff","textColor":"#202020","maxWidth":677},"title":{"fontSize":32,"fontWeight":800,"lineHeight":1.25,"color":"#111111"},"body":{"fontSize":16,"lineHeight":1.8,"paragraphSpacing":16},"heading":{"fontSize":22,"color":"#111111","borderColor":"#111111"},"quote":{"background":"#f5f5f5","borderColor":"#4b5563"},"image":{"borderRadius":0,"spacing":18,"captionColor":"#5f6368"},"divider":{"color":"#111111","thickness":2}}'),
-  ('知识长文', '{"schemaVersion":1,"canvas":{"background":"#ffffff","textColor":"#263238","maxWidth":677},"title":{"fontSize":30,"fontWeight":700,"lineHeight":1.35,"color":"#102a43"},"body":{"fontSize":16,"lineHeight":1.95,"paragraphSpacing":19},"heading":{"fontSize":21,"color":"#0f766e","borderColor":"#5eead4"},"quote":{"background":"#f0fdfa","borderColor":"#14b8a6"},"image":{"borderRadius":4,"spacing":20,"captionColor":"#52606d"},"divider":{"color":"#cbd5e1","thickness":1}}');
+  ('清爽阅读', '{"schemaVersion":1,"canvas":{"background":"#ffffff","textColor":"#273444","maxWidth":677},"title":{"fontSize":31,"fontWeight":800,"lineHeight":1.32,"color":"#102a43"},"body":{"fontSize":16,"lineHeight":1.95,"paragraphSpacing":20},"heading":{"fontSize":21,"color":"#2563eb","borderColor":"#60a5fa"},"quote":{"background":"#f8fafc","borderColor":"#93c5fd"},"image":{"borderRadius":12,"spacing":22,"captionColor":"#64748b"},"divider":{"color":"#dbeafe","thickness":1},"layout":{"titleVariant":"label","headingVariant":"left-bar","imageVariant":"framed","quoteVariant":"card","dividerVariant":"dots","leadVariant":"stripe"}}'),
+  ('商务报告', '{"schemaVersion":1,"canvas":{"background":"#ffffff","textColor":"#243044","maxWidth":677},"title":{"fontSize":30,"fontWeight":800,"lineHeight":1.28,"color":"#172554"},"body":{"fontSize":16,"lineHeight":1.82,"paragraphSpacing":16},"heading":{"fontSize":20,"color":"#1e3a8a","borderColor":"#1e3a8a"},"quote":{"background":"#eff6ff","borderColor":"#3b82f6"},"image":{"borderRadius":0,"spacing":18,"captionColor":"#64748b"},"divider":{"color":"#94a3b8","thickness":2},"layout":{"titleVariant":"split","headingVariant":"numbered","imageVariant":"framed","quoteVariant":"outline","dividerVariant":"label","leadVariant":"card"}}'),
+  ('科技媒体', '{"schemaVersion":1,"canvas":{"background":"#f8fbff","textColor":"#1e293b","maxWidth":677},"title":{"fontSize":32,"fontWeight":900,"lineHeight":1.22,"color":"#0f172a"},"body":{"fontSize":16,"lineHeight":1.86,"paragraphSpacing":18},"heading":{"fontSize":21,"color":"#0369a1","borderColor":"#06b6d4"},"quote":{"background":"#ecfeff","borderColor":"#38bdf8"},"image":{"borderRadius":10,"spacing":22,"captionColor":"#475569"},"divider":{"color":"#7dd3fc","thickness":2},"layout":{"titleVariant":"poster","headingVariant":"pill","imageVariant":"shadow","quoteVariant":"bubble","dividerVariant":"dots","leadVariant":"stripe"}}'),
+  ('人文杂志', '{"schemaVersion":1,"canvas":{"background":"#fffdf8","textColor":"#3f3a34","maxWidth":677},"title":{"fontSize":31,"fontWeight":700,"lineHeight":1.42,"color":"#292524"},"body":{"fontSize":17,"lineHeight":2.05,"paragraphSpacing":22},"heading":{"fontSize":21,"color":"#9a3412","borderColor":"#c08457"},"quote":{"background":"#faf5ed","borderColor":"#d6b38a"},"image":{"borderRadius":4,"spacing":24,"captionColor":"#78716c"},"divider":{"color":"#d6b38a","thickness":1},"layout":{"titleVariant":"card","headingVariant":"stamp","imageVariant":"framed","quoteVariant":"bubble","dividerVariant":"dots","leadVariant":"kicker"}}'),
+  ('现代报刊', '{"schemaVersion":1,"canvas":{"background":"#ffffff","textColor":"#202020","maxWidth":677},"title":{"fontSize":34,"fontWeight":900,"lineHeight":1.16,"color":"#111111"},"body":{"fontSize":16,"lineHeight":1.78,"paragraphSpacing":16},"heading":{"fontSize":22,"color":"#111111","borderColor":"#111111"},"quote":{"background":"#f5f5f5","borderColor":"#4b5563"},"image":{"borderRadius":0,"spacing":18,"captionColor":"#5f6368"},"divider":{"color":"#111111","thickness":3},"layout":{"titleVariant":"bar","headingVariant":"underline","imageVariant":"cutout","quoteVariant":"outline","dividerVariant":"label","leadVariant":"stripe"}}'),
+  ('知识长文', '{"schemaVersion":1,"canvas":{"background":"#ffffff","textColor":"#263238","maxWidth":677},"title":{"fontSize":30,"fontWeight":800,"lineHeight":1.34,"color":"#102a43"},"body":{"fontSize":16,"lineHeight":1.98,"paragraphSpacing":20},"heading":{"fontSize":21,"color":"#0f766e","borderColor":"#14b8a6"},"quote":{"background":"#f0fdfa","borderColor":"#5eead4"},"image":{"borderRadius":8,"spacing":20,"captionColor":"#52606d"},"divider":{"color":"#99f6e4","thickness":1},"layout":{"titleVariant":"label","headingVariant":"band","imageVariant":"poster","quoteVariant":"card","dividerVariant":"dots","leadVariant":"card"}}');
 
 CREATE OR REPLACE FUNCTION seed_wechat_layout_templates(target_workspace_id uuid)
 RETURNS void
@@ -298,7 +301,8 @@ INSERT INTO content_drafts (workspace_id, project_id, platform, created_at, upda
 SELECT platform.workspace_id, platform.project_id, platform.platform, project.created_at, project.updated_at
 FROM draft_platforms platform
 JOIN content_projects project
-  ON project.workspace_id = platform.workspace_id AND project.project_id = platform.project_id;
+  ON project.workspace_id = platform.workspace_id AND project.project_id = platform.project_id
+ON CONFLICT (workspace_id, project_id, platform) DO NOTHING;
 
 INSERT INTO content_draft_versions (
   id, workspace_id, draft_id, platform, version_number, title, body,
@@ -313,7 +317,8 @@ JOIN content_drafts draft
   AND draft.project_id = version.project_id
   AND draft.platform = version.platform
 LEFT JOIN project_artifacts artifact ON artifact.id = version.artifact_id
-WHERE version.platform IN ('WECHAT', 'XIAOHONGSHU', 'WEIBO');
+WHERE version.platform IN ('WECHAT', 'XIAOHONGSHU', 'WEIBO')
+ON CONFLICT DO NOTHING;
 
 WITH current_json AS (
   SELECT DISTINCT ON (project.workspace_id, project.project_id, value->>'platform')
@@ -353,7 +358,8 @@ INSERT INTO content_draft_versions (
 )
 SELECT workspace_id, draft_id, platform, version_number, title, body,
   'MIGRATED_CURRENT', workspace_id::text || ':' || project_id || ':' || platform, updated_at
-FROM candidates;
+FROM candidates
+ON CONFLICT DO NOTHING;
 
 WITH latest_versions AS (
   SELECT DISTINCT ON (version.workspace_id, version.draft_id)

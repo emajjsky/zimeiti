@@ -12,7 +12,7 @@ const { encrypt, decrypt, hashPassword, verifyPassword } = require('./crypto.cjs
 const { clipPublicLink, readPublicArticle, fetchPublicPage } = require('./services/public-web.cjs');
 const { searchTavily, searchTavilyImages } = require('./services/tavily.cjs');
 const { searchImagesWithFallback, searchWikimediaImages } = require('./services/image-search.cjs');
-const { parseVisualGenerationRequest, resolveWechatVisualGenerationSpec } = require('./services/visual-generation.cjs');
+const { buildBailianVisualGenerationError, isBailianDataInspectionFailure, parseVisualGenerationRequest, resolveWechatVisualGenerationSpec, sanitizeBailianVisualPrompt } = require('./services/visual-generation.cjs');
 const { listSources, createSources, updateSource, removeSource, listItems, saveItem, refreshWorkspaceRss } = require('./services/intelligenceRepository.cjs');
 const { enqueue } = require('./queue.cjs');
 const { listAvailableSkills } = require('./agent/skillRegistry.cjs');
@@ -54,6 +54,9 @@ const { createAssetStore } = require('./services/assets.cjs');
 const { createContentDraftStore } = require('./services/content-drafts.cjs');
 const { createDraftAdaptationService } = require('./services/draft-adaptation.cjs');
 const { registerContentDraftRoutes } = require('./routes/content-drafts.cjs');
+const { createPublishingStore } = require('./services/publishing.cjs');
+const { registerPublishingRoutes } = require('./routes/publishing.cjs');
+const { createWechatOfficialClient } = require('./services/wechat-official.cjs');
 const { renderWechatDraft } = require('./services/wechat-layout-renderer.cjs');
 const { analyzeWechatTemplateSource, createWechatLayoutTemplateStore } = require('./services/wechat-layout-templates.cjs');
 const { registerWechatLayoutTemplateRoutes } = require('./routes/wechat-layout-templates.cjs');
@@ -82,7 +85,7 @@ const app = Fastify({ logger: true, bodyLimit: 5 * 1024 * 1024 });
 const credentials = new Set(['TAVILY', 'BAILIAN']);
 const modelTasks = [
   'INTELLIGENCE_ANALYSIS', 'SOURCE_VERIFICATION', 'TOPIC_RECOMMENDATION', 'VOICE_CALIBRATION',
-  'WECHAT_COPY_GENERATION', 'WECHAT_VISUAL_PLANNING', 'WECHAT_TEMPLATE_ANALYSIS',
+  'WECHAT_COPY_GENERATION', 'WECHAT_VISUAL_PLANNING', 'WECHAT_TEMPLATE_ANALYSIS', 'WECHAT_LAYOUT_DESIGN',
   'XIAOHONGSHU_ADAPTATION', 'WEIBO_ADAPTATION', 'CONTENT_PREFLIGHT_REVIEW',
   'TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE', 'SPEECH_SYNTHESIS', 'SPEECH_RECOGNITION',
   'TEXT_TO_VIDEO', 'IMAGE_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO', 'REFERENCE_TO_VIDEO', 'VIDEO_EDIT',
@@ -109,7 +112,8 @@ const visualStylePreset = z.enum([
   'FRESH_EDITORIAL', 'BUSINESS_EDITORIAL', 'SWISS_GRID', 'DOCUMENTARY', 'CINEMATIC_DOCUMENTARY', 'MONO_EDITORIAL', 'NEWSPAPER_EDITORIAL', 'LIFESTYLE_PHOTO',
   'MINIMAL_KNOWLEDGE', 'DATA_VISUAL', 'BLUEPRINT_DIAGRAM', 'HAND_DRAWN_NOTES', 'CONSULTING_REPORT', 'SCIENCE_ATLAS',
   'RETRO_POP', 'MACARON_CARTOON', 'PAPER_COLLAGE', 'FLAT_GEOMETRIC', 'SOFT_3D', 'PENCIL_SKETCH', 'PIXEL_RETRO',
-  'NEW_CHINESE', 'INK_WASH', 'GUOCHAO_POSTER', 'WOODCUT_PRINT', 'TECH_MEDIA', 'CYBER_TECH', 'INDUSTRIAL_MEDIA',
+  'NEW_CHINESE', 'INK_WASH', 'GUOCHAO_POSTER', 'MINERAL_FRESCO', 'WOODCUT_PRINT', 'TECH_MEDIA', 'AI_LAB', 'CLEAN_ENERGY', 'CYBER_TECH', 'INDUSTRIAL_MEDIA',
+  'KIDS_DOODLE', 'COSMIC_HORROR', 'STICK_FIGURE', 'SATIRICAL_CARTOON', 'WARM_3D_ANIMATION', 'POP_NOSTALGIA', 'PIXEL_GAME',
 ]);
 const visualReferenceUse = z.enum(['COLOR', 'COMPOSITION', 'LAYOUT', 'TEXTURE', 'SUBJECT']);
 const visualPlanItemInput = z.object({
@@ -284,8 +288,27 @@ const workspaceAccess = createWorkspaceAccess({ query, authenticate });
 const assetStore = createAssetStore({ query, transaction, removeStoredFile: (storageKey) => removeAssetFile(config.uploadRoot, storageKey) });
 const draftStore = createContentDraftStore({ query, transaction, renderWechatDraft });
 const draftAdaptationService = createDraftAdaptationService({ query, transaction, draftStore, resolveTaskRoute: textTaskRoute, enqueue });
+async function loadPublishingAsset(workspaceId, assetId) {
+  const result = await query('SELECT original_filename, mime_type, storage_key FROM workspace_assets WHERE workspace_id = $1 AND id = $2 AND kind = $3 AND status = $4', [workspaceId, assetId, 'IMAGE', 'ACTIVE']);
+  if (!result.rows.length) throw businessError(404, 'PUBLISH_ASSET_NOT_FOUND', '发布图片素材不存在或不可用。');
+  const row = result.rows[0];
+  return {
+    buffer: await fs.readFile(safePath(config.uploadRoot, row.storage_key)),
+    mimeType: row.mime_type,
+    filename: row.original_filename,
+  };
+}
+const publishingStore = createPublishingStore({
+  query,
+  transaction,
+  encryptSecret: encrypt,
+  decryptSecret: decrypt,
+  officialDraftClient: createWechatOfficialClient(),
+  loadAsset: loadPublishingAsset,
+});
 const wechatLayoutTemplateStore = createWechatLayoutTemplateStore({ query, transaction });
 registerContentDraftRoutes(app, { workspaceAccess, draftStore, assetStore, adaptationService: draftAdaptationService });
+registerPublishingRoutes(app, { workspaceAccess, publishingStore });
 registerWechatLayoutTemplateRoutes(app, {
   workspaceAccess,
   templateStore: wechatLayoutTemplateStore,
@@ -1257,6 +1280,20 @@ function generatedImageMime(filename) {
   return extension === '.jpg' || extension === '.jpeg' ? 'image/jpeg' : extension === '.webp' ? 'image/webp' : 'image/png';
 }
 
+const bailianImageSizes = Object.freeze({
+  '1:1': '1280*1280',
+  '3:4': '1104*1472',
+  '4:3': '1472*1104',
+  '9:16': '960*1696',
+  '16:9': '1696*960',
+});
+
+function bailianImageSize(size) {
+  return bailianImageSizes[size] ?? size;
+}
+
+const visualNegativePrompt = 'watermark, logo, QR code, signature, text artifacts, misspelled text, blurry, low quality, distorted hands, deformed face, copied UI, stock photo watermark';
+
 app.post('/api/v1/creative/projects/:projectId/visual/generate', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const projectId = z.string().min(1).max(200).parse(request.params.projectId);
   const input = parseVisualGenerationRequest(request.body ?? {});
@@ -1289,9 +1326,28 @@ app.post('/api/v1/creative/projects/:projectId/visual/generate', { preHandler: w
   try {
     await fs.mkdir(jobFolder, { recursive: true });
     const command = generationSpec.assetIds.length ? 'edit' : 'generate';
-    const args = ['image', command, '--prompt', generationSpec.prompt, '--model', model, '--size', generationSpec.size, '--n', '1', '--out-dir', jobFolder, '--out-prefix', 'visual', '--output', 'json', '--quiet'];
-    for (const image of referenceImages) args.push('--image', image);
-    await runBailianCli(args, apiKey, 180_000);
+    const promptAttempts = [generationSpec.prompt];
+    const retryPrompt = sanitizeBailianVisualPrompt(generationSpec.prompt);
+    if (retryPrompt !== generationSpec.prompt) promptAttempts.push(retryPrompt);
+    let generationError = null;
+    let retriedAfterInspection = false;
+    for (const [attemptIndex, prompt] of promptAttempts.entries()) {
+      const args = ['image', command, '--prompt', prompt, '--model', model, '--size', bailianImageSize(generationSpec.size), '--n', '1', '--negative-prompt', visualNegativePrompt, '--prompt-extend', 'false', '--watermark', 'false', '--out-dir', jobFolder, '--out-prefix', 'visual', '--output', 'json', '--quiet'];
+      for (const image of referenceImages) args.push('--image', image);
+      try {
+        await runBailianCli(args, apiKey, 180_000);
+        generationError = null;
+        break;
+      } catch (error) {
+        generationError = error;
+        if (attemptIndex === 0 && promptAttempts.length > 1 && isBailianDataInspectionFailure(error)) {
+          retriedAfterInspection = true;
+          continue;
+        }
+        break;
+      }
+    }
+    if (generationError) throw buildBailianVisualGenerationError(generationError, { retried: retriedAfterInspection });
     const files = await fs.readdir(jobFolder, { withFileTypes: true });
     const image = files.find((entry) => entry.isFile() && /\.(png|jpe?g|webp)$/i.test(entry.name));
     if (!image) throw new Error('模型未返回可保存的图片文件。');
@@ -1311,7 +1367,7 @@ app.post('/api/v1/creative/projects/:projectId/visual/generate', { preHandler: w
     const created = await assetStore.createFromStoredFile(workspace.id, request.user.sub, stored, {
       origin: 'AI_GENERATED',
       title: `AI 配图 · ${generationSpec.prompt.slice(0, 38)}`,
-      sourceNote: `AI 生图｜模型：${model}｜比例：${input.size}${referenceImages.length ? `｜参考图：${referenceImages.length} 张` : ''}`,
+      sourceNote: `AI 生图｜模型：${model}｜比例：${generationSpec.size}${referenceImages.length ? `｜参考图：${referenceImages.length} 张` : ''}`,
       copyrightStatus: 'OWNED',
     });
     assetPersisted = true;

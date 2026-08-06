@@ -9,6 +9,38 @@ class ModelToolCallError extends Error {
   }
 }
 
+function rawErrorMessage(error) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  try { return JSON.stringify(error); } catch { return String(error); }
+}
+
+function parseErrorPayload(raw) {
+  try { return JSON.parse(raw); } catch { /* fall through */ }
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  if (start >= 0 && end > start) {
+    try { return JSON.parse(raw.slice(start, end + 1)); } catch { /* fall through */ }
+  }
+  return null;
+}
+
+function normalizeTextModelError(error, context = {}) {
+  const raw = rawErrorMessage(error);
+  const payload = parseErrorPayload(raw);
+  const detail = payload?.error?.message ?? payload?.message ?? raw;
+  const apiCode = payload?.error?.api_code ?? payload?.api_code ?? '';
+  const model = context.model ? `「${context.model}」` : '当前模型';
+  const lower = `${detail}\n${apiCode}`.toLowerCase();
+  if (lower.includes('product is not activated') || lower.includes('not activated')) {
+    return `百炼模型${model}对应的产品未开通或未激活。请在“设置 > 模型任务策略”把当前任务切换到已开通的文本模型，或到阿里云百炼控制台开通该模型后重试。`;
+  }
+  if (lower.includes('百炼 cli 任务超时') || lower.includes('timeout')) {
+    return `百炼模型${model}响应超时。当前任务可能需要更长生成时间，请稍后重试；如果连续超时，请在“设置 > 模型任务策略”切换到更快的文本模型。`;
+  }
+  return detail || '文本模型调用失败，请检查模型任务策略。';
+}
+
 function parseModelResponse(value, expectedToolName) {
   let payload;
   try { payload = typeof value === 'string' ? JSON.parse(value) : value; }
@@ -38,12 +70,18 @@ function createTextModelRunner({ runBailianCli = defaultRunBailianCli, fetchImpl
     async runText(input) {
       const maxTokens = Number.isInteger(input.maxTokens) ? Math.max(256, Math.min(input.maxTokens, 16_000)) : 1_800;
       const temperature = Number.isFinite(input.temperature) ? Math.max(0, Math.min(input.temperature, 1)) : 0.2;
+      const timeoutMs = Number.isInteger(input.timeoutMs) ? Math.max(15_000, Math.min(input.timeoutMs, 300_000)) : 180_000;
       if (input.provider === 'BAILIAN_CLI') {
         if (!input.apiKey) throw new Error('工作空间未配置百炼 Key。');
         const args = ['text', 'chat', '--model', input.model, '--system', input.system, '--message', input.message, '--max-tokens', String(maxTokens), '--temperature', String(temperature)];
         for (const tool of input.tools ?? []) args.push('--tool', JSON.stringify(tool));
         args.push('--output', 'json');
-        const output = await runBailianCli(args, input.apiKey);
+        let output;
+        try {
+          output = await runBailianCli(args, input.apiKey, timeoutMs);
+        } catch (error) {
+          throw new Error(normalizeTextModelError(error, { provider: input.provider, model: input.model }));
+        }
         return parseModelResponse(output, input.requiredToolName);
       }
       if (input.provider !== 'EXTERNAL_API') throw new Error('不支持的文本模型来源。');
@@ -53,7 +91,7 @@ function createTextModelRunner({ runBailianCli = defaultRunBailianCli, fetchImpl
       try {
         response = await fetchImpl(`${baseUrl}/chat/completions`, {
           method: 'POST',
-          signal: AbortSignal.timeout(60_000),
+          signal: AbortSignal.timeout(timeoutMs),
           headers: { Authorization: `Bearer ${input.connection.apiKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
             model: input.model,
@@ -77,4 +115,4 @@ function createTextModelRunner({ runBailianCli = defaultRunBailianCli, fetchImpl
   };
 }
 
-module.exports = { createTextModelRunner, parseModelResponse, ModelToolCallError };
+module.exports = { createTextModelRunner, parseModelResponse, normalizeTextModelError, ModelToolCallError };

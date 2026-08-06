@@ -1,8 +1,12 @@
-import { Archive, Check, Copy, FilePlus2, Link2, LoaderCircle, X } from 'lucide-react';
+import { Check, Copy, FilePlus2, Link2, LoaderCircle, Trash2, X } from 'lucide-react';
 import { useState } from 'react';
 import type { WechatLayoutPreview, WechatLayoutTemplate } from '../../domain/content-drafts';
 
 export type TemplateNotice = { tone: 'neutral' | 'success' | 'error'; message: string } | null;
+
+function previewSrcDoc(html: string) {
+  return `<!doctype html><html><head><style>html,body{margin:0;overflow:hidden;-ms-overflow-style:none;scrollbar-width:none;background:#fff;}body::-webkit-scrollbar{display:none}</style></head><body>${html}</body></html>`;
+}
 
 export function WechatLayoutTemplatePicker({
   templates,
@@ -13,7 +17,7 @@ export function WechatLayoutTemplatePicker({
   onSelect,
   onImport,
   onDuplicate,
-  onArchive,
+  onRemove,
 }: {
   templates: WechatLayoutTemplate[];
   previews: Record<string, WechatLayoutPreview | undefined>;
@@ -23,13 +27,13 @@ export function WechatLayoutTemplatePicker({
   onSelect: (template: WechatLayoutTemplate) => void;
   onImport: (input: { name: string; url: string }) => Promise<void>;
   onDuplicate: (template: WechatLayoutTemplate) => Promise<void>;
-  onArchive: (template: WechatLayoutTemplate) => Promise<void>;
+  onRemove: (template: WechatLayoutTemplate) => Promise<void>;
 }) {
   const [showImport, setShowImport] = useState(false);
   const [importName, setImportName] = useState('');
   const [importUrl, setImportUrl] = useState('');
   const [confirmedRights, setConfirmedRights] = useState(false);
-  const [archiveTargetId, setArchiveTargetId] = useState<string | null>(null);
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
 
   const submitImport = async () => {
     try {
@@ -63,21 +67,21 @@ export function WechatLayoutTemplatePicker({
       {templates.map((template) => {
         const selected = selectedTemplateId === template.id;
         const preview = previews[template.id];
-        const archiving = archiveTargetId === template.id;
+        const deleting = deleteTargetId === template.id;
         return <article className={`wechat-template-card ${selected ? 'selected' : ''}`} key={template.id}>
           <button className="wechat-template-select" type="button" onClick={() => onSelect(template)} aria-pressed={selected}>
             <span className="wechat-template-mini-preview">
-              {preview ? <iframe title={`${template.name}预览`} sandbox="" srcDoc={preview.html}/> : <span>{busyTemplateId === template.id ? <LoaderCircle size={17}/> : '等待预览'}</span>}
+              {preview ? <iframe title={`${template.name}预览`} sandbox="" srcDoc={previewSrcDoc(preview.html)}/> : <span>{busyTemplateId === template.id ? <LoaderCircle size={17}/> : '等待预览'}</span>}
             </span>
             <span className="wechat-template-card-copy"><b>{template.name}</b><small>{template.kind === 'SYSTEM' ? '系统模板' : '自定义模板'} · V{template.currentVersionNumber}</small></span>
             {selected && <Check size={16} aria-hidden="true"/>}
           </button>
           <footer>
             <button className="icon-button" type="button" title="复制模板" aria-label={`复制模板：${template.name}`} disabled={busyTemplateId !== null} onClick={() => void onDuplicate(template)}><Copy size={14}/></button>
-            {template.kind === 'CUSTOM' && (archiving ? <>
-              <button className="icon-button danger-text" type="button" title="确认归档" aria-label={`确认归档模板：${template.name}`} disabled={busyTemplateId !== null} onClick={() => { setArchiveTargetId(null); void onArchive(template); }}><Check size={14}/></button>
-              <button className="icon-button" type="button" title="取消归档" aria-label="取消归档" onClick={() => setArchiveTargetId(null)}><X size={14}/></button>
-            </> : <button className="icon-button" type="button" title="归档模板" aria-label={`归档模板：${template.name}`} disabled={busyTemplateId !== null} onClick={() => setArchiveTargetId(template.id)}><Archive size={14}/></button>)}
+            {template.kind === 'CUSTOM' && (deleting ? <>
+              <button className="icon-button danger-text" type="button" title="确认删除" aria-label={`确认删除模板：${template.name}`} disabled={busyTemplateId !== null} onClick={() => { setDeleteTargetId(null); void onRemove(template); }}><Check size={14}/></button>
+              <button className="icon-button" type="button" title="取消删除" aria-label="取消删除" onClick={() => setDeleteTargetId(null)}><X size={14}/></button>
+            </> : <button className="icon-button danger-icon" type="button" title="删除模板" aria-label={`删除模板：${template.name}`} disabled={busyTemplateId !== null} onClick={() => setDeleteTargetId(template.id)}><Trash2 size={14}/></button>)}
           </footer>
         </article>;
       })}

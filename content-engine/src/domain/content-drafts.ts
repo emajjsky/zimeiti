@@ -97,6 +97,21 @@ export interface WechatLayoutRules {
   quote: { background: string; borderColor: string };
   image: { borderRadius: number; spacing: number; captionColor: string };
   divider: { color: string; thickness: number };
+  layout?: {
+    titleVariant?: 'plain' | 'bar' | 'card' | 'label' | 'split' | 'poster' | 'news';
+    headingVariant?: 'left-bar' | 'pill' | 'underline' | 'numbered' | 'band' | 'stamp' | 'shadow-card' | 'center-underline';
+    imageVariant?: 'plain' | 'framed' | 'shadow' | 'bleed' | 'cutout' | 'poster';
+    quoteVariant?: 'bar' | 'card' | 'bubble' | 'outline';
+    dividerVariant?: 'line' | 'dots' | 'label';
+    leadVariant?: 'none' | 'card' | 'stripe' | 'kicker';
+    tocVariant?: 'none' | 'bullets' | 'card' | 'index';
+    listVariant?: 'plain' | 'bold' | 'spaced' | 'check';
+    linkVariant?: 'plain' | 'accent' | 'pill';
+    tagVariant?: 'none' | 'chips' | 'rail' | 'mono';
+    metaVariant?: 'none' | 'muted' | 'chips';
+    paragraphVariant?: 'plain' | 'indent' | 'rail' | 'card' | 'report' | 'newspaper' | 'case-card';
+    inlineVariant?: 'plain' | 'accent' | 'dual' | 'marker' | 'mono';
+  };
 }
 
 export interface WechatLayoutTemplate {
@@ -119,6 +134,36 @@ export interface WechatLayoutPreview {
   draftId: string;
   html: string;
   checks: Array<{ code: string; level: 'ERROR' | 'WARNING'; message: string }>;
+}
+
+export interface WechatLayoutDesign {
+  schemaVersion: 1;
+  templateId?: string;
+  templateVersionId?: string;
+  blocks: Array<{
+    paragraphIndex: number;
+    role: 'lead' | 'key-judgement' | 'section-summary' | 'quote' | 'normal';
+    variant: 'accent-line' | 'callout' | 'card' | 'plain';
+    label?: string;
+  }>;
+  inlineMarks: Array<{
+    text: string;
+    type: 'strong' | 'strong-accent' | 'marker' | 'code';
+    paragraphIndex?: number;
+  }>;
+  notes?: string;
+}
+
+export interface WechatLayoutDesignResult extends WechatLayoutPreview {
+  draft: ContentDraft;
+  layoutDesign: WechatLayoutDesign;
+  policy: {
+    scope: 'WECHAT_LAYOUT_DESIGN';
+    provider: 'BAILIAN_CLI' | 'EXTERNAL_API';
+    connectionId: string | null;
+    model: string;
+    promptVersion?: string;
+  };
 }
 
 export interface ChannelAccountCapability {

@@ -61,6 +61,28 @@ export interface AccountVoiceCalibrationDraft extends AccountVoiceInput {
 export type CreativePlatform = Exclude<Platform, 'VIDEO_CHANNEL'>;
 export type CreativePlatformSkillSelection = { LAYOUT: string; CHANNEL: string; lengthTarget?: string };
 export type CreativePlatformSkillMap = Partial<Record<CreativePlatform, CreativePlatformSkillSelection>>;
+
+export const defaultWritingLengthTarget = '350-500 字';
+
+export const writingLengthTargetOptions = [
+  defaultWritingLengthTarget,
+  ...Array.from({ length: 18 }, (_, index) => {
+    const start = 500 + index * 250;
+    return `${start}-${start + 250} 字`;
+  }),
+];
+
+export function normalizeWritingLengthTarget(value: string | null | undefined) {
+  const raw = String(value ?? '').trim();
+  if (writingLengthTargetOptions.includes(raw)) return raw;
+  const [firstNumber] = raw.match(/\d+/g) ?? [];
+  const lower = Number(firstNumber);
+  if (!Number.isFinite(lower)) return defaultWritingLengthTarget;
+  if (lower < 500) return defaultWritingLengthTarget;
+  if (lower >= 5000) return writingLengthTargetOptions[writingLengthTargetOptions.length - 1];
+  const start = 500 + Math.floor((lower - 500) / 250) * 250;
+  return `${start}-${start + 250} 字`;
+}
 export type ProjectMaterialScope = 'PROJECT' | 'RESEARCH' | 'WRITING' | 'IMAGING';
 export type ProjectInputKind = 'IDEA' | 'DRAFT' | 'NOTE' | 'TRANSCRIPT';
 export type ProjectReferenceRole = 'FACT' | 'OPINION' | 'STRUCTURE' | 'VOICE' | 'HOOK' | 'VISUAL' | 'NEGATIVE';

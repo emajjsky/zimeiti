@@ -139,6 +139,7 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
   const boundCount = plan.filter((item) => item.assetId).length;
   const countRange = visualPlanCountRange(platform);
   const hasCopy = draft.body.trim().length >= 80;
+  const allVisualsBound = plan.length > 0 && boundCount === plan.length;
   const selectedStyle = visualStyles.find((style) => style.id === styleDraft.preset) ?? visualStyles[0];
   const visibleStyleGroup = visualStyleGroups.find((group) => group.id === activeStyleGroup) ?? visualStyleGroups[0];
 
@@ -183,9 +184,11 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
   const persistVisual = (snapshot: VisualSnapshot, workflowStatus = persistedVisual.workflowStatus) => {
     const queued = saveQueue.current.catch(() => draftRef.current).then(async () => {
       const compiledPlan = snapshot.plan.map((item) => updateVisualPlanItem(item, {}, { platform, title: draftRef.current.title }, snapshot.styleProfile));
+      const existingVisualPlan = { ...(draftRef.current.visualPlan ?? {}) };
+      if (!workflowStatus) delete existingVisualPlan.workflowStatus;
       let saved = await webDrafts.patch(draftRef.current.id, {
         revision: draftRef.current.revision,
-        visualPlan: { planVersion: VISUAL_PLAN_VERSION, plan: compiledPlan, styleProfile: snapshot.styleProfile, quantityMode: snapshot.quantityMode, bodyItemCount: snapshot.bodyItemCount, ...(workflowStatus ? { workflowStatus } : {}) },
+        visualPlan: { ...existingVisualPlan, planVersion: VISUAL_PLAN_VERSION, plan: compiledPlan, styleProfile: snapshot.styleProfile, quantityMode: snapshot.quantityMode, bodyItemCount: snapshot.bodyItemCount, ...(workflowStatus ? { workflowStatus } : {}) },
       });
       const seen = new Set<string>();
       const orderedAssets = compiledPlan.flatMap((item) => {
@@ -278,6 +281,15 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
     } finally {
       if (revision === searchRevision.current) setSearchBusy(false);
     }
+  };
+
+  const selectSearchQuery = (query: string) => {
+    searchRevision.current += 1;
+    setSearchQuery(query);
+    setSearchResults([]);
+    setSearchAttempted(false);
+    setSearchProvider('');
+    setSearchError('');
   };
 
   const selectPlanItem = (item: CreativeVisualPlanItem) => {
@@ -381,6 +393,8 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
 
   const complete = async () => {
     if (!hasCopy) { setError('请先完成当前渠道正文，再确认配图进入排版。'); return; }
+    if (!allVisualsBound) { setError('请先为每个配图位置绑定图片，再进入排版。'); return; }
+    if (planQuantityMismatch) { setError('正文插图数量已调整，请先更新配图方案。'); return; }
     setBusy('complete'); setError('');
     try {
       await persistVisual({ plan, styleProfile, quantityMode, bodyItemCount }, 'COMPLETE');
@@ -441,6 +455,8 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
   };
 
   const actualBodyItemCount = plan.filter((item) => item.role === 'BODY').length;
+  const planQuantityMismatch = quantityMode === 'MANUAL' && plan.length > 0 && actualBodyItemCount !== bodyItemCount;
+  const canCompleteVisual = hasCopy && allVisualsBound && !planQuantityMismatch;
   const planCountSummary = quantityMode === 'AUTO'
     ? plan.length ? `自动规划｜封面 1 张，正文插图 ${actualBodyItemCount} 张` : '自动规划数量｜封面 1 张，正文插图由 Agent 决定'
     : `手动指定｜封面 1 张，正文插图 ${bodyItemCount} 张`;
@@ -501,7 +517,7 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
         </nav>
 
         {sourceView === 'search' && <section className="visual-source-workspace">
-          <div className="visual-query-chips">{activeItem.searchQueries.map((query) => <button type="button" className={query === searchQuery ? 'active' : ''} aria-pressed={query === searchQuery && searchAttempted} disabled={searchBusy} key={query} onClick={() => void runSearch(query)}>{query}</button>)}</div>
+          <div className="visual-query-chips">{activeItem.searchQueries.map((query) => <button type="button" className={query === searchQuery ? 'active' : ''} aria-pressed={query === searchQuery} disabled={searchBusy} key={query} onClick={() => selectSearchQuery(query)}>{query}</button>)}</div>
           <form className="visual-search-form" onSubmit={(event) => { event.preventDefault(); void runSearch(searchQuery); }}>
             <label><span>搜索词</span><input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} /></label>
             <button className="button primary" type="submit" disabled={searchBusy || searchQuery.trim().length < 2}>{searchBusy ? <LoaderCircle size={16}/> : <Search size={16}/>}搜索</button>
@@ -509,7 +525,7 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
           {searchBusy && <div className="visual-result-state" role="status"><LoaderCircle size={18}/>正在搜索“{searchQuery}”</div>}
           {!searchBusy && searchError && <div className="visual-result-state error" role="alert">{searchError}</div>}
           {!searchBusy && searchAttempted && !searchError && searchResults.length === 0 && <div className="visual-result-state">没有找到与“{searchQuery}”匹配的图片，请换一个具体主体或场景。</div>}
-          {!searchBusy && !searchAttempted && <div className="visual-result-state">点击推荐词会立即搜索，也可以输入关键词后搜索</div>}
+          {!searchBusy && !searchAttempted && <div className="visual-result-state">选择推荐词或输入关键词后，点击搜索获取候选图。</div>}
           {!searchBusy && searchResults.length > 0 && <div className="visual-search-summary" role="status">{searchProvider} · {searchResults.length} 张候选图</div>}
           {searchResults.length > 0 && <div className="visual-search-grid">{searchResults.map((result) => <article className="visual-search-card" key={result.id}>
             <button className="visual-search-preview-button" type="button" onClick={() => setPreviewAsset({ id: '', kind: 'IMAGE', origin: 'WEB_IMPORT', status: 'ACTIVE', title: result.title, originalFilename: result.title, mimeType: 'image/jpeg', sizeBytes: 0, sha256: '', sourceUrl: result.imageUrl, sourceNote: result.sourceUrl, copyrightStatus: result.copyrightStatus, projectCount: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() })}><img src={result.thumbnailUrl} alt=""/></button><div><b>{result.title}</b><small>{result.license}</small></div>
@@ -557,7 +573,7 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
       </main>}
     </div>}
 
-    {plan.length > 0 && <footer className="delivery-workspace-footer"><span>{saveState === 'saving' ? '正在自动保存配图方案' : planningRoute ? `实际策略：公众号配图策划（${planningRoute.scope}） · ${planningRoute.provider} / ${planningRoute.model}` : boundCount ? `已绑定 ${boundCount}/${plan.length} 张图片｜策略：公众号配图策划（WECHAT_VISUAL_PLANNING）` : '策略：公众号配图策划（WECHAT_VISUAL_PLANNING）｜可从第一张开始选图'}</span><div><button className="text-button" type="button" onClick={onOpenModelSettings}>查看任务策略</button><button className="button" type="button" disabled={busy !== null} onClick={() => void save()}>{busy === 'save' ? <LoaderCircle size={16}/> : <Save size={16}/>}保存</button><button className="button primary" type="button" disabled={busy !== null || !hasCopy || planNeedsRefresh} onClick={() => void complete()}>{busy === 'complete' ? <LoaderCircle size={16}/> : null}确认素材，进入排版</button></div></footer>}
+    {plan.length > 0 && <footer className="delivery-workspace-footer"><span>{saveState === 'saving' ? '正在自动保存配图方案' : planningRoute ? `实际策略：公众号配图策划（${planningRoute.scope}） · ${planningRoute.provider} / ${planningRoute.model}` : boundCount ? `已绑定 ${boundCount}/${plan.length} 张图片｜策略：公众号配图策划（WECHAT_VISUAL_PLANNING）` : '策略：公众号配图策划（WECHAT_VISUAL_PLANNING）｜可从第一张开始选图'}</span><div><button className="text-button" type="button" onClick={onOpenModelSettings}>查看任务策略</button><button className="button" type="button" disabled={busy !== null} onClick={() => void save()}>{busy === 'save' ? <LoaderCircle size={16}/> : <Save size={16}/>}保存</button><button className="button primary" type="button" disabled={busy !== null || !canCompleteVisual} onClick={() => void complete()}>{busy === 'complete' ? <LoaderCircle size={16}/> : null}确认素材，进入排版</button></div></footer>}
 
     {styleDialogOpen && <div className="visual-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setStyleDialogOpen(false); }}>
       <section className="visual-style-dialog" role="dialog" aria-modal="true" aria-labelledby="visual-style-dialog-title">

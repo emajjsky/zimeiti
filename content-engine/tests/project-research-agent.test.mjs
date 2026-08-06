@@ -191,7 +191,8 @@ test('研究与文案复用同一个 ProjectAgent 入口并按阶段分流', () 
   assert.match(agent, /SimplifiedResearchAgent/);
   assert.match(agent, /CopyProjectAgent/);
   assert.match(agent, /copyActionPanelState/);
-  assert.match(agent, /confirmAgentRun\(prepared\.id\)/);
+  assert.match(agent, /selectedAction/);
+  assert.match(agent, /executableAction && void startAction\(executableAction\)/);
   assert.doesNotMatch(agent, /自由对话/);
   assert.doesNotMatch(materials, /<ProjectAgent/);
   assert.match(workspace, /stage="RESEARCH"/);

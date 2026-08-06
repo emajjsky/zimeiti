@@ -311,7 +311,8 @@ test('公众号候选不得把待复核主张写成正文事实', () => {
 test('重构已有正文自动继承待复核事实，且拒绝新增待复核事实', () => {
   const claim = '该卫星主要用于为飞船、空间实验室、空间站等载人航天器提供数据中继和测控服务。';
   const body = `这是一篇正在重构的公众号文章，原稿已提到该卫星为载人航天器提供数据中继和测控服务。\n\n${'重构只改善结构与表达，不新增未经核验的用途、数据或影响推演。'.repeat(5)}`;
-  const output = parseCopyOutput(JSON.stringify({ title: '这颗卫星上天意味着什么？', body, changeSummary: '重组原有叙事结构。', factsToVerify: [] }), 'RESTRUCTURE_DRAFT', {
+  const revisedBody = `${'先换一个新的开头，把读者如何理解这条新闻放到最前面。'.repeat(8)}\n\n该卫星为载人航天器提供数据中继和测控服务。\n\n${'随后再用新的段落顺序说明边界：重构只改善结构与表达，不新增未经核验的用途、数据或影响推演。'.repeat(8)}`;
+  const output = parseCopyOutput(JSON.stringify({ title: '这颗卫星上天意味着什么？', body: revisedBody, changeSummary: '重组原有叙事结构。', factsToVerify: [] }), 'RESTRUCTURE_DRAFT', {
     currentContent: { body },
     researchContext: { cautions: [{ claim, status: 'NEEDS_REVIEW' }] },
   });
@@ -320,6 +321,19 @@ test('重构已有正文自动继承待复核事实，且拒绝新增待复核�
     currentContent: { body: '不包含这条主张的原稿。' },
     researchContext: { cautions: [{ claim, status: 'NEEDS_REVIEW' }] },
   }), /待复核|正文/);
+});
+
+test('重构候选不能与当前正文几乎一致', () => {
+  const current = `第一段先说明为什么要重构。\n\n第二段继续使用原有结构。\n\n${'第三段保持同样的论证路径。'.repeat(20)}`;
+  const same = JSON.stringify({ title: '原题', body: current, changeSummary: '重构完成。', factsToVerify: [] });
+  assert.throws(() => parseCopyOutput(same, 'RESTRUCTURE_DRAFT', { currentContent: { title: '原题', body: current } }), /重构|原文|一致/);
+  const changed = JSON.stringify({
+    title: '新题',
+    body: `${'先换一个完全不同的开头，把读者问题放到前面。'.repeat(8)}\n\n${'再重新组织论证顺序，用新的分段推进。'.repeat(8)}\n\n${'最后收束到新的判断框架。'.repeat(8)}`,
+    changeSummary: '重新组织结构和叙事顺序。',
+    factsToVerify: [],
+  });
+  assert.equal(parseCopyOutput(changed, 'RESTRUCTURE_DRAFT', { currentContent: { title: '原题', body: current } }).title, '新题');
 });
 
 test('文案质量审稿只以已核验事实为准，并返回可执行的重写结论', () => {
@@ -399,13 +413,17 @@ test('Project Agent prepare 不入队，confirm 才创建 Worker Job', () => {
   assert.match(confirm, /await enqueue/);
 });
 
-test('Project Agent Worker 只把正文写入公众号工作草稿', () => {
+test('Project Agent Worker 初稿写入公众号工作草稿，改写只生成候选', () => {
   const worker = fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8');
   const execute = routeSlice(worker, 'async function generateProjectCopyAction', 'async function generateAgentPlan');
   assert.match(worker, /PROJECT_COPY_ACTION/);
   assert.match(execute, /draftStore\.upsertWechat/);
-  assert.doesNotMatch(execute, /platform_content_versions|updateCreativeProjects|applyAcceptedCopyToState/);
-  assert.doesNotMatch(execute, /type:\s*'PLATFORM_COPY'/);
+  assert.match(execute, /isInitialDraft/);
+  assert.match(execute, /isRevisionCandidate/);
+  assert.match(execute, /platform_content_versions/);
+  assert.match(execute, /type:\s*'PLATFORM_COPY'/);
+  assert.match(execute, /artifactRefs_json|artifact_refs_json/);
+  assert.doesNotMatch(execute, /updateCreativeProjects|applyAcceptedCopyToState/);
   assert.doesNotMatch(execute, /qualityReview/);
 });
 

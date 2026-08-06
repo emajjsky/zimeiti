@@ -5,7 +5,7 @@ import { webAccountVoices, webCreative, webDrafts } from '../../data/webApi';
 import { canOpenCreateStage, creativeStages, stageRouteForProjectStage } from '../../domain/creative-flow.mjs';
 import { projectStageName, type ContentProject } from '../../domain/content';
 import type { ContentDraft, ContentDraftVersion } from '../../domain/content-drafts';
-import type { AccountVoiceProfile, CreativeSkillDefinition, CreativeSkillDimension, CreativeSkillSelection, WritingBrief, WritingBriefInput } from '../../domain/creative';
+import { defaultWritingLengthTarget, normalizeWritingLengthTarget, type AccountVoiceProfile, type CreativeSkillDefinition, type CreativeSkillDimension, type CreativeSkillSelection, type WritingBrief, type WritingBriefInput } from '../../domain/creative';
 import { CopyWorkspace } from './CopyWorkspace';
 import { DraftResultWorkspace } from './DraftResultWorkspace';
 import { LayoutWorkspace } from './LayoutWorkspace';
@@ -20,7 +20,7 @@ function firstVersion(skills: CreativeSkillDefinition[], dimension: CreativeSkil
   return (candidates.find((skill) => skill.slug === preferredSlug) ?? candidates[0])?.version.id ?? '';
 }
 
-function wechatSkills(skills: CreativeSkillDefinition[], lengthTarget = '1500-2500 字') {
+function wechatSkills(skills: CreativeSkillDefinition[], lengthTarget = defaultWritingLengthTarget) {
   return {
     LAYOUT: firstVersion(skills, 'LAYOUT', 'wechat-longform'),
     CHANNEL: firstVersion(skills, 'CHANNEL', 'wechat'),
@@ -39,7 +39,7 @@ function defaultBrief(project: ContentProject, skills: CreativeSkillDefinition[]
     targetAudience: project.planning.targetAudience,
     coreMessage: project.planning.coreMessage || project.coreViewpoint,
     sourceRequirements: project.planning.sourceRequirements || project.factChecks.join('；'),
-    lengthTarget: '1500-2500 字',
+    lengthTarget: defaultWritingLengthTarget,
     selectedPlatforms: ['WECHAT'],
     notes: project.planning.constraints,
     selectedSkills: { ...emptySelection, SUBJECT: firstVersion(skills, 'SUBJECT', subject), CONTENT_TYPE: firstVersion(skills, 'CONTENT_TYPE', 'education') },
@@ -50,7 +50,7 @@ function defaultBrief(project: ContentProject, skills: CreativeSkillDefinition[]
 }
 
 function briefInput(brief: WritingBrief, skills: CreativeSkillDefinition[]): WritingBriefInput {
-  const lengthTarget = brief.platformSkills.WECHAT?.lengthTarget || brief.lengthTarget || '1500-2500 字';
+  const lengthTarget = normalizeWritingLengthTarget(brief.platformSkills.WECHAT?.lengthTarget || brief.lengthTarget);
   return {
     objective: brief.objective,
     targetAudience: brief.targetAudience,
@@ -182,7 +182,7 @@ export function CreateWorkspace({ project, stage, activeDerivedDraftId, onStage,
 
   const saveBrief = async (next: WritingBriefInput) => {
     if (!project) return;
-    const lengthTarget = next.platformSkills.WECHAT?.lengthTarget || next.lengthTarget || '1500-2500 字';
+    const lengthTarget = normalizeWritingLengthTarget(next.platformSkills.WECHAT?.lengthTarget || next.lengthTarget);
     const normalized: WritingBriefInput = { ...next, lengthTarget, selectedPlatforms: ['WECHAT'], platformSkills: { WECHAT: wechatSkills(skills, lengthTarget) } };
     setBrief(normalized); setBriefState('saving');
     try {

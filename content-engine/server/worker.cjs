@@ -839,7 +839,8 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
     const saved = await transaction(async (client) => {
       const activeRun = await client.query("SELECT id FROM generation_runs WHERE id = $1 AND workspace_id = $2 AND status = 'RUNNING' FOR UPDATE", [runId, workspaceId]);
       if (!activeRun.rowCount) throw new Error('文案任务已取消或中断。');
-      const artifact = isOutlineAction ? await projectAgentStore.createArtifact(client, {
+      const isRevisionCandidate = !isOutlineAction && !isInitialDraft;
+      let artifact = isOutlineAction ? await projectAgentStore.createArtifact(client, {
         workspaceId,
         projectId: snapshot.projectId,
         type: 'OUTLINE',
@@ -850,10 +851,43 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
         title: output.titleOptions[0],
         metadata: { action: snapshot.action, payload: output },
       }) : null;
-      const draft = isOutlineAction ? null : await draftStore.upsertWechat(workspaceId, snapshot.projectId, {
-        title: output.title,
-        body: output.body,
-      }, client);
+      let draft = null;
+      if (isInitialDraft) {
+        draft = await draftStore.upsertWechat(workspaceId, snapshot.projectId, {
+          title: output.title,
+          body: output.body,
+        }, client);
+      }
+      if (isRevisionCandidate) {
+        artifact = await projectAgentStore.createArtifact(client, {
+          workspaceId,
+          projectId: snapshot.projectId,
+          type: 'PLATFORM_COPY',
+          stage: 'COPY',
+          platform: 'WECHAT',
+          status: 'CANDIDATE',
+          actionRunId: runId,
+          title: output.title,
+          metadata: { action: snapshot.action, payload: output },
+        });
+        const parent = await client.query(`SELECT id, version_number FROM platform_content_versions
+          WHERE workspace_id = $1 AND project_id = $2 AND platform = 'WECHAT'
+          ORDER BY version_number DESC LIMIT 1`, [workspaceId, snapshot.projectId]);
+        const parentVersion = parent.rows[0] ?? null;
+        await client.query(`INSERT INTO platform_content_versions
+          (workspace_id, project_id, platform, artifact_id, parent_version_id, version_number, title, body, facts_to_verify_json, change_summary)
+          VALUES ($1, $2, 'WECHAT', $3, $4, $5, $6, $7, $8, $9)`, [
+          workspaceId,
+          snapshot.projectId,
+          artifact.id,
+          parentVersion?.id ?? null,
+          Number(parentVersion?.version_number ?? 0) + 1,
+          output.title,
+          output.body,
+          JSON.stringify(output.factsToVerify ?? []),
+          output.changeSummary ?? '',
+        ]);
+      }
       const message = await client.query(`INSERT INTO project_agent_messages
         (workspace_id, project_id, action_run_id, role, content, stage, message_type, artifact_refs_json, metadata_json)
         VALUES ($1, $2, $3, 'ASSISTANT', $4, 'COPY', 'ARTIFACT', $5, $6) RETURNING id`, [
@@ -865,7 +899,7 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
         JSON.stringify({ platform: 'WECHAT', action: snapshot.action, policy, draftId: draft?.id ?? null }),
       ]);
       if (artifact) await client.query('UPDATE project_artifacts SET created_by_message_id = $1 WHERE id = $2 AND workspace_id = $3', [message.rows[0].id, artifact.id, workspaceId]);
-      if (!isOutlineAction) {
+      if (isInitialDraft) {
         await projectAgentStore.upsertStageSummary(client, {
           workspaceId,
           projectId: snapshot.projectId,

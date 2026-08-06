@@ -234,6 +234,14 @@ test('项目风格库覆盖编辑、知识、插画、文化和科技，并提�
   assert.match(retro.prompt, /人物动作.*不幼稚/);
 });
 
+test('后端配图接口接受全部前端艺术方向预设', () => {
+  const api = readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
+  const enumBody = api.match(/const visualStylePreset = z\.enum\(\[([\s\S]*?)\]\);/)?.[1] ?? '';
+  const serverStyleIds = new Set([...enumBody.matchAll(/'([A-Z0-9_]+)'/g)].map((match) => match[1]));
+  const missing = visualStylePresets().map((style) => style.id).filter((id) => !serverStyleIds.has(id));
+  assert.deepEqual(missing, []);
+});
+
 test('正式风格选择器只使用真实案例图清单并覆盖核心视觉方向', () => {
   const featured = visualStylePresets().filter((style) => style.featured);
   assert.equal(featured.length, 36);

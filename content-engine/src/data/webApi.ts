@@ -2,9 +2,10 @@ import type { LocalState } from './localRepository';
 import type { ApiUsageLog, ApiUsageSummary, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelTaskPolicy } from '../domain/integrations';
 import type { ContentProject, CreativeDelivery, CreativeVisualPlanItem, IntelligenceAnalysis, Platform, ProjectOriginType, ProjectPlanning } from '../domain/content';
 import type { AccountVoiceCalibrationDraft, AccountVoiceInput, AccountVoiceProfile, CreativeDraftCandidate, CreativeDraftPreparation, CreativeDraftRun, CreativeOutlineCandidate, CreativeOutlinePreparation, CreativeOutlineRun, CreativePlatform, CreativeSkillDefinition, ProjectAgentContext, ProjectAgentHistory, ProjectAgentPrepareInput, ProjectAgentPrepareResult, ProjectAgentRun, ProjectArtifact, ProjectInput, ProjectInputPayload, ProjectReference, ProjectReferenceMetadata, ProjectResearchContext, ProjectResearchRun, WritingBrief, WritingBriefInput } from '../domain/creative';
+import type { ChannelAccount, MetricSnapshot, PlatformDraftTask, PublishPackage, PublishedArticle, PublishReadyDraft, Retrospective } from '../domain/publishing';
 import type { WebSession, WorkspaceSession, WorkspaceSummary } from '../domain/workspace';
 import type { AssetFilters, AssetMetadataInput, AssetUpdateInput, ProjectAsset, ProjectAssetLinkInput, WorkspaceAsset } from '../domain/assets';
-import type { ContentDraft, ContentDraftVersion, DraftAdaptationRun, DraftPatchInput, DraftPreview, DraftPlatform, WechatLayoutPreview, WechatLayoutRules, WechatLayoutTemplate } from '../domain/content-drafts';
+import type { ContentDraft, ContentDraftVersion, DraftAdaptationRun, DraftPatchInput, DraftPreview, DraftPlatform, WechatLayoutDesignResult, WechatLayoutPreview, WechatLayoutRules, WechatLayoutTemplate } from '../domain/content-drafts';
 import { sessionStore } from './sessionStore';
 
 const apiBase = import.meta.env.VITE_API_BASE ?? '/api/v1';
@@ -49,6 +50,14 @@ async function requestWorkspaceContent(path: string, fallback: string) {
     throw new Error(payload?.error?.message || `${fallback}（HTTP ${response.status}）。`);
   }
   return response;
+}
+
+function isRetryableSearchError(error: unknown) {
+  return error instanceof WebApiError && [502, 503, 504].includes(error.status);
+}
+
+function wait(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
 export const webAuth = {
@@ -144,6 +153,27 @@ export const webDrafts = {
   cancelAdaptation: (runId: string) => request<DraftAdaptationRun>(`/content-draft-adaptation-runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST', body: '{}' }),
   versions: (draftId: string) => request<{ versions: ContentDraftVersion[] }>(`/content-drafts/${encodeURIComponent(draftId)}/versions`),
   preview: (draftId: string) => request<DraftPreview>(`/content-drafts/${encodeURIComponent(draftId)}/preview`),
+  designLayout: (draftId: string, input: { templateId?: string; templateVersionId?: string; instruction?: string }) => request<WechatLayoutDesignResult>(`/creative/drafts/${encodeURIComponent(draftId)}/layout/design`, { method: 'POST', body: JSON.stringify(input) }),
+};
+
+export const webChannelAccounts = {
+  list: () => request<{ accounts: ChannelAccount[] }>('/channel-accounts'),
+  create: (input: { platform: 'WECHAT' | 'XIAOHONGSHU' | 'WEIBO'; name: string; externalAccountLabel?: string; mode?: 'MANUAL' | 'OFFICIAL' }) => request<{ account: ChannelAccount }>('/channel-accounts', { method: 'POST', body: JSON.stringify(input) }),
+  saveOfficialCredential: (accountId: string, input: { appId: string; appSecret: string }) => request<{ account: ChannelAccount }>(`/channel-accounts/${encodeURIComponent(accountId)}/official-credential`, { method: 'PUT', body: JSON.stringify(input) }),
+  testOfficialCredential: (accountId: string) => request<{ account: ChannelAccount }>(`/channel-accounts/${encodeURIComponent(accountId)}/official-credential/test`, { method: 'POST', body: '{}' }),
+  remove: (accountId: string) => request<{ account: ChannelAccount }>(`/channel-accounts/${encodeURIComponent(accountId)}`, { method: 'DELETE' }),
+};
+
+export const webPublishing = {
+  readyDrafts: () => request<{ drafts: PublishReadyDraft[] }>('/publishing/ready-drafts'),
+  packages: (input: { accountId: string; draftVersionId: string }) => request<{ task: PlatformDraftTask; package: PublishPackage }>('/publishing/packages', { method: 'POST', body: JSON.stringify(input) }),
+  createOfficialDraft: (input: { accountId: string; draftVersionId: string }) => request<{ task: PlatformDraftTask; package: PublishPackage }>('/publishing/official-drafts', { method: 'POST', body: JSON.stringify(input) }),
+  tasks: () => request<{ tasks: PlatformDraftTask[] }>('/publishing/tasks'),
+  manualConfirm: (taskId: string, input: { url?: string; note?: string; publishedAt?: string }) => request<{ task: PlatformDraftTask; publication: PublishedArticle }>(`/publishing/tasks/${encodeURIComponent(taskId)}/manual-confirm`, { method: 'POST', body: JSON.stringify(input) }),
+  articles: () => request<{ articles: PublishedArticle[] }>('/publishing/articles'),
+  addMetrics: (articleId: string, input: { capturedAt?: string; readCount?: number; likeCount?: number; shareCount?: number; favoriteCount?: number; commentCount?: number; followerDelta?: number }) => request<{ metric: MetricSnapshot }>(`/publishing/articles/${encodeURIComponent(articleId)}/metrics`, { method: 'POST', body: JSON.stringify(input) }),
+  metrics: (articleId: string) => request<{ metrics: MetricSnapshot[] }>(`/publishing/articles/${encodeURIComponent(articleId)}/metrics`),
+  saveRetrospective: (articleId: string, input: { summary?: string; highlights?: string[]; issues?: string[]; nextActions?: string[] }) => request<{ retrospective: Retrospective }>(`/publishing/articles/${encodeURIComponent(articleId)}/retrospective`, { method: 'PUT', body: JSON.stringify(input) }),
 };
 
 export const webWechatTemplates = {
@@ -152,6 +182,7 @@ export const webWechatTemplates = {
   patch: (templateId: string, input: { name: string; rules: WechatLayoutRules }) => request<WechatLayoutTemplate>(`/wechat-layout-templates/${encodeURIComponent(templateId)}`, { method: 'PATCH', body: JSON.stringify(input) }),
   duplicate: (templateId: string, name: string) => request<WechatLayoutTemplate>(`/wechat-layout-templates/${encodeURIComponent(templateId)}/duplicate`, { method: 'POST', body: JSON.stringify({ name }) }),
   archive: (templateId: string) => request<void>(`/wechat-layout-templates/${encodeURIComponent(templateId)}/archive`, { method: 'POST', body: '{}' }),
+  remove: (templateId: string) => request<void>(`/wechat-layout-templates/${encodeURIComponent(templateId)}`, { method: 'DELETE' }),
   import: (input: { name: string; url: string }) => request<WechatLayoutTemplate>('/wechat-layout-templates/import', { method: 'POST', body: JSON.stringify({ ...input, confirmedRights: true }) }),
   preview: (templateId: string, draftId: string) => request<WechatLayoutPreview>(`/wechat-layout-templates/${encodeURIComponent(templateId)}/preview`, { method: 'POST', body: JSON.stringify({ draftId }) }),
 };
@@ -200,7 +231,24 @@ export const webCreative = {
   updateInput: (id: string, input: ProjectInputPayload) => request<ProjectInput>(`/creative/project-inputs/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(input) }),
   removeInput: (id: string) => request<void>(`/creative/project-inputs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   createReference: (projectId: string, input: ProjectReferenceMetadata & { url: string }) => request<ProjectReference>(`/creative/projects/${encodeURIComponent(projectId)}/references`, { method: 'POST', body: JSON.stringify(input) }),
-  searchImages: (query: string) => request<{ provider: string; results: Array<{ id: string; title: string; thumbnailUrl: string; imageUrl: string; sourceUrl: string; license: string; attribution: string; copyrightStatus: 'PENDING' | 'OPEN_LICENSE' }> }>(`/creative/image-search?q=${encodeURIComponent(query)}`),
+  async searchImages(query: string) {
+    const delays = [0, 120, 240];
+    let lastError: unknown;
+    for (const [attemptIndex, delayMs] of delays.entries()) {
+      if (delayMs) await wait(delayMs);
+      try {
+        return await request<{ provider: string; results: Array<{ id: string; title: string; thumbnailUrl: string; imageUrl: string; sourceUrl: string; license: string; attribution: string; copyrightStatus: 'PENDING' | 'OPEN_LICENSE' }> }>(`/creative/image-search?q=${encodeURIComponent(query)}`);
+      } catch (error) {
+        lastError = error;
+        if (!isRetryableSearchError(error) || attemptIndex === delays.length - 1) break;
+      }
+    }
+    if (isRetryableSearchError(lastError)) {
+      const fallback = lastError as WebApiError;
+      throw new WebApiError('图片搜索服务暂时不可用，请稍后重试。', fallback.status, fallback.code, fallback.details);
+    }
+    throw lastError instanceof Error ? lastError : new Error('图片搜索失败。');
+  },
   planVisual: (projectId: string, input: { platform: 'WECHAT'; quantityMode: 'AUTO' | 'MANUAL'; bodyItemCount?: number; styleProfile: import('../domain/content').CreativeVisualStyleProfile; request?: string; currentItemId?: string; currentPlan?: CreativeVisualPlanItem[]; keepAssignedAssets?: boolean }) => request<{ plan: CreativeVisualPlanItem[]; bodyItemCount: number; quantityMode: 'AUTO' | 'MANUAL'; strategy: string; policy: { scope: string; provider: string; connectionId: string | null; model: string; promptVersion: string } }>(`/creative/projects/${encodeURIComponent(projectId)}/visual/plan`, { method: 'POST', body: JSON.stringify(input) }),
   generateImage: (projectId: string, input: { platform: 'WECHAT'; visualItemId: string; assetIds?: string[] } | { platform: Exclude<DraftPlatform, 'WECHAT'>; prompt: string; size: '3:4' | '1:1'; assetIds?: string[] }) => request<{ asset: WorkspaceAsset; projectAsset: ProjectAsset; policy: { scope: 'TEXT_TO_IMAGE' | 'IMAGE_TO_IMAGE'; provider: string; model: string } }>(`/creative/projects/${encodeURIComponent(projectId)}/visual/generate`, { method: 'POST', body: JSON.stringify(input) }),
   updateReference: (id: string, input: ProjectReferenceMetadata) => request<ProjectReference>(`/creative/project-references/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(input) }),

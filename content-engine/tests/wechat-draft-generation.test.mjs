@@ -82,12 +82,14 @@ test('缺失任务策略返回稳定错误码且图生图不回退到文生图',
   assert.match(imageGeneration, /TASK_POLICY_REQUIRED/);
 });
 
-test('Worker 成功结果只更新公众号工作草稿而不双写旧平台正文', async () => {
+test('Worker 初稿更新公众号工作草稿，改写候选不双写旧平台正文', async () => {
   const worker = await readFile(new URL('../server/worker.cjs', import.meta.url), 'utf8');
   const execute = section(worker, 'async function generateProjectCopyAction', 'async function generateAgentPlan');
   assert.match(execute, /draftStore\.upsertWechat/);
   assert.match(execute, /scope:\s*WECHAT_COPY_GENERATION_SCOPE/);
-  assert.doesNotMatch(execute, /platform_content_versions/);
+  assert.match(execute, /isInitialDraft/);
+  assert.match(execute, /isRevisionCandidate/);
+  assert.match(execute, /platform_content_versions/);
   assert.doesNotMatch(execute, /updateCreativeProjects/);
   assert.doesNotMatch(execute, /applyAcceptedCopyToState/);
 });
@@ -106,6 +108,7 @@ test('前端模型任务契约没有 fallback 字段并公开新任务 Scope', a
   assert.match(integrations, /'WECHAT_COPY_GENERATION'/);
   assert.match(integrations, /'WECHAT_VISUAL_PLANNING'/);
   assert.match(integrations, /'WECHAT_TEMPLATE_ANALYSIS'/);
+  assert.match(integrations, /'WECHAT_LAYOUT_DESIGN'/);
   assert.match(integrations, /'XIAOHONGSHU_ADAPTATION'/);
   assert.match(integrations, /'WEIBO_ADAPTATION'/);
   assert.match(integrations, /'CONTENT_PREFLIGHT_REVIEW'/);

@@ -91,6 +91,14 @@ async function loadDraft(db, workspaceId, draftId, { forUpdate = false } = {}) {
   return result.rows[0];
 }
 
+function layoutDesignForTemplateVersion(visualPlan, templateVersionId, templateId) {
+  const layoutDesign = visualPlan?.layoutDesign;
+  if (!layoutDesign || typeof layoutDesign !== 'object' || Array.isArray(layoutDesign)) return undefined;
+  if (layoutDesign.templateVersionId) return layoutDesign.templateVersionId === templateVersionId ? layoutDesign : undefined;
+  if (layoutDesign.templateId) return layoutDesign.templateId === templateId ? layoutDesign : undefined;
+  return layoutDesign;
+}
+
 function createContentDraftStore({ query, transaction, renderWechatDraft } = {}) {
   if (typeof query !== 'function' || typeof transaction !== 'function') throw new TypeError('草稿 Store 需要 query 和 transaction。');
 
@@ -244,10 +252,17 @@ function createContentDraftStore({ query, transaction, renderWechatDraft } = {})
     if (draft.platform !== 'WECHAT') return { html: null, checks: [] };
     if (!draft.layout_template_version_id) throw businessError(400, 'LAYOUT_TEMPLATE_REQUIRED', '请选择公众号排版模板后再完成草稿。');
     if (typeof renderWechatDraft !== 'function') throw businessError(503, 'DRAFT_RENDERER_REQUIRED', '公众号排版渲染服务尚未就绪。');
-    const template = await client.query(`SELECT rules_json FROM wechat_layout_template_versions
+    const template = await client.query(`SELECT id, template_id, rules_json FROM wechat_layout_template_versions
       WHERE workspace_id = $1 AND id = $2`, [draft.workspace_id, draft.layout_template_version_id]);
     if (!template.rows.length) throw businessError(400, 'LAYOUT_TEMPLATE_NOT_FOUND', '公众号排版模板不存在或不属于当前工作空间。');
-    const rendered = await renderWechatDraft({ title: draft.title, body: draft.body, assets: assets.map(draftAssetView), templateRules: template.rows[0].rules_json });
+    const rendered = await renderWechatDraft({
+      title: draft.title,
+      body: draft.body,
+      assets: assets.map(draftAssetView),
+      templateRules: template.rows[0].rules_json,
+      layoutAddons: draft.visual_plan_json?.layoutAddons,
+      layoutDesign: layoutDesignForTemplateVersion(draft.visual_plan_json, template.rows[0].id, template.rows[0].template_id),
+    });
     if (rendered.checks?.some(({ level }) => level === 'ERROR')) throw businessError(400, 'DRAFT_PREFLIGHT_FAILED', '草稿存在必须修正的问题。', { checks: rendered.checks });
     return rendered;
   }

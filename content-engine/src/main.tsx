@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { animate, createScope, stagger } from 'animejs';
 import { ArrowLeft, Bell, BrainCircuit, CalendarDays, ChartColumn, CheckCircle2, ChevronRight, CircleAlert, CircleCheck, Compass, FilePenLine, FolderOpen, KeyRound, Lightbulb, LoaderCircle, Menu, PenLine, Pencil, Plus, RefreshCw, Search, Send, Settings, Trash2 } from 'lucide-react';
 import { intelligenceKey, loadState, seedState, type FeishuLibraryTemplate, type LocalState, type WorkspaceProfile } from './data/localRepository';
-import { webAgent, webAuth, webCreative, webIntelligence, webModels, webProjects, webSettings, webState, webWorkspaces, type CreateProjectInput, type CredentialStatus, type WebSession } from './data/webApi';
+import { webAgent, webAssets, webAuth, webChannelAccounts, webCreative, webIntelligence, webModels, webProjects, webPublishing, webSettings, webState, webWorkspaces, type CreateProjectInput, type CredentialStatus, type WebSession } from './data/webApi';
 import { platformName, projectStageName, type ContentProject, type IntelligenceSource, type Platform } from './domain/content';
 import { stageRouteForProjectStage } from './domain/creative-flow.mjs';
 import { completedProjects, formatTodayTitle, projectTaskEntries } from './domain/today.mjs';
@@ -25,6 +25,7 @@ import { PromptTemplateSettings } from './workspaces/settings/PromptTemplateSett
 import { CreateWorkspace } from './workspaces/create/CreateWorkspace';
 import { CreativeProjectCenter } from './workspaces/create/CreativeProjectCenter';
 import { AssetLibrary } from './workspaces/assets/AssetLibrary';
+import type { ChannelAccount, MetricSnapshot, PlatformDraftTask, PublishPackage, PublishReadyDraft, PublishedArticle } from './domain/publishing';
 import './styles.css';
 
 function displayError(error: unknown, fallback: string) {
@@ -49,6 +50,8 @@ const navigationIcons: Record<View, typeof CalendarDays> = {
   assets: FolderOpen,
   settings: Settings,
 };
+
+const WECHAT_MP_DRAFTS_URL = 'https://mp.weixin.qq.com/cgi-bin/appmsg?action=list_card';
 
 function App({ session, onSessionChange }: { session: WebSession; onSessionChange: (session: WebSession) => void }) {
   const initialRoute = useRef(readWorkspaceLocation()).current;
@@ -233,7 +236,7 @@ function App({ session, onSessionChange }: { session: WebSession; onSessionChang
   return <div className="app-shell">
     <header className="topbar">
       <button className="mobile-menu-button" type="button" aria-label="打开导航" onClick={() => setSidebarOpen(true)}><Menu size={20} /></button>
-      <div className="wordmark">知行<span>内容</span>实验室</div>
+      <div className="wordmark">百炼<span>公众号</span>百宝箱</div>
       <WorkspaceSwitcher session={session} onSessionChange={onSessionChange} onBeforeSwitch={flushPendingSaves} onManage={() => openSettings('workspace')} />
       <label className="global-search"><Search size={17}/><input placeholder="搜索热点、项目、内容、素材" /></label>
       <div className="top-actions"><button className="button primary" onClick={requestNewCreation}><Plus size={16}/>新建创作</button><button className="icon-button" aria-label="通知"><Bell size={20}/></button><button className="icon-button" aria-label="同步"><RefreshCw size={20}/></button><span className="avatar" /></div>
@@ -247,7 +250,7 @@ function App({ session, onSessionChange }: { session: WebSession; onSessionChang
       {view === 'discover' && <DiscoverWorkspace section={discoverSection} onSectionChange={setDiscoverSection} inbox={<IntelligenceInbox item={selectedIntel} intelligence={state.intelligence} sources={state.sources} projects={state.projects} onSelect={setSelectedIntelId} onAddToCreative={(itemId, analysis, angleIndex) => void addIntelligenceToCreative(itemId, analysis, angleIndex)} onOpenProject={openIntelligenceProject} onSaveAnalysis={saveAnalysis} onRefresh={refreshRss} onOpenSources={() => openSettings('sources')} refreshFeedback={refreshFeedback} />} search={<NetworkSearchPanel preset={searchPreset} onSave={saveSearchCandidate} onOpenSearchSettings={() => openSettings('models', 'search')} checkStatus={webSearchStatus} searchWeb={searchWeb} />} linkImport={<LinkImportPanel onSave={saveClippedLink} onShowInbox={() => openDiscover('inbox')} previewLink={previewPublicLink} />} />}
       {view === 'create' && (!selectedProjectId || !featuredProject) && <CreativeProjectCenter projects={state.projects} onOpenProject={openProject} onCreateProject={createProject} creationRequested={creationRequested} onCreationHandled={() => setCreationRequested(false)} />}
       {view === 'create' && selectedProjectId && featuredProject && <CreateWorkspace project={featuredProject} stage={createStage} onStage={(next) => { setCreateStage(next); if (next !== 'drafts') setSelectedDerivedDraftId(''); }} activeDerivedDraftId={selectedDerivedDraftId} onActiveDerivedDraftChange={setSelectedDerivedDraftId} onExitProject={() => { setSelectedProjectId(''); setCreateStage(null); setSelectedDerivedDraftId(''); }} onProjectAccepted={acceptProjectFromServer} onPublish={() => setView('publish')} onOpenModelSettings={() => openSettings('models', 'policies')} onOpenAgentSettings={() => openSettings('models', 'agent')} onOpenSearchSettings={() => openSettings('models', 'search')} onOpenVoiceSettings={() => openSettings('voices')} />}
-      {view === 'publish' && <Publish project={featuredProject} onNavigate={setView} />}
+      {view === 'publish' && <Publish onNavigate={setView} onOpenAccountSettings={() => openSettings('accounts')} />}
       {view === 'review' && <Review projects={state.projects} onOpenProject={(project) => openProject(project)} />}
       {view === 'assets' && <AssetLibrary/>}
       {view === 'settings' && <SettingsWorkspace section={settingsSection} onSectionChange={setSettingsSection} workspace={<div className="workspace-settings-stack"><WorkspaceManagementSettings session={session} onSessionChange={onSessionChange} onBeforeSwitch={flushPendingSaves} /><WorkspaceProfileSettings workspace={state.workspace} onChange={(workspace) => { setState((current) => ({ ...current, workspace })); savePreferences({ workspace }); }} /></div>} sources={<SourceSettings sources={state.sources} onAddSource={addSource} onAddSources={addSources} onUpdateSource={updateSource} onRemoveSource={removeSource} />} voices={<AccountVoiceSettings />} models={<ModelSettingsScreen initialSection={requestedModelSection} onSectionChange={setRequestedModelSection} />} feishu={<WorkspaceSettings template={state.feishuTemplate} onTemplateChange={saveFeishuTemplate} />} accounts={<AccountAuthorizationSettings />} />}
@@ -297,10 +300,456 @@ function Task({ title, sub, action, onClick }: { title: string; sub: string; act
 
 
 
-function Publish({ project, onNavigate }: { project: ContentProject | undefined; onNavigate: (view: View) => void }) { return <>
-  <PageHeader eyebrow="PUBLISH / 发布中心" title="内容日历" subtitle="先安排发布时间，再进入独立的发布审核。" />
-  <div className="publish-layout"><section><div className="filter-row slim"><div><button className="filter active">本周</button><button className="filter">公众号</button><button className="filter">小红书</button><button className="filter">视频号</button></div></div><div className="calendar-grid">{['周一 21','周二 22','周三 23','周四 24','周五 25','周六 26','周日 27'].map((day,index) => <div className="calendar-day" key={day}><b>{day}</b>{index === 1 && <div className="calendar-post">小红书：Notion AI 教程下集</div>}{index === 2 && <div className="calendar-post red">待审核：{project?.title}</div>}{index === 4 && <div className="calendar-post mint">公众号：AIGC 行业周报</div>}</div>)}</div></section><aside className="publish-review"><span className="chip yellow">待发布审核</span><h2>{project?.title}</h2><img src="https://images.unsplash.com/photo-1551434678-e076c223a692?auto=format&fit=crop&w=900&q=80" alt="发布封面预览"/><p><b>小红书 · 图文 8 页</b><br/><small>计划：7 月 23 日 18:30</small></p><ul><li><CheckCircle2 size={16}/>标题与封面已确认</li><li><CheckCircle2 size={16}/>图片比例符合平台要求</li><li className="pending">! 有 1 条事实待确认</li></ul><button className="button primary wide" onClick={() => onNavigate('create')}>进入发布审核 →</button></aside></div>
-  </>; }
+function Publish({ onNavigate, onOpenAccountSettings }: { onNavigate: (view: View) => void; onOpenAccountSettings: () => void }) {
+  type PublishTaskView = PlatformDraftTask & { accountName?: string | null; projectTitle?: string | null; draftTitle?: string | null };
+  const [accounts, setAccounts] = useState<ChannelAccount[]>([]);
+  const [readyDrafts, setReadyDrafts] = useState<PublishReadyDraft[]>([]);
+  const [tasks, setTasks] = useState<PublishTaskView[]>([]);
+  const [articles, setArticles] = useState<PublishedArticle[]>([]);
+  const [metricHistory, setMetricHistory] = useState<MetricSnapshot[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState('');
+  const [selectedDraftVersionId, setSelectedDraftVersionId] = useState('');
+  const [selectedArticleId, setSelectedArticleId] = useState('');
+  const [packageResult, setPackageResult] = useState<PublishPackage | null>(null);
+  const [packageTaskId, setPackageTaskId] = useState('');
+  const [busy, setBusy] = useState('');
+  const [message, setMessage] = useState('');
+  const [confirmDraft, setConfirmDraft] = useState({ url: '', publishedAt: '', note: '' });
+  const [metricDraft, setMetricDraft] = useState({ readCount: 0, likeCount: 0, shareCount: 0, favoriteCount: 0, commentCount: 0, followerDelta: 0 });
+  const [retrospectiveDraft, setRetrospectiveDraft] = useState({ summary: '', highlights: '', issues: '', nextActions: '' });
+
+  async function loadPublishData(clearMessage = true) {
+    setBusy('load');
+    if (clearMessage) setMessage('');
+    try {
+      const [accountResult, draftResult, taskResult, articleResult] = await Promise.all([
+        webChannelAccounts.list(),
+        webPublishing.readyDrafts(),
+        webPublishing.tasks(),
+        webPublishing.articles(),
+      ]);
+      setAccounts(accountResult.accounts);
+      setReadyDrafts(draftResult.drafts);
+      setTasks(taskResult.tasks as PublishTaskView[]);
+      setArticles(articleResult.articles);
+      setSelectedAccountId((current) => current || accountResult.accounts[0]?.id || '');
+      setSelectedDraftVersionId((current) => current || draftResult.drafts[0]?.version.id || '');
+      setSelectedArticleId((current) => current && articleResult.articles.some((article) => article.id === current) ? current : articleResult.articles[0]?.id || '');
+    } catch (error) {
+      setMessage(displayError(error, '读取发布数据失败'));
+    } finally {
+      setBusy('');
+    }
+  }
+
+  useEffect(() => { void loadPublishData(); }, []);
+
+  const selectedAccount = accounts.find((item) => item.id === selectedAccountId) ?? accounts[0];
+  const selectedDraft = readyDrafts.find((item) => item.version.id === selectedDraftVersionId) ?? readyDrafts[0];
+  const selectedPublication = articles.find((article) => article.id === selectedArticleId) ?? articles[0] ?? null;
+  const canUseSelectedTarget = Boolean(selectedAccount && selectedDraft && selectedAccount.platform === selectedDraft.version.platform);
+  const publishSteps = [
+    { title: '添加公众号账号', detail: accounts.length ? `${accounts.length} 个账号可用` : '先建一个手动发布账号', done: accounts.length > 0 },
+    { title: '完成排版稿', detail: readyDrafts.length ? `${readyDrafts.length} 个完成版本` : '从创作页完成草稿', done: readyDrafts.length > 0 },
+    { title: selectedAccount?.mode === 'OFFICIAL' ? '导入公众号草稿箱' : '生成发布包', detail: packageTaskId ? (selectedAccount?.mode === 'OFFICIAL' ? '已导入公众号草稿箱' : '发布包已生成') : (selectedAccount?.mode === 'OFFICIAL' ? '调用官方接口写入标题、正文和图片' : '复制标题、富文本正文和图片清单'), done: Boolean(packageTaskId) },
+    { title: '回填数据复盘', detail: articles.length ? `${articles.length} 篇已发布` : '确认发布后录入浏览数据', done: articles.length > 0 },
+  ];
+
+  useEffect(() => {
+    if (!selectedPublication) return;
+    const latest = selectedPublication.latestMetrics;
+    setMetricDraft({
+      readCount: latest?.readCount ?? 0,
+      likeCount: latest?.likeCount ?? 0,
+      shareCount: latest?.shareCount ?? 0,
+      favoriteCount: latest?.favoriteCount ?? 0,
+      commentCount: latest?.commentCount ?? 0,
+      followerDelta: latest?.followerDelta ?? 0,
+    });
+    const retrospective = selectedPublication.retrospective;
+    setRetrospectiveDraft({
+      summary: retrospective?.summary ?? '',
+      highlights: retrospective?.highlights.join('\n') ?? '',
+      issues: retrospective?.issues.join('\n') ?? '',
+      nextActions: retrospective?.nextActions.join('\n') ?? '',
+    });
+    webPublishing.metrics(selectedPublication.id).then((result) => {
+      setMetricHistory(result.metrics);
+    }).catch((error) => {
+      setMessage(displayError(error, '读取指标历史失败'));
+    });
+  }, [selectedPublication?.id]);
+
+  async function createPublishPackage() {
+    if (!selectedAccount || !selectedDraft) {
+      setMessage('请先选择账号和完成版本。');
+      return;
+    }
+    if (!canUseSelectedTarget) {
+      setMessage('账号平台和草稿平台不一致，请重新选择。');
+      return;
+    }
+    setBusy('package');
+    setMessage('');
+    try {
+      const result = selectedAccount.mode === 'OFFICIAL'
+        ? await webPublishing.createOfficialDraft({ accountId: selectedAccount.id, draftVersionId: selectedDraft.version.id })
+        : await webPublishing.packages({ accountId: selectedAccount.id, draftVersionId: selectedDraft.version.id });
+      setPackageTaskId(result.task.id);
+      const taskResult = await webPublishing.tasks();
+      setTasks(taskResult.tasks as PublishTaskView[]);
+      if (selectedAccount.mode === 'OFFICIAL') {
+        setPackageResult(null);
+        setConfirmDraft({ url: '', publishedAt: '', note: '' });
+        setMessage('一键导入公众号草稿箱成功，请到公众号后台草稿箱查看。');
+        return;
+      }
+      setPackageResult(result.package);
+      setConfirmDraft({ url: '', publishedAt: new Date().toISOString().slice(0, 16), note: '' });
+      setMessage('发布包已生成，当前仍是可复制的手动发布状态。');
+    } catch (error) {
+      setMessage(displayError(error, selectedAccount.mode === 'OFFICIAL' ? '一键导入公众号草稿箱失败' : '生成发布包失败'));
+    } finally {
+      setBusy('');
+    }
+  }
+
+  function packageImageItems(targetPackage: PublishPackage) {
+    let bodyIndex = 0;
+    return [...targetPackage.assets]
+      .sort((first, second) => first.sortOrder - second.sortOrder)
+      .map((asset) => {
+        const role = asset.role.toUpperCase();
+        const isCover = asset.assetId === targetPackage.coverAssetId || role === 'COVER' || role === 'MAIN';
+        const label = isCover ? '封面图' : `正文图 ${++bodyIndex}`;
+        return { ...asset, label };
+      });
+  }
+
+  function packageAssetChecklistText(targetPackage: PublishPackage) {
+    const items = packageImageItems(targetPackage);
+    if (!items.length) return '无图片清单';
+    return items.map((asset) => `${asset.label}：${asset.assetId}`).join('\n');
+  }
+
+  function packageClipboardHtml(targetPackage: PublishPackage) {
+    const container = document.createElement('div');
+    container.innerHTML = targetPackage.html;
+    const labels = new Map(packageImageItems(targetPackage).map((asset) => [asset.assetId, asset.label]));
+    let fallbackIndex = 0;
+    container.querySelectorAll('figure[data-asset-id], img[src*="/api/v1/assets/"]').forEach((node) => {
+      if (node instanceof HTMLImageElement && node.closest('figure[data-asset-id]')) return;
+      const source = node instanceof HTMLImageElement ? node.getAttribute('src') ?? '' : '';
+      const assetId = node instanceof HTMLElement
+        ? node.dataset.assetId ?? source.match(/\/assets\/([^/]+)\/content/)?.[1] ?? ''
+        : source.match(/\/assets\/([^/]+)\/content/)?.[1] ?? '';
+      const label = labels.get(assetId) ?? `图片 ${++fallbackIndex}`;
+      const placeholder = document.createElement('section');
+      placeholder.setAttribute('data-image-placeholder', assetId || label);
+      placeholder.setAttribute('style', 'margin:22px 0;padding:14px 16px;border:1px dashed #8a94a6;background:#f7f8fb;color:#4f5b75;font-size:14px;line-height:1.6;text-align:center;');
+      placeholder.textContent = `【${label}：请在此处粘贴/上传图片】`;
+      node.replaceWith(placeholder);
+    });
+    return container.innerHTML;
+  }
+
+  function htmlToPlainText(html: string) {
+    const container = document.createElement('div');
+    container.innerHTML = html;
+    return container.textContent?.replace(/\n{3,}/g, '\n\n').trim() || html.replace(/<[^>]+>/g, '').trim();
+  }
+
+  async function copyPlainText(label: string, value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setMessage(`已复制${label}。`);
+    } catch (error) {
+      setMessage(displayError(error, `复制${label}失败，请手动选中复制。`));
+    }
+  }
+
+  async function copyRichHtml(html: string) {
+    try {
+      const clipboardApi = navigator.clipboard as Clipboard & { write?: (items: unknown[]) => Promise<void> };
+      const ClipboardItemCtor = (window as Window & { ClipboardItem?: new (items: Record<string, Blob>) => unknown }).ClipboardItem;
+      if (ClipboardItemCtor && clipboardApi.write) {
+        const item = new ClipboardItemCtor({
+          'text/html': new Blob([html], { type: 'text/html' }),
+          'text/plain': new Blob([htmlToPlainText(html)], { type: 'text/plain' }),
+        });
+        await clipboardApi.write([item]);
+      } else {
+        await navigator.clipboard.writeText(html);
+      }
+      setMessage('已复制富文本正文。正文里的图片位置会显示占位，请按占位顺序粘贴或上传图片。');
+    } catch (error) {
+      try {
+        await navigator.clipboard.writeText(html);
+        setMessage('浏览器未允许富文本复制，已改为复制 HTML 备份。');
+      } catch (fallbackError) {
+        setMessage(displayError(fallbackError, '复制富文本正文失败，请展开 HTML 备份手动复制。'));
+      }
+    }
+  }
+
+  async function imageBlobForClipboard(sourceBlob: Blob) {
+    if (sourceBlob.type === 'image/png') return sourceBlob;
+    const image = await createImageBitmap(sourceBlob);
+    const canvas = document.createElement('canvas');
+    canvas.width = image.width;
+    canvas.height = image.height;
+    canvas.getContext('2d')?.drawImage(image, 0, 0);
+    image.close();
+    return await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('图片转换失败')), 'image/png');
+    });
+  }
+
+  async function copyAssetImage(assetId: string, label: string) {
+    setBusy(`copy-asset:${assetId}`);
+    try {
+      const clipboardApi = navigator.clipboard as Clipboard & { write?: (items: unknown[]) => Promise<void> };
+      const ClipboardItemCtor = (window as Window & { ClipboardItem?: new (items: Record<string, Blob>) => unknown }).ClipboardItem;
+      if (!ClipboardItemCtor || !clipboardApi.write) throw new Error('当前浏览器不支持直接复制图片，请使用下载图片。');
+      const blob = await imageBlobForClipboard(await webAssets.content(assetId));
+      const item = new ClipboardItemCtor({ [blob.type || 'image/png']: blob });
+      await clipboardApi.write([item]);
+      setMessage(`已复制${label}。请在公众号正文对应图片占位处粘贴。`);
+    } catch (error) {
+      setMessage(displayError(error, `复制${label}失败，请改用下载图片后上传。`));
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function downloadAssetImage(assetId: string, label: string) {
+    setBusy(`download-asset:${assetId}`);
+    try {
+      const blob = await webAssets.content(assetId);
+      const extension = blob.type.includes('jpeg') ? 'jpg' : blob.type.includes('webp') ? 'webp' : blob.type.includes('png') ? 'png' : 'png';
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `${label}-${assetId.slice(0, 8)}.${extension}`;
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setMessage(`已下载${label}，可以在公众号后台用“图片”上传。`);
+    } catch (error) {
+      setMessage(displayError(error, `下载${label}失败。`));
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function confirmManualPublish() {
+    if (!packageTaskId) {
+      setMessage('请先生成发布包。');
+      return;
+    }
+    setBusy('confirm');
+    setMessage('');
+    try {
+      await webPublishing.manualConfirm(packageTaskId, {
+        url: confirmDraft.url.trim(),
+        note: confirmDraft.note.trim() || '手动确认发布',
+        publishedAt: confirmDraft.publishedAt || undefined,
+      });
+      setMessage('已回填为发布完成，可以继续录入数据。');
+      setPackageResult(null);
+      setConfirmDraft({ url: '', publishedAt: '', note: '' });
+      await loadPublishData(false);
+    } catch (error) {
+      setMessage(displayError(error, '确认发布失败'));
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function saveMetrics(articleId: string) {
+    setBusy(`metric:${articleId}`);
+    try {
+      await webPublishing.addMetrics(articleId, { ...metricDraft });
+      setMessage('指标已保存。');
+      const history = await webPublishing.metrics(articleId);
+      setMetricHistory(history.metrics);
+      await loadPublishData(false);
+    } catch (error) {
+      setMessage(displayError(error, '保存指标失败'));
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function saveRetrospective(articleId: string) {
+    setBusy(`retro:${articleId}`);
+    try {
+      await webPublishing.saveRetrospective(articleId, {
+        summary: retrospectiveDraft.summary,
+        highlights: retrospectiveDraft.highlights.split('\n').map((line) => line.trim()).filter(Boolean),
+        issues: retrospectiveDraft.issues.split('\n').map((line) => line.trim()).filter(Boolean),
+        nextActions: retrospectiveDraft.nextActions.split('\n').map((line) => line.trim()).filter(Boolean),
+      });
+      setMessage('复盘已保存。');
+      await loadPublishData(false);
+    } catch (error) {
+      setMessage(displayError(error, '保存复盘失败'));
+    } finally {
+      setBusy('');
+    }
+  }
+
+  return <>
+    <PageHeader eyebrow="PUBLISH / 发布中心" title="发布与复盘" subtitle="先生成发布包，再决定是手动发到公众号后台，还是接入官方草稿箱/发布接口。" />
+    {message && <div className={`refresh-feedback ${message.includes('失败') || message.includes('不支持') ? 'error' : 'success'}`}><span>i</span>{message}</div>}
+    <section className="publish-guide" aria-label="发布流程">
+      {publishSteps.map((step, index) => <article className={step.done ? 'done' : ''} key={step.title}><b>{index + 1}</b><div><strong>{step.title}</strong><small>{step.detail}</small></div></article>)}
+    </section>
+    <div className="publish-workbench">
+      <section className="publish-main">
+        <div className="panel publish-panel">
+          <div className="panel-head"><h2>发布目标</h2><span className="chip blue">{accounts.length} 个账号</span></div>
+          <div className="publish-chooser">
+            <label>
+              <span>账号</span>
+              <select value={selectedAccountId} onChange={(event) => setSelectedAccountId(event.target.value)} disabled={!accounts.length}>
+                {accounts.map((account) => <option key={account.id} value={account.id}>{account.name} · {account.mode === 'MANUAL' ? '手动' : '官方'}</option>)}
+              </select>
+            </label>
+            <label>
+              <span>完成版本</span>
+              <select value={selectedDraftVersionId} onChange={(event) => setSelectedDraftVersionId(event.target.value)} disabled={!readyDrafts.length}>
+                {readyDrafts.map((item) => <option key={item.version.id} value={item.version.id}>{item.project.title} · v{item.version.versionNumber} · {platformName[item.version.platform]}</option>)}
+              </select>
+            </label>
+            <button className="button primary" type="button" onClick={() => void createPublishPackage()} disabled={busy === 'package' || !canUseSelectedTarget}>{busy === 'package' ? <LoaderCircle className="spin" size={16}/> : <Send size={16}/>}{selectedAccount?.mode === 'OFFICIAL' ? '一键导入公众号草稿箱' : '生成发布包'}</button>
+          </div>
+          {!accounts.length && <div className="publish-action-hint"><div><b>先添加账号</b><p>当前不能生成发布包，是因为还没有公众号账号。先建一个“手动发布包”账号即可继续。</p></div><button className="button" type="button" onClick={onOpenAccountSettings}><KeyRound size={16}/>去添加账号</button></div>}
+          {!readyDrafts.length && <div className="publish-action-hint"><div><b>还没有完成版本</b><p>发布包只读取“完成草稿”后的冻结版本。请回到创作页完成正文、配图和排版。</p></div><button className="button" type="button" onClick={() => onNavigate('create')}><PenLine size={16}/>回到创作</button></div>}
+          {selectedAccount && selectedDraft && selectedAccount.platform !== selectedDraft.version.platform && <p className="publish-hint warning">账号平台和草稿平台不一致，请重新选择。</p>}
+          {selectedAccount?.mode === 'OFFICIAL' && <div className="publish-action-hint official-api-hint"><div><b>官方接口账号</b><p>验证通过后可自动导入草稿箱，也可一键导入公众号草稿箱；如果提示 IP 白名单或 AppSecret 错误，请到账号设置里重新保存并测试连接。</p></div><button className="button" type="button" onClick={onOpenAccountSettings}><KeyRound size={16}/>配置官方接口账号</button></div>}
+        </div>
+
+        <div className="panel publish-panel">
+          <div className="panel-head"><h2>发布包</h2><span className="chip">{packageResult ? '已生成' : '待生成'}</span></div>
+          {packageResult ? (
+            <div className="publish-package">
+              <h3>{packageResult.title}</h3>
+              <small>{packageResult.project.title} · {platformName[packageResult.platform]} · {packageResult.account.mode === 'MANUAL' ? '手动发布' : '官方接口'}</small>
+              <div className="publish-copy-guide">
+                <div className="publish-copy-guide-head"><b aria-label="新的创作 > 文章">去公众号后台：新的创作 &gt; 文章</b><a className="button" href={WECHAT_MP_DRAFTS_URL} target="_blank" rel="noreferrer">打开公众号后台</a></div>
+                <p>先复制标题和富文本正文；正文会保留图片占位，不再直接插入私有图片链接。再按图片清单逐张复制或下载图片，贴到公众号对应占位处。</p>
+              </div>
+              <div className="publish-copy-actions" aria-label="发布包复制操作">
+                <button className="button" type="button" onClick={() => void copyPlainText('标题', packageResult.title)}><FilePenLine size={16}/>复制标题</button>
+                <button className="button primary" type="button" onClick={() => void copyRichHtml(packageClipboardHtml(packageResult))}><Pencil size={16}/>复制富文本正文</button>
+                <button className="button" type="button" onClick={() => void copyPlainText('图片清单', packageAssetChecklistText(packageResult))}><FolderOpen size={16}/>复制图片清单</button>
+              </div>
+              <div className="publish-asset-list">
+                <b>图片清单</b>
+                {packageImageItems(packageResult).length ? <div className="publish-asset-items">
+                  {packageImageItems(packageResult).map((asset) => (
+                    <article className="publish-asset-item" key={asset.assetId}>
+                      <span><strong>{asset.label}</strong><small>{asset.assetId}</small></span>
+                      <button className="text-button" type="button" onClick={() => void copyAssetImage(asset.assetId, asset.label)} disabled={busy === `copy-asset:${asset.assetId}`}>{busy === `copy-asset:${asset.assetId}` ? '复制中' : '复制图片'}</button>
+                      <button className="text-button" type="button" onClick={() => void downloadAssetImage(asset.assetId, asset.label)} disabled={busy === `download-asset:${asset.assetId}`}>{busy === `download-asset:${asset.assetId}` ? '下载中' : '下载图片'}</button>
+                    </article>
+                  ))}
+                </div> : <p className="empty-note">暂无图片清单。</p>}
+              </div>
+              <ul>{packageResult.publishChecklist.map((item) => <li key={item}><CheckCircle2 size={16}/>{item}</li>)}</ul>
+              <details className="publish-html-backup">
+                <summary>HTML 备份</summary>
+                <pre>{packageResult.html}</pre>
+              </details>
+              <div className="manual-confirm-form">
+                <label><span>发布链接</span><input value={confirmDraft.url} onChange={(event) => setConfirmDraft((current) => ({ ...current, url: event.target.value }))} placeholder="发布后文章链接，可稍后补" /></label>
+                <label><span>发布时间</span><input type="datetime-local" value={confirmDraft.publishedAt} onChange={(event) => setConfirmDraft((current) => ({ ...current, publishedAt: event.target.value }))} /></label>
+                <label><span>备注</span><input value={confirmDraft.note} onChange={(event) => setConfirmDraft((current) => ({ ...current, note: event.target.value }))} placeholder="例如：已发送到草稿箱 / 已群发" /></label>
+              </div>
+              <footer>
+                <button className="button" type="button" onClick={() => void confirmManualPublish()} disabled={busy === 'confirm' || packageResult.account.mode !== 'MANUAL'}>{busy === 'confirm' ? <LoaderCircle className="spin" size={16}/> : <CheckCircle2 size={16}/>}确认已发布</button>
+                <button className="text-button" type="button" onClick={() => onNavigate('create')}>回到创作</button>
+              </footer>
+            </div>
+          ) : <section className="settings-empty-state"><Send size={28}/><h2>还没有发布包</h2><p>选择账号和完成版本后，生成一份可复制的发布快照。</p></section>}
+        </div>
+
+        <div className="panel publish-panel">
+          <div className="panel-head"><h2>已发布文章</h2><span className="chip mint">{articles.length} 篇</span></div>
+          {articles.length ? <div className="publication-list">
+            {articles.map((article) => (
+              <button className={`publication-row ${selectedPublication?.id === article.id ? 'selected' : ''}`} type="button" key={article.id} onClick={() => setSelectedArticleId(article.id)}>
+                <div>
+                  <b>{article.title || article.projectTitle || '未命名文章'}</b>
+                  <small>{article.accountName || '未关联账号'} · {article.publishedAt}</small>
+                </div>
+                <span>{article.latestMetrics ? `阅读 ${article.latestMetrics.readCount}` : '待录入数据'}</span>
+              </button>
+            ))}
+          </div> : <p className="empty-note">发布后会在这里看到文章和后续指标。</p>}
+        </div>
+      </section>
+
+      <aside className="publish-side">
+        <div className="panel publish-panel">
+          <div className="panel-head"><h2>发布状态</h2></div>
+          {tasks.length ? tasks.map((task) => (
+            <article className="task-card" key={task.id}>
+              <b>{task.projectTitle || task.draftTitle || task.id}</b>
+              <p>{task.accountName || '未命名账号'} · {task.mode === 'MANUAL' ? '手动发布包' : '官方接口'} · {task.status}</p>
+            </article>
+          )) : <p className="empty-note">暂无发布任务。</p>}
+        </div>
+
+        <div className="panel publish-panel">
+          <div className="panel-head"><h2>数据跟进</h2></div>
+          {selectedPublication ? (
+            <div className="metric-form">
+              <div className="article-focus">
+                <b>{selectedPublication.title || selectedPublication.projectTitle || '未命名文章'}</b>
+                <small>{selectedPublication.url || '未填写发布链接'}</small>
+              </div>
+              <label><span>阅读</span><input type="number" value={metricDraft.readCount} onChange={(event) => setMetricDraft((current) => ({ ...current, readCount: Number(event.target.value) }))} /></label>
+              <label><span>点赞</span><input type="number" value={metricDraft.likeCount} onChange={(event) => setMetricDraft((current) => ({ ...current, likeCount: Number(event.target.value) }))} /></label>
+              <label><span>分享</span><input type="number" value={metricDraft.shareCount} onChange={(event) => setMetricDraft((current) => ({ ...current, shareCount: Number(event.target.value) }))} /></label>
+              <label><span>收藏</span><input type="number" value={metricDraft.favoriteCount} onChange={(event) => setMetricDraft((current) => ({ ...current, favoriteCount: Number(event.target.value) }))} /></label>
+              <label><span>评论</span><input type="number" value={metricDraft.commentCount} onChange={(event) => setMetricDraft((current) => ({ ...current, commentCount: Number(event.target.value) }))} /></label>
+              <label><span>新增关注</span><input type="number" value={metricDraft.followerDelta} onChange={(event) => setMetricDraft((current) => ({ ...current, followerDelta: Number(event.target.value) }))} /></label>
+              <button className="button" type="button" onClick={() => void saveMetrics(selectedPublication.id)} disabled={busy === `metric:${selectedPublication.id}`}>保存指标</button>
+              {selectedPublication.latestMetrics && <p className="publish-hint">最近阅读 {selectedPublication.latestMetrics.readCount}，点赞 {selectedPublication.latestMetrics.likeCount}，分享 {selectedPublication.latestMetrics.shareCount}。</p>}
+              {metricHistory.length > 0 && <div className="metric-history">
+                {metricHistory.slice(0, 5).map((metric) => (
+                  <div key={metric.id}>
+                    <b>{metric.readCount}</b>
+                    <span>阅读</span>
+                    <small>{metric.capturedAt}</small>
+                  </div>
+                ))}
+              </div>}
+            </div>
+          ) : <p className="empty-note">先有文章，再录入浏览数据和复盘。</p>}
+        </div>
+
+        <div className="panel publish-panel">
+          <div className="panel-head"><h2>复盘</h2></div>
+          {selectedPublication ? (
+            <div className="retrospective-form">
+              <div className="article-focus">
+                <b>{selectedPublication.title || selectedPublication.projectTitle || '未命名文章'}</b>
+                <small>{selectedPublication.retrospective ? '已有复盘，可继续更新' : '尚未复盘'}</small>
+              </div>
+              <label><span>总结</span><textarea value={retrospectiveDraft.summary} onChange={(event) => setRetrospectiveDraft((current) => ({ ...current, summary: event.target.value }))} /></label>
+              <label><span>亮点</span><textarea value={retrospectiveDraft.highlights} onChange={(event) => setRetrospectiveDraft((current) => ({ ...current, highlights: event.target.value }))} placeholder="每行一条" /></label>
+              <label><span>问题</span><textarea value={retrospectiveDraft.issues} onChange={(event) => setRetrospectiveDraft((current) => ({ ...current, issues: event.target.value }))} placeholder="每行一条" /></label>
+              <label><span>下一步</span><textarea value={retrospectiveDraft.nextActions} onChange={(event) => setRetrospectiveDraft((current) => ({ ...current, nextActions: event.target.value }))} placeholder="每行一条" /></label>
+              <button className="button" type="button" onClick={() => void saveRetrospective(selectedPublication.id)} disabled={busy === `retro:${selectedPublication.id}`}>保存复盘</button>
+            </div>
+          ) : <p className="empty-note">发布完成后可在这里写复盘。</p>}
+        </div>
+      </aside>
+    </div>
+  </>;
+}
 
 function Review({ projects, onOpenProject }: { projects: ContentProject[]; onOpenProject: (project: ContentProject) => void }) {
   const reviewable = completedProjects(projects);
@@ -346,6 +795,7 @@ const modelTaskNames: Record<ModelTask, string> = {
   WECHAT_COPY_GENERATION: '公众号正文生成',
   WECHAT_VISUAL_PLANNING: '公众号配图策划',
   WECHAT_TEMPLATE_ANALYSIS: '公众号模板分析',
+  WECHAT_LAYOUT_DESIGN: '公众号智能精排',
   XIAOHONGSHU_ADAPTATION: '小红书内容派生',
   WEIBO_ADAPTATION: '微博内容派生',
   CONTENT_PREFLIGHT_REVIEW: '内容预检复核',
@@ -501,12 +951,12 @@ function UsageOverview({ usage }: { usage: ApiUsageSummary }) {
 
 
 const taskRequirements: Record<ModelTask, { capability: ModelCapability; operation?: ModelOperation; flow: string }> = {
-  INTELLIGENCE_ANALYSIS: { capability: 'TEXT', flow: '资讯 → 分析结果' }, SOURCE_VERIFICATION: { capability: 'TEXT', flow: '研究来源 → 事实结论' }, TOPIC_RECOMMENDATION: { capability: 'TEXT', flow: '资讯 → 选题' }, VOICE_CALIBRATION: { capability: 'TEXT', flow: '授权文章 → 表达规则' }, WECHAT_COPY_GENERATION: { capability: 'TEXT', flow: '素材 → 公众号母稿' }, WECHAT_VISUAL_PLANNING: { capability: 'TEXT', flow: '公众号正文 → 配图方案' }, WECHAT_TEMPLATE_ANALYSIS: { capability: 'TEXT', flow: '授权链接 → 排版模板' }, XIAOHONGSHU_ADAPTATION: { capability: 'TEXT', flow: '公众号版本 → 小红书草稿' }, WEIBO_ADAPTATION: { capability: 'TEXT', flow: '公众号版本 → 微博草稿' }, CONTENT_PREFLIGHT_REVIEW: { capability: 'TEXT', flow: '草稿 → 显式复核结果' },
+  INTELLIGENCE_ANALYSIS: { capability: 'TEXT', flow: '资讯 → 分析结果' }, SOURCE_VERIFICATION: { capability: 'TEXT', flow: '研究来源 → 事实结论' }, TOPIC_RECOMMENDATION: { capability: 'TEXT', flow: '资讯 → 选题' }, VOICE_CALIBRATION: { capability: 'TEXT', flow: '授权文章 → 表达规则' }, WECHAT_COPY_GENERATION: { capability: 'TEXT', flow: '素材 → 公众号母稿' }, WECHAT_VISUAL_PLANNING: { capability: 'TEXT', flow: '公众号正文 → 配图方案' }, WECHAT_TEMPLATE_ANALYSIS: { capability: 'TEXT', flow: '授权链接 → 排版模板' }, WECHAT_LAYOUT_DESIGN: { capability: 'TEXT', flow: '公众号正文 + 配图 + 模板 → 智能排版标注' }, XIAOHONGSHU_ADAPTATION: { capability: 'TEXT', flow: '公众号版本 → 小红书草稿' }, WEIBO_ADAPTATION: { capability: 'TEXT', flow: '公众号版本 → 微博草稿' }, CONTENT_PREFLIGHT_REVIEW: { capability: 'TEXT', flow: '草稿 → 显式复核结果' },
   TEXT_TO_IMAGE: { capability: 'IMAGE', operation: 'TEXT_TO_IMAGE', flow: '文本 → 图片' }, IMAGE_TO_IMAGE: { capability: 'IMAGE', operation: 'IMAGE_TO_IMAGE', flow: '图片 + 文本 → 图片' }, SPEECH_SYNTHESIS: { capability: 'AUDIO', flow: '文本 → 音频' }, SPEECH_RECOGNITION: { capability: 'ASR', flow: '音频 / 视频 → 文本' },
   TEXT_TO_VIDEO: { capability: 'VIDEO', operation: 'TEXT_TO_VIDEO', flow: '文本 → 视频' }, IMAGE_TO_VIDEO: { capability: 'VIDEO', operation: 'IMAGE_TO_VIDEO', flow: '首帧 + 文本 → 视频' }, FIRST_LAST_FRAME_TO_VIDEO: { capability: 'VIDEO', operation: 'FIRST_LAST_FRAME_TO_VIDEO', flow: '首帧 + 尾帧 + 文本 → 视频' }, REFERENCE_TO_VIDEO: { capability: 'VIDEO', operation: 'REFERENCE_TO_VIDEO', flow: '参考图 / 视频 + 文本 → 视频' }, VIDEO_EDIT: { capability: 'VIDEO', operation: 'VIDEO_EDIT', flow: '视频 + 指令 → 视频' },
 };
 const modelTaskGroups: { label: string; tasks: ModelTask[] }[] = [
-  { label: '情报与内容', tasks: ['INTELLIGENCE_ANALYSIS', 'SOURCE_VERIFICATION', 'TOPIC_RECOMMENDATION', 'VOICE_CALIBRATION', 'WECHAT_COPY_GENERATION', 'WECHAT_VISUAL_PLANNING', 'WECHAT_TEMPLATE_ANALYSIS', 'XIAOHONGSHU_ADAPTATION', 'WEIBO_ADAPTATION', 'CONTENT_PREFLIGHT_REVIEW'] },
+  { label: '情报与内容', tasks: ['INTELLIGENCE_ANALYSIS', 'SOURCE_VERIFICATION', 'TOPIC_RECOMMENDATION', 'VOICE_CALIBRATION', 'WECHAT_COPY_GENERATION', 'WECHAT_VISUAL_PLANNING', 'WECHAT_TEMPLATE_ANALYSIS', 'WECHAT_LAYOUT_DESIGN', 'XIAOHONGSHU_ADAPTATION', 'WEIBO_ADAPTATION', 'CONTENT_PREFLIGHT_REVIEW'] },
   { label: '图片', tasks: ['TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE'] },
   { label: '音频', tasks: ['SPEECH_SYNTHESIS', 'SPEECH_RECOGNITION'] },
   { label: '视频', tasks: ['TEXT_TO_VIDEO', 'IMAGE_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO', 'REFERENCE_TO_VIDEO', 'VIDEO_EDIT'] },
@@ -699,7 +1149,7 @@ function WorkspaceGate({ session, onSessionChange }: { session: WebSession; onSe
   return (
     <main className="workspace-gate">
       <section className="workspace-gate-panel">
-        <header><div className="wordmark">知行<span>内容</span>实验室</div><p>{session.user.email}</p></header>
+        <header><div className="wordmark">百炼<span>公众号</span>百宝箱</div><p>{session.user.email}</p></header>
         <div className="workspace-gate-copy"><h1>选择工作空间</h1><p>项目、素材、账号配置和发布数据按空间隔离。请选择要进入的空间，或创建一个新空间。</p></div>
         {workspaces.length ? <div className="workspace-gate-list">{workspaces.map((workspace) => <button type="button" key={workspace.id} disabled={Boolean(busyAction)} onClick={() => void selectWorkspace(workspace.id)}><span><b>{workspace.name}</b><small>{workspace.role}</small></span>{busyAction === `select:${workspace.id}` ? <LoaderCircle className="spin" size={18} /> : <ChevronRight size={18} />}</button>)}</div> : <div className="workspace-gate-empty"><FolderOpen size={24} /><b>还没有可用的工作空间</b><span>创建后会立即进入，之后可在顶部随时切换。</span></div>}
         <form className="workspace-gate-create" onSubmit={createWorkspace}><label><span>新工作空间名称</span><input value={name} onChange={(event) => setName(event.target.value)} maxLength={80} /></label><button className="button primary" type="submit" disabled={!name.trim() || Boolean(busyAction)}>{busyAction === 'create' ? <LoaderCircle className="spin" size={16} /> : <Plus size={16} />}{busyAction === 'create' ? '创建中' : '创建并进入'}</button></form>

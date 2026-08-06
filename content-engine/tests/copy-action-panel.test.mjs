@@ -37,13 +37,26 @@ test('次级大纲入口也能生成受控的大纲请求', () => {
   assert.equal(copyActionRequest('GENERATE_OUTLINE'), '生成大纲');
 });
 
-test('正文 Agent 使用动作面板并在点击后直接启动任务', () => {
+test('正文 Agent 使用动作面板，修改标签只选择动作，生成按钮才启动任务', () => {
   const agent = fs.readFileSync(new URL('../src/workspaces/create/ProjectAgent.tsx', import.meta.url), 'utf8');
   assert.match(agent, /copyActionPanelState/);
   assert.match(agent, /copyActionRequest/);
+  assert.match(agent, /selectedAction/);
+  assert.match(agent, /aria-pressed=\{selectedAction === item\.action\}/);
+  assert.match(agent, /onClick=\{\(\) => setSelectedAction\(item\.action\)\}/);
+  assert.match(agent, /executableAction && void startAction\(executableAction\)/);
   assert.match(agent, /confirmAgentRun\(prepared\.id\)/);
+  assert.doesNotMatch(agent, /onClick=\{\(\) => void startAction\(item\.action\)\}/);
   assert.doesNotMatch(agent, /自由对话/);
   assert.doesNotMatch(agent, /确认调用/);
+});
+
+test('文案 Agent 将代理层 502 转换成可重试提示', () => {
+  const agent = fs.readFileSync(new URL('../src/workspaces/create/ProjectAgent.tsx', import.meta.url), 'utf8');
+  assert.match(agent, /projectAgentErrorMessage/);
+  assert.match(agent, /\[502, 503, 504\]\.includes\(reason\.status\)/);
+  assert.match(agent, /开发服务刚重启或模型服务短暂不可用/);
+  assert.doesNotMatch(agent, /请求失败（HTTP 502）/);
 });
 
 test('首次正文不产生候选，只有大纲或主动修改候选进入查看流程', () => {

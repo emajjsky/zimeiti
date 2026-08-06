@@ -1,6 +1,6 @@
 import { Bot, Check, CircleAlert, FileCheck2, LoaderCircle, Search, Settings2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { webCreative } from '../../data/webApi';
+import { WebApiError, webCreative } from '../../data/webApi';
 import { copyActionPanelState, copyActionRequest, type CopyPanelAction } from '../../domain/copy-action-panel.mjs';
 import { copyRunCompletion } from '../../domain/copy-run-lifecycle.mjs';
 import { platformName, type ContentProject } from '../../domain/content';
@@ -197,9 +197,17 @@ function researchRunLabel(phase: string | undefined) {
   return phase === 'VERIFYING' ? '正在核验' : phase === 'SOURCES' ? '正在检索' : phase === 'PLANNING' ? '正在整理' : '正在研究';
 }
 
+function projectAgentErrorMessage(reason: unknown, fallback: string) {
+  if (reason instanceof WebApiError && [502, 503, 504].includes(reason.status) && !reason.code && /^请求失败（HTTP \d+）/.test(reason.message)) {
+    return '请求暂时没有连上后端服务，可能是开发服务刚重启或模型服务短暂不可用。请稍后重试一次。';
+  }
+  return reason instanceof Error ? reason.message : fallback;
+}
+
 function CopyProjectAgent({ projectId, stage, platform, selectedMaterials, selection, hasAcceptedCopy = false, blockedReason, refreshToken = 0, onClearSelection, onContextChange, onArtifactOpen, onDraftGenerated, onOpenSettings }: CopyProjectAgentProps) {
   const [context, setContext] = useState<ProjectAgentContext | null>(null);
   const [note, setNote] = useState('');
+  const [selectedAction, setSelectedAction] = useState<CopyPanelAction>('POLISH_EXISTING_DRAFT');
   const [busy, setBusy] = useState<'idle' | 'loading' | 'starting' | 'cancelling'>('loading');
   const [error, setError] = useState('');
   const watchedRun = useRef<{ id: string; action: string } | null>(null);
@@ -233,7 +241,7 @@ function CopyProjectAgent({ projectId, stage, platform, selectedMaterials, selec
     setBusy('loading'); setError(''); setContext(null);
     void reload()
       .then(() => undefined)
-      .catch((reason) => { if (!cancelled) setError(reason instanceof Error ? reason.message : '读取文案状态失败。'); })
+      .catch((reason) => { if (!cancelled) setError(projectAgentErrorMessage(reason, '读取文案状态失败。')); })
       .finally(() => { if (!cancelled) setBusy('idle'); });
     return () => { cancelled = true; };
   }, [platform, projectId, refreshToken, stage]);
@@ -242,13 +250,29 @@ function CopyProjectAgent({ projectId, stage, platform, selectedMaterials, selec
   const runIsActive = Boolean(activeRun && ['DRAFT', 'QUEUED', 'RUNNING'].includes(activeRun.status));
   useEffect(() => {
     if (!runIsActive) return;
-    const timer = window.setInterval(() => { void reload().catch((reason) => setError(reason instanceof Error ? reason.message : '文案状态更新失败。')); }, 1_500);
+    const timer = window.setInterval(() => { void reload().catch((reason) => setError(projectAgentErrorMessage(reason, '文案状态更新失败。'))); }, 1_500);
     return () => window.clearInterval(timer);
   }, [runIsActive, platform, projectId, stage]);
 
   const candidate = useMemo(() => (context?.artifacts ?? []).find((artifact) => (artifact.type === 'OUTLINE' || artifact.type === 'PLATFORM_COPY') && artifact.platform === platform && artifact.status === 'CANDIDATE') ?? null, [context?.artifacts, platform]);
   const panel = copyActionPanelState({ hasAcceptedCopy, hasSelection: Boolean(selection?.text), hasCandidate: Boolean(candidate) });
   const disabled = busy !== 'idle' || Boolean(blockedReason) || runIsActive;
+  const availableActionKey = panel.primary.action === 'REVIEW_CANDIDATE'
+    ? ''
+    : panel.quickActions.length
+      ? panel.quickActions.map((item) => item.action).join('|')
+      : panel.primary.action;
+  const executableAction = panel.primary.action === 'REVIEW_CANDIDATE'
+    ? null
+    : panel.quickActions.length
+      ? selectedAction
+      : panel.primary.action;
+
+  useEffect(() => {
+    if (!availableActionKey) return;
+    const actions = availableActionKey.split('|') as CopyPanelAction[];
+    setSelectedAction((current) => actions.includes(current) ? current : actions[0]);
+  }, [availableActionKey]);
 
   const openCandidate = () => { if (candidate && onArtifactOpen) onArtifactOpen(candidate); };
 
@@ -269,7 +293,7 @@ function CopyProjectAgent({ projectId, stage, platform, selectedMaterials, selec
       await webCreative.confirmAgentRun(prepared.id);
       setNote('');
       await reload();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : '文案任务启动失败。'); }
+    } catch (reason) { setError(projectAgentErrorMessage(reason, '文案任务启动失败。')); }
     finally { setBusy('idle'); }
   };
 
@@ -277,7 +301,7 @@ function CopyProjectAgent({ projectId, stage, platform, selectedMaterials, selec
     if (!activeRun || !['DRAFT', 'QUEUED'].includes(activeRun.status)) return;
     setBusy('cancelling'); setError('');
     try { await webCreative.cancelAgentRun(activeRun.id); await reload(); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : '取消失败。'); }
+    catch (reason) { setError(projectAgentErrorMessage(reason, '取消失败。')); }
     finally { setBusy('idle'); }
   };
 
@@ -287,9 +311,9 @@ function CopyProjectAgent({ projectId, stage, platform, selectedMaterials, selec
     {busy !== 'loading' && candidate && <section className="copy-action-candidate"><div><b>{candidate.type === 'OUTLINE' ? '大纲候选已生成' : '修改版本已生成'}</b><span>当前正文保持不变</span></div><button className="button" type="button" onClick={openCandidate}>查看修改</button></section>}
     {busy !== 'loading' && activeRun && ['DRAFT', 'QUEUED', 'RUNNING'].includes(activeRun.status) && <section className="copy-action-running" aria-live="polite"><LoaderCircle size={18}/><div><b>{activeRun.status === 'RUNNING' ? (activeRun.action === 'GENERATE_DRAFT' ? '正在生成正文' : '正在生成修改版本') : '任务已排队'}</b><span>{activeRun.action === 'GENERATE_DRAFT' ? 'Agent 正在准备资料并生成最终成稿' : '完成后可查看修改差异'}</span></div>{['DRAFT', 'QUEUED'].includes(activeRun.status) && <button className="text-button" type="button" disabled={busy !== 'idle'} onClick={() => void cancel()}>{busy === 'cancelling' ? '取消中' : '取消'}</button>}</section>}
     {busy !== 'loading' && !candidate && !runIsActive && <div className="copy-action-body">
-      {panel.quickActions.length > 0 && <div className="copy-action-quick" aria-label="快捷修改">{panel.quickActions.map((item) => <button key={item.action} type="button" className="text-button" disabled={disabled} onClick={() => void startAction(item.action)}>{item.label}</button>)}</div>}
+      {panel.quickActions.length > 0 && <div className="copy-action-quick" aria-label="快捷修改">{panel.quickActions.map((item) => <button key={item.action} type="button" className={`text-button ${selectedAction === item.action ? 'active' : ''}`} aria-pressed={selectedAction === item.action} disabled={disabled} onClick={() => setSelectedAction(item.action)}>{item.label}</button>)}</div>}
       {(hasAcceptedCopy || Boolean(selection?.text)) && <label className="copy-action-note"><span>{selection?.text ? `修改选中 ${selection.text.length} 字` : '补充要求（可选）'}</span><textarea rows={3} value={note} maxLength={2_000} placeholder={selection?.text ? '例如：语气更有说服力，保留事实' : '例如：更口语化，保留已有案例'} onChange={(event) => setNote(event.target.value)}/>{selection?.text && onClearSelection && <button className="text-button" type="button" onClick={onClearSelection}>取消选区</button>}</label>}
-      <button className="button primary copy-action-primary" type="button" disabled={disabled} onClick={() => panel.primary.action === 'REVIEW_CANDIDATE' ? openCandidate() : void startAction(panel.primary.action)}>{busy === 'starting' ? <LoaderCircle size={16}/> : <Check size={16}/>}{panel.primary.label}</button>
+      <button className="button primary copy-action-primary" type="button" disabled={disabled || (!executableAction && panel.primary.action !== 'REVIEW_CANDIDATE')} onClick={() => panel.primary.action === 'REVIEW_CANDIDATE' ? openCandidate() : executableAction && void startAction(executableAction)}>{busy === 'starting' ? <LoaderCircle size={16}/> : <Check size={16}/>}{panel.primary.action === 'REVIEW_CANDIDATE' ? panel.primary.label : panel.quickActions.length ? '生成' : panel.primary.label}</button>
       {!hasAcceptedCopy && <button className="text-button copy-action-outline" type="button" disabled={disabled} onClick={() => void startAction('GENERATE_OUTLINE')}>先生成大纲</button>}
     </div>}
     {blockedReason && <div className="copy-action-blocked"><CircleAlert size={16}/><span>{blockedReason}</span></div>}

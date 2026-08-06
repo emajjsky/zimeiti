@@ -283,6 +283,32 @@ function isRevisionAction(action) {
   return action !== 'GENERATE_OUTLINE' && action !== 'GENERATE_DRAFT';
 }
 
+function revisionComparisonText(value) {
+  return String(value ?? '').replace(/[\s\p{P}\p{S}]/gu, '');
+}
+
+function textSimilarity(left, right) {
+  const normalizedLeft = revisionComparisonText(left);
+  const normalizedRight = revisionComparisonText(right);
+  const longest = Math.max(normalizedLeft.length, normalizedRight.length);
+  if (!longest) return 1;
+  return longestCommonSubsequenceLength(normalizedLeft, normalizedRight) / longest;
+}
+
+function assertRevisionChanged(output, action, safetyContext) {
+  if (!isRevisionAction(action)) return;
+  const current = safetyContext?.selection?.text || safetyContext?.currentContent?.body || '';
+  const currentTitle = safetyContext?.currentContent?.title ?? '';
+  if (!String(current).trim()) return;
+  if (revisionComparisonText(output.body) === revisionComparisonText(current)
+    && revisionComparisonText(output.title) === revisionComparisonText(currentTitle)) {
+    throw new Error('修改结果与原文一致，请补充更明确的修改要求后重试。');
+  }
+  if (action === 'RESTRUCTURE_DRAFT' && textSimilarity(output.body, current) >= 0.985) {
+    throw new Error('重构结果与原文几乎一致。重构必须重新组织结构、段落顺序或叙事路径。');
+  }
+}
+
 function preservedExistingCautions(action, safetyContext) {
   if (!isRevisionAction(action)) return [];
   const existingBody = safetyContext?.currentContent?.body ?? '';
@@ -305,6 +331,7 @@ function parseCopyOutput(content, action, safetyContext) {
   const value = parseJson(content, '模型没有返回文案内容。', '模型返回的文案不是有效 JSON。');
   if (action === 'GENERATE_OUTLINE') return outlineSchema.parse(value);
   const output = copyOutputSchema.parse(value);
+  assertRevisionChanged(output, action, safetyContext);
   assertNoUnresolvedClaimInBody(output, action, safetyContext);
   return output;
 }
@@ -455,6 +482,15 @@ function parseFinishedCopyBody(content, packet) {
   return { title: packet.lockedTitle, body };
 }
 
+function actionRevisionRule(action) {
+  if (action === 'POLISH_EXISTING_DRAFT') return '本次是润色：保留原有事实、主旨和大体结构，但必须改善措辞、句子节奏、衔接和表达清晰度；不得原样返回当前正文。';
+  if (action === 'EXPAND_DRAFT') return '本次是扩写：在事实边界内补充解释、论证层次、读者场景或已有案例细节，正文必须明显比当前正文更充分；不得原样返回当前正文。';
+  if (action === 'SHORTEN_DRAFT') return '本次是压缩：删除重复铺陈、合并近似段落、保留核心观点和必要事实，正文必须明显更短更集中；不得原样返回当前正文。';
+  if (action === 'RESTRUCTURE_DRAFT') return '本次是重构：不是润色。必须完全重新组织文章结构、段落顺序和叙事路径，重写开头、过渡和小标题，让读者看到明显的新结构；不得沿用原段落顺序，不得原样或近似原样返回当前正文。';
+  if (action === 'REVISE_SELECTION') return '本次只修改用户选中的正文片段：保持未选中内容的上下文边界，输出完整候选正文，但选区必须有明确变化。';
+  return '严格执行本次动作，不得原样返回当前正文。';
+}
+
 function buildCopyPrompt(snapshot) {
   const businessTemplate = snapshot.action === 'GENERATE_OUTLINE' || snapshot.action === 'GENERATE_DRAFT'
     ? String(snapshot.template ?? '').trim()
@@ -499,6 +535,7 @@ function buildCopyPrompt(snapshot) {
   const system = [
     '你是内容项目的文案编辑，只执行已经确认的单一动作。',
     `本次动作是 ${snapshot.action}，目标平台是 ${snapshot.platform}。`,
+    actionRevisionRule(snapshot.action),
     '项目标题、核心观点和目标平台是硬主题边界：文章主体必须服务项目主题、核心观点与平台表达规则。不得用研究资料中的单条事件替换项目主题；与主题不一致的资料只能作为背景，或不使用。',
     '严格依据项目资料、当前正文、选区、内容母版、阶段摘要和 Skill 工作，不得编造数据、引语、来源或人物经历。',
     '研究上下文中的 verifiedFacts 是唯一可以作为已确认客观事实写入正文的研究结论；cautions 不能改写成确定事实。修改已有正文时，只有系统列出的原稿已有主张可原样保留为待核验内容。',

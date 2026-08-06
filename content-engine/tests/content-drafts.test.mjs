@@ -112,12 +112,19 @@ test('有序素材替换执行平台图片上限并拒绝重复素材', async ()
 
 test('完成公众号草稿原子创建不可变版本、冻结素材并标记派生稿过期', async () => {
   const statements = [];
-  const draft = draftRow();
+  const layoutDesign = {
+    schemaVersion: 1,
+    templateId: '33333333-3333-4333-8333-333333333333',
+    templateVersionId: '22222222-2222-4222-8222-222222222222',
+    blocks: [{ paragraphIndex: 1, role: 'lead', variant: 'callout' }],
+    inlineMarks: [{ text: '正文', type: 'strong-accent' }],
+  };
+  const draft = draftRow({ visual_plan_json: { layoutDesign } });
   const client = { async query(sql, values) {
     statements.push({ sql, values });
     if (sql.includes('FROM content_drafts draft') && sql.includes('FOR UPDATE')) return { rows: [draft], rowCount: 1 };
     if (sql.includes('FROM content_draft_assets item')) return { rows: [{ asset_id: 'asset-1', role: 'COVER', sort_order: 0 }], rowCount: 1 };
-    if (sql.includes('FROM wechat_layout_template_versions')) return { rows: [{ rules_json: { schemaVersion: 1 } }], rowCount: 1 };
+    if (sql.includes('FROM wechat_layout_template_versions')) return { rows: [{ id: draft.layout_template_version_id, template_id: layoutDesign.templateId, rules_json: { schemaVersion: 1 } }], rowCount: 1 };
     if (sql.includes('max(version_number)')) return { rows: [{ next_version: 1 }], rowCount: 1 };
     if (sql.includes('INSERT INTO content_draft_versions')) return { rows: [{ id: 'version-1', workspace_id: draft.workspace_id, draft_id: draft.id, platform: 'WECHAT', version_number: 1, title: draft.title, body: draft.body, visual_plan_json: {}, rendered_html: '<article>正文</article>', layout_template_version_id: draft.layout_template_version_id, source_draft_version_id: null, generation_run_id: null, created_at: NOW }], rowCount: 1 };
     if (sql.includes('INSERT INTO content_draft_assets')) return { rows: [], rowCount: 1 };
@@ -128,11 +135,12 @@ test('完成公众号草稿原子创建不可变版本、冻结素材并标记�
   const store = createContentDraftStore({
     query: async () => { throw new Error('完成草稿必须留在事务内'); },
     transaction: (callback) => callback(client),
-    renderWechatDraft: ({ title, body, assets, templateRules }) => {
+    renderWechatDraft: ({ title, body, assets, templateRules, layoutDesign: receivedLayoutDesign }) => {
       assert.equal(title, draft.title);
       assert.equal(body, draft.body);
       assert.equal(assets.length, 1);
       assert.equal(templateRules.schemaVersion, 1);
+      assert.deepEqual(receivedLayoutDesign, layoutDesign);
       return { html: '<article>正文</article>', checks: [] };
     },
   });
@@ -141,6 +149,39 @@ test('完成公众号草稿原子创建不可变版本、冻结素材并标记�
   assert.equal(completed.draft.currentVersionId, 'version-1');
   assert.ok(statements.some(({ sql }) => sql.includes('INSERT INTO content_draft_assets')));
   assert.ok(statements.some(({ sql }) => sql.includes('SET source_stale = true')));
+});
+
+test('完成公众号草稿不会把其它模板的智能精排误应用到当前模板', async () => {
+  const draft = draftRow({
+    visual_plan_json: {
+      layoutDesign: {
+        schemaVersion: 1,
+        templateId: '33333333-3333-4333-8333-333333333333',
+        templateVersionId: '33333333-3333-4333-8333-333333333334',
+        blocks: [{ paragraphIndex: 1, role: 'lead', variant: 'callout' }],
+        inlineMarks: [{ text: '正文', type: 'strong-accent' }],
+      },
+    },
+  });
+  const client = { async query(sql) {
+    if (sql.includes('FROM content_drafts draft') && sql.includes('FOR UPDATE')) return { rows: [draft], rowCount: 1 };
+    if (sql.includes('FROM content_draft_assets item')) return { rows: [], rowCount: 0 };
+    if (sql.includes('FROM wechat_layout_template_versions')) return { rows: [{ id: draft.layout_template_version_id, template_id: '44444444-4444-4444-8444-444444444444', rules_json: { schemaVersion: 1 } }], rowCount: 1 };
+    if (sql.includes('max(version_number)')) return { rows: [{ next_version: 1 }], rowCount: 1 };
+    if (sql.includes('INSERT INTO content_draft_versions')) return { rows: [{ id: 'version-1', workspace_id: draft.workspace_id, draft_id: draft.id, platform: 'WECHAT', version_number: 1, title: draft.title, body: draft.body, visual_plan_json: draft.visual_plan_json, rendered_html: '<article>正文</article>', layout_template_version_id: draft.layout_template_version_id, source_draft_version_id: null, generation_run_id: null, created_at: NOW }], rowCount: 1 };
+    if (sql.includes("UPDATE content_drafts SET status = 'READY'")) return { rows: [draftRow({ status: 'READY', revision: 4, current_version_id: 'version-1' })], rowCount: 1 };
+    if (sql.includes('SET source_stale = true')) return { rows: [], rowCount: 0 };
+    throw new Error(`未处理 SQL：${sql}`);
+  } };
+  const store = createContentDraftStore({
+    query: async () => { throw new Error('完成草稿必须留在事务内'); },
+    transaction: (callback) => callback(client),
+    renderWechatDraft: ({ layoutDesign }) => {
+      assert.equal(layoutDesign, undefined);
+      return { html: '<article>正文</article>', checks: [] };
+    },
+  });
+  await store.complete(draft.workspace_id, draft.id, draft.revision);
 });
 
 test('完成草稿必须校验用户实际预览的 revision', async () => {

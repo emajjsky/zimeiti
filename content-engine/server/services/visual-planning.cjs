@@ -107,6 +107,29 @@ const visualPlanningTool = Object.freeze({
 const genericOnly = /^(关键|节点|时间|重点|核心|内容|信息|主题|场景|要点|结论|背景|价值|问题|方法|流程|数据|人物|事件|图片|配图)[一二三四五六七八九十\d\s、，：:.-]*$/;
 const searchNoise = /(模板|矢量|图标|字体|字效|排版|版式|PPT|信息卡|知识卡|海报|素材|图表|架构图|示意图|流程图|对比图|框架图|思维导图)/i;
 
+function cleanSearchQuery(value) {
+  return String(value ?? '')
+    .replace(/(?:模板|排版|PPT|信息卡|知识卡|海报|图标|字体|字效|版式|样式|风格|素材|图表|架构图|示意图|流程图|对比图|框架图|思维导图|封面图|配图|插画|设计)/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function fallbackSearchQueries(item) {
+  const chunks = [item.focus, item.sourceExcerpt, item.purpose, item.title]
+    .flatMap((value) => String(value ?? '').split(/[。！？；;，,、\s]+/))
+    .map((value) => cleanSearchQuery(value))
+    .filter((value) => value.length >= 2 && !genericOnly.test(value));
+  return [...new Set(chunks)].slice(0, 4);
+}
+
+function normalizeSearchQueries(item) {
+  const cleaned = item.searchQueries
+    .map((query) => cleanSearchQuery(query))
+    .filter((query) => query.length >= 2 && !searchNoise.test(query));
+  const merged = [...new Set([...cleaned, ...fallbackSearchQueries(item)])].slice(0, 4);
+  return merged.length >= 2 ? merged : item.searchQueries;
+}
+
 function assertSpecificPlan(plan) {
   const fields = [];
   for (const [index, item] of plan.items.entries()) {
@@ -158,30 +181,34 @@ function parseVisualPlanningContent(content, { platform, quantityMode = 'MANUAL'
   let value;
   try { value = JSON.parse(stripCodeFence(content)); }
   catch { throw new Error('模型返回的配图方案不是有效 JSON。'); }
-  const parsed = assertSpecificPlan(visualPlanSchema.parse(value));
-  if (singleItem && parsed.items.length !== 1) throw new Error(`单图重策划必须返回 1 张，实际返回 ${parsed.items.length} 张。`);
-  if (singleItem && expectedRole && parsed.items[0]?.role !== expectedRole) {
-    throw new Error(`单图重策划必须保持 ${expectedRole} 角色，不能改为 ${parsed.items[0]?.role ?? '未知角色'}。`);
+  const parsed = visualPlanSchema.parse(value);
+  const checked = assertSpecificPlan({
+    ...parsed,
+    items: parsed.items.map((item) => ({ ...item, searchQueries: normalizeSearchQueries(item) })),
+  });
+  if (singleItem && checked.items.length !== 1) throw new Error(`单图重策划必须返回 1 张，实际返回 ${checked.items.length} 张。`);
+  if (singleItem && expectedRole && checked.items[0]?.role !== expectedRole) {
+    throw new Error(`单图重策划必须保持 ${expectedRole} 角色，不能改为 ${checked.items[0]?.role ?? '未知角色'}。`);
   }
   if (!singleItem && quantityMode === 'AUTO') {
-    validateVisualPlanImageCount(platform, parsed.items.length);
-    if (parsed.items.length < 3) throw new Error(`自动规划必须包含 1 张封面和至少 2 张正文插图，实际返回 ${parsed.items.length} 张。`);
-    parsed.items.forEach((item, index) => {
+    validateVisualPlanImageCount(platform, checked.items.length);
+    if (checked.items.length < 3) throw new Error(`自动规划必须包含 1 张封面和至少 2 张正文插图，实际返回 ${checked.items.length} 张。`);
+    checked.items.forEach((item, index) => {
       const expectedRole = index === 0 ? 'COVER' : 'BODY';
       if (item.role !== expectedRole) throw new Error(`第 ${index + 1} 张图角色不正确，应为 ${expectedRole}。`);
     });
   }
   if (!singleItem && quantityMode === 'MANUAL') {
     const roles = expectedRoles(platform, bodyItemCount);
-    if (parsed.items.length !== roles.length) {
+    if (checked.items.length !== roles.length) {
       const quantity = quantityInstruction(platform, quantityMode, bodyItemCount, false);
-      throw new Error(`配图数量不正确，${quantity.instruction}实际返回 ${parsed.items.length} 张。`);
+      throw new Error(`配图数量不正确，${quantity.instruction}实际返回 ${checked.items.length} 张。`);
     }
-    parsed.items.forEach((item, index) => {
+    checked.items.forEach((item, index) => {
       if (item.role !== roles[index]) throw new Error(`第 ${index + 1} 张图角色不正确，应为 ${roles[index]}。`);
     });
   }
-  return parsed;
+  return checked;
 }
 
 function buildVisualPlanningPrompt({ project, platform, quantityMode, bodyItemCount, styleProfile, request, currentItem }) {

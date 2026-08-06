@@ -41,6 +41,20 @@ test('公众号母稿策略不暴露其他平台的结构与渠道选项', () =>
   assert.match(workspace, /requiresWechatBriefNormalization/);
 });
 
+test('目标篇幅使用固定下拉选项并把旧值归一到合法范围', () => {
+  const copy = fs.readFileSync(new URL('../src/workspaces/create/CopyWorkspace.tsx', import.meta.url), 'utf8');
+  const workspace = fs.readFileSync(new URL('../src/workspaces/create/CreateWorkspace.tsx', import.meta.url), 'utf8');
+  const creative = fs.readFileSync(new URL('../src/domain/creative.ts', import.meta.url), 'utf8');
+  assert.match(creative, /defaultWritingLengthTarget = '350-500 字'/);
+  assert.match(creative, /Array\.from\(\{ length: 18 \}/);
+  assert.match(creative, /normalizeWritingLengthTarget/);
+  assert.match(copy, /<select value=\{lengthTarget\}/);
+  assert.match(copy, /writingLengthTargetOptions\.map/);
+  assert.doesNotMatch(copy, /<input value=\{platformStrategy\?\.lengthTarget/);
+  assert.match(workspace, /normalizeWritingLengthTarget\(brief\.platformSkills\.WECHAT\?\.lengthTarget \|\| brief\.lengthTarget\)/);
+  assert.doesNotMatch(workspace, /1500-2500 字/);
+});
+
 test('文案工作区支持 revision 保存、正文选区和明确采用候选', () => {
   const copy = fs.readFileSync(new URL('../src/workspaces/create/CopyWorkspace.tsx', import.meta.url), 'utf8');
   const dialog = fs.readFileSync(new URL('../src/workspaces/create/CopyCandidateDialog.tsx', import.meta.url), 'utf8');

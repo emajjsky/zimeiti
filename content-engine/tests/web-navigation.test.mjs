@@ -4,6 +4,12 @@ import test from 'node:test';
 
 const navigation = await import('../src/app/navigation.mjs').catch(() => null);
 
+test('应用品牌名显示为百炼公众号百宝箱', async () => {
+  const main = await readFile(new URL('../src/main.tsx', import.meta.url), 'utf8');
+  assert.match(main, /百炼<span>公众号<\/span>百宝箱/);
+  assert.doesNotMatch(main, /知行<span>内容<\/span>实验室/);
+});
+
 test('账号声音设置入口独立于模型配置', async () => {
   const settings = await readFile(new URL('../src/workspaces/settings/AccountVoiceSettings.tsx', import.meta.url), 'utf8');
   assert.ok(navigation.settingsTabs.some((item) => item.id === 'voices' && item.label === '账号声音'));

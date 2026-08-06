@@ -7,6 +7,7 @@ import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const migration = await readFile(new URL('../server/migrations/028_content_draft_foundation.sql', import.meta.url), 'utf8');
+const migration033 = await readFile(new URL('../server/migrations/033_fix_content_draft_version_migration_source_index.sql', import.meta.url), 'utf8');
 const { draftPreflight, parseOutputDirectory, validateArchiveOutputPath, zhihuProjectRows } = require('../scripts/export-zhihu-archive.cjs');
 const { buildVerificationSummary } = require('../scripts/verify-draft-migration.cjs');
 
@@ -59,6 +60,24 @@ test('迁移预置六个真实公众号模板并回填三平台版本', () => {
   assert.match(migration, /SELECT seed_wechat_layout_templates\(workspace\.id\)[\s\S]*FROM workspaces workspace/);
   assert.doesNotMatch(migration, /DROP TABLE platform_content_versions/);
   assert.doesNotMatch(migration, /project_json\s*=\s*project_json\s*-\s*'delivery'/);
+});
+
+test('草稿迁移重复执行时不会因历史版本唯一键冲突失败', () => {
+  const draftBackfill = migration.match(/INSERT INTO content_drafts[\s\S]*?FROM draft_platforms[\s\S]*?;/)?.[0] ?? '';
+  const legacyVersions = migration.match(/INSERT INTO content_draft_versions \([\s\S]*?'PLATFORM_CONTENT_VERSION'[\s\S]*?;/)?.[0] ?? '';
+  const currentVersions = migration.match(/INSERT INTO content_draft_versions \([\s\S]*?'MIGRATED_CURRENT'[\s\S]*?;/)?.[0] ?? '';
+
+  assert.match(draftBackfill, /ON CONFLICT \(workspace_id, project_id, platform\) DO NOTHING/);
+  assert.match(legacyVersions, /ON CONFLICT DO NOTHING/);
+  assert.match(currentVersions, /ON CONFLICT DO NOTHING/);
+});
+
+test('草稿版本迁移来源唯一性只约束迁移记录，不阻塞普通保存版本', () => {
+  assert.doesNotMatch(migration, /UNIQUE NULLS NOT DISTINCT \(workspace_id, migration_source, migration_source_key\)/);
+  assert.match(migration, /CREATE UNIQUE INDEX content_draft_versions_migration_source_key_idx[\s\S]*WHERE migration_source IS NOT NULL/);
+  assert.match(migration033, /DROP CONSTRAINT/);
+  assert.match(migration033, /UNIQUE NULLS NOT DISTINCT[\s\S]*migration_source/);
+  assert.match(migration033, /CREATE UNIQUE INDEX IF NOT EXISTS content_draft_versions_migration_source_key_idx[\s\S]*WHERE migration_source IS NOT NULL/);
 });
 
 test('知乎归档输出目录必须绝对、安全且为空', async () => {

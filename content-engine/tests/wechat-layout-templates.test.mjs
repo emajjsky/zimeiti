@@ -69,6 +69,95 @@ test('公众号渲染器转义内容、自行生成标签且输出确定', () =>
   assert.match(first.html, new RegExp(`/api/v1/assets/${asset(0).assetId}/content`));
 });
 
+test('renderer outputs structural layout variants for titles, toc, tags, lists and links', () => {
+  const rules = normalizeWechatLayoutRules({
+    ...DEFAULT_WECHAT_LAYOUT_RULES,
+    layout: {
+      ...DEFAULT_WECHAT_LAYOUT_RULES.layout,
+      titleVariant: 'news',
+      headingVariant: 'shadow-card',
+      tocVariant: 'card',
+      listVariant: 'check',
+      linkVariant: 'pill',
+      tagVariant: 'mono',
+      paragraphVariant: 'rail',
+      inlineVariant: 'dual',
+    },
+  });
+  const result = renderWechatDraft({
+    title: 'AI Tool Evaluation',
+    body: '## Setup\n\nIntro paragraph with [source](https://example.com/a), `claude-opus-5` and ==red flag==.\n\n## Metrics\n\n- **Output length:** 1200 words\n- **Latency:** 3 minutes\n\n## Decision\n\nhttps://example.com/b',
+    assets: [],
+    templateRules: rules,
+  });
+
+  assert.match(result.html, /<header[^>]*><h1/);
+  assert.match(result.html, /<nav aria-label=/);
+  assert.match(result.html, /#Setup/);
+  assert.match(result.html, /box-shadow:0 8px 18px/);
+  assert.match(result.html, /grid-template-columns:18px minmax\(0,1fr\)/);
+  assert.match(result.html, /<strong style=/);
+  assert.match(result.html, /<code style=/);
+  assert.match(result.html, /<mark style=/);
+  assert.match(result.html, /#4f68a8/);
+  assert.match(result.html, /target="_blank" rel="noopener noreferrer"/);
+  assert.match(result.html, /border-radius:999px;color:/);
+  assert.match(result.html, /border-left:2px solid/);
+});
+
+test('renderer applies branded intro and outro addons across preview and final HTML', () => {
+  const rules = normalizeWechatLayoutRules({
+    ...DEFAULT_WECHAT_LAYOUT_RULES,
+    canvas: { ...DEFAULT_WECHAT_LAYOUT_RULES.canvas, background: '#fff8ed', textColor: '#2d241f' },
+    title: { ...DEFAULT_WECHAT_LAYOUT_RULES.title, color: '#4a2411' },
+    heading: { ...DEFAULT_WECHAT_LAYOUT_RULES.heading, borderColor: '#c87533' },
+    quote: { ...DEFAULT_WECHAT_LAYOUT_RULES.quote, background: '#fff1dc' },
+  });
+  const result = renderWechatDraft({
+    title: 'Brand Voice',
+    body: '## Main Point\n\nBody copy with ==accent==.',
+    assets: [],
+    templateRules: rules,
+    layoutAddons: {
+      intro: { enabled: true, label: '二师兄说', title: '<开场>', body: '一句带 `code` 的开头' },
+      outro: { enabled: true, label: '收个尾', title: '下期见', body: '关注后续 ==重点==。' },
+    },
+  });
+
+  assert.match(result.html, /data-layout-addon="intro"/);
+  assert.match(result.html, /data-layout-addon="outro"/);
+  assert.match(result.html, /二师兄说/);
+  assert.match(result.html, /&lt;开场&gt;/);
+  assert.match(result.html, /一句带 <code style=/);
+  assert.match(result.html, /收个尾/);
+  assert.match(result.html, /下期见/);
+  assert.match(result.html, /#c87533/);
+  assert.match(result.html, /#fff1dc/);
+  assert.match(result.html, /<mark style=/);
+});
+
+test('renderer reproduces numbered case card paragraph layout', () => {
+  const rules = normalizeWechatLayoutRules({
+    ...DEFAULT_WECHAT_LAYOUT_RULES,
+    heading: { ...DEFAULT_WECHAT_LAYOUT_RULES.heading, color: '#5b7ee5', borderColor: '#5b7ee5' },
+    divider: { ...DEFAULT_WECHAT_LAYOUT_RULES.divider, color: '#5b7ee5' },
+    layout: { ...DEFAULT_WECHAT_LAYOUT_RULES.layout, paragraphVariant: 'case-card' },
+  });
+  const result = renderWechatDraft({
+    title: '案例公布',
+    body: '导语段落。\n\n第一个案例正文。\n\n第二个案例正文。',
+    assets: [],
+    templateRules: rules,
+  });
+
+  assert.match(result.html, /data-layout-case-card="1"/);
+  assert.match(result.html, /data-layout-case-card="2"/);
+  assert.match(result.html, /border:1px solid #5b7ee5/);
+  assert.match(result.html, /background:#f6c23e/);
+  assert.match(result.html, />1<\/span>/);
+  assert.match(result.html, />2<\/span>/);
+});
+
 test('公众号渲染器允许最多 12 张图并报告缺图或非法素材', () => {
   assert.equal(renderWechatDraft({ title: '标题', body: '正文', assets: Array.from({ length: 12 }, (_, index) => asset(index)), templateRules: DEFAULT_WECHAT_LAYOUT_RULES }).checks.length, 0);
   assert.throws(
@@ -94,11 +183,17 @@ test('模板规则拒绝任意 CSS 与未知字段，并把数值限制到安全
   );
   const normalized = normalizeWechatLayoutRules({
     ...DEFAULT_WECHAT_LAYOUT_RULES,
+    layout: undefined,
     title: { ...DEFAULT_WECHAT_LAYOUT_RULES.title, fontSize: 500 },
     image: { ...DEFAULT_WECHAT_LAYOUT_RULES.image, borderRadius: -30 },
   });
   assert.equal(normalized.title.fontSize, 48);
   assert.equal(normalized.image.borderRadius, 0);
+  assert.equal(normalized.layout.titleVariant, 'plain');
+  assert.throws(
+    () => normalizeWechatLayoutRules({ ...DEFAULT_WECHAT_LAYOUT_RULES, layout: { ...DEFAULT_WECHAT_LAYOUT_RULES.layout, titleVariant: 'free-css' } }),
+    (error) => error.code === 'LAYOUT_TEMPLATE_RULES_INVALID',
+  );
 });
 
 test('链接分析必须确认授权且只接受公众号文章 URL', async () => {
@@ -168,6 +263,119 @@ test('链接分析只向模型发送结构信号，不复制原文、原图或�
   assert.deepEqual(result.usage, { inputTokens: 10, outputTokens: 20 });
   assert.equal('html' in result, false);
   assert.equal('text' in result, false);
+});
+
+test('链接导入会安全修正模型输出里的额外字段和布局别名', async () => {
+  const result = await analyzeWechatTemplateSource({
+    url: 'https://mp.weixin.qq.com/s/example',
+    confirmedRights: true,
+    route: { provider: 'BAILIAN_CLI', model: 'qwen-max' },
+    fetchPublicPage: async () => ({ url: new URL('https://mp.weixin.qq.com/s/example'), html: '<div id="js_content"><section style="color:#0f172a;background:#f8fafc"><p>正文</p></section></div>' }),
+    runTextTask: async () => ({
+      content: JSON.stringify({
+        rules: {
+          schemaVersion: 1,
+          canvas: { background: '#fff', textColor: '#0F172A', maxWidth: 900, css: 'display:none' },
+          title: { ...DEFAULT_WECHAT_LAYOUT_RULES.title, color: '#111827', customCss: 'position:fixed' },
+          layout: {
+            titleVariant: 'minimal',
+            headingVariant: 'number',
+            imageVariant: 'dropShadow',
+            quoteVariant: 'callout',
+            dividerVariant: 'dotted',
+            leadVariant: 'dropcap',
+            tocVariant: 'catalog',
+            listVariant: 'emphasis',
+            linkVariant: 'blue',
+            tagVariant: 'hashtags',
+            metaVariant: 'badges',
+            paragraphVariant: 'report',
+            inlineVariant: 'twoTone',
+            css: 'bad',
+          },
+          customCss: '.x{display:none}',
+        },
+      }),
+    }),
+  });
+  assert.equal(result.rules.canvas.background, DEFAULT_WECHAT_LAYOUT_RULES.canvas.background);
+  assert.equal(result.rules.canvas.textColor, '#0f172a');
+  assert.equal(result.rules.canvas.maxWidth, 677);
+  assert.equal(result.rules.layout.titleVariant, 'plain');
+  assert.equal(result.rules.layout.headingVariant, 'numbered');
+  assert.equal(result.rules.layout.imageVariant, 'shadow');
+  assert.equal(result.rules.layout.quoteVariant, 'card');
+  assert.equal(result.rules.layout.dividerVariant, 'dots');
+  assert.equal(result.rules.layout.leadVariant, 'kicker');
+  assert.equal(result.rules.layout.tocVariant, 'card');
+  assert.equal(result.rules.layout.listVariant, 'bold');
+  assert.equal(result.rules.layout.linkVariant, 'accent');
+  assert.equal(result.rules.layout.tagVariant, 'mono');
+  assert.equal(result.rules.layout.metaVariant, 'chips');
+  assert.equal(result.rules.layout.paragraphVariant, 'report');
+  assert.equal(result.rules.layout.inlineVariant, 'dual');
+});
+
+test('imported layout refines structural signals into distinct template variants', async () => {
+  let modelInput;
+  const html = `<div id="js_content">
+    <section style="box-shadow:0 8px 18px rgba(0,0,0,.12);border-left:4px solid #ff4d2e"><h2>Opening</h2></section>
+    <section style="box-shadow:0 8px 18px rgba(0,0,0,.12);border-left:4px solid #ff4d2e"><h2>Checklist</h2></section>
+    <section><h2>Links</h2><p><a href="https://example.com/a">A</a><a href="https://example.com/b">B</a></p></section>
+    <ul><li>Output length</li><li>Latency</li><li>Evidence</li><li>Decision</li></ul>
+  </div>`;
+  const result = await analyzeWechatTemplateSource({
+    url: 'https://mp.weixin.qq.com/s/example',
+    confirmedRights: true,
+    route: { provider: 'BAILIAN_CLI', model: 'qwen-max' },
+    fetchPublicPage: async () => ({ url: new URL('https://mp.weixin.qq.com/s/example'), html }),
+    runTextTask: async (input) => {
+      modelInput = input;
+      return { content: JSON.stringify({ rules: DEFAULT_WECHAT_LAYOUT_RULES }) };
+    },
+  });
+
+  assert.match(modelInput.message, /shadowCount/);
+  assert.match(modelInput.message, /listItemCount/);
+  assert.match(modelInput.message, /linkCount/);
+  assert.equal(result.rules.layout.headingVariant, 'shadow-card');
+  assert.equal(result.rules.layout.tocVariant, 'card');
+  assert.equal(result.rules.layout.listVariant, 'bold');
+  assert.equal(result.rules.layout.linkVariant, 'accent');
+  assert.equal(result.rules.layout.tagVariant, 'chips');
+  assert.equal(result.rules.layout.paragraphVariant, 'rail');
+  assert.equal(result.rules.layout.inlineVariant, 'dual');
+  assert.equal(result.rules.heading.borderColor, '#ff4d2e');
+});
+
+test('imported layout recognizes repeated numbered case cards', async () => {
+  let modelInput;
+  const caseSection = (index) => `<section style="position:relative;margin:42px 0 30px;padding:32px 24px 22px;border:1px solid #5b7ee5;border-radius:10px;background:#ffffff">
+    <span style="position:absolute;left:36px;top:-32px;color:#5b7ee5;font-size:46px;font-weight:900">${index}</span>
+    <span style="position:absolute;left:36px;top:-5px;width:9px;height:9px;border-radius:50%;background:#f6c23e"></span>
+    <span style="position:absolute;left:132px;right:14px;top:-1px;height:1px;background:#5b7ee5"></span>
+    <p>案例 ${index} 的说明文字。</p>
+  </section>`;
+  const html = `<div id="js_content">
+    <p>导语段落。</p>
+    ${[1, 2, 3, 4].map(caseSection).join('')}
+  </div>`;
+  const result = await analyzeWechatTemplateSource({
+    url: 'https://mp.weixin.qq.com/s/example',
+    confirmedRights: true,
+    route: { provider: 'BAILIAN_CLI', model: 'qwen-max' },
+    fetchPublicPage: async () => ({ url: new URL('https://mp.weixin.qq.com/s/example'), html }),
+    runTextTask: async (input) => {
+      modelInput = input;
+      return { content: JSON.stringify({ rules: DEFAULT_WECHAT_LAYOUT_RULES }) };
+    },
+  });
+
+  assert.match(modelInput.message, /caseCardCount/);
+  assert.equal(result.rules.layout.paragraphVariant, 'case-card');
+  assert.equal(result.rules.heading.borderColor, '#5b7ee5');
+  assert.equal(result.rules.heading.color, '#5b7ee5');
+  assert.equal(result.rules.divider.color, '#5b7ee5');
 });
 
 test('模型返回不合规规则时分析失败，Store 不会产生空模板', async () => {
@@ -278,6 +486,54 @@ test('模板路由导入成功后才创建模板并记录模型用量', async ()
   assert.equal(usages[0].operation, 'WECHAT_TEMPLATE_ANALYSIS');
 });
 
+test('模板导入失败时用量记录失败不会覆盖原始分析错误', async () => {
+  const routes = new Map();
+  const app = {
+    get(path, options, handler) { routes.set(`GET ${path}`, { options, handler }); },
+    post(path, options, handler) { routes.set(`POST ${path}`, { options, handler }); },
+    patch(path, options, handler) { routes.set(`PATCH ${path}`, { options, handler }); },
+    put(path, options, handler) { routes.set(`PUT ${path}`, { options, handler }); },
+    delete(path, options, handler) { routes.set(`DELETE ${path}`, { options, handler }); },
+  };
+  const warnings = [];
+  registerWechatLayoutTemplateRoutes(app, {
+    workspaceAccess: { forRole: (role) => role },
+    templateStore: {
+      list: async () => [],
+      create: async () => { throw new Error('template must not be created'); },
+      update: async () => ({}),
+      duplicate: async () => ({}),
+      archive: async () => {},
+      get: async () => templateRow(),
+      remove: async () => {},
+    },
+    draftStore: { get: async () => ({}) },
+    renderWechatDraft: () => ({ html: '', checks: [] }),
+    resolveTaskRoute: async () => ({ scope: 'WECHAT_TEMPLATE_ANALYSIS', provider: 'BAILIAN_CLI', model: 'qwen-max' }),
+    analyzeTemplateSource: async () => {
+      const error = new Error('公众号文章链接暂时无法读取，请确认链接公开且仍然有效。');
+      error.statusCode = 422;
+      error.code = 'LAYOUT_TEMPLATE_SOURCE_UNREADABLE';
+      throw error;
+    },
+    runTextTask: async () => { throw new Error('analyzer is injected and should not run directly'); },
+    recordUsage: async () => { throw new Error('usage write failed'); },
+    transaction: (callback) => callback({}),
+  });
+  const route = routes.get('POST /api/v1/wechat-layout-templates/import');
+  await assert.rejects(
+    () => route.handler({
+      workspace: { id: WORKSPACE_ID },
+      user: { sub: USER_ID },
+      log: { warn: (...args) => warnings.push(args) },
+      body: { name: '授权模板', url: 'https://mp.weixin.qq.com/s/example', confirmedRights: true },
+    }, { code() { return this; }, send() {} }),
+    (error) => error.code === 'LAYOUT_TEMPLATE_SOURCE_UNREADABLE' && error.statusCode === 422,
+  );
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0][1], /usage recording failed/);
+});
+
 test('模板创建与成功用量日志属于同一事务，日志失败不会留下模板', async () => {
   const routes = new Map();
   const app = {
@@ -334,7 +590,18 @@ test('模板预览读取当前公众号草稿并返回服务端渲染 HTML', asy
     delete(path, options, handler) { routes.set(`DELETE ${path}`, { options, handler }); },
   };
   const template = { id: TEMPLATE_ID, currentVersionId: VERSION_ID, rules: DEFAULT_WECHAT_LAYOUT_RULES };
-  const draft = { id: '44444444-4444-4444-8444-444444444444', platform: 'WECHAT', title: '母稿标题', body: '母稿正文', assets: [asset(0)] };
+  const layoutAddons = { intro: { enabled: true, label: '栏目', title: '开头', body: '固定开场' } };
+  const draft = {
+    id: '44444444-4444-4444-8444-444444444444',
+    platform: 'WECHAT',
+    title: '母稿标题',
+    body: '母稿正文',
+    assets: [asset(0)],
+    visualPlan: {
+      layoutAddons,
+      layoutDesign: { schemaVersion: 1, templateId: '55555555-5555-4555-8555-555555555555', templateVersionId: '55555555-5555-4555-8555-555555555556', blocks: [{ paragraphIndex: 1, role: 'lead', variant: 'callout' }], inlineMarks: [] },
+    },
+  };
   registerWechatLayoutTemplateRoutes(app, {
     workspaceAccess: { forRole: (role) => role },
     transaction: (callback) => callback({}),
@@ -343,6 +610,8 @@ test('模板预览读取当前公众号草稿并返回服务端渲染 HTML', asy
     renderWechatDraft: (input) => {
       assert.equal(input.title, draft.title);
       assert.equal(input.templateRules, template.rules);
+      assert.deepEqual(input.layoutAddons, layoutAddons);
+      assert.equal(input.layoutDesign, undefined);
       return { html: '<article>真实预览</article>', checks: [] };
     },
     resolveTaskRoute: async () => ({}),
@@ -352,4 +621,68 @@ test('模板预览读取当前公众号草稿并返回服务端渲染 HTML', asy
   });
   const preview = await routes.get('POST /api/v1/wechat-layout-templates/:templateId/preview').handler({ workspace: { id: WORKSPACE_ID }, params: { templateId: TEMPLATE_ID }, body: { draftId: draft.id } });
   assert.deepEqual(preview, { templateId: TEMPLATE_ID, templateVersionId: VERSION_ID, draftId: draft.id, html: '<article>真实预览</article>', checks: [] });
+});
+
+test('智能精排接口调用 WECHAT_LAYOUT_DESIGN 并把结构化标注保存到草稿', async () => {
+  const routes = new Map();
+  const app = {
+    get(path, options, handler) { routes.set(`GET ${path}`, { options, handler }); },
+    post(path, options, handler) { routes.set(`POST ${path}`, { options, handler }); },
+    patch(path, options, handler) { routes.set(`PATCH ${path}`, { options, handler }); },
+    put(path, options, handler) { routes.set(`PUT ${path}`, { options, handler }); },
+    delete(path, options, handler) { routes.set(`DELETE ${path}`, { options, handler }); },
+  };
+  const template = { id: TEMPLATE_ID, currentVersionId: VERSION_ID, rules: DEFAULT_WECHAT_LAYOUT_RULES };
+  const draft = {
+    id: '44444444-4444-4444-8444-444444444444',
+    revision: 7,
+    platform: 'WECHAT',
+    title: '母稿标题',
+    body: '市场越热的时候，越要回到真实价值。\n\n真正值得长期投入的公司，不只要站在技术变化的起点。',
+    assets: [asset(0)],
+    visualPlan: { layoutAddons: { intro: { enabled: false } } },
+  };
+  const calls = [];
+  registerWechatLayoutTemplateRoutes(app, {
+    workspaceAccess: { forRole: (role) => role },
+    transaction: (callback) => callback({ staged: [] }),
+    templateStore: { list: async () => [template], create: async () => ({}), update: async () => ({}), duplicate: async () => ({}), archive: async () => {}, remove: async () => {}, get: async () => template },
+    draftStore: {
+      get: async () => draft,
+      patchWorkingCopy: async (workspaceId, draftId, input) => {
+        calls.push({ workspaceId, draftId, input });
+        return { ...draft, revision: 8, visualPlan: input.visualPlan };
+      },
+    },
+    renderWechatDraft: (input) => {
+      assert.deepEqual(input.layoutDesign.inlineMarks, [{ text: '真实价值', type: 'strong-accent' }]);
+      assert.equal(input.layoutDesign.templateId, TEMPLATE_ID);
+      assert.equal(input.layoutDesign.templateVersionId, VERSION_ID);
+      return { html: '<article>智能精排预览</article>', checks: [] };
+    },
+    resolveTaskRoute: async (workspaceId, scope, label) => {
+      calls.push({ workspaceId, scope, label });
+      return { scope, provider: 'BAILIAN_CLI', connectionId: null, model: 'qwen-max' };
+    },
+    analyzeTemplateSource: async () => ({}),
+    runTextTask: async ({ route, system, message }) => {
+      calls.push({ route, system, message });
+      return { content: JSON.stringify({ schemaVersion: 1, blocks: [{ paragraphIndex: 1, role: 'lead', variant: 'accent-line' }], inlineMarks: [{ text: '真实价值', type: 'strong-accent' }] }), inputTokens: 12, outputTokens: 24 };
+    },
+    recordUsage: async (usage) => calls.push({ usage }),
+  });
+  const result = await routes.get('POST /api/v1/creative/drafts/:draftId/layout/design').handler({
+    workspace: { id: WORKSPACE_ID },
+    params: { draftId: draft.id },
+    body: { templateId: TEMPLATE_ID, instruction: '突出重点判断' },
+  });
+  assert.equal(calls[0].scope, 'WECHAT_LAYOUT_DESIGN');
+  assert.equal(calls[1].route.scope, 'WECHAT_LAYOUT_DESIGN');
+  assert.equal(calls[2].input.visualPlan.layoutDesign.inlineMarks[0].text, '真实价值');
+  assert.equal(calls[2].input.visualPlan.layoutDesign.templateId, TEMPLATE_ID);
+  assert.equal(calls[2].input.visualPlan.layoutDesign.templateVersionId, VERSION_ID);
+  assert.equal(result.templateId, TEMPLATE_ID);
+  assert.equal(result.templateVersionId, VERSION_ID);
+  assert.equal(result.html, '<article>智能精排预览</article>');
+  assert.equal(result.policy.scope, 'WECHAT_LAYOUT_DESIGN');
 });

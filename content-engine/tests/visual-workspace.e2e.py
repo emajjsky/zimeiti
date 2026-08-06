@@ -205,6 +205,8 @@ with sync_playwright() as playwright:
         if path == "/api/v1/creative/image-search":
             query = request.url.split("q=", 1)[-1]
             state["searches"].append(query)
+            if len(state["searches"]) == 1:
+                return respond(route, {"error": {"message": "图片搜索服务暂时波动"}}, status=502)
             return respond(route, {"provider": "Wikimedia Commons", "results": [
                 {"id": "image-1", "title": "Satellite launch", "thumbnailUrl": "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=", "imageUrl": "https://upload.wikimedia.org/satellite.jpg", "sourceUrl": "https://commons.wikimedia.org/wiki/File:Satellite.jpg", "license": "CC BY-SA", "attribution": "Test", "copyrightStatus": "OPEN_LICENSE"},
                 {"id": "image-2", "title": "Relay satellite", "thumbnailUrl": "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=", "imageUrl": "https://commons.wikimedia.org/wiki/File:Relay_satellite.jpg", "sourceUrl": "https://commons.wikimedia.org/", "license": "Public domain", "attribution": "Test", "copyrightStatus": "OPEN_LICENSE"},
@@ -292,9 +294,11 @@ with sync_playwright() as playwright:
     assert state["planning_calls"][1]["bodyItemCount"] == 3
 
     page.locator(".visual-query-chips button").first.click()
+    assert not state["searches"], "点击推荐关键词只应选择搜索词，不应立即检索图片"
+    page.get_by_role("button", name="搜索", exact=True).click()
     page.get_by_text("Satellite launch", exact=True).wait_for()
     page.get_by_text("Wikimedia Commons · 2 张候选图", exact=True).wait_for()
-    assert len(state["searches"]) == 1, "点击推荐关键词后应只执行一次图片检索"
+    assert len(state["searches"]) == 2, "图片搜索首次 502 后应自动重试一次"
     page.get_by_role("article").filter(has_text="Satellite launch").get_by_role("button", name="用于此处", exact=True).click()
     page.get_by_text("图片已绑定到当前配图位置。", exact=True).wait_for()
     page.get_by_label("当前选中图片预览", exact=True).locator("img").wait_for()
@@ -317,7 +321,7 @@ with sync_playwright() as playwright:
         page.wait_for_timeout(100)
     assert state["draft"]["visualPlan"]["plan"][0]["assetId"] == IMPORTED_ID
     page.get_by_role("button", name=re.compile(r"正文插图 1")).click()
-    assert len(state["searches"]) == 1, "切换配图项时不应自动产生新的图片检索请求"
+    assert len(state["searches"]) == 2, "切换配图项时不应自动产生新的图片检索请求"
     page.get_by_role("button", name="AI 生图", exact=True).click()
     page.get_by_text("画面任务", exact=True).wait_for()
     page.get_by_text("为什么配", exact=True).wait_for()
@@ -397,5 +401,6 @@ with sync_playwright() as playwright:
     page.screenshot(path=ARTIFACTS / "visual-style-dialog-mobile.png")
     page.get_by_role("button", name="关闭艺术方向设置", exact=True).click()
     assert not state["unexpected"], state["unexpected"]
-    assert not state["console_errors"], state["console_errors"]
+    console_errors = [message for message in state["console_errors"] if "502 (Bad Gateway)" not in message]
+    assert not console_errors, state["console_errors"]
     browser.close()
