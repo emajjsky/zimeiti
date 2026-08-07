@@ -52,12 +52,27 @@ async function requestWorkspaceContent(path: string, fallback: string) {
   return response;
 }
 
-function isRetryableSearchError(error: unknown) {
+function isRetryableTransientError(error: unknown) {
   return error instanceof WebApiError && [502, 503, 504].includes(error.status);
 }
 
 function wait(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+async function retryTransient<T>(requestFn: () => Promise<T>) {
+  const delays = [0, 120, 240];
+  let lastError: unknown;
+  for (const [attemptIndex, delayMs] of delays.entries()) {
+    if (delayMs) await wait(delayMs);
+    try {
+      return await requestFn();
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableTransientError(error) || attemptIndex === delays.length - 1) break;
+    }
+  }
+  throw lastError;
 }
 
 export const webAuth = {
@@ -232,22 +247,15 @@ export const webCreative = {
   removeInput: (id: string) => request<void>(`/creative/project-inputs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   createReference: (projectId: string, input: ProjectReferenceMetadata & { url: string }) => request<ProjectReference>(`/creative/projects/${encodeURIComponent(projectId)}/references`, { method: 'POST', body: JSON.stringify(input) }),
   async searchImages(query: string) {
-    const delays = [0, 120, 240];
-    let lastError: unknown;
-    for (const [attemptIndex, delayMs] of delays.entries()) {
-      if (delayMs) await wait(delayMs);
-      try {
-        return await request<{ provider: string; results: Array<{ id: string; title: string; thumbnailUrl: string; imageUrl: string; sourceUrl: string; license: string; attribution: string; copyrightStatus: 'PENDING' | 'OPEN_LICENSE' }> }>(`/creative/image-search?q=${encodeURIComponent(query)}`);
-      } catch (error) {
-        lastError = error;
-        if (!isRetryableSearchError(error) || attemptIndex === delays.length - 1) break;
+    try {
+      return await retryTransient(() => request<{ provider: string; results: Array<{ id: string; title: string; thumbnailUrl: string; imageUrl: string; sourceUrl: string; license: string; attribution: string; copyrightStatus: 'PENDING' | 'OPEN_LICENSE' }> }>(`/creative/image-search?q=${encodeURIComponent(query)}`));
+    } catch (error) {
+      if (isRetryableTransientError(error)) {
+        const fallback = error as WebApiError;
+        throw new WebApiError('图片搜索服务暂时不可用，请稍后重试。', fallback.status, fallback.code, fallback.details);
       }
+      throw error instanceof Error ? error : new Error('图片搜索失败。');
     }
-    if (isRetryableSearchError(lastError)) {
-      const fallback = lastError as WebApiError;
-      throw new WebApiError('图片搜索服务暂时不可用，请稍后重试。', fallback.status, fallback.code, fallback.details);
-    }
-    throw lastError instanceof Error ? lastError : new Error('图片搜索失败。');
   },
   planVisual: (projectId: string, input: { platform: 'WECHAT'; quantityMode: 'AUTO' | 'MANUAL'; bodyItemCount?: number; styleProfile: import('../domain/content').CreativeVisualStyleProfile; request?: string; currentItemId?: string; currentPlan?: CreativeVisualPlanItem[]; keepAssignedAssets?: boolean }) => request<{ plan: CreativeVisualPlanItem[]; bodyItemCount: number; quantityMode: 'AUTO' | 'MANUAL'; strategy: string; policy: { scope: string; provider: string; connectionId: string | null; model: string; promptVersion: string } }>(`/creative/projects/${encodeURIComponent(projectId)}/visual/plan`, { method: 'POST', body: JSON.stringify(input) }),
   generateImage: (projectId: string, input: { platform: 'WECHAT'; visualItemId: string; assetIds?: string[] } | { platform: Exclude<DraftPlatform, 'WECHAT'>; prompt: string; size: '3:4' | '1:1'; assetIds?: string[] }) => request<{ asset: WorkspaceAsset; projectAsset: ProjectAsset; policy: { scope: 'TEXT_TO_IMAGE' | 'IMAGE_TO_IMAGE'; provider: string; model: string } }>(`/creative/projects/${encodeURIComponent(projectId)}/visual/generate`, { method: 'POST', body: JSON.stringify(input) }),
@@ -308,7 +316,17 @@ export const webIntelligence = {
   removeSource: (sourceId: string) => request<void>(`/intelligence/sources/${sourceId}`, { method: 'DELETE' }),
   listItems: () => request<LocalState['intelligence']>('/intelligence/items'),
   saveItem: (item: Omit<LocalState['intelligence'][number], 'id' | 'analysis'>) => request<LocalState['intelligence'][number]>('/intelligence/items', { method: 'POST', body: JSON.stringify(item) }),
-  refreshRss: () => request<{ items: LocalState['intelligence']; results: { sourceId: string; ok: boolean; count: number; error?: string }[]; sources: LocalState['sources'] }>('/intelligence/rss/refresh', { method: 'POST', body: '{}' }),
+  async refreshRss() {
+    try {
+      return await retryTransient(() => request<{ items: LocalState['intelligence']; results: { sourceId: string; ok: boolean; count: number; error?: string }[]; sources: LocalState['sources'] }>('/intelligence/rss/refresh', { method: 'POST', body: '{}' }));
+    } catch (error) {
+      if (isRetryableTransientError(error)) {
+        const fallback = error as WebApiError;
+        throw new WebApiError('热点刷新服务暂时不可用，请稍后重试。', fallback.status, fallback.code, fallback.details);
+      }
+      throw error instanceof Error ? error : new Error('刷新热点失败。');
+    }
+  },
   previewLink: (url: string) => request<{ url: string; title: string; summary: string; source: string; category: string; keywords: string[] }>('/intelligence/clip', { method: 'POST', body: JSON.stringify({ url }) }),
   webSearchStatus: () => request<CredentialStatus>('/settings/credentials/TAVILY'),
   saveWebSearchKey: (apiKey: string) => request<CredentialStatus>('/settings/credentials/TAVILY', { method: 'PUT', body: JSON.stringify({ apiKey }) }),

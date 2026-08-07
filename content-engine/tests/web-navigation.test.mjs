@@ -168,6 +168,15 @@ test('已完成分析的资讯卡片显示已分析状态', async () => {
   assert.match(source, /entry\.analysis && <em className="analyzed">已分析<\/em>/);
 });
 
+test('热点刷新和图片搜索都会对临时 5xx 做有限重试', async () => {
+  const client = await readFile(new URL('../src/data/webApi.ts', import.meta.url), 'utf8');
+  assert.match(client, /retryTransient/);
+  assert.match(client, /isRetryableTransientError/);
+  assert.match(client, /searchImages\(query: string\)[\s\S]*retryTransient/);
+  assert.match(client, /refreshRss\(\)[\s\S]*retryTransient/);
+  assert.match(client, /热点刷新服务暂时不可用，请稍后重试。/);
+});
+
 test('热点分析固定为公众号母稿且不再显示多平台选择或平台建议', async () => {
   const inbox = await readFile(new URL('../src/workspaces/discover/IntelligenceInbox.tsx', import.meta.url), 'utf8');
   const api = await readFile(new URL('../src/data/webApi.ts', import.meta.url), 'utf8');
