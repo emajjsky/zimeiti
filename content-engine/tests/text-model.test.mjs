@@ -92,6 +92,7 @@ test('百炼严格工具调用走兼容接口并强制指定工具', async () =>
   assert.equal(result.content, result.toolCall.arguments);
   assert.equal(request.url, 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions');
   assert.equal(request.headers.Authorization, 'Bearer secret');
+  assert.equal(request.body.enable_thinking, false);
   assert.deepEqual(request.body.tools, [tool]);
   assert.deepEqual(request.body.tool_choice, { type: 'function', function: { name: 'submit_visual_plan' } });
 });

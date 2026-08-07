@@ -73,6 +73,7 @@ function openAiChatBody(input, maxTokens, temperature) {
     messages: [{ role: 'system', content: input.system }, { role: 'user', content: input.message }],
     temperature,
     max_tokens: maxTokens,
+    ...(input.tools?.length ? { enable_thinking: false } : {}),
     ...(input.tools?.length ? {
       tools: input.tools,
       ...(input.requiredToolName ? { tool_choice: { type: 'function', function: { name: input.requiredToolName } } } : {}),
