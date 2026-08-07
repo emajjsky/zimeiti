@@ -232,10 +232,33 @@ test('文案提示词冻结动作、平台规则并禁止洗掉待核验事实',
     materials: [],
   });
   assert.match(prompt.system, /POLISH_EXISTING_DRAFT/);
+  assert.match(prompt.system, /submit_project_copy_action/);
+  assert.equal(prompt.requiredToolName, 'submit_project_copy_action');
+  assert.equal(prompt.tools[0].function.name, 'submit_project_copy_action');
+  assert.deepEqual(prompt.tools[0].function.parameters.required, ['title', 'body', 'changeSummary', 'factsToVerify']);
+  assert.equal(prompt.tools[0].function.parameters.additionalProperties, false);
   assert.match(prompt.system, /factsToVerify/);
   assert.match(prompt.system, /不得.*已确认事实/);
   assert.match(prompt.message, /保留作者的个人表达/);
   assert.match(prompt.message, /核验价格/);
+});
+
+test('文案大纲动作也必须走强制工具调用契约', () => {
+  const prompt = buildCopyPrompt({
+    action: 'GENERATE_OUTLINE',
+    request: '先出大纲',
+    platform: 'WECHAT',
+    template: '先生成公众号大纲',
+    project: { title: '项目标题', coreViewpoint: '核心观点', factChecks: [] },
+    brief: { objective: '完成大纲', targetAudience: '普通读者', coreMessage: '核心信息', sourceRequirements: '公开资料', lengthTarget: '1500 字', notes: '' },
+    currentContent: { title: '', body: '', factsToVerify: [] },
+    materials: [],
+  });
+  assert.match(prompt.system, /submit_project_copy_action/);
+  assert.equal(prompt.requiredToolName, 'submit_project_copy_action');
+  assert.equal(prompt.tools[0].function.name, 'submit_project_copy_action');
+  assert.deepEqual(prompt.tools[0].function.parameters.required, ['titleOptions', 'summary', 'sections', 'factsToVerify']);
+  assert.equal(prompt.tools[0].function.parameters.additionalProperties, false);
 });
 
 test('文案提示词锁定项目主题，并把未经核验的信息排除在确定事实之外', () => {
@@ -377,7 +400,8 @@ test('历史质量审稿数据仍可兼容读取，但 Worker 不再调用审稿
   const worker = fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8');
   const execute = routeSlice(worker, 'async function generateProjectCopyAction', 'async function generateAgentPlan');
   assert.doesNotMatch(execute, /buildCopyQualityReviewPrompt|parseCopyQualityReviewSafely|candidateQualityReview|detectVoiceViolations/);
-  assert.doesNotMatch(execute, /buildCopyRepairPrompt/);
+  assert.match(execute, /prompt\.tools/);
+  assert.match(execute, /requiredToolName:\s*prompt\.requiredToolName/);
 });
 
 test('017 注册八个需要确认的受控文案动作', () => {

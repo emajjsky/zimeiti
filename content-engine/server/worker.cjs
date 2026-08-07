@@ -830,7 +830,14 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
     const prompt = isInitialDraft
       ? buildFinishedCopyPrompt(writingPacket, input.template.body)
       : buildCopyPrompt({ ...preparedSnapshot, template: input.template.body });
-    const first = await textRunner.runText({ provider: route.provider, model: route.model, system: prompt.system, message: prompt.message, ...connectionInput });
+    const first = await textRunner.runText({
+      provider: route.provider,
+      model: route.model,
+      system: prompt.system,
+      message: prompt.message,
+      ...(prompt.tools ? { tools: prompt.tools, requiredToolName: prompt.requiredToolName } : {}),
+      ...connectionInput,
+    });
     inputTokens += first.inputTokens ?? 0;
     outputTokens += first.outputTokens ?? 0;
     const output = isInitialDraft

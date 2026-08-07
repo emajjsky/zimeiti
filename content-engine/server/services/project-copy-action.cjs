@@ -2,6 +2,7 @@ const { z } = require('zod');
 const { outlineSchema } = require('./creative-outline.cjs');
 
 const WECHAT_COPY_GENERATION_SCOPE = 'WECHAT_COPY_GENERATION';
+const COPY_ACTION_TOOL_NAME = 'submit_project_copy_action';
 
 const COPY_ACTIONS = [
   'GENERATE_OUTLINE',
@@ -51,6 +52,65 @@ const copyQualityReviewSchema = z.object({
   approved: z.boolean(),
   issues: z.array(z.string().trim().min(1).max(500)).max(12),
 });
+
+function copyActionTool(action) {
+  const outlineProperties = {
+    titleOptions: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 5,
+      items: { type: 'string', minLength: 1, maxLength: 120 },
+      description: '可供采用的公众号标题候选。',
+    },
+    summary: { type: 'string', minLength: 1, maxLength: 500, description: '大纲采用的叙事或论证思路。' },
+    sections: {
+      type: 'array',
+      minItems: 3,
+      maxItems: 10,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['heading', 'purpose', 'keyPoints'],
+        properties: {
+          heading: { type: 'string', minLength: 1, maxLength: 100 },
+          purpose: { type: 'string', minLength: 1, maxLength: 240 },
+          keyPoints: { type: 'array', minItems: 1, maxItems: 6, items: { type: 'string', minLength: 1, maxLength: 300 } },
+        },
+      },
+    },
+    factsToVerify: {
+      type: 'array',
+      maxItems: 8,
+      items: { type: 'string', minLength: 1, maxLength: 300 },
+      description: '发布前仍需核验的事实。',
+    },
+  };
+  const copyProperties = {
+    title: { type: 'string', minLength: 1, maxLength: 120, description: '调整后的标题。' },
+    body: { type: 'string', minLength: 80, maxLength: 30000, description: '完整正文纯文本，不使用 Markdown。' },
+    changeSummary: { type: 'string', minLength: 1, maxLength: 500, description: '本次具体修改内容。' },
+    factsToVerify: {
+      type: 'array',
+      maxItems: 20,
+      items: { type: 'string', minLength: 1, maxLength: 300 },
+      description: '发布前仍需核验的事实。',
+    },
+  };
+  const isOutline = action === 'GENERATE_OUTLINE';
+  return {
+    type: 'function',
+    function: {
+      name: COPY_ACTION_TOOL_NAME,
+      description: isOutline ? '提交公众号正文大纲候选。' : '提交公众号正文修改候选。',
+      parameters: {
+        type: 'object',
+        additionalProperties: false,
+        required: isOutline ? ['titleOptions', 'summary', 'sections', 'factsToVerify'] : ['title', 'body', 'changeSummary', 'factsToVerify'],
+        properties: isOutline ? outlineProperties : copyProperties,
+      },
+    },
+  };
+}
 
 function copyActionVersion(action) {
   if (!COPY_ACTIONS.includes(action)) throw new Error('未知的文案动作。');
@@ -544,7 +604,7 @@ function buildCopyPrompt(snapshot) {
     'factsToVerify 只列本次候选正文仍直接涉及的待核验事实；不得回填项目历史核验池中的无关条目。保留的待核验事实不得被删掉、弱化或改写为已确认事实。',
     ...platformQualityRules,
     '输出前自行检查：标题与正文是否仍服务项目主题；是否有无法追溯的具体事实；是否存在空泛套话、Markdown 标记或把解释性内容写成通稿。发现任一问题就重写后再输出。',
-    '只返回 JSON，不要 Markdown 代码围栏、过程说明或额外字段。',
+    `必须调用且只能调用一次 ${COPY_ACTION_TOOL_NAME}，不要直接输出文本、Markdown 代码围栏、过程说明或额外字段。`,
     `严格按以下形状返回：${JSON.stringify(snapshot.action === 'GENERATE_OUTLINE' ? outlineExample : copyExample)}`,
   ].join('\n');
   const message = JSON.stringify({
@@ -573,11 +633,7 @@ function buildCopyPrompt(snapshot) {
     materials: snapshot.materials ?? [],
     researchContext: snapshot.researchContext ?? null,
   });
-  return { system, message };
-}
-
-function buildCopyRepairPrompt(system, validationError) {
-  return `${system}\n上一次输出未通过结构校验。请只返回修正后的 JSON。校验错误：${validationError}`;
+  return { system, message, tools: [copyActionTool(snapshot.action)], requiredToolName: COPY_ACTION_TOOL_NAME };
 }
 
 function normalizeQualityReviewIssue(issue) {
@@ -671,7 +727,6 @@ module.exports = {
   normalizeFinishedCopyBody,
   parseFinishedCopyBody,
   buildCopyPrompt,
-  buildCopyRepairPrompt,
   parseCopyQualityReview,
   parseCopyQualityReviewSafely,
   candidateQualityReview,

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-const { createTextModelRunner } = await import('../server/services/text-model.cjs');
+const { createTextModelRunner, ModelToolCallError } = await import('../server/services/text-model.cjs');
 
 const payload = JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }], usage: { prompt_tokens: 12, completion_tokens: 8 } });
 
@@ -73,30 +73,42 @@ test('多图配图策划允许最多一万六千输出 Token', async () => {
   assert.equal(args[args.indexOf('--max-tokens') + 1], '16000');
 });
 
-test('百炼严格工具调用会传递工具定义并只读取指定工具参数', async () => {
-  let args;
+test('百炼严格工具调用走兼容接口并强制指定工具', async () => {
+  let request;
   const toolPayload = JSON.stringify({
     choices: [{ message: { content: '', tool_calls: [{ type: 'function', function: { name: 'submit_visual_plan', arguments: '{"strategy":"完整方案","items":[]}' } }] } }],
     usage: { prompt_tokens: 20, completion_tokens: 10 },
   });
   const tool = { type: 'function', function: { name: 'submit_visual_plan', parameters: { type: 'object' } } };
-  const runner = createTextModelRunner({ runBailianCli: async (nextArgs) => { args = nextArgs; return toolPayload; } });
+  const runner = createTextModelRunner({
+    runBailianCli: async () => { throw new Error('CLI should not run for strict tools'); },
+    fetchImpl: async (url, options) => {
+      request = { url, body: JSON.parse(options.body), headers: options.headers };
+      return new Response(toolPayload, { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  });
   const result = await runner.runText({ provider: 'BAILIAN_CLI', apiKey: 'secret', model: 'qwen-plus', system: 'system', message: 'message', tools: [tool], requiredToolName: 'submit_visual_plan' });
   assert.deepEqual(result.toolCall, { name: 'submit_visual_plan', arguments: '{"strategy":"完整方案","items":[]}' });
   assert.equal(result.content, result.toolCall.arguments);
-  assert.deepEqual(JSON.parse(args[args.indexOf('--tool') + 1]), tool);
+  assert.equal(request.url, 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions');
+  assert.equal(request.headers.Authorization, 'Bearer secret');
+  assert.deepEqual(request.body.tools, [tool]);
+  assert.deepEqual(request.body.tool_choice, { type: 'function', function: { name: 'submit_visual_plan' } });
 });
 
-test('严格工具调用拒绝普通文本和错误工具，不把文本当结构化结果', async () => {
+test('严格工具调用拒绝缺失工具定义和错误工具，不把文本当结构化结果', async () => {
   const plainRunner = createTextModelRunner({ runBailianCli: async () => payload });
   await assert.rejects(
     plainRunner.runText({ provider: 'BAILIAN_CLI', apiKey: 'secret', model: 'qwen-plus', system: 'system', message: 'message', tools: [], requiredToolName: 'submit_visual_plan' }),
-    (error) => error.message.includes('必须且只能调用一次 submit_visual_plan') && error.inputTokens === 12 && error.outputTokens === 8,
+    (error) => error instanceof ModelToolCallError && error.message.includes('必须提供 submit_visual_plan 的工具定义'),
   );
   const wrongTool = JSON.stringify({ choices: [{ message: { tool_calls: [{ function: { name: 'other_tool', arguments: '{}' } }] } }] });
-  const wrongRunner = createTextModelRunner({ runBailianCli: async () => wrongTool });
+  const wrongRunner = createTextModelRunner({
+    runBailianCli: async () => { throw new Error('CLI should not run for strict tools'); },
+    fetchImpl: async () => new Response(wrongTool, { status: 200, headers: { 'content-type': 'application/json' } }),
+  });
   await assert.rejects(
-    wrongRunner.runText({ provider: 'BAILIAN_CLI', apiKey: 'secret', model: 'qwen-plus', system: 'system', message: 'message', requiredToolName: 'submit_visual_plan' }),
+    wrongRunner.runText({ provider: 'BAILIAN_CLI', apiKey: 'secret', model: 'qwen-plus', system: 'system', message: 'message', tools: [{ type: 'function', function: { name: 'submit_visual_plan', parameters: { type: 'object' } } }], requiredToolName: 'submit_visual_plan' }),
     /调用了错误的工具/,
   );
 });

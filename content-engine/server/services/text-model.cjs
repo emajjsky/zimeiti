@@ -1,5 +1,7 @@
 const { runBailianCli: defaultRunBailianCli } = require('../runner/bailian.cjs');
 
+const DASHSCOPE_COMPATIBLE_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
+
 class ModelToolCallError extends Error {
   constructor(message, tokens = {}) {
     super(message);
@@ -65,6 +67,42 @@ function parseModelResponse(value, expectedToolName) {
   return { content: content.trim(), ...tokens };
 }
 
+function openAiChatBody(input, maxTokens, temperature) {
+  return {
+    model: input.model,
+    messages: [{ role: 'system', content: input.system }, { role: 'user', content: input.message }],
+    temperature,
+    max_tokens: maxTokens,
+    ...(input.tools?.length ? {
+      tools: input.tools,
+      ...(input.requiredToolName ? { tool_choice: { type: 'function', function: { name: input.requiredToolName } } } : {}),
+    } : { response_format: { type: 'json_object' } }),
+  };
+}
+
+async function requestOpenAiCompatibleChat({ fetchImpl, baseUrl, apiKey, input, maxTokens, temperature, timeoutMs, errorPrefix }) {
+  let response;
+  try {
+    response = await fetchImpl(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(openAiChatBody(input, maxTokens, temperature)),
+    });
+  } catch (error) {
+    throw new Error(`${errorPrefix}${error instanceof Error ? error.message : '网络错误'}。`);
+  }
+  if (!response.ok) {
+    let detail = '';
+    try {
+      const payload = await response.json();
+      detail = [payload?.error?.message, payload?.message].find((item) => typeof item === 'string') ?? '';
+    } catch { /* HTTP 状态足以说明失败。 */ }
+    throw new Error(`${errorPrefix}HTTP ${response.status}${detail ? `：${detail}` : ''}。`);
+  }
+  return parseModelResponse(await response.json(), input.requiredToolName);
+}
+
 function createTextModelRunner({ runBailianCli = defaultRunBailianCli, fetchImpl = fetch } = {}) {
   return {
     async runText(input) {
@@ -73,8 +111,25 @@ function createTextModelRunner({ runBailianCli = defaultRunBailianCli, fetchImpl
       const timeoutMs = Number.isInteger(input.timeoutMs) ? Math.max(15_000, Math.min(input.timeoutMs, 300_000)) : 180_000;
       if (input.provider === 'BAILIAN_CLI') {
         if (!input.apiKey) throw new Error('工作空间未配置百炼 Key。');
+        if (input.requiredToolName && !input.tools?.length) throw new ModelToolCallError(`必须提供 ${input.requiredToolName} 的工具定义。`);
+        if (input.tools?.length) {
+          try {
+            return await requestOpenAiCompatibleChat({
+              fetchImpl,
+              baseUrl: input.connection?.baseUrl || input.baseUrl || process.env.DASHSCOPE_BASE_URL || DASHSCOPE_COMPATIBLE_BASE_URL,
+              apiKey: input.apiKey,
+              input,
+              maxTokens,
+              temperature,
+              timeoutMs,
+              errorPrefix: '百炼文本模型调用失败：',
+            });
+          } catch (error) {
+            if (error instanceof ModelToolCallError) throw error;
+            throw new Error(normalizeTextModelError(error, { provider: input.provider, model: input.model }));
+          }
+        }
         const args = ['text', 'chat', '--model', input.model, '--system', input.system, '--message', input.message, '--max-tokens', String(maxTokens), '--temperature', String(temperature)];
-        for (const tool of input.tools ?? []) args.push('--tool', JSON.stringify(tool));
         args.push('--output', 'json');
         let output;
         try {
