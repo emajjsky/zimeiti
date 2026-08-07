@@ -2,7 +2,6 @@ const { z } = require('zod');
 const { outlineSchema } = require('./creative-outline.cjs');
 
 const WECHAT_COPY_GENERATION_SCOPE = 'WECHAT_COPY_GENERATION';
-const COPY_ACTION_TOOL_NAME = 'submit_project_copy_action';
 
 const COPY_ACTIONS = [
   'GENERATE_OUTLINE',
@@ -52,65 +51,6 @@ const copyQualityReviewSchema = z.object({
   approved: z.boolean(),
   issues: z.array(z.string().trim().min(1).max(500)).max(12),
 });
-
-function copyActionTool(action) {
-  const outlineProperties = {
-    titleOptions: {
-      type: 'array',
-      minItems: 1,
-      maxItems: 5,
-      items: { type: 'string', minLength: 1, maxLength: 120 },
-      description: '可供采用的公众号标题候选。',
-    },
-    summary: { type: 'string', minLength: 1, maxLength: 500, description: '大纲采用的叙事或论证思路。' },
-    sections: {
-      type: 'array',
-      minItems: 3,
-      maxItems: 10,
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['heading', 'purpose', 'keyPoints'],
-        properties: {
-          heading: { type: 'string', minLength: 1, maxLength: 100 },
-          purpose: { type: 'string', minLength: 1, maxLength: 240 },
-          keyPoints: { type: 'array', minItems: 1, maxItems: 6, items: { type: 'string', minLength: 1, maxLength: 300 } },
-        },
-      },
-    },
-    factsToVerify: {
-      type: 'array',
-      maxItems: 8,
-      items: { type: 'string', minLength: 1, maxLength: 300 },
-      description: '发布前仍需核验的事实。',
-    },
-  };
-  const copyProperties = {
-    title: { type: 'string', minLength: 1, maxLength: 120, description: '调整后的标题。' },
-    body: { type: 'string', minLength: 80, maxLength: 30000, description: '完整正文纯文本，不使用 Markdown。' },
-    changeSummary: { type: 'string', minLength: 1, maxLength: 500, description: '本次具体修改内容。' },
-    factsToVerify: {
-      type: 'array',
-      maxItems: 20,
-      items: { type: 'string', minLength: 1, maxLength: 300 },
-      description: '发布前仍需核验的事实。',
-    },
-  };
-  const isOutline = action === 'GENERATE_OUTLINE';
-  return {
-    type: 'function',
-    function: {
-      name: COPY_ACTION_TOOL_NAME,
-      description: isOutline ? '提交公众号正文大纲候选。' : '提交公众号正文修改候选。',
-      parameters: {
-        type: 'object',
-        additionalProperties: false,
-        required: isOutline ? ['titleOptions', 'summary', 'sections', 'factsToVerify'] : ['title', 'body', 'changeSummary', 'factsToVerify'],
-        properties: isOutline ? outlineProperties : copyProperties,
-      },
-    },
-  };
-}
 
 function copyActionVersion(action) {
   if (!COPY_ACTIONS.includes(action)) throw new Error('未知的文案动作。');
@@ -388,9 +328,48 @@ function assertNoUnresolvedClaimInBody(output, action, safetyContext) {
 }
 
 function parseCopyOutput(content, action, safetyContext) {
-  const value = parseJson(content, '模型没有返回文案内容。', '模型返回的文案不是有效 JSON。');
-  if (action === 'GENERATE_OUTLINE') return outlineSchema.parse(value);
-  const output = copyOutputSchema.parse(value);
+  const raw = String(content ?? '').trim().replace(/\r\n/g, '\n');
+  if (!raw) throw new Error('模型没有返回文案内容。');
+  if (/```/.test(raw)) throw new Error('文案包含代码围栏，不能保存。');
+  if (/^\s*[\[{]/.test(raw)) throw new Error('正文写作应输出纯文本，不应返回 JSON 或结构化对象。');
+
+  const parseList = (block) => {
+    const text = String(block ?? '').trim();
+    if (!text || /^无$/u.test(text)) return [];
+    return text
+      .split('\n')
+      .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)、])\s*/, '').trim())
+      .filter(Boolean);
+  };
+
+  if (action === 'GENERATE_OUTLINE') {
+    const match = raw.match(/^标题候选[：:]\s*\n([\s\S]*?)\n摘要[：:]\s*\n([\s\S]*?)\n章节[：:]\s*\n([\s\S]*?)\n待核验[：:]\s*\n([\s\S]*)$/);
+    if (!match) throw new Error('模型返回的大纲不符合纯文本成稿格式。');
+    const sections = match[3].trim().split(/\n{2,}(?=\d+\.\s)/).filter(Boolean).map((section) => {
+      const sectionMatch = section.match(/^\s*(\d+)\.\s*([^\n]+)\n目的[：:]\s*([\s\S]*?)\n要点[：:]\s*\n([\s\S]*)$/);
+      if (!sectionMatch) throw new Error('模型返回的大纲章节格式不正确。');
+      return {
+        heading: sectionMatch[2].trim(),
+        purpose: sectionMatch[3].trim(),
+        keyPoints: parseList(sectionMatch[4]),
+      };
+    });
+    return outlineSchema.parse({
+      titleOptions: parseList(match[1]),
+      summary: match[2].trim(),
+      sections,
+      factsToVerify: parseList(match[4]),
+    });
+  }
+
+  const match = raw.match(/^标题[：:]\s*\n([\s\S]*?)\n变更说明[：:]\s*\n([\s\S]*?)\n正文[：:]\s*\n([\s\S]*?)\n待核验[：:]\s*\n([\s\S]*)$/);
+  if (!match) throw new Error('模型返回的文案不符合纯文本成稿格式。');
+  const output = copyOutputSchema.parse({
+    title: match[1].trim(),
+    changeSummary: match[2].trim(),
+    body: match[3].trim(),
+    factsToVerify: parseList(match[4]),
+  });
   assertRevisionChanged(output, action, safetyContext);
   assertNoUnresolvedClaimInBody(output, action, safetyContext);
   return output;
@@ -489,6 +468,8 @@ function buildFinishedCopyPrompt(packet, template) {
       '成稿必须完整，不得留下待补充、待核验、建议修改或下一步处理等内部工作痕迹。',
     ].join('\n'),
     message: JSON.stringify({ businessTemplate, writingPacket: packet }),
+    enableThinking: true,
+    contentFormat: 'text',
   };
 }
 
@@ -556,22 +537,6 @@ function buildCopyPrompt(snapshot) {
     ? String(snapshot.template ?? '').trim()
     : validateRevisionTemplate(snapshot.template ?? defaultRevisionTemplate(snapshot.platform));
   if (!businessTemplate) throw new Error('文案动作提示词不能为空。');
-  const outlineExample = {
-    titleOptions: ['标题方案一'],
-    summary: '大纲采用的叙事或论证思路',
-    sections: [
-      { heading: '开篇', purpose: '建立问题', keyPoints: ['核心要点'] },
-      { heading: '主体', purpose: '展开论证', keyPoints: ['核心要点'] },
-      { heading: '结尾', purpose: '形成行动', keyPoints: ['核心要点'] },
-    ],
-    factsToVerify: ['发布前仍需核验的事实'],
-  };
-  const copyExample = {
-    title: '调整后的标题',
-    body: '完整正文',
-    changeSummary: '本次具体修改内容',
-    factsToVerify: ['发布前仍需核验的事实'],
-  };
   const cautions = unresolvedClaims(snapshot.researchContext);
   const preservedCautions = preservedExistingCautions(snapshot.action, snapshot);
   const cautionBoundaryRule = cautions.length
@@ -592,6 +557,44 @@ function buildCopyPrompt(snapshot) {
       : snapshot.platform === 'ZHIHU'
         ? ['知乎正文必须先直接回答问题，再补充论证、边界与例证；纯文本成稿，不得使用 Markdown 标记。']
         : ['微博内容必须先给出核心信息或观点，再判断单条或串文推进；纯文本成稿，不得使用 Markdown 标记。'];
+  const outputFormat = snapshot.action === 'GENERATE_OUTLINE'
+    ? [
+      '只输出纯文本，固定格式如下：',
+      '标题候选：',
+      '- 标题一',
+      '- 标题二',
+      '',
+      '摘要：',
+      '一段简短摘要。',
+      '',
+      '章节：',
+      '1. 章节标题',
+      '目的：这一节要完成什么。',
+      '要点：',
+      '- 要点一',
+      '- 要点二',
+      '',
+      '待核验：',
+      '- 事实一',
+      '- 事实二',
+      '如果没有待核验事项，写“无”。',
+    ]
+    : [
+      '只输出纯文本，固定格式如下：',
+      '标题：',
+      '标题文本。',
+      '',
+      '变更说明：',
+      '本次修改做了什么。',
+      '',
+      '正文：',
+      '完整正文。',
+      '',
+      '待核验：',
+      '- 事实一',
+      '- 事实二',
+      '如果没有待核验事项，写“无”。',
+    ];
   const system = [
     '你是内容项目的文案编辑，只执行已经确认的单一动作。',
     `本次动作是 ${snapshot.action}，目标平台是 ${snapshot.platform}。`,
@@ -603,9 +606,8 @@ function buildCopyPrompt(snapshot) {
     ...(cautionBoundaryRule ? [cautionBoundaryRule] : []),
     'factsToVerify 只列本次候选正文仍直接涉及的待核验事实；不得回填项目历史核验池中的无关条目。保留的待核验事实不得被删掉、弱化或改写为已确认事实。',
     ...platformQualityRules,
-    '输出前自行检查：标题与正文是否仍服务项目主题；是否有无法追溯的具体事实；是否存在空泛套话、Markdown 标记或把解释性内容写成通稿。发现任一问题就重写后再输出。',
-    `必须调用且只能调用一次 ${COPY_ACTION_TOOL_NAME}，不要直接输出文本、Markdown 代码围栏、过程说明或额外字段。`,
-    `严格按以下形状返回：${JSON.stringify(snapshot.action === 'GENERATE_OUTLINE' ? outlineExample : copyExample)}`,
+    '输出前自行检查：标题与正文是否仍服务项目主题；是否有无法追溯的具体事实；是否存在空泛套话或 Markdown 标记。发现任一问题就重写后再输出。',
+    ...outputFormat,
   ].join('\n');
   const message = JSON.stringify({
     businessTemplate,
@@ -633,7 +635,7 @@ function buildCopyPrompt(snapshot) {
     materials: snapshot.materials ?? [],
     researchContext: snapshot.researchContext ?? null,
   });
-  return { system, message, tools: [copyActionTool(snapshot.action)], requiredToolName: COPY_ACTION_TOOL_NAME };
+  return { system, message, enableThinking: true, contentFormat: 'text' };
 }
 
 function normalizeQualityReviewIssue(issue) {

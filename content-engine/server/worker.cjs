@@ -835,6 +835,8 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
       model: route.model,
       system: prompt.system,
       message: prompt.message,
+      ...(typeof prompt.enableThinking === 'boolean' ? { enableThinking: prompt.enableThinking } : {}),
+      ...(typeof prompt.contentFormat === 'string' ? { contentFormat: prompt.contentFormat } : {}),
       ...(prompt.tools ? { tools: prompt.tools, requiredToolName: prompt.requiredToolName } : {}),
       ...connectionInput,
     });

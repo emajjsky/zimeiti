@@ -68,16 +68,20 @@ function parseModelResponse(value, expectedToolName) {
 }
 
 function openAiChatBody(input, maxTokens, temperature) {
+  if (input.tools?.length && input.enableThinking === true) {
+    throw new ModelToolCallError('工具调用模式不支持推理模式同时开启。');
+  }
+  const expectsTextContent = input.contentFormat === 'text';
   return {
     model: input.model,
     messages: [{ role: 'system', content: input.system }, { role: 'user', content: input.message }],
     temperature,
     max_tokens: maxTokens,
-    ...(input.tools?.length ? { enable_thinking: false } : {}),
+    ...(input.enableThinking === true ? { enable_thinking: true } : input.tools?.length ? { enable_thinking: false } : {}),
     ...(input.tools?.length ? {
       tools: input.tools,
       ...(input.requiredToolName ? { tool_choice: { type: 'function', function: { name: input.requiredToolName } } } : {}),
-    } : { response_format: { type: 'json_object' } }),
+    } : expectsTextContent ? {} : { response_format: { type: 'json_object' } }),
   };
 }
 
@@ -110,6 +114,7 @@ function createTextModelRunner({ runBailianCli = defaultRunBailianCli, fetchImpl
       const maxTokens = Number.isInteger(input.maxTokens) ? Math.max(256, Math.min(input.maxTokens, 16_000)) : 1_800;
       const temperature = Number.isFinite(input.temperature) ? Math.max(0, Math.min(input.temperature, 1)) : 0.2;
       const timeoutMs = Number.isInteger(input.timeoutMs) ? Math.max(15_000, Math.min(input.timeoutMs, 300_000)) : 180_000;
+      const enableThinking = input.enableThinking === true;
       if (input.provider === 'BAILIAN_CLI') {
         if (!input.apiKey) throw new Error('工作空间未配置百炼 Key。');
         if (input.requiredToolName && !input.tools?.length) throw new ModelToolCallError(`必须提供 ${input.requiredToolName} 的工具定义。`);
@@ -119,7 +124,7 @@ function createTextModelRunner({ runBailianCli = defaultRunBailianCli, fetchImpl
               fetchImpl,
               baseUrl: input.connection?.baseUrl || input.baseUrl || process.env.DASHSCOPE_BASE_URL || DASHSCOPE_COMPATIBLE_BASE_URL,
               apiKey: input.apiKey,
-              input,
+              input: { ...input, enableThinking: false },
               maxTokens,
               temperature,
               timeoutMs,
@@ -131,6 +136,7 @@ function createTextModelRunner({ runBailianCli = defaultRunBailianCli, fetchImpl
           }
         }
         const args = ['text', 'chat', '--model', input.model, '--system', input.system, '--message', input.message, '--max-tokens', String(maxTokens), '--temperature', String(temperature)];
+        if (enableThinking) args.push('--enable-thinking');
         args.push('--output', 'json');
         let output;
         try {
@@ -142,31 +148,16 @@ function createTextModelRunner({ runBailianCli = defaultRunBailianCli, fetchImpl
       }
       if (input.provider !== 'EXTERNAL_API') throw new Error('不支持的文本模型来源。');
       if (!input.connection?.apiKey || !input.connection?.baseUrl) throw new Error('外部 API 连接不可用。');
-      const baseUrl = input.connection.baseUrl.replace(/\/$/, '');
-      let response;
-      try {
-        response = await fetchImpl(`${baseUrl}/chat/completions`, {
-          method: 'POST',
-          signal: AbortSignal.timeout(timeoutMs),
-          headers: { Authorization: `Bearer ${input.connection.apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: input.model,
-            messages: [{ role: 'system', content: input.system }, { role: 'user', content: input.message }],
-            temperature,
-            max_tokens: maxTokens,
-            ...(input.tools?.length ? {
-              tools: input.tools,
-              ...(input.requiredToolName ? { tool_choice: { type: 'function', function: { name: input.requiredToolName } } } : {}),
-            } : { response_format: { type: 'json_object' } }),
-          }),
-        });
-      } catch (error) { throw new Error(`外部文本模型请求失败：${error instanceof Error ? error.message : '网络错误'}。`); }
-      if (!response.ok) {
-        let detail = '';
-        try { const payload = await response.json(); detail = [payload?.error?.message, payload?.message].find((item) => typeof item === 'string') ?? ''; } catch { /* HTTP 状态足以说明失败。 */ }
-        throw new Error(`外部文本模型调用失败（HTTP ${response.status}${detail ? `：${detail}` : ''}）。`);
-      }
-      return parseModelResponse(await response.json(), input.requiredToolName);
+      return requestOpenAiCompatibleChat({
+        fetchImpl,
+        baseUrl: input.connection.baseUrl,
+        apiKey: input.connection.apiKey,
+        input,
+        maxTokens,
+        temperature,
+        timeoutMs,
+        errorPrefix: '外部文本模型调用失败：',
+      });
     },
   };
 }

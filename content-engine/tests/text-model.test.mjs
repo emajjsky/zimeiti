@@ -63,7 +63,31 @@ test('外部策略通过连接的 chat completions 返回标准文本结果', as
   const result = await runner.runText({ provider: 'EXTERNAL_API', connection: { baseUrl: 'https://models.example/v1/', apiKey: 'secret' }, model: 'external-text', system: 'system', message: 'message' });
   assert.equal(request.url, 'https://models.example/v1/chat/completions');
   assert.equal(request.options.headers.Authorization, 'Bearer secret');
+  assert.deepEqual(JSON.parse(request.options.body).response_format, { type: 'json_object' });
   assert.deepEqual(result, { content: '{"ok":true}', inputTokens: 12, outputTokens: 8 });
+});
+
+test('正文纯文本任务通过外部策略时不再强制 JSON 响应格式', async () => {
+  let request;
+  const runner = createTextModelRunner({
+    runBailianCli: async () => { throw new Error('CLI should not run'); },
+    fetchImpl: async (url, options) => {
+      request = { url, body: JSON.parse(options.body), headers: options.headers };
+      return new Response(JSON.stringify({ choices: [{ message: { content: '标题：\n示例\n\n正文：\n示例正文' } }], usage: { prompt_tokens: 12, completion_tokens: 8 } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  });
+  await runner.runText({
+    provider: 'EXTERNAL_API',
+    connection: { baseUrl: 'https://models.example/v1/', apiKey: 'secret' },
+    model: 'external-text',
+    system: 'system',
+    message: 'message',
+    enableThinking: true,
+    contentFormat: 'text',
+  });
+  assert.equal(request.url, 'https://models.example/v1/chat/completions');
+  assert.equal(request.body.enable_thinking, true);
+  assert.equal(request.body.response_format, undefined);
 });
 
 test('多图配图策划允许最多一万六千输出 Token', async () => {

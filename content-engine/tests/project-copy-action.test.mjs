@@ -103,6 +103,7 @@ test('首次正文使用锁定标题和纯文本单次成稿契约', () => {
   const prompt = buildFinishedCopyPrompt(packet, '写成适合公众号阅读的完整文章。');
   assert.match(prompt.system, /只输出最终正文/);
   assert.doesNotMatch(prompt.system, /JSON|factsToVerify|changeSummary|候选/);
+  assert.equal(prompt.contentFormat, 'text');
   assert.equal(parseFinishedCopyBody('这是完整正文。'.repeat(50), packet).title, '锁定标题');
   assert.throws(() => parseFinishedCopyBody('```json\n{"body":"错误"}\n```', packet), /代码围栏|JSON|正文/);
 });
@@ -169,6 +170,55 @@ function routeSlice(source, start, end) {
   return source.slice(from, to);
 }
 
+function revisionText({ title = '调整后的标题', changeSummary = '本次修改完成。', body, factsToVerify = [] }) {
+  return [
+    '标题：',
+    title,
+    '',
+    '变更说明：',
+    changeSummary,
+    '',
+    '正文：',
+    body,
+    '',
+    '待核验：',
+    factsToVerify.length ? factsToVerify.map((fact) => `- ${fact}`).join('\n') : '无',
+  ].join('\n');
+}
+
+function outlineText() {
+  return [
+    '标题候选：',
+    '- 标题方案一',
+    '- 标题方案二',
+    '',
+    '摘要：',
+    '围绕项目主题建立一条清晰的公众号叙事线。',
+    '',
+    '章节：',
+    '1. 开篇问题',
+    '目的：用读者熟悉的场景建立问题。',
+    '要点：',
+    '- 交代为什么这件事值得读',
+    '- 避免新闻通稿式开场',
+    '',
+    '2. 核心变化',
+    '目的：解释事件和读者之间的关系。',
+    '要点：',
+    '- 说明已经核验的事实',
+    '- 标出不能确定的边界',
+    '',
+    '3. 结尾判断',
+    '目的：回收文章主旨。',
+    '要点：',
+    '- 给出克制的理解框架',
+    '- 不用空泛关注式结尾',
+    '',
+    '待核验：',
+    '- 发布前核验事实一',
+  ].join('\n');
+}
+
 test('文案请求按固定优先级确定性映射到注册动作', () => {
   assert.equal(resolveCopyAction({ request: '把这篇文章润色一下', hasBody: true }).action, 'POLISH_EXISTING_DRAFT');
   assert.equal(resolveCopyAction({ request: '压缩到 800 字', hasBody: true }).action, 'SHORTEN_DRAFT');
@@ -199,14 +249,13 @@ test('无法唯一判断的请求要求澄清且不创建动作', () => {
 test('八个文案动作拥有稳定版本且模型输出保持待核验事实', () => {
   assert.equal(COPY_ACTIONS.length, 8);
   assert.equal(copyActionVersion('SHORTEN_DRAFT'), 'project-copy-shorten-draft:1.0.0');
-  const output = parseCopyOutput(JSON.stringify({
-    title: '调整后的标题',
+  const output = parseCopyOutput(revisionText({
     body: '这是调整后的完整正文。'.repeat(12),
     changeSummary: '压缩重复表达并保留核心观点。',
     factsToVerify: ['核验公开数据的发布日期'],
   }), 'SHORTEN_DRAFT');
   assert.deepEqual(output.factsToVerify, ['核验公开数据的发布日期']);
-  assert.throws(() => parseCopyOutput(JSON.stringify({ ...output, factsToVerify: '已经核验' }), 'SHORTEN_DRAFT'), /array|expected/i);
+  assert.throws(() => parseCopyOutput(JSON.stringify(output), 'SHORTEN_DRAFT'), /纯文本|JSON|结构化对象/);
 });
 
 test('四个平台拥有独立修订提示词 Scope 和规则', () => {
@@ -232,18 +281,17 @@ test('文案提示词冻结动作、平台规则并禁止洗掉待核验事实',
     materials: [],
   });
   assert.match(prompt.system, /POLISH_EXISTING_DRAFT/);
-  assert.match(prompt.system, /submit_project_copy_action/);
-  assert.equal(prompt.requiredToolName, 'submit_project_copy_action');
-  assert.equal(prompt.tools[0].function.name, 'submit_project_copy_action');
-  assert.deepEqual(prompt.tools[0].function.parameters.required, ['title', 'body', 'changeSummary', 'factsToVerify']);
-  assert.equal(prompt.tools[0].function.parameters.additionalProperties, false);
+  assert.doesNotMatch(prompt.system, /submit_project_copy_action/);
+  assert.equal(prompt.enableThinking, true);
+  assert.equal(prompt.tools, undefined);
+  assert.equal(prompt.contentFormat, 'text');
   assert.match(prompt.system, /factsToVerify/);
   assert.match(prompt.system, /不得.*已确认事实/);
   assert.match(prompt.message, /保留作者的个人表达/);
   assert.match(prompt.message, /核验价格/);
 });
 
-test('文案大纲动作也必须走强制工具调用契约', () => {
+test('文案大纲动作走纯文本 Skill 写作契约', () => {
   const prompt = buildCopyPrompt({
     action: 'GENERATE_OUTLINE',
     request: '先出大纲',
@@ -254,11 +302,12 @@ test('文案大纲动作也必须走强制工具调用契约', () => {
     currentContent: { title: '', body: '', factsToVerify: [] },
     materials: [],
   });
-  assert.match(prompt.system, /submit_project_copy_action/);
-  assert.equal(prompt.requiredToolName, 'submit_project_copy_action');
-  assert.equal(prompt.tools[0].function.name, 'submit_project_copy_action');
-  assert.deepEqual(prompt.tools[0].function.parameters.required, ['titleOptions', 'summary', 'sections', 'factsToVerify']);
-  assert.equal(prompt.tools[0].function.parameters.additionalProperties, false);
+  assert.doesNotMatch(prompt.system, /submit_project_copy_action/);
+  assert.equal(prompt.enableThinking, true);
+  assert.equal(prompt.tools, undefined);
+  assert.equal(prompt.contentFormat, 'text');
+  assert.match(prompt.system, /标题候选/);
+  assert.match(prompt.system, /章节/);
 });
 
 test('文案提示词锁定项目主题，并把未经核验的信息排除在确定事实之外', () => {
@@ -293,11 +342,10 @@ test('公众号正文强制移动端文章结构，并拒绝把 Markdown 标记�
   assert.match(prompt.system, /公众号正文开篇先写一个读者熟悉的场景、疑问或反差/);
   assert.match(prompt.system, /不要写成百科词条、新闻通稿或教科书解释/);
   assert.match(prompt.system, /纯文本成稿：不得使用 Markdown 标记/);
-  assert.throws(() => parseCopyOutput(JSON.stringify({
+  assert.throws(() => parseCopyOutput(revisionText({
     title: '标题',
     body: `**一、这不是公众号小标题**\n\n${'这是一段错误示例，用来确保 Markdown 标记不能泄漏到正式文稿。'.repeat(3)}`,
     changeSummary: '生成候选',
-    factsToVerify: [],
   }), 'GENERATE_DRAFT'), /Markdown/);
 });
 
@@ -323,7 +371,7 @@ test('待复核主张不能作为项目核心观点注入生成上下文', () =>
 
 test('公众号候选不得把待复核主张写成正文事实', () => {
   const claim = '该卫星主要用于为飞船、空间实验室、空间站等载人航天器提供数据中继和测控服务。';
-  assert.throws(() => parseCopyOutput(JSON.stringify({
+  assert.throws(() => parseCopyOutput(revisionText({
     title: '这颗卫星上天意味着什么？',
     body: `这是一段面向普通读者的完整公众号正文，用于解释一条航天新闻的阅读方法。\n\n这颗卫星为载人航天器提供数据中继和测控服务。\n\n${'正文还需要保持清晰、克制，并把未核验信息留在核验清单中。'.repeat(5)}`,
     changeSummary: '生成候选',
@@ -335,12 +383,12 @@ test('重构已有正文自动继承待复核事实，且拒绝新增待复核�
   const claim = '该卫星主要用于为飞船、空间实验室、空间站等载人航天器提供数据中继和测控服务。';
   const body = `这是一篇正在重构的公众号文章，原稿已提到该卫星为载人航天器提供数据中继和测控服务。\n\n${'重构只改善结构与表达，不新增未经核验的用途、数据或影响推演。'.repeat(5)}`;
   const revisedBody = `${'先换一个新的开头，把读者如何理解这条新闻放到最前面。'.repeat(8)}\n\n该卫星为载人航天器提供数据中继和测控服务。\n\n${'随后再用新的段落顺序说明边界：重构只改善结构与表达，不新增未经核验的用途、数据或影响推演。'.repeat(8)}`;
-  const output = parseCopyOutput(JSON.stringify({ title: '这颗卫星上天意味着什么？', body: revisedBody, changeSummary: '重组原有叙事结构。', factsToVerify: [] }), 'RESTRUCTURE_DRAFT', {
+  const output = parseCopyOutput(revisionText({ title: '这颗卫星上天意味着什么？', body: revisedBody, changeSummary: '重组原有叙事结构。' }), 'RESTRUCTURE_DRAFT', {
     currentContent: { body },
     researchContext: { cautions: [{ claim, status: 'NEEDS_REVIEW' }] },
   });
   assert.deepEqual(output.factsToVerify, [claim]);
-  assert.throws(() => parseCopyOutput(JSON.stringify({ title: '标题', body, changeSummary: '错误示例', factsToVerify: [] }), 'RESTRUCTURE_DRAFT', {
+  assert.throws(() => parseCopyOutput(revisionText({ title: '标题', body, changeSummary: '错误示例' }), 'RESTRUCTURE_DRAFT', {
     currentContent: { body: '不包含这条主张的原稿。' },
     researchContext: { cautions: [{ claim, status: 'NEEDS_REVIEW' }] },
   }), /待复核|正文/);
@@ -348,13 +396,12 @@ test('重构已有正文自动继承待复核事实，且拒绝新增待复核�
 
 test('重构候选不能与当前正文几乎一致', () => {
   const current = `第一段先说明为什么要重构。\n\n第二段继续使用原有结构。\n\n${'第三段保持同样的论证路径。'.repeat(20)}`;
-  const same = JSON.stringify({ title: '原题', body: current, changeSummary: '重构完成。', factsToVerify: [] });
+  const same = revisionText({ title: '原题', body: current, changeSummary: '重构完成。' });
   assert.throws(() => parseCopyOutput(same, 'RESTRUCTURE_DRAFT', { currentContent: { title: '原题', body: current } }), /重构|原文|一致/);
-  const changed = JSON.stringify({
+  const changed = revisionText({
     title: '新题',
     body: `${'先换一个完全不同的开头，把读者问题放到前面。'.repeat(8)}\n\n${'再重新组织论证顺序，用新的分段推进。'.repeat(8)}\n\n${'最后收束到新的判断框架。'.repeat(8)}`,
     changeSummary: '重新组织结构和叙事顺序。',
-    factsToVerify: [],
   });
   assert.equal(parseCopyOutput(changed, 'RESTRUCTURE_DRAFT', { currentContent: { title: '原题', body: current } }).title, '新题');
 });
