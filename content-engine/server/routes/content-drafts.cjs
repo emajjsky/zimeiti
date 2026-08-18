@@ -14,8 +14,9 @@ const assetInput = z.object({
   assets: z.array(z.object({ assetId: uuid, role: z.enum(['COVER', 'BODY', 'CARD', 'MAIN']) })).max(12),
 });
 const completeInput = z.object({ revision: z.number().int().positive() });
+const titleRecommendationInput = z.object({ revision: z.number().int().positive() });
 
-function registerContentDraftRoutes(app, { workspaceAccess, draftStore, adaptationService }) {
+function registerContentDraftRoutes(app, { workspaceAccess, draftStore, adaptationService, recommendTitles }) {
   app.get('/api/v1/creative/projects/:projectId/drafts', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
     const id = projectId.parse(request.params.projectId);
     return { drafts: await draftStore.listProject(request.workspace.id, id) };
@@ -31,13 +32,34 @@ function registerContentDraftRoutes(app, { workspaceAccess, draftStore, adaptati
     return draftStore.patchWorkingCopy(request.workspace.id, uuid.parse(request.params.draftId), draftPatch.parse(request.body));
   });
 
+  app.post('/api/v1/content-drafts/:draftId/title-recommendations', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
+    if (typeof recommendTitles !== 'function') throw new TypeError('标题建议服务未配置。');
+    const draftId = uuid.parse(request.params.draftId);
+    const input = titleRecommendationInput.parse(request.body);
+    const draft = await draftStore.get(request.workspace.id, draftId);
+    if (Number(draft.revision) !== input.revision) {
+      const error = new Error('正文已更新，请基于最新内容重新生成标题建议。');
+      error.statusCode = 409;
+      error.code = 'DRAFT_REVISION_CONFLICT';
+      throw error;
+    }
+    if (!String(draft.body ?? '').trim()) {
+      const error = new Error('请先完成正文，再生成标题建议。');
+      error.statusCode = 409;
+      error.code = 'DRAFT_BODY_REQUIRED';
+      throw error;
+    }
+    return recommendTitles({ workspaceId: request.workspace.id, draft });
+  });
+
   app.put('/api/v1/content-drafts/:draftId/assets', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
     return draftStore.replaceWorkingAssets(request.workspace.id, uuid.parse(request.params.draftId), assetInput.parse(request.body));
   });
 
   app.post('/api/v1/content-drafts/:draftId/complete', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
     const input = completeInput.parse(request.body);
-    return draftStore.complete(request.workspace.id, uuid.parse(request.params.draftId), input.revision);
+    const draftId = uuid.parse(request.params.draftId);
+    return draftStore.complete(request.workspace.id, draftId, input.revision);
   });
 
   app.post('/api/v1/content-drafts/:draftId/derive', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {

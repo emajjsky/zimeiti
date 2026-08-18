@@ -176,18 +176,13 @@ test('accepted research replaces stale candidates and running research can be ca
   assert.match(fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8'), /研究任务已取消或中断/);
 });
 
-test('正文首次生成不再经过质量复审，历史审稿状态也不阻止用户采用主动修改', () => {
-  const worker = fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8');
+test('正文首次生成不经过历史审稿状态阻断主动修改', () => {
   const server = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
   const projectAgent = fs.readFileSync(new URL('../server/services/project-agent.cjs', import.meta.url), 'utf8');
   const dialog = fs.readFileSync(new URL('../src/workspaces/create/CopyCandidateDialog.tsx', import.meta.url), 'utf8');
   const acceptStart = server.indexOf("app.post('/api/v1/creative/project-artifacts/:id/accept'");
   const acceptEnd = server.indexOf("app.post('/api/v1/creative/project-artifacts/:id/reject'", acceptStart);
 
-  const executeStart = worker.indexOf('async function generateProjectCopyAction');
-  const executeEnd = worker.indexOf('async function generateAgentPlan', executeStart);
-  const execute = worker.slice(executeStart, executeEnd);
-  assert.doesNotMatch(execute, /buildCopyQualityReviewPrompt|parseCopyQualityReviewSafely|candidateQualityReview/);
   assert.doesNotMatch(server.slice(acceptStart, acceptEnd), /qualityReview\?\.status === 'NEEDS_REVIEW'/);
   assert.match(projectAgent, /'qualityReview',\s*a\.metadata_json->'payload'->'qualityReview'/);
   assert.doesNotMatch(dialog, /needsRewrite|qualityReview|发布前核验/);

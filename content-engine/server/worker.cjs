@@ -1,8 +1,11 @@
 const { Worker } = require('bullmq');
 const IORedis = require('ioredis');
+const path = require('node:path');
+const fs = require('node:fs/promises');
+const { createHash } = require('node:crypto');
 const config = require('./config.cjs');
 const { query, transaction } = require('./db.cjs');
-const { decrypt } = require('./crypto.cjs');
+const { encrypt, decrypt } = require('./crypto.cjs');
 const { runBailianCli } = require('./runner/bailian.cjs');
 const { listAvailableSkills, plannerSkillView } = require('./agent/skillRegistry.cjs');
 const { parsePlan } = require('./agent/planValidation.cjs');
@@ -12,7 +15,9 @@ const { buildOutlinePrompt, buildOutlineRepairPrompt, parseOutlineContent } = re
 const { DRAFT_ACTION_VERSION, buildDraftPrompt, buildDraftRepairPrompt, parseDraftContent } = require('./services/creative-draft.cjs');
 const { PROJECT_RESEARCH_ACTION_VERSION, buildResearchPlanPrompt, buildResearchPlanRepairPrompt, parseResearchPlan } = require('./services/project-research.cjs');
 const { searchTavily } = require('./services/tavily.cjs');
-const { clipPublicLink } = require('./services/public-web.cjs');
+const { clipPublicLink, readPublicArticle } = require('./services/public-web.cjs');
+const { createPublishingStore } = require('./services/publishing.cjs');
+const { createWechatOfficialClient } = require('./services/wechat-official.cjs');
 const {
   PROJECT_RESEARCH_SOURCES_VERSION,
   dedupeSourceSnapshots,
@@ -34,9 +39,179 @@ const { SIMPLIFIED_RESEARCH_WORKFLOW_VERSION, workflowSourceActionsForProject, p
 const { createProjectAgentStore } = require('./services/project-agent.cjs');
 const { createContentDraftStore } = require('./services/content-drafts.cjs');
 const { createDraftAdaptationService } = require('./services/draft-adaptation.cjs');
-const { WECHAT_COPY_GENERATION_SCOPE, buildCopyPrompt, buildFinishedCopyPrompt, buildWritingPacket, parseCopyOutput, parseFinishedCopyBody } = require('./services/project-copy-action.cjs');
+const { WECHAT_COPY_GENERATION_SCOPE, buildCopyPrompt, buildFinishedCopyPrompt, buildWritingPacket, parseRevisionCopyBody, parseFinishedCopyBody, copyMaxTokensForLength } = require('./services/project-copy-action.cjs');
 const { createStorageDeletionService } = require('./services/storageDeletion.cjs');
-const { enqueue } = require('./queue.cjs');
+const { updateCreativeProjects } = require('./services/project-planning.cjs');
+const { enqueue, isFinalQueueAttempt } = require('./queue.cjs');
+const { createContentIngestionStore, executeContentIngestion, contentUnderstandingTimeoutMs, readableContentTitle } = require('./services/content-ingestions.cjs');
+const { createAssetStore } = require('./services/assets.cjs');
+const { buildContentUnderstandingPrompt, buildContentUnderstandingOmniArgs, parseContentUnderstanding } = require('./services/content-understanding.cjs');
+const { buildRichContentOmniArgs, extractOmniText } = require('./services/rich-content-understanding.cjs');
+const {
+  VISUAL_PLANNING_OPERATION,
+  buildVisualPlanningOmniPrompt,
+  visualPlanningRichContent,
+  parseVisualPlanningContent,
+  mergePlannedItems,
+  compileVisualPlan,
+} = require('./services/visual-planning.cjs');
+const { readAssetText, saveRemoteImageAsset, removeAssetFile } = require('./services/assetStorage.cjs');
+const {
+  buildVideoAnalysisPrompt,
+  buildVideoAnalysisVisionArgs,
+  parseVideoAnalysis,
+  extractVideoKeyframes,
+  withVideoAnalysisOutputDirectory,
+  probeVideoDuration,
+  keyframeTargetForDuration,
+  readableVideoAnalysisError,
+  titleFromVideoAnalysis,
+  detectSceneChanges,
+  extractVideoSegment,
+  planVideoSegments,
+  mergeVideoSegmentResults,
+} = require('./services/video-analysis.cjs');
+
+const CONTENT_UNDERSTANDING_SCOPE = 'CONTENT_UNDERSTANDING';
+
+function safeUploadPath(storageKey) {
+  const root = path.resolve(config.uploadRoot);
+  const target = path.resolve(root, String(storageKey ?? ''));
+  if (target === root || !target.startsWith(`${root}${path.sep}`)) throw new Error('素材存储路径无效。');
+  return target;
+}
+
+async function runContentUnderstanding({ workspaceId, document, media = [] }) {
+  const policy = await query('SELECT model FROM agent_model_policies WHERE workspace_id = $1 AND scope = $2 AND provider = $3', [workspaceId, CONTENT_UNDERSTANDING_SCOPE, 'BAILIAN_CLI']);
+  if (!policy.rowCount) throw Object.assign(new Error('请先配置内容理解任务策略。'), { code: 'CONTENT_UNDERSTANDING_POLICY_REQUIRED' });
+  const keyRow = await query('SELECT encrypted_secret FROM credential_vault WHERE workspace_id = $1 AND provider = $2', [workspaceId, 'BAILIAN']);
+  if (!keyRow.rowCount) throw Object.assign(new Error('请先配置阿里云百炼 API Key。'), { code: 'BAILIAN_CREDENTIAL_REQUIRED' });
+  const resolvedMedia = media.map((item) => ({ ...item, source: item.storageKey ? safeUploadPath(item.storageKey) : item.source })).filter((item) => item.source);
+  const prompt = buildContentUnderstandingPrompt(document, resolvedMedia);
+  const model = policy.rows[0].model;
+  const args = buildContentUnderstandingOmniArgs({ model, system: prompt.system, message: prompt.message, media: resolvedMedia });
+  const startedAt = Date.now();
+  try {
+    const content = extractOmniText(await runBailianCli(args, decrypt(keyRow.rows[0].encrypted_secret), contentUnderstandingTimeoutMs(resolvedMedia)));
+    if (!content) throw new Error('内容理解模型没有返回可用内容。');
+    const output = parseContentUnderstanding(content);
+    const generatedText = [output.summary, ...output.coreViewpoints, ...output.structureOutline].filter(Boolean).join('\n\n');
+    const plainText = String(document.plainText ?? '').trim() || generatedText;
+    const blocks = document.blocks?.length ? document.blocks : plainText.split(/\n{2,}/).filter(Boolean).map((text, index) => ({ id: `analysis-${index + 1}`, type: 'paragraph', text, sourcePosition: index }));
+    await query(`INSERT INTO api_usage_logs (workspace_id, provider, model, operation, status, duration_ms)
+      VALUES ($1, 'BAILIAN_CLI', $2, $3, 'SUCCESS', $4)`, [workspaceId, model, CONTENT_UNDERSTANDING_SCOPE, Date.now() - startedAt]);
+    return {
+      ...document,
+      title: readableContentTitle(document.title, generatedText),
+      plainText,
+      blocks,
+      extraction: { ...document.extraction, contentHash: createHash('sha256').update(plainText).digest('hex') },
+      understanding: { scope: CONTENT_UNDERSTANDING_SCOPE, model, result: output },
+    };
+  } catch (error) {
+    await query(`INSERT INTO api_usage_logs (workspace_id, provider, model, operation, status, duration_ms, error)
+      VALUES ($1, 'BAILIAN_CLI', $2, $3, 'ERROR', $4, $5)`, [workspaceId, model, CONTENT_UNDERSTANDING_SCOPE, Date.now() - startedAt, (error instanceof Error ? error.message : '内容理解失败').slice(0, 2_000)]).catch(() => {});
+    throw error;
+  }
+}
+
+async function executeVideoAnalysis({ jobId, workspaceId, analysisId }) {
+  const analysisResult = await query(`SELECT analysis.*, asset.storage_key, asset.title AS asset_title
+    FROM video_analyses analysis
+    JOIN workspace_assets asset ON asset.workspace_id = analysis.workspace_id AND asset.id = analysis.source_asset_id
+    WHERE analysis.workspace_id = $1 AND analysis.id = $2`, [workspaceId, analysisId]);
+  if (!analysisResult.rowCount) throw new Error('没有找到视频拉片任务。');
+  const analysis = analysisResult.rows[0];
+  const keyRow = await query('SELECT encrypted_secret FROM credential_vault WHERE workspace_id = $1 AND provider = $2', [workspaceId, 'BAILIAN']);
+  if (!keyRow.rowCount) throw new Error('请先配置阿里云百炼 API Key。');
+  const videoPath = safeUploadPath(analysis.storage_key);
+  const segmentDirectory = safeUploadPath(`${workspaceId}/assets/video-analysis-${analysisId}-segments`);
+  try {
+    const durationSeconds = await probeVideoDuration({ videoPath });
+    await query("UPDATE video_analyses SET progress_json = $3, updated_at = now() WHERE workspace_id = $1 AND id = $2", [workspaceId, analysisId, JSON.stringify({ phase: 'DETECTING_SCENES', completedSegments: 0, totalSegments: 0 })]);
+    const sceneChanges = await detectSceneChanges({ videoPath });
+    const plannedSegments = planVideoSegments({ durationSeconds, sceneChanges });
+    const savedEntries = Array.isArray(analysis.result_json?.segmentEntries) ? analysis.result_json.segmentEntries : [];
+    const entries = [];
+    await fs.mkdir(segmentDirectory, { recursive: true });
+    for (const [index, segment] of plannedSegments.entries()) {
+      const saved = savedEntries.find((entry) => entry.segment?.id === segment.id && entry.segment.status === 'SUCCEEDED');
+      if (saved) { entries.push(saved); continue; }
+      const progress = { phase: 'ANALYZING_SEGMENTS', completedSegments: entries.filter((entry) => entry.segment.status === 'SUCCEEDED').length, totalSegments: plannedSegments.length, currentSegment: index + 1 };
+      await query("UPDATE video_analyses SET progress_json = $3, result_json = $4, updated_at = now() WHERE workspace_id = $1 AND id = $2", [workspaceId, analysisId, JSON.stringify(progress), JSON.stringify({ segmentEntries: entries })]);
+      const sourceExtension = path.extname(videoPath).toLowerCase() === '.webm' ? '.webm' : '.mp4';
+      const segmentPath = path.join(segmentDirectory, `${segment.id}${sourceExtension}`);
+      try {
+        await extractVideoSegment({ videoPath, outputPath: segmentPath, startSeconds: segment.startSeconds, endSeconds: segment.endSeconds });
+        const prompt = buildVideoAnalysisPrompt({ title: analysis.asset_title, targetPlatform: analysis.target_platform, durationSeconds: segment.endSeconds - segment.startSeconds });
+        const requestPrompt = `${prompt.system}\n\n本次只分析全片 ${segment.startSeconds}-${segment.endSeconds} 秒对应的片段。关键帧按内容事件选择，不按时间平均分配，也不要求固定数量。为每个关键帧提供稳定的 eventKey 和 0 到 1 的 valueScore。\n\n任务输入：${prompt.message}`;
+        const raw = await runBailianCli(buildVideoAnalysisVisionArgs({ model: analysis.model, videoPath: segmentPath, prompt: requestPrompt }), decrypt(keyRow.rows[0].encrypted_secret), 600_000);
+        entries.push({ segment: { ...segment, status: 'SUCCEEDED' }, result: parseVideoAnalysis(extractOmniText(raw)) });
+      } catch (error) {
+        entries.push({ segment: { ...segment, status: 'FAILED', error: readableVideoAnalysisError(error) } });
+      } finally {
+        await fs.rm(segmentPath, { force: true }).catch(() => undefined);
+      }
+      await query("UPDATE video_analyses SET result_json = $3, progress_json = $4, updated_at = now() WHERE workspace_id = $1 AND id = $2", [workspaceId, analysisId, JSON.stringify({ segmentEntries: entries }), JSON.stringify({ phase: 'ANALYZING_SEGMENTS', completedSegments: entries.filter((entry) => entry.segment.status === 'SUCCEEDED').length, totalSegments: plannedSegments.length, currentSegment: index + 1 })]);
+    }
+    const result = mergeVideoSegmentResults(entries, durationSeconds);
+    if (!result.narrativeStructure.length) throw new Error('视频分段均未返回可用拉片结果。');
+    await query("UPDATE video_analyses SET progress_json = $3, updated_at = now() WHERE workspace_id = $1 AND id = $2", [workspaceId, analysisId, JSON.stringify({ phase: 'EXTRACTING_MATERIALS', completedSegments: entries.filter((entry) => entry.segment.status === 'SUCCEEDED').length, totalSegments: plannedSegments.length })]);
+    await query("UPDATE video_analyses SET status = 'EXTRACTING_FRAMES', result_json = $3, updated_at = now() WHERE workspace_id = $1 AND id = $2", [workspaceId, analysisId, JSON.stringify(result)]);
+    const relativeDirectory = `${workspaceId}/assets/video-analysis-${analysisId}`;
+    const outputDirectory = safeUploadPath(relativeDirectory);
+    const assetIds = await withVideoAnalysisOutputDirectory(outputDirectory, async () => {
+      const frames = await extractVideoKeyframes({ videoPath, outputDirectory, keyframes: result.keyframes });
+      return transaction(async (client) => {
+        const ids = [];
+        for (const [index, frame] of frames.entries()) {
+        const storageKey = `${relativeDirectory}/${frame.filename}`.replace(/\\/g, '/');
+        const existing = await client.query(`SELECT id FROM workspace_assets WHERE workspace_id = $1 AND sha256 = $2 AND status <> 'DELETING'`, [workspaceId, frame.sha256]);
+        let assetId = existing.rows[0]?.id;
+        if (!assetId) {
+          const inserted = await client.query(`INSERT INTO workspace_assets
+            (workspace_id, kind, origin, title, original_filename, mime_type, size_bytes, sha256, storage_key, source_note, copyright_status, created_by)
+            VALUES ($1, 'IMAGE', 'AI_GENERATED', $2, $3, 'image/jpeg', $4, $5, $6, $7, 'OWNED', $8) RETURNING id`, [workspaceId, frame.caption, frame.filename, frame.sizeBytes, frame.sha256, storageKey, `视频关键帧 ${frame.timestampSeconds}s：${frame.reason}`, analysis.created_by]);
+          assetId = inserted.rows[0].id;
+        } else {
+          await fs.rm(frame.outputPath, { force: true }).catch(() => undefined);
+        }
+        ids.push(assetId);
+        await client.query(`INSERT INTO project_asset_links (workspace_id, project_id, asset_id, role, scope, title, notes, platforms_json, sort_order)
+          VALUES ($1, $2, $3, 'VISUAL', 'PROJECT', $4, $5, $6, $7)
+          ON CONFLICT (workspace_id, project_id, asset_id) DO UPDATE SET notes = excluded.notes, sort_order = excluded.sort_order, updated_at = now()`, [workspaceId, analysis.project_id, assetId, frame.caption, frame.reason, JSON.stringify([analysis.target_platform]), index]);
+      }
+      const analysisText = [result.summary, ...result.narrativeStructure.map((segment) => `${segment.startSeconds}-${segment.endSeconds}s ${segment.segment}：${segment.content}；画面：${segment.visual}`), ...result.reusableInsights].join('\n\n');
+      await client.query(`INSERT INTO project_inputs (workspace_id, project_id, kind, title, body, scope, platforms_json)
+        VALUES ($1, $2, 'NOTE', '视频拉片结果', $3, 'RESEARCH', $4)`, [workspaceId, analysis.project_id, analysisText.slice(0, 50_000), JSON.stringify([analysis.target_platform])]);
+      await client.query("UPDATE video_analyses SET status = 'SUCCEEDED', result_json = $3, keyframe_asset_ids = $4, progress_json = $5, error = NULL, updated_at = now() WHERE workspace_id = $1 AND id = $2", [workspaceId, analysisId, JSON.stringify(result), JSON.stringify(ids), JSON.stringify({ phase: 'SUCCEEDED', completedSegments: entries.filter((entry) => entry.segment.status === 'SUCCEEDED').length, totalSegments: plannedSegments.length })]);
+      const derivedTitle = titleFromVideoAnalysis(result.summary, analysis.asset_title);
+      await updateCreativeProjects(client, workspaceId, (state) => ({
+        ...state,
+        projects: state.projects.map((project) => {
+          if (project.id !== analysis.project_id || !/^(?:[a-f0-9]{32,64}|视频拉片项目)$/i.test(String(project.title ?? ''))) return project;
+          return {
+            ...project,
+            title: derivedTitle,
+            planning: { ...project.planning, title: derivedTitle },
+            updatedAt: new Date().toISOString(),
+          };
+        }),
+      }));
+      await client.query(`UPDATE content_drafts SET title = $3, updated_at = now()
+        WHERE workspace_id = $1 AND project_id = $2 AND title ~* '^(?:[a-f0-9]{32,64}|视频拉片项目)$'`, [workspaceId, analysis.project_id, derivedTitle]);
+        return ids;
+      });
+    });
+    await query('UPDATE jobs SET status = $1, result_json = $2, completed_at = now() WHERE id = $3', ['SUCCEEDED', JSON.stringify({ analysisId, keyframeAssetIds: assetIds }), jobId]);
+    await fs.rm(segmentDirectory, { recursive: true, force: true }).catch(() => undefined);
+    return { analysisId, keyframeAssetIds: assetIds };
+  } catch (error) {
+    const message = readableVideoAnalysisError(error);
+    await query("UPDATE video_analyses SET status = 'FAILED', error = $3, updated_at = now() WHERE workspace_id = $1 AND id = $2", [workspaceId, analysisId, message.slice(0, 2_000)]).catch(() => undefined);
+    throw new Error(message, { cause: error });
+  }
+}
 
 const connection = new IORedis(config.redisUrl, { maxRetriesPerRequest: null });
 const textRunner = createTextModelRunner();
@@ -52,6 +227,38 @@ const draftAdaptationService = createDraftAdaptationService({
   },
 });
 const storageDeletion = createStorageDeletionService({ query, transaction, uploadRoot: config.uploadRoot });
+const contentIngestionStore = createContentIngestionStore({ query, transaction });
+const assetStore = createAssetStore({ query, transaction, removeStoredFile: (storageKey) => removeAssetFile(config.uploadRoot, storageKey) });
+
+async function importIngestionRemoteMedia({ workspaceId, ingestionId, media, document }) {
+  const stored = await saveRemoteImageAsset(config.uploadRoot, workspaceId, media.resolvedUrl || media.sourceUrl, { fallbackUrl: media.sourceUrl });
+  const creatorId = await contentIngestionStore.getCreator(workspaceId, ingestionId);
+  const title = String(media.caption || media.altText || document.title || '链接正文配图').trim().slice(0, 200) || '链接正文配图';
+  const created = await assetStore.createFromStoredFile(workspaceId, creatorId, stored, {
+    origin: 'WEB_IMPORT',
+    title,
+    sourceUrl: stored.sourceUrl,
+    sourceNote: `由链接内容读取任务 ${ingestionId} 自动导入`,
+    copyrightStatus: 'PENDING',
+  });
+  return { assetId: created.asset.id };
+}
+const publicationMetricsStore = createPublishingStore({ query, transaction, encryptSecret: encrypt, decryptSecret: decrypt, officialDraftClient: createWechatOfficialClient(), clipPublicLink });
+const PUBLICATION_METRICS_INTERVAL_MS = 30 * 60 * 1000;
+let metricsRefreshRunning = false;
+async function refreshAllPublicationMetrics() {
+  if (metricsRefreshRunning) return;
+  metricsRefreshRunning = true;
+  try {
+    const workspaces = await query(`SELECT DISTINCT workspace_id FROM publications WHERE status = 'PUBLISHED' AND url <> ''`);
+    for (const row of workspaces.rows) {
+      try {
+        const result = await publicationMetricsStore.syncMetricsForAll(row.workspace_id, null, {});
+        console.log(`[PUBLICATION_METRICS] workspace=${row.workspace_id} synced=${result.syncedCount} failed=${result.failedCount}`);
+      } catch (error) { console.error(`[PUBLICATION_METRICS] workspace=${row.workspace_id} failed`, error); }
+    }
+  } finally { metricsRefreshRunning = false; }
+}
 
 async function processJob(queueJob) {
   const { jobId, workspaceId, payload } = queueJob.data;
@@ -65,7 +272,10 @@ async function processJob(queueJob) {
     RETURNING j.id, c.previous_status`, [jobId, workspaceId]);
   if (!claimed.rowCount) return { jobId, skipped: true };
   if (claimed.rows[0].previous_status === 'RUNNING' && payload.runId) {
-    await query("UPDATE generation_runs SET status = 'QUEUED', started_at = NULL, completed_at = NULL WHERE id = $1 AND workspace_id = $2 AND status = 'RUNNING'", [payload.runId, workspaceId]);
+    await query("UPDATE generation_runs SET status = 'QUEUED', error = NULL, started_at = NULL, completed_at = NULL WHERE id = $1 AND workspace_id = $2 AND status IN ('RUNNING', 'FAILED')", [payload.runId, workspaceId]);
+  }
+  if (claimed.rows[0].previous_status === 'RUNNING' && payload.visualPlanningRunId) {
+    await query("UPDATE visual_planning_runs SET status = 'QUEUED', error = NULL, started_at = NULL, completed_at = NULL, updated_at = now() WHERE id = $1 AND workspace_id = $2 AND status IN ('RUNNING', 'FAILED')", [payload.visualPlanningRunId, workspaceId]);
   }
   try {
     if (queueJob.name === 'STORAGE_DELETE') return await storageDeletion.executeById({ workspaceId, deletionJobId: payload.deletionJobId, queueJobId: jobId });
@@ -79,6 +289,13 @@ async function processJob(queueJob) {
     if (queueJob.name === 'CREATIVE_DRAFT') return await generateCreativeDraft({ jobId, workspaceId, runId: payload.runId });
     if (queueJob.name === 'PROJECT_COPY_ACTION') return await generateProjectCopyAction({ jobId, workspaceId, runId: payload.runId });
     if (queueJob.name === 'DRAFT_ADAPTATION') return await draftAdaptationService.execute({ jobId, workspaceId, runId: payload.runId });
+    if (queueJob.name === 'VIDEO_ANALYSIS') return await executeVideoAnalysis({ jobId, workspaceId, analysisId: payload.analysisId });
+    if (queueJob.name === 'VISUAL_PLANNING') return await executeVisualPlanning({ jobId, workspaceId, runId: payload.visualPlanningRunId });
+    if (queueJob.name === 'CONTENT_INGESTION') {
+      await executeContentIngestion({ query, store: contentIngestionStore, workspaceId, ingestionId: payload.ingestionId, readPublicArticle, readAssetText, uploadRoot: config.uploadRoot, runContentUnderstanding, importRemoteMedia: importIngestionRemoteMedia });
+      await query('UPDATE jobs SET status = $1, result_json = $2, completed_at = now() WHERE id = $3 AND status <> $4', ['SUCCEEDED', JSON.stringify({ ingestionId: payload.ingestionId }), jobId, 'CANCELLED']);
+      return { jobId, ingestionId: payload.ingestionId };
+    }
     if (queueJob.name !== 'BAILIAN_TEXT') throw new Error(`暂不支持的任务类型：${queueJob.name}`);
     const keyRow = await query('SELECT encrypted_secret FROM credential_vault WHERE workspace_id = $1 AND provider = $2', [workspaceId, 'BAILIAN']);
     if (!keyRow.rowCount) throw new Error('工作空间未配置百炼 Key。');
@@ -87,8 +304,86 @@ async function processJob(queueJob) {
     return { jobId };
   } catch (error) {
     const message = error instanceof Error ? error.message : '任务失败。';
-    if (queueJob.name === 'AGENT_PLAN' && payload.planId) await query('UPDATE agent_plans SET status = $1, error = $2, updated_at = now() WHERE id = $3 AND workspace_id = $4', ['FAILED', message.slice(0, 2_000), payload.planId, workspaceId]);
-    await query("UPDATE jobs SET status = $1, error = $2, completed_at = now() WHERE id = $3 AND status <> 'CANCELLED'", ['FAILED', message.slice(0, 2_000), jobId]);
+    if (isFinalQueueAttempt(queueJob)) {
+      await transaction(async (client) => {
+        if (payload.runId) await client.query("UPDATE generation_runs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1 AND workspace_id = $3 AND status IN ('QUEUED', 'RUNNING', 'FAILED')", [payload.runId, message.slice(0, 2_000), workspaceId]);
+        if (queueJob.name === 'AGENT_PLAN' && payload.planId) await client.query('UPDATE agent_plans SET status = $1, error = $2, updated_at = now() WHERE id = $3 AND workspace_id = $4', ['FAILED', message.slice(0, 2_000), payload.planId, workspaceId]);
+        await client.query("UPDATE jobs SET status = $1, error = $2, completed_at = now() WHERE id = $3 AND status <> 'CANCELLED'", ['FAILED', message.slice(0, 2_000), jobId]);
+      });
+    }
+    throw error;
+  }
+}
+
+async function executeVisualPlanning({ jobId, workspaceId, runId }) {
+  const startedAt = Date.now();
+  const result = await query(`SELECT run.*, draft.title AS draft_title, draft.body AS draft_body, project.project_json
+    FROM visual_planning_runs run
+    JOIN content_drafts draft ON draft.workspace_id = run.workspace_id AND draft.id = run.draft_id
+    JOIN content_projects project ON project.workspace_id = run.workspace_id AND project.project_id = run.project_id
+    WHERE run.workspace_id = $1 AND run.id = $2`, [workspaceId, runId]);
+  if (!result.rowCount) throw new Error('没有找到配图策划任务。');
+  const run = result.rows[0];
+  await query("UPDATE visual_planning_runs SET status = 'RUNNING', started_at = now(), updated_at = now() WHERE workspace_id = $1 AND id = $2", [workspaceId, runId]);
+  try {
+    const key = await query("SELECT encrypted_secret FROM credential_vault WHERE workspace_id = $1 AND provider = 'BAILIAN'", [workspaceId]);
+    if (!key.rowCount) throw new Error('请先配置阿里云百炼 API Key。');
+    const input = run.input_json;
+    const assets = await query(`SELECT asset.kind, asset.title, asset.origin, asset.storage_key
+      FROM project_asset_links link JOIN workspace_assets asset ON asset.workspace_id = link.workspace_id AND asset.id = link.asset_id
+      WHERE link.workspace_id = $1 AND link.project_id = $2 AND asset.status = 'ACTIVE' AND asset.kind IN ('IMAGE','VIDEO','AUDIO')
+      ORDER BY link.sort_order, asset.updated_at DESC`, [workspaceId, run.project_id]);
+    const draft = { title: run.draft_title, body: run.draft_body };
+    const prompt = buildVisualPlanningOmniPrompt({
+      project: { ...run.project_json, versionTitle: draft.title, versionBody: draft.body },
+      platform: input.platform,
+      quantityMode: input.quantityMode,
+      bodyItemCount: input.bodyItemCount,
+      styleProfile: input.styleProfile,
+      request: input.request,
+      currentItem: input.currentItem,
+    });
+    const richContent = visualPlanningRichContent({
+      draft,
+      assets: assets.rows.map((asset) => ({ ...asset, source: safeUploadPath(asset.storage_key) })),
+    });
+    const raw = await runBailianCli(
+      buildRichContentOmniArgs({ model: run.model, system: prompt.system, message: prompt.message, content: richContent, maxTokens: 16_000 }),
+      decrypt(key.rows[0].encrypted_secret),
+      richContent.media.some((item) => item.kind === 'VIDEO') ? 600_000 : 240_000,
+    );
+    const content = extractOmniText(raw);
+    if (!content) throw new Error('配图策划模型没有返回可用内容。');
+    const parsed = parseVisualPlanningContent(content, {
+      platform: input.platform,
+      quantityMode: input.quantityMode,
+      bodyItemCount: input.bodyItemCount,
+      singleItem: Boolean(input.currentItemId),
+      expectedRole: input.currentItem?.role,
+    });
+    const merged = mergePlannedItems({
+      platform: input.platform,
+      plannedItems: parsed.items,
+      currentPlan: input.currentPlan,
+      currentItemId: input.currentItemId,
+      keepAssignedAssets: input.keepAssignedAssets,
+    });
+    const plan = await compileVisualPlan({ platform: input.platform, title: draft.title, body: draft.body, items: merged, styleProfile: input.styleProfile });
+    const output = { plan, bodyItemCount: plan.filter((item) => item.role === 'BODY').length, quantityMode: input.quantityMode, strategy: parsed.strategy };
+    await transaction(async (client) => {
+      await client.query("UPDATE visual_planning_runs SET status = 'SUCCEEDED', result_json = $3, error = NULL, completed_at = now(), updated_at = now() WHERE workspace_id = $1 AND id = $2", [workspaceId, runId, JSON.stringify(output)]);
+      await client.query("UPDATE jobs SET status = 'SUCCEEDED', result_json = $2, completed_at = now() WHERE id = $1", [jobId, JSON.stringify({ visualPlanningRunId: runId })]);
+      await client.query(`INSERT INTO api_usage_logs (workspace_id, job_id, provider, model, operation, status, duration_ms)
+        VALUES ($1,$2,$3,$4,$5,'SUCCESS',$6)`, [workspaceId, jobId, run.provider, run.model, VISUAL_PLANNING_OPERATION, Date.now() - startedAt]);
+    });
+    return output;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '配图策划失败。';
+    await transaction(async (client) => {
+      await client.query("UPDATE visual_planning_runs SET status = 'FAILED', error = $3, completed_at = now(), updated_at = now() WHERE workspace_id = $1 AND id = $2", [workspaceId, runId, message.slice(0, 2_000)]);
+      await client.query(`INSERT INTO api_usage_logs (workspace_id, job_id, provider, model, operation, status, duration_ms, error)
+        VALUES ($1,$2,$3,$4,$5,'ERROR',$6,$7)`, [workspaceId, jobId, run.provider, run.model, VISUAL_PLANNING_OPERATION, Date.now() - startedAt, message.slice(0, 2_000)]);
+    });
     throw error;
   }
 }
@@ -278,8 +573,6 @@ async function generateSimplifiedResearchWorkflow({ jobId, workspaceId, runId })
   } catch (error) {
     const message = error instanceof Error ? error.message : '研究任务失败。';
     await transaction(async (client) => {
-      await client.query("UPDATE generation_runs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1 AND workspace_id = $3 AND status <> 'CANCELLED'", [runId, message.slice(0, 2_000), workspaceId]);
-      await client.query("UPDATE jobs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1 AND status <> 'CANCELLED'", [jobId, message.slice(0, 2_000)]);
       await client.query(`INSERT INTO api_usage_logs
         (workspace_id, job_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens, error)
         VALUES ($1, $2, $3, $4, 'PROJECT_RESEARCH_WORKFLOW', 'FAILED', $5, $6, $7, $8)`, [workspaceId, jobId, route?.provider ?? 'UNKNOWN', route?.model ?? null, Date.now() - startedAt, inputTokens || null, outputTokens || null, message.slice(0, 2_000)]);
@@ -422,7 +715,6 @@ async function generateProjectResearchSources({ jobId, workspaceId, runId }) {
   } catch (error) {
     const message = error instanceof Error ? error.message : '研究来源任务失败。';
     await transaction(async (client) => {
-      await client.query("UPDATE generation_runs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1 AND workspace_id = $3", [runId, message.slice(0, 2_000), workspaceId]);
       await client.query(`INSERT INTO api_usage_logs
         (workspace_id, job_id, provider, model, operation, status, duration_ms, error)
         VALUES ($1, $2, 'UNKNOWN', NULL, 'SOURCE_DISCOVERY', 'FAILED', $3, $4)`, [workspaceId, jobId, Date.now() - startedAt, message.slice(0, 2_000)]);
@@ -494,7 +786,6 @@ async function generateSourceVerification({ jobId, workspaceId, runId }) {
   } catch (error) {
     const message = error instanceof Error ? error.message : '事实核验失败。';
     await transaction(async (client) => {
-      await client.query("UPDATE generation_runs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1 AND workspace_id = $3 AND status <> 'CANCELLED'", [runId, message.slice(0, 2_000), workspaceId]);
       await client.query(`INSERT INTO api_usage_logs
         (workspace_id, job_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens, error)
         VALUES ($1, $2, $3, $4, 'SOURCE_VERIFICATION', 'FAILED', $5, $6, $7, $8)`, [workspaceId, jobId, route?.provider ?? 'UNKNOWN', route?.model ?? null, Date.now() - startedAt, inputTokens ?? null, outputTokens ?? null, message.slice(0, 2_000)]);
@@ -567,7 +858,6 @@ async function generateProjectResearchPlan({ jobId, workspaceId, runId }) {
   } catch (error) {
     const message = error instanceof Error ? error.message : '研究计划生成失败。';
     await transaction(async (client) => {
-      await client.query("UPDATE generation_runs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1 AND workspace_id = $3", [runId, message.slice(0, 2_000), workspaceId]);
       await client.query(`INSERT INTO api_usage_logs (workspace_id, job_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens, error)
         VALUES ($1, $2, $3, $4, 'PROJECT_RESEARCH', 'FAILED', $5, $6, $7, $8)`, [workspaceId, jobId, route?.provider ?? 'UNKNOWN', route?.model ?? null, Date.now() - startedAt, inputTokens ?? null, outputTokens ?? null, message.slice(0, 2_000)]);
     });
@@ -599,19 +889,19 @@ async function generateIntelligenceAnalysis({ jobId, workspaceId, runId }) {
     const snapshot = run.source_snapshot_json;
     const input = run.input_json;
     route = input.route;
+    if (route.provider !== 'BAILIAN_CLI') throw new Error('热点分析需要使用支持富内容理解的百炼 CLI 模型。');
     const prompt = buildAnalysisPrompt({ template: input.template.body, item: snapshot.item, profile: snapshot.profile, platforms: input.selectedPlatforms });
     const connectionInput = await textConnectionInput(workspaceId, route);
-    const first = await textRunner.runText({ provider: route.provider, model: route.model, system: prompt.system, message: prompt.message, ...connectionInput });
-    inputTokens = first.inputTokens;
-    outputTokens = first.outputTokens;
+    const richContent = snapshot.item.richContent ?? { text: { title: snapshot.item.title, body: snapshot.item.summary }, media: [] };
+    const firstContent = extractOmniText(await runBailianCli(buildRichContentOmniArgs({ model: route.model, system: prompt.system, message: prompt.message, content: richContent, maxTokens: 3_000 }), connectionInput.apiKey, richContent.media?.some((item) => item.kind === 'VIDEO') ? 180_000 : 120_000));
+    if (!firstContent) throw new Error('热点分析模型没有返回可用内容。');
     let output;
-    try { output = parseAnalysisContent(first.content, input.selectedPlatforms); }
+    try { output = parseAnalysisContent(firstContent, input.selectedPlatforms); }
     catch (error) {
       const validationError = error instanceof Error ? error.message : '输出不符合 JSON 契约。';
-      const repaired = await textRunner.runText({ provider: route.provider, model: route.model, system: buildAnalysisRepairPrompt(prompt.system, validationError), message: first.content, ...connectionInput });
-      inputTokens = (inputTokens ?? 0) + (repaired.inputTokens ?? 0);
-      outputTokens = (outputTokens ?? 0) + (repaired.outputTokens ?? 0);
-      output = parseAnalysisContent(repaired.content, input.selectedPlatforms);
+      const repairMessage = JSON.stringify({ invalidOutput: firstContent, context: JSON.parse(prompt.message) });
+      const repairedContent = extractOmniText(await runBailianCli(buildRichContentOmniArgs({ model: route.model, system: buildAnalysisRepairPrompt(prompt.system, validationError), message: repairMessage, content: richContent, maxTokens: 3_000 }), connectionInput.apiKey, richContent.media?.some((item) => item.kind === 'VIDEO') ? 180_000 : 120_000));
+      output = parseAnalysisContent(repairedContent, input.selectedPlatforms);
     }
     const overallScore = calculateOverallScore(output.dimensions);
     const decision = decisionForScore(overallScore);
@@ -629,7 +919,6 @@ async function generateIntelligenceAnalysis({ jobId, workspaceId, runId }) {
   } catch (error) {
     const message = error instanceof Error ? error.message : '热点分析失败。';
     await transaction(async (client) => {
-      await client.query("UPDATE generation_runs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1 AND workspace_id = $3 AND status <> 'CANCELLED'", [runId, message.slice(0, 2_000), workspaceId]);
       await client.query(`INSERT INTO api_usage_logs (workspace_id, job_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens, error)
         VALUES ($1, $2, $3, $4, 'INTELLIGENCE_ANALYSIS', 'FAILED', $5, $6, $7, $8)`, [workspaceId, jobId, route?.provider ?? 'UNKNOWN', route?.model ?? null, Date.now() - startedAt, inputTokens ?? null, outputTokens ?? null, message.slice(0, 2_000)]);
     });
@@ -676,7 +965,6 @@ async function generateCreativeOutline({ jobId, workspaceId, runId }) {
   } catch (error) {
     const message = error instanceof Error ? error.message : '大纲生成失败。';
     await transaction(async (client) => {
-      await client.query("UPDATE generation_runs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1 AND workspace_id = $3", [runId, message.slice(0, 2_000), workspaceId]);
       await client.query(`INSERT INTO api_usage_logs (workspace_id, job_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens, error)
         VALUES ($1, $2, $3, $4, 'CONTENT_WRITING', 'FAILED', $5, $6, $7, $8)`, [workspaceId, jobId, route?.provider ?? 'UNKNOWN', route?.model ?? null, Date.now() - startedAt, inputTokens ?? null, outputTokens ?? null, message.slice(0, 2_000)]);
     });
@@ -724,7 +1012,6 @@ async function generateCreativeDraft({ jobId, workspaceId, runId }) {
   } catch (error) {
     const message = error instanceof Error ? error.message : '初稿生成失败。';
     await transaction(async (client) => {
-      await client.query("UPDATE generation_runs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1 AND workspace_id = $3", [runId, message.slice(0, 2_000), workspaceId]);
       await client.query(`INSERT INTO api_usage_logs (workspace_id, job_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens, error)
         VALUES ($1, $2, $3, $4, 'CONTENT_WRITING', 'FAILED', $5, $6, $7, $8)`, [workspaceId, jobId, route?.provider ?? 'UNKNOWN', route?.model ?? null, Date.now() - startedAt, inputTokens ?? null, outputTokens ?? null, message.slice(0, 2_000)]);
     });
@@ -752,7 +1039,7 @@ function canWriteFromAuthorMaterials(snapshot) {
     ...(Array.isArray(snapshot.materials) ? snapshot.materials : []),
     ...(Array.isArray(snapshot.researchContext?.userContent) ? snapshot.researchContext.userContent : []),
   ];
-  const hasAuthorContent = materials.some((item) => ['DRAFT', 'OPINION', 'EXPERIENCE'].includes(String(item?.kind ?? '').toUpperCase()) && String(item?.body ?? item?.content ?? '').trim());
+  const hasAuthorContent = materials.some((item) => ['DRAFT', 'OPINION', 'EXPERIENCE', 'REFERENCE'].includes(String(item?.kind ?? '').toUpperCase()) && String(item?.body ?? item?.content ?? '').trim());
   const explicitlyNeedsSources = Boolean(String(snapshot.project?.planning?.sourceRequirements ?? snapshot.brief?.sourceRequirements ?? '').trim()) || (snapshot.project?.factChecks ?? []).length > 0;
   return hasAuthorContent && !explicitlyNeedsSources;
 }
@@ -837,14 +1124,14 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
       message: prompt.message,
       ...(typeof prompt.enableThinking === 'boolean' ? { enableThinking: prompt.enableThinking } : {}),
       ...(typeof prompt.contentFormat === 'string' ? { contentFormat: prompt.contentFormat } : {}),
-      ...(prompt.tools ? { tools: prompt.tools, requiredToolName: prompt.requiredToolName } : {}),
+      maxTokens: copyMaxTokensForLength(writingPacket.targetLength),
       ...connectionInput,
     });
     inputTokens += first.inputTokens ?? 0;
     outputTokens += first.outputTokens ?? 0;
     const output = isInitialDraft
-      ? { ...parseFinishedCopyBody(first.content, writingPacket), factsToVerify: [], changeSummary: '已生成正式正文。' }
-      : parseCopyOutput(first.content, snapshot.action, preparedSnapshot);
+      ? { ...parseFinishedCopyBody(first.content, writingPacket, snapshot.action, preparedSnapshot), changeSummary: '已生成正式正文。' }
+      : parseRevisionCopyBody(first.content, snapshot.action, { ...preparedSnapshot, lockedTitle: writingPacket.lockedTitle });
     const saved = await transaction(async (client) => {
       const activeRun = await client.query("SELECT id FROM generation_runs WHERE id = $1 AND workspace_id = $2 AND status = 'RUNNING' FOR UPDATE", [runId, workspaceId]);
       if (!activeRun.rowCount) throw new Error('文案任务已取消或中断。');
@@ -932,7 +1219,6 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
   } catch (error) {
     const message = error instanceof Error ? error.message : '文案任务执行失败。';
     await transaction(async (client) => {
-      await client.query("UPDATE generation_runs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1 AND workspace_id = $3", [runId, message.slice(0, 2_000), workspaceId]);
       await client.query(`INSERT INTO api_usage_logs
         (workspace_id, job_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens, error)
         VALUES ($1, $2, $3, $4, $5, 'FAILED', $6, $7, $8, $9)`, [
@@ -967,6 +1253,7 @@ async function generateAgentPlan({ jobId, workspaceId, planId }) {
 const worker = new Worker('content-engine', processJob, { connection });
 worker.on('ready', async () => {
   console.log('Content Engine Worker 已启动');
+  void refreshAllPublicationMetrics();
   try {
     const recovered = await storageDeletion.recoverPendingDeletionJobs();
     await Promise.all(recovered.map((job) => enqueue(job)));
@@ -977,6 +1264,8 @@ worker.on('ready', async () => {
 });
 worker.on('failed', (job, error) => console.error(`任务 ${job?.id} 失败：${error.message}`));
 
-async function close() { await worker.close(); await connection.quit(); }
+const metricsTimer = setInterval(() => { void refreshAllPublicationMetrics(); }, PUBLICATION_METRICS_INTERVAL_MS);
+metricsTimer.unref?.();
+async function close() { clearInterval(metricsTimer); await worker.close(); await connection.quit(); }
 process.on('SIGINT', () => void close().finally(() => process.exit(0)));
 process.on('SIGTERM', () => void close().finally(() => process.exit(0)));

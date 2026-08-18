@@ -103,7 +103,7 @@ test('热点分析创建项目时冻结角度、受众、公众号母稿、时�
   assert.equal(project.versions.length, 0);
 });
 
-test('空白创作项目只建立规划工作稿，不伪造正文', () => {
+test('空白创作项目不把草稿片段伪装成规划核心表达', () => {
   const project = createBlankProject({
     originType: 'MANUAL',
     title: '我想写一次工具复盘',
@@ -116,7 +116,23 @@ test('空白创作项目只建立规划工作稿，不伪造正文', () => {
   assert.equal(project.planning.title, '我想写一次工具复盘');
   assert.equal(project.planning.targetPlatforms[0], 'WECHAT');
   assert.equal(project.versions.length, 0);
-  assert.equal(project.sourceSnapshot.draftText, '这是我自己记录的草稿片段。');
+  assert.equal(project.planning.coreMessage, '');
+  assert.equal('draftText' in project.sourceSnapshot, false);
+});
+
+test('规划确认拒绝把待核验能力主张直接写进标题', () => {
+  const claim = 'Wan3.0 首次支持 doc、xls、ppt、pdf、md 等文档格式作为视频生成输入源';
+  const project = createBlankProject({ title: '待规划项目', targetPlatforms: ['WECHAT'] }, '2026-07-28T08:00:00.000Z');
+  const withCheck = { ...project, factChecks: [claim] };
+  assert.throws(() => confirmProjectPlanning(withCheck, {
+    title: claim,
+    category: '科技',
+    angle: '解释这项说法该如何核验',
+    objective: '帮助读者建立判断',
+    targetAudience: '普通读者',
+    coreMessage: '先核验再下结论',
+    targetPlatforms: ['WECHAT'],
+  }), /标题|待核验/);
 });
 
 test('项目状态更新锁定工作空间且空变更不会写项目或快照', async () => {

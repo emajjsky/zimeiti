@@ -34,7 +34,7 @@ const bodyItem = {
   assetId: null,
 };
 
-test('公众号生图请求只接受配图项 ID，不接受客户端提示词和画幅', () => {
+test('公众号生图接受用户提示词，但画幅仍由服务端决定', () => {
   const { parseVisualGenerationRequest } = loadVisualGenerationService();
   assert.throws(() => parseVisualGenerationRequest({
     platform: 'WECHAT',
@@ -91,4 +91,14 @@ test('公众号生图提示词清理会去掉高风险词并保留主体场景',
   assert.match(sanitized, /动态增长曲线/);
   assert.doesNotMatch(sanitized, /中国地图|二维码|水印|logo|签名/);
   assert.equal(isBailianDataInspectionFailure(new Error('network down')), false);
+});
+
+test('公众号生图使用用户编辑后的正向提示词', async () => {
+  const { resolveWechatVisualGenerationSpec } = loadVisualGenerationService();
+  const result = await resolveWechatVisualGenerationSpec({
+    input: { platform: 'WECHAT', visualItemId: bodyItem.id, prompt: 'bright room, an older adult holds a phone, natural window light, clear subject', assetIds: [] },
+    draft: { title: 'test', visualPlan: { plan: [bodyItem], styleProfile: { preset: 'FRESH_EDITORIAL', customPrompt: '' } } },
+  });
+  assert.equal(result.prompt, 'bright room, an older adult holds a phone, natural window light, clear subject');
+  assert.equal(result.size, '4:3');
 });

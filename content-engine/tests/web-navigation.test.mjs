@@ -19,12 +19,13 @@ test('账号声音设置入口独立于模型配置', async () => {
   assert.doesNotMatch(settings, /提示词正文|先选原型/);
 });
 
-test('一级导航移除独立规划，只保留七个工作入口', () => {
+test('一级导航提供首页指引并保留原有工作入口', () => {
   assert.ok(navigation, '导航模型尚未实现');
   const entries = navigation.navigationGroups.flatMap((group) => group.items);
   assert.deepEqual(
     entries.map(({ view, label }) => [view, label]),
     [
+      ['home', '首页'],
       ['today', '今天'],
       ['discover', '发现'],
       ['create', '创作'],
@@ -34,6 +35,20 @@ test('一级导航移除独立规划，只保留七个工作入口', () => {
       ['settings', '设置'],
     ],
   );
+});
+
+test('首页按六项配置引导并在全部就绪后进入创作', async () => {
+  const home = await readFile(new URL('../src/workspaces/HomeWorkspace.tsx', import.meta.url), 'utf8');
+  assert.match(home, /const config: ConfigItem\[\] = \[/);
+  assert.match(home, /配置阿里云百炼 API/);
+  assert.match(home, /配置检索 API/);
+  assert.match(home, /配置任务策略/);
+  assert.match(home, /配置资讯来源/);
+  assert.match(home, /配置公众号平台账号/);
+  assert.match(home, /配置账号声音/);
+  assert.match(home, /const next = config\.find\(\(item\) => !item\.complete\) \?\? null/);
+  assert.match(home, /开始创作/);
+  assert.match(home, /data-mermaid-source/);
 });
 
 test('发现跳转保留局部页面和搜索预设', () => {

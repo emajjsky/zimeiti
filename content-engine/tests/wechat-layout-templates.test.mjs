@@ -18,6 +18,31 @@ const TEMPLATE_ID = '11111111-1111-4111-8111-111111111111';
 const VERSION_ID = '22222222-2222-4222-8222-222222222222';
 const NOW = '2026-08-02T00:00:00.000Z';
 
+test('公众号模板分析把 DOM 信号和页面截图放进同一次 Omni 调用', async () => {
+  let omniInput;
+  const result = await analyzeWechatTemplateSource({
+    url: 'https://mp.weixin.qq.com/s/example',
+    confirmedRights: true,
+    route: { scope: 'WECHAT_TEMPLATE_ANALYSIS', provider: 'BAILIAN_CLI', model: 'qwen3.8-max' },
+    capturePage: async (_url, screenshotPath) => ({
+      url: new URL('https://mp.weixin.qq.com/s/example'),
+      html: '<div id="js_content"><h2 style="color:#3366ff">标题</h2><p>正文</p></div>',
+      screenshotPath,
+    }),
+    runOmniTask: async (input) => {
+      omniInput = input;
+      return { content: JSON.stringify({ rules: DEFAULT_WECHAT_LAYOUT_RULES }) };
+    },
+  });
+
+  assert.match(omniInput.message, /headingCount/);
+  assert.deepEqual(omniInput.richContent.media.map(({ kind, label }) => [kind, label]), [
+    ['IMAGE', '公众号文章完整页面截图'],
+  ]);
+  assert.match(omniInput.richContent.media[0].source, /page\.png$/);
+  assert.equal(result.rules.schemaVersion, 1);
+});
+
 function asset(index) {
   return {
     assetId: `${String(index + 1).padStart(8, '0')}-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,

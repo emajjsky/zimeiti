@@ -1,20 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
-import { canOpenChannelView, channelViewForStage } from '../src/domain/channel-workflow.mjs';
-
-test('渠道步骤按正文确认状态逐步解锁', () => {
-  assert.equal(canOpenChannelView('COPY', 'copy', false), true);
-  assert.equal(canOpenChannelView('COPY', 'visual', false), false);
-  assert.equal(canOpenChannelView('COPY', 'visual', true), false);
-  assert.equal(canOpenChannelView('VISUAL', 'visual', true), true);
-  assert.equal(canOpenChannelView('VISUAL', 'layout', true), false);
-  assert.equal(canOpenChannelView('LAYOUT', 'layout', true), true);
-  assert.equal(canOpenChannelView('REVIEW', 'review', true), true);
-  assert.equal(channelViewForStage('COPY', false), 'copy');
-  assert.equal(channelViewForStage('VISUAL', true), 'visual');
-});
-
 test('创作后半段提供配图、排版、审核和发布包的真实接口', () => {
   const api = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
   const client = fs.readFileSync(new URL('../src/data/webApi.ts', import.meta.url), 'utf8');
@@ -41,7 +27,7 @@ test('创作工作台提供真实配图与排版，并将公众号排版直接�
   assert.match(visual, /确认素材，进入排版/);
   assert.match(visual, /if \(!hasCopy \|\| !plan\.length\) return/);
   assert.match(visual, /生成配图方案/);
-  assert.match(visual, /修改这张图/);
+  assert.match(visual, /调整当前任务/);
   assert.doesNotMatch(visual, />高级设置</);
   assert.doesNotMatch(visual, /aria-label="视觉结构"/);
   assert.match(visual, /webDrafts\.patch/);
@@ -57,6 +43,16 @@ test('配图完成按钮按素材绑定与数量一致性解锁，而不是被�
   assert.match(visual, /const canCompleteVisual = hasCopy && allVisualsBound && !planQuantityMismatch/);
   assert.match(visual, /disabled=\{busy !== null \|\| !canCompleteVisual\}/);
   assert.doesNotMatch(visual, /disabled=\{busy !== null \|\| !hasCopy \|\| planNeedsRefresh\}/);
+});
+
+test('配图策划和 AI 生图在主内容区显示明确任务状态', () => {
+  const visual = fs.readFileSync(new URL('../src/workspaces/create/VisualWorkspace.tsx', import.meta.url), 'utf8');
+  assert.match(visual, /正在生成配图方案/);
+  assert.match(visual, /正在生成/);
+  assert.match(visual, /图片生成中/);
+  assert.match(visual, /当前图片已绑定/);
+  assert.match(visual, /visual-generation-status/);
+  assert.match(visual, /role="status"/);
 });
 
 test('服务端拒绝为没有公众号正文的草稿保存配图方案', () => {
@@ -93,6 +89,7 @@ test('视觉导演保存完整策划字段并支持参考图真实图生图', ()
   const api = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
   const generation = fs.readFileSync(new URL('../server/services/visual-generation.cjs', import.meta.url), 'utf8');
   const client = fs.readFileSync(new URL('../src/data/webApi.ts', import.meta.url), 'utf8');
+  const visual = fs.readFileSync(new URL('../src/workspaces/create/VisualWorkspace.tsx', import.meta.url), 'utf8');
   assert.match(generation, /z\.array\(z\.string\(\)\.uuid\(\)\)\.max\(3\)/);
   assert.match(generation, /visualItemId:/);
   assert.match(generation, /resolveWechatVisualGenerationSpec/);
@@ -118,6 +115,9 @@ test('视觉导演保存完整策划字段并支持参考图真实图生图', ()
   assert.match(api, /'--watermark', 'false'/);
   assert.match(api, /比例：\$\{generationSpec\.size\}/);
   assert.match(client, /assetIds\?: string\[\]/);
+  assert.match(client, /platform: 'WECHAT'; visualItemId: string; prompt\?: string/);
+  assert.match(visual, /正向提示词/);
+  assert.match(visual, /setPromptDraft/);
   assert.match(client, /planVisual:/);
   assert.match(api, /VISUAL_PLANNING_SCOPE/);
   assert.doesNotMatch(api, /VISUAL_PLANNING_FALLBACK_SCOPE/);
@@ -133,6 +133,7 @@ test('配图策划使用独立可见任务策略，不静默回退到文案模�
   const service = fs.readFileSync(new URL('../server/services/visual-planning.cjs', import.meta.url), 'utf8');
   const client = fs.readFileSync(new URL('../src/main.tsx', import.meta.url), 'utf8');
   const workspace = fs.readFileSync(new URL('../src/workspaces/create/VisualWorkspace.tsx', import.meta.url), 'utf8');
+  const worker = fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8');
   const migration = fs.readFileSync(new URL('../server/migrations/028_content_draft_foundation.sql', import.meta.url), 'utf8');
   const routeStart = api.indexOf("app.post('/api/v1/creative/projects/:projectId/visual/plan'");
   const routeEnd = api.indexOf('function generatedImageMime', routeStart);
@@ -148,10 +149,37 @@ test('配图策划使用独立可见任务策略，不静默回退到文案模�
   assert.match(workspace, /quantityMode === 'MANUAL' \? \{ bodyItemCount \} : \{\}/);
   assert.match(workspace, /legacy\.length \? 'MANUAL' : 'AUTO'/);
   assert.match(migration, /SELECT workspace_id, 'WECHAT_VISUAL_PLANNING'/);
-  assert.equal((route.match(/textRunner\.runText/g) ?? []).length, 1);
+  assert.equal((route.match(/textRunner\.runText/g) ?? []).length, 0);
+  const executionStart = worker.indexOf('async function executeVisualPlanning');
+  const executionEnd = worker.indexOf('\nasync function updateSimplifiedResearchPhase', executionStart);
+  const execution = worker.slice(executionStart, executionEnd);
+  assert.match(execution, /buildRichContentOmniArgs/);
+  assert.match(execution, /visualPlanningRichContent/);
+  assert.match(execution, /runBailianCli/);
   assert.doesNotMatch(route, /RepairPrompt|repaired/);
-  assert.match(route, /tools:\s*prompt\.tools/);
-  assert.match(route, /requiredToolName:\s*prompt\.requiredToolName/);
+  assert.doesNotMatch(route, /tools:\s*prompt\.tools/);
+  assert.doesNotMatch(route, /requiredToolName:\s*prompt\.requiredToolName/);
   assert.match(api, /VISUAL_PLANNING_INPUT_INVALID/);
   assert.match(api, /VISUAL_PLANNING_OUTPUT_INVALID/);
+});
+
+test('配图异步任务在入队失败和 Worker 恢复时保持运行记录与任务状态一致', () => {
+  const api = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
+  const worker = fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8');
+  const routeStart = api.indexOf("app.post('/api/v1/creative/projects/:projectId/visual/plan'");
+  const routeEnd = api.indexOf("app.get('/api/v1/creative/projects/:projectId/visual/plan-runs/latest'", routeStart);
+  const route = api.slice(routeStart, routeEnd);
+  assert.match(route, /catch \(error\)/);
+  assert.match(route, /UPDATE visual_planning_runs SET status = 'FAILED'/);
+  assert.match(route, /UPDATE jobs SET status = 'FAILED'/);
+  assert.match(worker, /payload\.visualPlanningRunId/);
+  assert.match(worker, /UPDATE visual_planning_runs SET status = 'QUEUED'/);
+});
+
+test('配图工作台固定展示方案、候选素材和当前任务三栏', () => {
+  const visual = fs.readFileSync(new URL('../src/workspaces/create/VisualWorkspace.tsx', import.meta.url), 'utf8');
+  const styles = fs.readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+  assert.match(visual, /visual-inspector-panel/);
+  assert.match(visual, /当前图片任务/);
+  assert.match(styles, /grid-template-columns:240px minmax\(0,1fr\) 320px/);
 });

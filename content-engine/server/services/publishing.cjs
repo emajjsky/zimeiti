@@ -24,7 +24,7 @@ function taskView(row) {
     id: row.id,
     workspaceId: row.workspace_id,
     accountId: row.account_id,
-    draftVersionId: row.draft_version_id,
+    draftVersionId: row.draft_version_id ?? null,
     platform: row.platform,
     mode: row.mode,
     status: row.status,
@@ -43,18 +43,23 @@ function taskView(row) {
 
 function metricView(row) {
   if (!row?.metric_id) return null;
+  const optionalCount = (value) => value === null || value === undefined ? null : Number(value);
   return {
     id: row.metric_id,
     workspaceId: row.workspace_id,
     publicationId: row.id,
+    dataDate: row.metric_data_date ?? row.captured_at?.slice(0, 10) ?? null,
     capturedAt: row.metric_captured_at,
     source: row.metric_source,
-    readCount: Number(row.metric_read_count ?? 0),
-    likeCount: Number(row.metric_like_count ?? 0),
-    shareCount: Number(row.metric_share_count ?? 0),
-    favoriteCount: Number(row.metric_favorite_count ?? 0),
-    commentCount: Number(row.metric_comment_count ?? 0),
-    followerDelta: Number(row.metric_follower_delta ?? 0),
+    checkpoint: row.metric_checkpoint ?? 'CUSTOM',
+    exposureCount: optionalCount(row.metric_exposure_count),
+    readCount: optionalCount(row.metric_read_count),
+    playCount: optionalCount(row.metric_play_count),
+    likeCount: optionalCount(row.metric_like_count),
+    shareCount: optionalCount(row.metric_share_count),
+    favoriteCount: optionalCount(row.metric_favorite_count),
+    commentCount: optionalCount(row.metric_comment_count),
+    followerDelta: optionalCount(row.metric_follower_delta),
     createdAt: row.metric_created_at,
   };
 }
@@ -75,23 +80,39 @@ function retrospectiveView(row) {
 }
 
 function metricSnapshotView(row) {
+  const optionalCount = (value) => value === null || value === undefined ? null : Number(value);
   return {
     id: row.id,
     workspaceId: row.workspace_id,
     publicationId: row.publication_id,
+    dataDate: row.data_date ?? row.captured_at?.slice(0, 10) ?? null,
     capturedAt: row.captured_at,
     source: row.source,
-    readCount: Number(row.read_count ?? 0),
-    likeCount: Number(row.like_count ?? 0),
-    shareCount: Number(row.share_count ?? 0),
-    favoriteCount: Number(row.favorite_count ?? 0),
-    commentCount: Number(row.comment_count ?? 0),
-    followerDelta: Number(row.follower_delta ?? 0),
+    checkpoint: row.checkpoint ?? 'CUSTOM',
+    exposureCount: optionalCount(row.exposure_count),
+    readCount: optionalCount(row.read_count),
+    playCount: optionalCount(row.play_count),
+    likeCount: optionalCount(row.like_count),
+    shareCount: optionalCount(row.share_count),
+    favoriteCount: optionalCount(row.favorite_count),
+    commentCount: optionalCount(row.comment_count),
+    followerDelta: optionalCount(row.follower_delta),
     createdAt: row.created_at,
   };
 }
 
 function publicationView(row) {
+  const snapshots = Array.isArray(row.metric_snapshots_json) ? row.metric_snapshots_json : [];
+  const captured = new Set(snapshots.map((snapshot) => snapshot.checkpoint));
+  const publishedAt = new Date(row.published_at).getTime();
+  const metricSchedule = [
+    { checkpoint: 'D1', label: '发布后 24 小时', hours: 24 },
+    { checkpoint: 'D3', label: '发布后 72 小时', hours: 72 },
+    { checkpoint: 'D7', label: '发布后 7 天', hours: 168 },
+  ].map(({ checkpoint, label, hours }) => {
+    const dueAt = new Date(publishedAt + hours * 60 * 60 * 1000).toISOString();
+    return { checkpoint, label, dueAt, status: captured.has(checkpoint) ? 'CAPTURED' : Date.now() >= Date.parse(dueAt) ? 'DUE' : 'UPCOMING' };
+  });
   return {
     id: row.id,
     workspaceId: row.workspace_id,
@@ -109,6 +130,7 @@ function publicationView(row) {
     projectTitle: row.project_title ?? null,
     latestMetrics: metricView(row),
     retrospective: retrospectiveView(row),
+    metricSchedule,
   };
 }
 
@@ -203,12 +225,13 @@ function idempotencyKey({ workspaceId, accountId, draftVersionId, mode }) {
   return createHash('sha256').update([workspaceId, accountId, draftVersionId, mode].join(':')).digest('hex');
 }
 
-function createPublishingStore({ query, transaction, encryptSecret, decryptSecret, officialDraftClient, loadAsset } = {}) {
+function createPublishingStore({ query, transaction, encryptSecret, decryptSecret, officialDraftClient, loadAsset, clipPublicLink } = {}) {
   if (typeof query !== 'function' || typeof transaction !== 'function') throw new TypeError('发布 Store 需要 query 和 transaction。');
 
   async function listAccounts(workspaceId) {
-    const result = await query(`SELECT * FROM channel_accounts
-      WHERE workspace_id = $1
+    const result = await query(`SELECT account.*
+      FROM channel_accounts account
+      WHERE account.workspace_id = $1
       ORDER BY CASE platform WHEN 'WECHAT' THEN 0 WHEN 'XIAOHONGSHU' THEN 1 ELSE 2 END, updated_at DESC`, [workspaceId]);
     return result.rows.map(accountView);
   }
@@ -484,24 +507,47 @@ function createPublishingStore({ query, transaction, encryptSecret, decryptSecre
     }));
   }
 
-  async function manualConfirm(workspaceId, userId, taskId, input) {
-    return transaction(async (client) => {
+  async function registerPublication(workspaceId, userId, taskId, input) {
+    const url = String(input?.url ?? '').trim();
+    if (!url) throw businessError(400, 'PUBLICATION_URL_REQUIRED', '请填写已发布文章的公开链接。');
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(url);
+    } catch {
+      throw businessError(400, 'PUBLICATION_URL_INVALID', '文章链接格式不正确。');
+    }
+    if (!['http:', 'https:'].includes(parsedUrl.protocol)) throw businessError(400, 'PUBLICATION_URL_INVALID', '文章链接必须使用 HTTP 或 HTTPS。');
+    if (typeof clipPublicLink !== 'function') throw businessError(500, 'PUBLICATION_METADATA_READER_MISSING', '文章链接读取器未配置。');
+    let metadata;
+    try {
+      metadata = await clipPublicLink(url);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '无法读取公开文章信息。';
+      throw businessError(422, 'PUBLICATION_METADATA_READ_FAILED', message);
+    }
+    const publishedAt = metadata?.publishedAt ?? null;
+    if (!publishedAt) throw businessError(422, 'PUBLICATION_PUBLISHED_AT_NOT_FOUND', '无法从公开文章链接读取发布时间，请确认链接指向已发布文章。');
+    const registration = await transaction(async (client) => {
       const taskResult = await client.query(`SELECT task.*, version.title
         FROM platform_draft_tasks task
         JOIN content_draft_versions version ON version.workspace_id = task.workspace_id AND version.id = task.draft_version_id
         WHERE task.workspace_id = $1 AND task.id = $2 FOR UPDATE`, [workspaceId, taskId]);
       if (!taskResult.rows.length) throw businessError(404, 'PUBLISH_TASK_NOT_FOUND', '没有找到这条发布任务。');
       const task = taskResult.rows[0];
-      if (task.mode !== 'MANUAL') throw businessError(409, 'PUBLISH_TASK_NOT_MANUAL', '这条任务不是手动发布包。');
+      const canRegister = task.mode === 'MANUAL'
+        ? ['MANUAL_PENDING', 'MANUAL_CONFIRMED'].includes(task.status)
+        : task.mode === 'OFFICIAL_API' && task.status === 'SUCCEEDED';
+      if (!canRegister) throw businessError(409, 'PUBLISH_TASK_NOT_REGISTERABLE', '这条任务当前不能登记为已发布。');
+      const nextStatus = task.mode === 'MANUAL' ? 'MANUAL_CONFIRMED' : task.status;
       const updated = await client.query(`UPDATE platform_draft_tasks
-        SET status = 'MANUAL_CONFIRMED',
+        SET status = $4,
           manually_confirmed_by = $3,
           manually_confirmed_at = now(),
-          completed_at = now(),
-          response_summary_json = COALESCE(response_summary_json, '{}'::jsonb) || $4::jsonb,
+          completed_at = CASE WHEN mode = 'MANUAL' THEN now() ELSE completed_at END,
+          response_summary_json = COALESCE(response_summary_json, '{}'::jsonb) || $5::jsonb,
           updated_at = now()
         WHERE workspace_id = $1 AND id = $2
-        RETURNING *`, [workspaceId, taskId, userId, JSON.stringify({ publishedUrl: input.url ?? '', confirmedNote: input.note ?? '' })]);
+        RETURNING *`, [workspaceId, taskId, userId, nextStatus, JSON.stringify({ publishedUrl: url, publishedAt, confirmedNote: input.note ?? '', publicationRegistered: true })]);
       const publication = await client.query(`INSERT INTO publications
         (workspace_id, task_id, account_id, draft_version_id, platform, title, url, published_at, created_by)
         VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::timestamptz, now()), $9)
@@ -509,35 +555,98 @@ function createPublishingStore({ query, transaction, encryptSecret, decryptSecre
           url = excluded.url,
           published_at = excluded.published_at,
           updated_at = now()
-        RETURNING *`, [
-        workspaceId,
-        taskId,
-        task.account_id,
-        task.draft_version_id,
-        task.platform,
-        task.title,
-        input.url ?? '',
-        input.publishedAt ?? null,
-        userId,
-      ]);
+        RETURNING *`, [workspaceId, taskId, task.account_id, task.draft_version_id, task.platform, metadata.title || task.title || '', url, publishedAt, userId]);
       return { task: taskView(updated.rows[0]), publication: publicationView(publication.rows[0]) };
     });
+    if (metadata.metrics) {
+      registration.publication.latestMetrics = await insertMetricSnapshot(workspaceId, userId, registration.publication.id, {
+        dataDate: publishedAt.slice(0, 10),
+        capturedAt: new Date().toISOString(),
+        checkpoint: 'CUSTOM',
+        ...metadata.metrics,
+      }, 'PUBLIC_PAGE');
+    }
+    return registration;
   }
+
+  async function registerStandalonePublication(workspaceId, userId, input) {
+    const url = String(input?.url ?? '').trim();
+    if (!url) throw businessError(400, 'PUBLICATION_URL_REQUIRED', '请填写已发布文章的公开链接。');
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(url);
+    } catch {
+      throw businessError(400, 'PUBLICATION_URL_INVALID', '文章链接格式不正确。');
+    }
+    if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+      throw businessError(400, 'PUBLICATION_URL_INVALID', '文章链接必须使用 HTTP 或 HTTPS。');
+    }
+    if (typeof clipPublicLink !== 'function') throw businessError(500, 'PUBLICATION_METADATA_READER_MISSING', '文章链接读取器未配置。');
+    let metadata;
+    try {
+      metadata = await clipPublicLink(url);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '无法读取公开文章信息。';
+      throw businessError(422, 'PUBLICATION_METADATA_READ_FAILED', message);
+    }
+    if (!metadata?.publishedAt) throw businessError(422, 'PUBLICATION_PUBLISHED_AT_NOT_FOUND', '无法从公开文章链接读取发布时间，请确认链接指向已发布文章。');
+
+    const registration = await transaction(async (client) => {
+      const accountQuery = input?.accountId
+        ? await client.query('SELECT * FROM channel_accounts WHERE workspace_id = $1 AND id = $2', [workspaceId, input.accountId])
+        : await client.query(`SELECT * FROM channel_accounts
+            WHERE workspace_id = $1 AND platform = 'WECHAT' AND status <> 'DISCONNECTED'
+            ORDER BY updated_at DESC LIMIT 1`, [workspaceId]);
+      if (!accountQuery.rows.length) throw businessError(409, 'PUBLICATION_ACCOUNT_REQUIRED', '请先在账号设置中添加公众号账号，再登记已发布文章。');
+      const account = accountQuery.rows[0];
+      if (account.platform !== 'WECHAT') throw businessError(400, 'PUBLICATION_PLATFORM_UNSUPPORTED', '当前复盘台账仅支持微信公众号文章。');
+      if (account.status === 'DISCONNECTED') throw businessError(409, 'PUBLICATION_ACCOUNT_DISCONNECTED', '当前公众号账号已停用，请先在账号设置中恢复或重新添加。');
+      const result = await client.query(`INSERT INTO publications
+        (workspace_id, task_id, account_id, draft_version_id, platform, title, url, published_at, created_by)
+        VALUES ($1, NULL, $2, NULL, 'WECHAT', $3, $4, $5, $6)
+        ON CONFLICT (workspace_id, url) WHERE url <> '' DO UPDATE SET
+          account_id = excluded.account_id,
+          title = CASE WHEN excluded.title <> '' THEN excluded.title ELSE publications.title END,
+          published_at = excluded.published_at,
+          updated_at = now()
+        RETURNING *`, [workspaceId, account.id, metadata.title || '', url, metadata.publishedAt, userId]);
+      return { publication: publicationView({ ...result.rows[0], account_name: account.name }) };
+    });
+    if (metadata.metrics) {
+      registration.publication.latestMetrics = await insertMetricSnapshot(workspaceId, userId, registration.publication.id, {
+        dataDate: metadata.publishedAt.slice(0, 10),
+        capturedAt: new Date().toISOString(),
+        checkpoint: 'CUSTOM',
+        ...metadata.metrics,
+      }, 'PUBLIC_PAGE');
+    }
+    return registration;
+  }
+
+  const manualConfirm = registerPublication;
 
   async function listPublications(workspaceId) {
     const result = await query(`SELECT publication.*,
         account.name AS account_name,
         project.project_json->>'title' AS project_title,
         metric.id AS metric_id,
+        metric.data_date AS metric_data_date,
         metric.captured_at AS metric_captured_at,
         metric.source AS metric_source,
+        metric.checkpoint AS metric_checkpoint,
+        metric.exposure_count AS metric_exposure_count,
         metric.read_count AS metric_read_count,
+        metric.play_count AS metric_play_count,
         metric.like_count AS metric_like_count,
         metric.share_count AS metric_share_count,
         metric.favorite_count AS metric_favorite_count,
         metric.comment_count AS metric_comment_count,
         metric.follower_delta AS metric_follower_delta,
         metric.created_at AS metric_created_at,
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('checkpoint', history.checkpoint, 'capturedAt', history.captured_at)
+          ORDER BY history.captured_at DESC, history.created_at DESC)
+          FROM metric_snapshots history
+          WHERE history.workspace_id = publication.workspace_id AND history.publication_id = publication.id), '[]'::jsonb) AS metric_snapshots_json,
         retrospective.id AS retrospective_id,
         retrospective.summary AS retrospective_summary,
         retrospective.highlights_json AS retrospective_highlights_json,
@@ -547,9 +656,9 @@ function createPublishingStore({ query, transaction, encryptSecret, decryptSecre
         retrospective.updated_at AS retrospective_updated_at
       FROM publications publication
       JOIN channel_accounts account ON account.workspace_id = publication.workspace_id AND account.id = publication.account_id
-      JOIN content_draft_versions version ON version.workspace_id = publication.workspace_id AND version.id = publication.draft_version_id
-      JOIN content_drafts draft ON draft.workspace_id = version.workspace_id AND draft.id = version.draft_id
-      JOIN content_projects project ON project.workspace_id = draft.workspace_id AND project.project_id = draft.project_id
+      LEFT JOIN content_draft_versions version ON version.workspace_id = publication.workspace_id AND version.id = publication.draft_version_id
+      LEFT JOIN content_drafts draft ON draft.workspace_id = version.workspace_id AND draft.id = version.draft_id
+      LEFT JOIN content_projects project ON project.workspace_id = draft.workspace_id AND project.project_id = draft.project_id
       LEFT JOIN LATERAL (
         SELECT * FROM metric_snapshots metric
         WHERE metric.workspace_id = publication.workspace_id AND metric.publication_id = publication.id
@@ -562,27 +671,252 @@ function createPublishingStore({ query, transaction, encryptSecret, decryptSecre
     return result.rows.map(publicationView);
   }
 
-  async function addMetricSnapshot(workspaceId, userId, publicationId, input) {
+  async function deletePublication(workspaceId, publicationId) {
+    const result = await query(`DELETE FROM publications
+      WHERE workspace_id = $1 AND id = $2
+      RETURNING id`, [workspaceId, publicationId]);
+    if (!result.rows.length) throw businessError(404, 'PUBLICATION_NOT_FOUND', '没有找到这篇复盘文章。');
+    return { publicationId: result.rows[0].id };
+  }
+
+  async function insertMetricSnapshot(workspaceId, userId, publicationId, input, source) {
     const result = await query(`INSERT INTO metric_snapshots
-      (workspace_id, publication_id, captured_at, source, read_count, like_count, share_count, favorite_count, comment_count, follower_delta, raw_json, created_by)
-      SELECT $1, publication.id, COALESCE($3::timestamptz, now()), 'MANUAL', $4, $5, $6, $7, $8, $9, $10::jsonb, $11
+      (workspace_id, publication_id, data_date, captured_at, source, checkpoint, exposure_count, read_count, play_count, like_count, share_count, favorite_count, comment_count, follower_delta, raw_json, created_by)
+      SELECT $1, publication.id, COALESCE($3::date, COALESCE($4::timestamptz, now())::date), COALESCE($4::timestamptz, now()), $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16
       FROM publications publication
       WHERE publication.workspace_id = $1 AND publication.id = $2
       RETURNING *`, [
       workspaceId,
       publicationId,
+      input.dataDate ?? null,
       input.capturedAt ?? null,
-      input.readCount ?? 0,
-      input.likeCount ?? 0,
-      input.shareCount ?? 0,
-      input.favoriteCount ?? 0,
-      input.commentCount ?? 0,
-      input.followerDelta ?? 0,
+      source,
+      input.checkpoint ?? 'CUSTOM',
+      input.exposureCount ?? null,
+      input.readCount ?? null,
+      input.playCount ?? null,
+      input.likeCount ?? null,
+      input.shareCount ?? null,
+      input.favoriteCount ?? null,
+      input.commentCount ?? null,
+      input.followerDelta ?? null,
       JSON.stringify(input.raw ?? {}),
       userId,
     ]);
     if (!result.rows.length) throw businessError(404, 'PUBLICATION_NOT_FOUND', '没有找到这篇已发布文章。');
     return metricSnapshotView(result.rows[0]);
+  }
+
+  async function addMetricSnapshot(workspaceId, userId, publicationId, input) {
+    return insertMetricSnapshot(workspaceId, userId, publicationId, input, 'MANUAL');
+  }
+
+  function normalizeArticleTitle(title) {
+    return String(title ?? '').replace(/[\s\u3000]+/g, '').trim();
+  }
+
+  function resolveMetricCaptureInput(publication, input = {}) {
+    const capturedAt = input.capturedAt ? new Date(input.capturedAt) : new Date();
+    const safeCapturedAt = Number.isNaN(capturedAt.getTime()) ? new Date() : capturedAt;
+    const publishedAt = publication?.published_at ? new Date(publication.published_at) : safeCapturedAt;
+    const ageHours = Math.max(0, (safeCapturedAt.getTime() - publishedAt.getTime()) / 3_600_000);
+    return {
+      dataDate: input.dataDate ?? safeCapturedAt.toISOString().slice(0, 10),
+      capturedAt: safeCapturedAt.toISOString(),
+      checkpoint: input.checkpoint ?? (ageHours >= 168 ? 'D7' : ageHours >= 72 ? 'D3' : ageHours >= 24 ? 'D1' : 'CUSTOM'),
+    };
+  }
+
+  async function syncPublicPageMetrics(workspaceId, userId, publicationId, input) {
+    const result = await query(`SELECT id, url, published_at
+      FROM publications
+      WHERE workspace_id = $1 AND id = $2`, [workspaceId, publicationId]);
+    if (!result.rows.length) throw businessError(404, 'PUBLICATION_NOT_FOUND', '没有找到这篇已发布文章。');
+    const publication = result.rows[0];
+    if (!publication.url) throw businessError(422, 'PUBLICATION_URL_REQUIRED', '这篇文章没有公开链接，无法读取公开数据。');
+    let metadata;
+    try {
+      metadata = await clipPublicLink(publication.url);
+    } catch (error) {
+      throw businessError(422, 'PUBLIC_PAGE_METRICS_READ_FAILED', error instanceof Error ? error.message : '读取公开文章页面失败。');
+    }
+    const metrics = metadata?.metrics;
+    if (!metrics || !Object.entries(metrics).some(([key, value]) => key.endsWith('Count') && value !== null)) {
+      throw businessError(422, 'PUBLIC_PAGE_METRICS_NOT_FOUND', '公开文章页面当前没有可读取的文章数据。');
+    }
+    const capture = resolveMetricCaptureInput(publication, input);
+    return insertMetricSnapshot(workspaceId, userId, publicationId, {
+      ...capture,
+      exposureCount: metrics.exposureCount ?? null,
+      readCount: metrics.readCount ?? null,
+      playCount: metrics.playCount ?? null,
+      likeCount: metrics.likeCount ?? null,
+      shareCount: metrics.shareCount ?? null,
+      favoriteCount: metrics.favoriteCount ?? null,
+      commentCount: metrics.commentCount ?? null,
+      followerDelta: metrics.followerDelta ?? null,
+      raw: metrics.raw ?? metrics,
+    }, 'PUBLIC_PAGE');
+  }
+
+  async function syncMetrics(workspaceId, userId, publicationId, input) {
+    const accountResult = await query(`SELECT publication.platform, account.mode
+      FROM publications publication
+      JOIN channel_accounts account ON account.workspace_id = publication.workspace_id AND account.id = publication.account_id
+      WHERE publication.workspace_id = $1 AND publication.id = $2`, [workspaceId, publicationId]);
+    const account = accountResult.rows[0];
+    if (account?.platform === 'WECHAT' && account.mode === 'OFFICIAL') {
+      try { return await syncOfficialMetrics(workspaceId, userId, publicationId, input); }
+      catch (officialError) {
+        if (officialError?.code !== 'WECHAT_METRICS_ARTICLE_NOT_FOUND' && officialError?.code !== 'WECHAT_METRICS_ARTICLE_AMBIGUOUS') throw officialError;
+      }
+    }
+    try {
+      return await syncPublicPageMetrics(workspaceId, userId, publicationId, input);
+    } catch (publicError) {
+      try {
+        return await syncOfficialMetrics(workspaceId, userId, publicationId, input);
+      } catch (officialError) {
+        if (officialError?.code === 'WECHAT_METRICS_OFFICIAL_ACCOUNT_REQUIRED' || officialError?.code === 'WECHAT_METRICS_SYNC_UNAVAILABLE') throw publicError;
+        throw officialError;
+      }
+    }
+  }
+
+  async function syncMetricsForAll(workspaceId, userId, input) {
+    const result = await query(`SELECT publication.id, publication.title, publication.platform, publication.url,
+        account.name AS account_name, account.mode, account.status AS account_status
+      FROM publications publication
+      JOIN channel_accounts account ON account.workspace_id = publication.workspace_id AND account.id = publication.account_id
+      WHERE publication.workspace_id = $1 AND publication.status = 'PUBLISHED' AND publication.url <> ''
+      ORDER BY publication.published_at DESC`, [workspaceId]);
+    const results = [];
+    for (const publication of result.rows) {
+      if (publication.account_status === 'DISCONNECTED') {
+        results.push({ articleId: publication.id, title: publication.title, accountName: publication.account_name, status: 'SKIPPED', message: '当前账号已停用，请重新配置账号。' });
+        continue;
+      }
+      try {
+        const metric = await syncMetrics(workspaceId, userId, publication.id, input);
+        results.push({ articleId: publication.id, title: publication.title, accountName: publication.account_name, status: 'SYNCED', metric });
+      } catch (error) {
+        results.push({ articleId: publication.id, title: publication.title, accountName: publication.account_name, status: 'FAILED', message: error instanceof Error ? error.message : '刷新文章数据失败。', code: error?.code ?? null });
+      }
+    }
+    return {
+      results,
+      syncedCount: results.filter((item) => item.status === 'SYNCED').length,
+      skippedCount: results.filter((item) => item.status === 'SKIPPED').length,
+      failedCount: results.filter((item) => item.status === 'FAILED').length,
+    };
+  }
+
+  async function syncOfficialMetrics(workspaceId, userId, publicationId, input) {
+    if (!officialDraftClient?.articleSummary) throw businessError(501, 'WECHAT_METRICS_SYNC_UNAVAILABLE', '公众号文章数据同步能力尚未接入。');
+    const publicationResult = await query(`SELECT publication.*, account.mode, account.platform
+      FROM publications publication
+      JOIN channel_accounts account ON account.workspace_id = publication.workspace_id AND account.id = publication.account_id
+      WHERE publication.workspace_id = $1 AND publication.id = $2`, [workspaceId, publicationId]);
+    if (!publicationResult.rows.length) throw businessError(404, 'PUBLICATION_NOT_FOUND', '没有找到这篇已发布文章。');
+    const publication = publicationResult.rows[0];
+    if (publication.platform !== 'WECHAT' || publication.mode !== 'OFFICIAL') throw businessError(409, 'WECHAT_METRICS_OFFICIAL_ACCOUNT_REQUIRED', '只有已接入公众号官方接口的账号才能同步文章数据；当前账号请手工回填。');
+    const publicationTitle = normalizeArticleTitle(publication.title);
+    if (!publicationTitle) throw businessError(409, 'WECHAT_METRICS_ARTICLE_TITLE_REQUIRED', '这篇发布记录没有文章标题，无法安全匹配微信数据，请先补充标题后再同步。');
+    const credential = await officialCredential(workspaceId, publication.account_id);
+    const capture = resolveMetricCaptureInput(publication, input);
+    const apiDate = input.dataDate ?? new Date(publication.published_at).toISOString().slice(0, 10);
+    const rows = await officialDraftClient.articleSummary({ credential, beginDate: apiDate, endDate: apiDate });
+    const candidates = rows.filter((row) => normalizeArticleTitle(row.title) === publicationTitle);
+    if (candidates.length !== 1) {
+      throw businessError(409, candidates.length ? 'WECHAT_METRICS_ARTICLE_AMBIGUOUS' : 'WECHAT_METRICS_ARTICLE_NOT_FOUND', candidates.length ? '微信返回了多篇同名文章，无法安全匹配数据，请手工回填。' : '微信在该日期没有返回标题完全匹配的文章，请确认采集日期或手工回填。', { dataDate: input.dataDate, matchedCount: candidates.length });
+    }
+    const row = candidates[0];
+    return insertMetricSnapshot(workspaceId, userId, publicationId, {
+      ...capture,
+      exposureCount: null,
+      readCount: row.int_page_read_count ?? null,
+      playCount: null,
+      likeCount: row.like_count ?? null,
+      shareCount: row.share_count ?? null,
+      favoriteCount: row.add_to_fav_count ?? null,
+      commentCount: row.comment_count ?? null,
+      followerDelta: null,
+      raw: row,
+    }, 'OFFICIAL_API');
+  }
+
+  async function syncOfficialMetricsForAll(workspaceId, userId, input) {
+    if (!officialDraftClient?.articleSummary) throw businessError(501, 'WECHAT_METRICS_SYNC_UNAVAILABLE', '公众号文章数据同步能力尚未接入。');
+    const result = await query(`SELECT publication.id, publication.account_id, publication.title, publication.platform, account.mode, account.status AS account_status, account.name AS account_name
+      FROM publications publication
+      JOIN channel_accounts account ON account.workspace_id = publication.workspace_id AND account.id = publication.account_id
+      WHERE publication.workspace_id = $1 AND publication.status = 'PUBLISHED'
+      ORDER BY publication.published_at DESC`, [workspaceId]);
+    const results = [];
+    const officialPublicationsByAccount = new Map();
+    for (const publication of result.rows) {
+      if (publication.account_status === 'DISCONNECTED' || publication.platform !== 'WECHAT' || publication.mode !== 'OFFICIAL') {
+        results.push({ articleId: publication.id, title: publication.title, accountName: publication.account_name, status: 'SKIPPED', message: publication.account_status === 'DISCONNECTED' ? '当前账号已停用，请重新配置账号' : '当前账号未接入公众号官方数据接口' });
+        continue;
+      }
+      const grouped = officialPublicationsByAccount.get(publication.account_id) ?? [];
+      grouped.push(publication);
+      officialPublicationsByAccount.set(publication.account_id, grouped);
+    }
+    for (const [accountId, publications] of officialPublicationsByAccount) {
+      try {
+        const credential = await officialCredential(workspaceId, accountId);
+        const rows = await officialDraftClient.articleSummary({ credential, beginDate: input.dataDate, endDate: input.dataDate });
+        const articlesByTitle = new Map();
+        for (const row of rows) {
+          const title = normalizeArticleTitle(row.title);
+          if (!title) continue;
+          const matches = articlesByTitle.get(title) ?? [];
+          matches.push(row);
+          articlesByTitle.set(title, matches);
+        }
+        for (const publication of publications) {
+          const candidates = articlesByTitle.get(normalizeArticleTitle(publication.title)) ?? [];
+          if (candidates.length !== 1) {
+            results.push({
+              articleId: publication.id,
+              title: publication.title,
+              accountName: publication.account_name,
+              status: 'FAILED',
+              code: candidates.length ? 'WECHAT_METRICS_ARTICLE_AMBIGUOUS' : 'WECHAT_METRICS_ARTICLE_NOT_FOUND',
+              message: candidates.length ? '微信公众号返回多篇同名文章，无法安全匹配数据' : '指定日期没有找到标题匹配的公众号文章',
+            });
+            continue;
+          }
+          const row = candidates[0];
+          const metric = await insertMetricSnapshot(workspaceId, userId, publication.id, {
+            dataDate: input.dataDate,
+            capturedAt: input.capturedAt ?? new Date().toISOString(),
+            exposureCount: null,
+            readCount: row.int_page_read_count ?? null,
+            playCount: null,
+            likeCount: row.like_count ?? null,
+            shareCount: row.share_count ?? null,
+            favoriteCount: row.add_to_fav_count ?? null,
+            commentCount: row.comment_count ?? null,
+            followerDelta: null,
+            raw: row,
+            checkpoint: input.checkpoint ?? 'CUSTOM',
+          }, 'OFFICIAL_API');
+          results.push({ articleId: publication.id, title: publication.title, accountName: publication.account_name, status: 'SYNCED', metric });
+        }
+      } catch (error) {
+        for (const publication of publications) {
+          results.push({ articleId: publication.id, title: publication.title, accountName: publication.account_name, status: 'FAILED', message: error instanceof Error ? error.message : '同步失败', code: error?.code ?? null });
+        }
+      }
+    }
+    return {
+      results,
+      syncedCount: results.filter((item) => item.status === 'SYNCED').length,
+      skippedCount: results.filter((item) => item.status === 'SKIPPED').length,
+      failedCount: results.filter((item) => item.status === 'FAILED').length,
+    };
   }
 
   async function listMetricSnapshots(workspaceId, publicationId) {
@@ -640,9 +974,16 @@ function createPublishingStore({ query, transaction, encryptSecret, decryptSecre
     createManualPackage,
     createOfficialDraft,
     listTasks,
+    registerPublication,
+    registerStandalonePublication,
     manualConfirm,
     listPublications,
+    deletePublication,
     addMetricSnapshot,
+    syncMetrics,
+    syncMetricsForAll,
+    syncOfficialMetrics,
+    syncOfficialMetricsForAll,
     listMetricSnapshots,
     saveRetrospective,
   };

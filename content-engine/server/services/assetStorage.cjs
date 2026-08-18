@@ -5,17 +5,20 @@ const path = require('node:path');
 const { Transform } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 const { businessError } = require('./business-errors.cjs');
+const { downloadImageWithBrowser } = require('./browser-reader.cjs');
+const { externalFetch } = require('./network.cjs');
 const { validatePublicUrl } = require('./public-web.cjs');
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+const MAX_VIDEO_UPLOAD_BYTES = 1024 * 1024 * 1024;
 const MAX_REMOTE_IMAGE_BYTES = 15_000_000;
 const MIME_EXTENSIONS = new Map([
-  ['image/jpeg', '.jpg'], ['image/png', '.png'], ['image/webp', '.webp'], ['image/gif', '.gif'],
+  ['image/jpeg', '.jpg'], ['image/png', '.png'], ['image/webp', '.webp'], ['image/gif', '.gif'], ['image/avif', '.avif'],
   ['application/pdf', '.pdf'], ['text/plain', '.txt'], ['text/markdown', '.md'],
   ['audio/mpeg', '.mp3'], ['audio/wav', '.wav'], ['audio/mp4', '.m4a'],
   ['video/mp4', '.mp4'], ['video/webm', '.webm'],
 ]);
-const REMOTE_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+const REMOTE_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif']);
 const GENERIC_BINARY_TYPES = new Set(['', 'application/octet-stream', 'binary/octet-stream']);
 
 function normalizeMime(value) {
@@ -24,6 +27,10 @@ function normalizeMime(value) {
   if (mimeType === 'audio/x-wav' || mimeType === 'audio/wave' || mimeType === 'audio/vnd.wave') return 'audio/wav';
   if (mimeType === 'text/x-markdown') return 'text/markdown';
   return mimeType;
+}
+
+function maxUploadBytesForMime(mimeType) {
+  return normalizeMime(mimeType).startsWith('video/') ? MAX_VIDEO_UPLOAD_BYTES : MAX_UPLOAD_BYTES;
 }
 
 function safePath(root, storageKey) {
@@ -60,6 +67,7 @@ function detectFileType(head, sample = head, declaredMimeType = '') {
   if (bytes.length >= 12 && bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WAVE') return { mimeType: 'audio/wav', kind: 'AUDIO', extension: '.wav' };
   if (bytes.length >= 12 && bytes.subarray(4, 8).toString('ascii') === 'ftyp') {
     const brand = bytes.subarray(8, 12).toString('ascii');
+    if (brand === 'avif' || brand === 'avis') return { mimeType: 'image/avif', kind: 'IMAGE', extension: '.avif' };
     if (declared === 'audio/mp4' || /^M4[ABP ]$/.test(brand)) return { mimeType: 'audio/mp4', kind: 'AUDIO', extension: '.m4a' };
     return { mimeType: 'video/mp4', kind: 'VIDEO', extension: '.mp4' };
   }
@@ -77,7 +85,7 @@ async function streamAndHash(readable, target, maxBytes) {
   const counter = new Transform({
     transform(chunk, _encoding, callback) {
       sizeBytes += chunk.length;
-      if (sizeBytes > maxBytes) return callback(businessError(413, 'ASSET_FILE_TOO_LARGE', '文件超过 50MB 上限。'));
+      if (sizeBytes > maxBytes) return callback(businessError(413, 'ASSET_FILE_TOO_LARGE', `文件超过 ${Math.round(maxBytes / 1024 / 1024)}MB 上限。`));
       hash.update(chunk);
       if (sampleBytes < 8192) {
         const remaining = 8192 - sampleBytes;
@@ -89,7 +97,7 @@ async function streamAndHash(readable, target, maxBytes) {
     },
   });
   await pipeline(readable, counter, fs.createWriteStream(target, { flags: 'wx' }));
-  if (readable.truncated) throw businessError(413, 'ASSET_FILE_TOO_LARGE', '文件超过 50MB 上限。');
+  if (readable.truncated) throw businessError(413, 'ASSET_FILE_TOO_LARGE', `文件超过 ${Math.round(maxBytes / 1024 / 1024)}MB 上限。`);
   if (!sizeBytes) throw businessError(400, 'ASSET_FILE_EMPTY', '不能上传空文件。');
   const sample = Buffer.concat(samples, sampleBytes);
   return { sizeBytes, sha256: hash.digest('hex'), head: sample.subarray(0, 32), sample };
@@ -104,7 +112,7 @@ async function saveUploadedAsset(root, workspaceId, part) {
   const temporaryKey = [workspaceId, 'assets', `${crypto.randomUUID()}.upload`].join('/');
   const temporaryPath = safePath(root, temporaryKey);
   try {
-    const result = await streamAndHash(part.file, temporaryPath, MAX_UPLOAD_BYTES);
+    const result = await streamAndHash(part.file, temporaryPath, maxUploadBytesForMime(declaredMimeType));
     const detected = detectFileType(result.head, result.sample, declaredMimeType);
     if (!detected || detected.mimeType !== declaredMimeType) throw businessError(400, 'ASSET_FILE_INVALID', '文件内容与声明格式不一致。');
     const storageKey = [workspaceId, 'assets', `${crypto.randomUUID()}${detected.extension}`].join('/');
@@ -149,26 +157,53 @@ async function readBufferLimited(response, maxBytes) {
   return Buffer.concat(chunks, sizeBytes);
 }
 
-async function saveRemoteImageAsset(root, workspaceId, rawUrl, { fetchImpl = fetch, validateUrl = validatePublicUrl } = {}) {
-  let url = await validateUrl(rawUrl);
+async function saveRemoteImageAsset(root, workspaceId, rawUrl, { fallbackUrl = '', fetchImpl = externalFetch, browserFetch = downloadImageWithBrowser, validateUrl = validatePublicUrl } = {}) {
+  const candidates = [...new Set([rawUrl, fallbackUrl].map((value) => String(value ?? '').trim()).filter(Boolean))];
+  let lastError;
+  let url;
   let response;
-  for (let redirects = 0; redirects < 4; redirects += 1) {
-    response = await fetchImpl(url, {
-      redirect: 'manual',
-      signal: AbortSignal.timeout(30_000),
-      headers: { 'User-Agent': 'ContentEngine/1.0 Image Import', Accept: 'image/webp,image/png,image/jpeg,image/gif', 'Accept-Encoding': 'identity' },
-    });
-    if (![301, 302, 303, 307, 308].includes(response.status)) break;
-    const location = response.headers.get('location');
-    if (!location) throw businessError(400, 'ASSET_REMOTE_REDIRECT_INVALID', '图片链接跳转缺少目标地址。');
-    url = await validateUrl(new URL(location, url).toString());
+  let browserResult;
+  for (const candidate of candidates) {
+    try {
+      url = await validateUrl(candidate);
+      for (let redirects = 0; redirects < 4; redirects += 1) {
+        response = await fetchImpl(url, {
+          redirect: 'manual',
+          signal: AbortSignal.timeout(30_000),
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138.0 Safari/537.36', Accept: 'image/avif,image/webp,image/png,image/jpeg,image/gif,*/*;q=0.8', 'Accept-Encoding': 'identity' },
+        });
+        if (![301, 302, 303, 307, 308].includes(response.status)) break;
+        const location = response.headers.get('location');
+        if (!location) throw businessError(400, 'ASSET_REMOTE_REDIRECT_INVALID', '图片链接跳转缺少目标地址。');
+        url = await validateUrl(new URL(location, url).toString());
+      }
+      if (!response?.ok) throw businessError(400, 'ASSET_REMOTE_DOWNLOAD_FAILED', `下载图片失败（HTTP ${response?.status ?? '网络错误'}）。`);
+      break;
+    } catch (error) {
+      lastError = error;
+      response = undefined;
+    }
   }
-  if (!response?.ok) throw businessError(400, 'ASSET_REMOTE_DOWNLOAD_FAILED', `下载图片失败（HTTP ${response?.status ?? '网络错误'}）。`);
-  const declaredMimeType = normalizeMime(response.headers.get('content-type'));
+  if (!response?.ok) {
+    for (const candidate of candidates) {
+      try {
+        browserResult = await browserFetch(candidate, validateUrl);
+        url = browserResult.url;
+        break;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (!browserResult) {
+      if (lastError?.code) throw lastError;
+      throw businessError(400, 'ASSET_REMOTE_DOWNLOAD_FAILED', '候选图片暂时无法下载，请换一张候选图或打开来源页确认图片可访问。');
+    }
+  }
+  const declaredMimeType = normalizeMime(browserResult?.contentType ?? response.headers.get('content-type'));
   if (!REMOTE_IMAGE_TYPES.has(declaredMimeType) && !GENERIC_BINARY_TYPES.has(declaredMimeType)) throw businessError(400, 'ASSET_REMOTE_INVALID', '远程链接返回的不是受支持图片。');
-  const declaredSize = Number(response.headers.get('content-length'));
+  const declaredSize = browserResult ? browserResult.buffer.length : Number(response.headers.get('content-length'));
   if (Number.isFinite(declaredSize) && declaredSize > MAX_REMOTE_IMAGE_BYTES) throw businessError(413, 'ASSET_REMOTE_TOO_LARGE', '远程图片超过 15MB 上限。');
-  const buffer = await readBufferLimited(response, MAX_REMOTE_IMAGE_BYTES);
+  const buffer = browserResult?.buffer ?? await readBufferLimited(response, MAX_REMOTE_IMAGE_BYTES);
   if (!buffer.length) throw businessError(400, 'ASSET_FILE_EMPTY', '远程图片内容为空。');
   const detected = detectFileType(buffer.subarray(0, 32), buffer);
   if (!detected || detected.kind !== 'IMAGE' || (REMOTE_IMAGE_TYPES.has(declaredMimeType) && declaredMimeType !== detected.mimeType)) throw businessError(400, 'ASSET_FILE_INVALID', '远程内容与图片格式不一致。');
@@ -219,10 +254,12 @@ async function removeWorkspaceDirectory(root, workspaceId) {
 
 module.exports = {
   MAX_UPLOAD_BYTES,
+  MAX_VIDEO_UPLOAD_BYTES,
   MAX_REMOTE_IMAGE_BYTES,
   MIME_EXTENSIONS,
   detectFileType,
   normalizeMime,
+  maxUploadBytesForMime,
   safePath,
   saveUploadedAsset,
   saveRemoteImageAsset,

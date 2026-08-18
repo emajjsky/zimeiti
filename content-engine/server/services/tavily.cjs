@@ -2,6 +2,7 @@ const { decrypt } = require('../crypto.cjs');
 const { query } = require('../db.cjs');
 const { sourceName } = require('./public-web.cjs');
 const { classifyIntelligence } = require('./intelligenceClassifier.cjs');
+const { externalFetch } = require('./network.cjs');
 const crypto = require('node:crypto');
 
 async function searchTavily(workspaceId, input) {
@@ -13,7 +14,7 @@ async function searchTavily(workspaceId, input) {
   const domains = Array.isArray(input?.domains) ? input.domains.filter((item) => typeof item === 'string' && item.length < 120).slice(0, 5) : [];
   let response;
   try {
-    response = await fetch('https://api.tavily.com/search', { method: 'POST', signal: AbortSignal.timeout(30_000), headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ query: queryText, topic: 'news', search_depth: 'basic', max_results: 10, include_domains: domains.length ? domains : undefined }) });
+    response = await externalFetch('https://api.tavily.com/search', { method: 'POST', signal: AbortSignal.timeout(30_000), headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ query: queryText, topic: 'news', search_depth: 'basic', max_results: 10, include_domains: domains.length ? domains : undefined }) });
   } catch (error) {
     throw new Error(`Tavily 无法连接网络：${error instanceof Error ? error.message : '未知网络错误'}。`);
   }
@@ -38,7 +39,7 @@ async function searchTavilyImages(workspaceId, queryText) {
   if (normalized.length < 2 || normalized.length > 120) return [];
   let response;
   try {
-    response = await fetch('https://api.tavily.com/search', {
+    response = await externalFetch('https://api.tavily.com/search', {
       method: 'POST',
       signal: AbortSignal.timeout(12_000),
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },

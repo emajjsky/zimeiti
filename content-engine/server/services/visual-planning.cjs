@@ -1,9 +1,21 @@
 const { z } = require('zod');
+const { normalizeRichContentPackage } = require('./rich-content-understanding.cjs');
 
 const VISUAL_PLANNING_SCOPE = 'WECHAT_VISUAL_PLANNING';
 const VISUAL_PLANNING_OPERATION = 'WECHAT_VISUAL_PLANNING';
-const VISUAL_PLANNING_PROMPT_VERSION = '2.0.0';
+const VISUAL_PLANNING_PROMPT_VERSION = '2.2.0';
 const VISUAL_PLANNING_TOOL_NAME = 'submit_visual_plan';
+// 这些是跨模型、工具参数和持久化接口共用的业务上限。
+// 上限只用于防止异常超长输出，不应限制模型为检索补充必要上下文。
+const SEARCH_QUERY_MAX_LENGTH = 300;
+const SEARCH_QUERY_MAX_COUNT = 8;
+const INFORMATION_POINT_MAX_LENGTH = 500;
+const INFORMATION_POINT_MAX_COUNT = 8;
+const CONTENT_BLOCK_LABEL_MAX_LENGTH = 120;
+const CONTENT_BLOCK_DETAIL_MAX_LENGTH = 1_000;
+const CONTENT_BLOCK_MAX_COUNT = 12;
+const AVOID_CONCEPT_MAX_LENGTH = 160;
+const AVOID_CONCEPT_MAX_COUNT = 12;
 
 const platformNames = {
   WECHAT: '公众号',
@@ -31,22 +43,23 @@ const visualType = z.enum(['NEWS_PHOTO', 'HERO_VISUAL', 'CONCEPT_DIAGRAM', 'SCEN
 const role = z.enum(['COVER', 'BODY', 'CARD', 'MAIN']);
 const generationMode = z.enum(['ILLUSTRATION', 'INFOGRAPHIC']);
 const contentBlockSchema = z.object({
-  label: z.string().trim().min(2).max(40),
-  detail: z.string().trim().min(6).max(180),
+  label: z.string().trim().min(1).max(CONTENT_BLOCK_LABEL_MAX_LENGTH),
+  detail: z.string().trim().min(1).max(CONTENT_BLOCK_DETAIL_MAX_LENGTH),
 });
 
 const plannedItemSchema = z.object({
   role,
-  title: z.string().trim().min(2).max(80),
-  placement: z.string().trim().min(2).max(160),
-  purpose: z.string().trim().min(8).max(300),
+  title: z.string().trim().min(1).max(200),
+  placement: z.string().trim().min(1).max(500),
+  purpose: z.string().trim().min(1).max(1_000),
   visualType,
-  focus: z.string().trim().min(8).max(300),
-  searchQueries: z.array(z.string().trim().min(2).max(60)).min(2).max(4),
+  focus: z.string().trim().min(1).max(1_000),
+  avoidConcepts: z.array(z.string().trim().min(1).max(AVOID_CONCEPT_MAX_LENGTH)).max(AVOID_CONCEPT_MAX_COUNT).default([]),
+  searchQueries: z.array(z.string().trim().min(1).max(SEARCH_QUERY_MAX_LENGTH)).min(1).max(SEARCH_QUERY_MAX_COUNT),
   generationMode,
-  informationPoints: z.array(z.string().trim().min(4).max(100)).min(1).max(6),
-  sourceExcerpt: z.string().trim().min(8).max(1_200),
-  contentBlocks: z.array(contentBlockSchema).max(6),
+  informationPoints: z.array(z.string().trim().min(1).max(INFORMATION_POINT_MAX_LENGTH)).min(1).max(INFORMATION_POINT_MAX_COUNT),
+  sourceExcerpt: z.string().trim().min(1).max(8_000),
+  contentBlocks: z.array(contentBlockSchema).max(CONTENT_BLOCK_MAX_COUNT),
 }).superRefine((item, context) => {
   if (item.generationMode === 'INFOGRAPHIC' && item.contentBlocks.length === 0) {
     context.addIssue({
@@ -80,20 +93,21 @@ const visualPlanningTool = Object.freeze({
             required: ['role', 'title', 'placement', 'purpose', 'visualType', 'focus', 'searchQueries', 'generationMode', 'informationPoints', 'sourceExcerpt', 'contentBlocks'],
             properties: {
               role: { type: 'string', enum: role.options, description: '图片在公众号方案中的角色。完整方案只能是首项 COVER、其余 BODY。' },
-              title: { type: 'string', minLength: 2, maxLength: 80, description: '用户可读的具体图片名称。' },
-              placement: { type: 'string', minLength: 2, maxLength: 160, description: '图片应插入正文的准确段落或句子之后。' },
-              purpose: { type: 'string', minLength: 8, maxLength: 300, description: '说明为什么正文需要这张图以及它承担的阅读任务。' },
+              title: { type: 'string', minLength: 1, maxLength: 200, description: '用户可读的具体图片名称。' },
+              placement: { type: 'string', minLength: 1, maxLength: 500, description: '图片应插入正文的准确段落或句子之后。' },
+              purpose: { type: 'string', minLength: 1, maxLength: 1_000, description: '说明为什么正文需要这张图以及它承担的阅读任务。' },
               visualType: { type: 'string', enum: visualType.options, description: '与正文信息关系匹配的视觉类型。' },
-              focus: { type: 'string', minLength: 8, maxLength: 300, description: '画面中具体可见的主体、动作、关系和场景。' },
-              searchQueries: { type: 'array', minItems: 2, maxItems: 4, description: '能搜索到画面内容的具体短语，不得包含模板、排版、图标、PPT 等设计形式词。', items: { type: 'string', minLength: 2, maxLength: 60 } },
+              focus: { type: 'string', minLength: 1, maxLength: 1_000, description: '可直接交给生图模型执行的正向画面任务，按景别或视角、主体、动作或状态、环境、构图关系和必须出现的视觉证据组织；不要写成正文解释或“移除/不要/避免……”的否定句。' },
+              avoidConcepts: { type: 'array', maxItems: AVOID_CONCEPT_MAX_COUNT, description: '不应出现在画面中的具体物体、标识、文字或重复表达；只写名词短语，不要把这些内容塞进 focus。', items: { type: 'string', minLength: 1, maxLength: AVOID_CONCEPT_MAX_LENGTH } },
+              searchQueries: { type: 'array', minItems: 1, maxItems: SEARCH_QUERY_MAX_COUNT, description: '能搜索到画面内容的具体短语或必要上下文，不得包含模板、排版、图标、PPT 等设计形式词。', items: { type: 'string', minLength: 1, maxLength: SEARCH_QUERY_MAX_LENGTH } },
               generationMode: { type: 'string', enum: generationMode.options, description: '照片、场景和主视觉使用 ILLUSTRATION；结构关系图使用 INFOGRAPHIC。' },
-              informationPoints: { type: 'array', minItems: 1, maxItems: 6, description: '图片必须准确传达且能由正文支持的具体信息。', items: { type: 'string', minLength: 4, maxLength: 100 } },
-              sourceExcerpt: { type: 'string', minLength: 8, maxLength: 1200, description: '支持本图的正文原句或忠实摘要。' },
+              informationPoints: { type: 'array', minItems: 1, maxItems: INFORMATION_POINT_MAX_COUNT, description: '图片必须准确传达且能由正文支持的具体信息。', items: { type: 'string', minLength: 1, maxLength: INFORMATION_POINT_MAX_LENGTH } },
+              sourceExcerpt: { type: 'string', minLength: 1, maxLength: 8_000, description: '支持本图的正文原句或忠实摘要。' },
               contentBlocks: {
-                type: 'array', maxItems: 6,
+                type: 'array', maxItems: CONTENT_BLOCK_MAX_COUNT,
                 items: {
                   type: 'object', additionalProperties: false, required: ['label', 'detail'],
-                  properties: { label: { type: 'string', minLength: 2, maxLength: 40 }, detail: { type: 'string', minLength: 6, maxLength: 180 } },
+                  properties: { label: { type: 'string', minLength: 1, maxLength: CONTENT_BLOCK_LABEL_MAX_LENGTH }, detail: { type: 'string', minLength: 1, maxLength: CONTENT_BLOCK_DETAIL_MAX_LENGTH } },
                 },
               },
             },
@@ -103,6 +117,28 @@ const visualPlanningTool = Object.freeze({
     },
   },
 });
+
+function buildVisualPlanningTool({ platform, quantityMode = 'MANUAL', bodyItemCount, singleItem = false } = {}) {
+  const quantity = quantityInstruction(platform, quantityMode, bodyItemCount, singleItem);
+  const items = visualPlanningTool.function.parameters.properties.items;
+  const exactCount = quantity.totalImageCount ?? (quantityMode === 'AUTO' ? null : bodyItemCount + 1);
+  return {
+    ...visualPlanningTool,
+    function: {
+      ...visualPlanningTool.function,
+      parameters: {
+        ...visualPlanningTool.function.parameters,
+        properties: {
+          ...visualPlanningTool.function.parameters.properties,
+          items: {
+            ...items,
+            ...(exactCount ? { minItems: exactCount, maxItems: exactCount } : { minItems: 3, maxItems: 12 }),
+          },
+        },
+      },
+    },
+  };
+}
 
 const genericOnly = /^(关键|节点|时间|重点|核心|内容|信息|主题|场景|要点|结论|背景|价值|问题|方法|流程|数据|人物|事件|图片|配图)[一二三四五六七八九十\d\s、，：:.-]*$/;
 const searchNoise = /(模板|矢量|图标|字体|字效|排版|版式|PPT|信息卡|知识卡|海报|素材|图表|架构图|示意图|流程图|对比图|框架图|思维导图)/i;
@@ -123,11 +159,91 @@ function fallbackSearchQueries(item) {
 }
 
 function normalizeSearchQueries(item) {
-  const cleaned = item.searchQueries
+  const cleaned = (Array.isArray(item.searchQueries) ? item.searchQueries : [])
     .map((query) => cleanSearchQuery(query))
     .filter((query) => query.length >= 2 && !searchNoise.test(query));
-  const merged = [...new Set([...cleaned, ...fallbackSearchQueries(item)])].slice(0, 4);
-  return merged.length >= 2 ? merged : item.searchQueries;
+  const merged = [...new Set([...cleaned, ...fallbackSearchQueries(item)])]
+    .map((query) => query.slice(0, SEARCH_QUERY_MAX_LENGTH))
+    .filter(Boolean)
+    .slice(0, SEARCH_QUERY_MAX_COUNT);
+  return merged.length >= 1 ? merged : item.searchQueries;
+}
+
+function limitText(value, maxLength) {
+  return typeof value === 'string' ? value.trim().slice(0, maxLength) : value;
+}
+
+const visualTypeAliases = new Map([
+  ['EDITORIAL_ILLUSTRATION', 'HERO_VISUAL'],
+  ['HERO_ILLUSTRATION', 'HERO_VISUAL'],
+  ['COVER', 'HERO_VISUAL'],
+  ['PHOTO', 'NEWS_PHOTO'],
+  ['PHOTOGRAPH', 'NEWS_PHOTO'],
+  ['DIAGRAM', 'CONCEPT_DIAGRAM'],
+  ['INFOGRAPHIC', 'CONCEPT_DIAGRAM'],
+  ['MINDMAP', 'MIND_MAP'],
+  ['FLOW_CHART', 'FLOWCHART'],
+  ['DATA_VISUALIZATION', 'DATA_CHART'],
+  ['QUOTE', 'QUOTE_CARD'],
+  ['INFORMATION_CARD', 'INFO_CARD'],
+  ['CHECKLIST', 'CHECKLIST_CARD'],
+]);
+
+function normalizedEnumValue(value) {
+  return String(value ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+}
+
+function normalizeVisualType(value) {
+  const normalized = normalizedEnumValue(value);
+  return visualType.options.includes(normalized) ? normalized : visualTypeAliases.get(normalized) ?? normalized;
+}
+
+function normalizeVisualPlanPayload(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  return {
+    ...value,
+    strategy: limitText(value.strategy, 500),
+    items: Array.isArray(value.items) ? value.items.map((rawItem) => {
+      if (!rawItem || typeof rawItem !== 'object' || Array.isArray(rawItem)) return rawItem;
+      const item = {
+        ...rawItem,
+        role: normalizedEnumValue(rawItem.role),
+        visualType: normalizeVisualType(rawItem.visualType),
+        generationMode: normalizedEnumValue(rawItem.generationMode),
+        title: limitText(rawItem.title, 200),
+        placement: limitText(rawItem.placement, 500),
+        purpose: limitText(rawItem.purpose, 1_000),
+        focus: limitText(rawItem.focus, 1_000),
+        sourceExcerpt: limitText(rawItem.sourceExcerpt, 8_000),
+      };
+      if (Array.isArray(rawItem.avoidConcepts)) {
+        item.avoidConcepts = rawItem.avoidConcepts
+          .map((concept) => limitText(concept, AVOID_CONCEPT_MAX_LENGTH))
+          .slice(0, AVOID_CONCEPT_MAX_COUNT);
+      }
+      if (Array.isArray(rawItem.searchQueries)) {
+        item.searchQueries = rawItem.searchQueries
+          .map((query) => typeof query === 'string' ? query.trim().slice(0, SEARCH_QUERY_MAX_LENGTH) : query)
+          .slice(0, SEARCH_QUERY_MAX_COUNT);
+      }
+      if (Array.isArray(rawItem.informationPoints)) {
+        item.informationPoints = rawItem.informationPoints
+          .map((point) => limitText(point, INFORMATION_POINT_MAX_LENGTH))
+          .slice(0, INFORMATION_POINT_MAX_COUNT);
+      }
+      if (Array.isArray(rawItem.contentBlocks)) {
+        item.contentBlocks = rawItem.contentBlocks.map((block) => {
+          if (!block || typeof block !== 'object' || Array.isArray(block)) return block;
+          return {
+            ...block,
+            label: limitText(block.label, CONTENT_BLOCK_LABEL_MAX_LENGTH),
+            detail: limitText(block.detail, CONTENT_BLOCK_DETAIL_MAX_LENGTH),
+          };
+        }).slice(0, CONTENT_BLOCK_MAX_COUNT);
+      }
+      return item;
+    }) : value.items,
+  };
 }
 
 function assertSpecificPlan(plan) {
@@ -181,7 +297,8 @@ function parseVisualPlanningContent(content, { platform, quantityMode = 'MANUAL'
   let value;
   try { value = JSON.parse(stripCodeFence(content)); }
   catch { throw new Error('模型返回的配图方案不是有效 JSON。'); }
-  const parsed = visualPlanSchema.parse(value);
+  // 模型输出先归一化，再进入结构与业务校验；避免合法上下文仅因边界空白或略长被拒绝。
+  const parsed = visualPlanSchema.parse(normalizeVisualPlanPayload(value));
   const checked = assertSpecificPlan({
     ...parsed,
     items: parsed.items.map((item) => ({ ...item, searchQueries: normalizeSearchQueries(item) })),
@@ -221,16 +338,20 @@ function buildVisualPlanningPrompt({ project, platform, quantityMode, bodyItemCo
     '你是资深内容视觉导演。你的工作不是罗列设计参数，而是把已完成正文转成可直接执行的配图方案。',
     '先理解文章叙事和每一段的传播任务，再决定真实场景图、资料图、主体主视觉或确有必要的结构图。整套方案必须以图片内容为主、文字为辅，不能做成文字型 PPT、课程卡片或大段文字海报。',
     '每张图只能完成一个明确任务，必须绑定正文中的具体事实、关系、场景或结论。禁止用“关键、节点、时间、重点、核心、内容、信息”等空词代替具体内容。',
+    'focus 不是正文摘要，也不是为什么配图；它必须是一条可直接执行的正向镜头 brief，至少交代：景别或视角、主体、动作或最终状态、环境、构图中的空间关系、读者必须看见的视觉证据。优先使用“俯拍/近景/中景 + 具体主体 + 正在发生的动作或已经形成的状态 + 具体环境 + 前后/左右/远近关系”的表达。抽象收益、观点和安全结论必须翻译为可见画面。',
+    '涉及“清除、减少、避免、改善、改造、前后变化”等内容时，只在 focus 中描述最终要看见的正向状态，例如“玄关地面平整开阔，老人脚步稳定通过”；把原本不应出现的物体或表达单独写入 avoidConcepts。不得依赖“没有、移除、不要出现”来承担主画面信息。',
     '只有正文存在明确数据、时间顺序、对比关系或流程时，才能使用数据图、时间线、对比图或流程图；即便如此也应以可视化关系为主，只保留不可缺少的短标签。不得编造任何数据、事实、机构、人物、引语或新闻现场。',
-    '搜索词必须描述能在图片中直接看到的主体、动作、地点、器物或真实场景，优先“专有主体 + 可见动作/场景”。每条搜索词不超过 60 个字符。禁止把模板、矢量、图标、字体、排版、PPT、信息卡、知识卡、海报、素材、图表、架构图、示意图、流程图、对比图、框架图、思维导图当作搜索词。不得使用完整句子。抽象关系由 AI 生图表达，不去网页图库搜索 PPT 图。',
-    'NEWS_PHOTO、HERO_VISUAL、SCENE 等照片或场景画面应使用 ILLUSTRATION，contentBlocks 必须返回空数组；只有需要在图内表达流程、时间、对比、数据或结构关系时才使用 INFOGRAPHIC，此时 contentBlocks 必须包含 1 至 6 个必要短标签及其准确内容。',
-    '你只负责策划画面主体、动作、环境、关系和正文依据。最终生图指令、项目统一艺术方向和图片比例由系统确定性编译，不得在工具参数中自行提交。',
+    `搜索词必须描述能在图片中直接看到的主体、动作、地点、器物或真实场景，优先“专有主体 + 可见动作/场景”，允许为适配检索补充必要上下文；每张图提供 1 到 ${SEARCH_QUERY_MAX_COUNT} 条，每条不超过 ${SEARCH_QUERY_MAX_LENGTH} 个字符。禁止把模板、矢量、图标、字体、排版、PPT、信息卡、知识卡、海报、素材、图表、架构图、示意图、流程图、对比图、框架图、思维导图当作搜索词。`,
+    `NEWS_PHOTO、HERO_VISUAL、SCENE 等照片或场景画面应使用 ILLUSTRATION，contentBlocks 必须返回空数组；只有需要在图内表达流程、时间、对比、数据或结构关系时才使用 INFOGRAPHIC，此时 contentBlocks 必须包含 1 至 ${CONTENT_BLOCK_MAX_COUNT} 个必要短标签及其准确内容。`,
+    quantity.instruction,
+    '你只负责策划可执行画面任务、避让对象、搜索词、图内信息和正文依据。最终生图指令、项目统一艺术方向和图片比例由系统确定性编译，不得在工具参数中自行提交。',
     `必须调用且只能调用一次 ${VISUAL_PLANNING_TOOL_NAME} 提交最终方案；不要输出普通文本、代码围栏、解释或备选方案。`,
   ].join('\n');
   const message = JSON.stringify({
     task: singleItem ? '根据用户意见只重做当前这一张的策划' : '生成完整配图方案',
     submissionTool: VISUAL_PLANNING_TOOL_NAME,
-    contentBlockRule: 'ILLUSTRATION 的 contentBlocks 必须为 []；INFOGRAPHIC 的 contentBlocks 必须为 1 至 6 项数组',
+    contentBlockRule: `ILLUSTRATION 的 contentBlocks 必须为 []；INFOGRAPHIC 的 contentBlocks 必须为 1 至 ${CONTENT_BLOCK_MAX_COUNT} 项数组`,
+    focusRule: 'focus 必须是正向、可执行的镜头 brief；avoidConcepts 单独承载不应出现或不应重复的具体对象和表达。',
     allowedVisualTypes: visualType.options,
     platform: { code: platform, name: platformName },
     requiredRoles: singleItem ? [currentItem.role] : roles,
@@ -253,10 +374,33 @@ function buildVisualPlanningPrompt({ project, platform, quantityMode, bodyItemCo
       placement: currentItem.placement,
       purpose: currentItem.purpose,
       focus: currentItem.focus,
+      avoidConcepts: currentItem.avoidConcepts ?? [],
       sourceExcerpt: currentItem.sourceExcerpt,
     } : null,
   });
-  return { system, message, tools: [visualPlanningTool], requiredToolName: VISUAL_PLANNING_TOOL_NAME };
+  return { system, message, tools: [buildVisualPlanningTool({ platform, quantityMode, bodyItemCount, singleItem })], requiredToolName: VISUAL_PLANNING_TOOL_NAME };
+}
+
+function buildVisualPlanningOmniPrompt(input) {
+  const prompt = buildVisualPlanningPrompt(input);
+  const toolSchema = prompt.tools[0].function.parameters;
+  const message = JSON.parse(prompt.message);
+  delete message.submissionTool;
+  message.outputSchema = toolSchema;
+  return {
+    system: prompt.system.replace(
+      `必须调用且只能调用一次 ${VISUAL_PLANNING_TOOL_NAME} 提交最终方案；不要输出普通文本、代码围栏、解释或备选方案。`,
+      '只返回符合结构的 JSON，不要输出 Markdown、代码围栏、解释、备选方案或工具调用。',
+    ),
+    message: JSON.stringify(message),
+  };
+}
+
+function visualPlanningRichContent({ draft, assets = [] }) {
+  return normalizeRichContentPackage({
+    text: { title: draft?.title, body: draft?.body },
+    media: assets.map((asset) => ({ kind: asset.kind, source: asset.source, label: asset.title, origin: asset.origin ?? 'DRAFT' })),
+  });
 }
 
 function itemId(platform, item, index) {
@@ -286,7 +430,7 @@ function mergePlannedItems({ platform, plannedItems, currentPlan = [], currentIt
     return {
       ...item,
       id: itemId(platform, item, index),
-      avoidConcepts: [],
+      avoidConcepts: Array.isArray(item.avoidConcepts) ? item.avoidConcepts : [],
       stylePreset: 'INHERIT',
       templatePreset: 'AI_DIRECTED',
       references: Array.isArray(previous?.references) ? previous.references : [],
@@ -295,9 +439,9 @@ function mergePlannedItems({ platform, plannedItems, currentPlan = [], currentIt
   });
 }
 
-async function compileVisualPlan({ platform, title, items, styleProfile }) {
+async function compileVisualPlan({ platform, title, body = '', items, styleProfile }) {
   const { updateVisualPlanItem } = await import('../../src/domain/visual-plan.mjs');
-  return items.map((item) => updateVisualPlanItem(item, {}, { platform, title }, styleProfile));
+  return items.map((item) => updateVisualPlanItem(item, {}, { platform, title, body }, styleProfile));
 }
 
 module.exports = {
@@ -305,9 +449,21 @@ module.exports = {
   VISUAL_PLANNING_OPERATION,
   VISUAL_PLANNING_PROMPT_VERSION,
   VISUAL_PLANNING_TOOL_NAME,
+  SEARCH_QUERY_MAX_LENGTH,
+  SEARCH_QUERY_MAX_COUNT,
+  INFORMATION_POINT_MAX_LENGTH,
+  INFORMATION_POINT_MAX_COUNT,
+  CONTENT_BLOCK_LABEL_MAX_LENGTH,
+  CONTENT_BLOCK_DETAIL_MAX_LENGTH,
+  CONTENT_BLOCK_MAX_COUNT,
+  AVOID_CONCEPT_MAX_LENGTH,
+  AVOID_CONCEPT_MAX_COUNT,
   visualPlanningTool,
+  buildVisualPlanningTool,
   visualPlanSchema,
   buildVisualPlanningPrompt,
+  buildVisualPlanningOmniPrompt,
+  visualPlanningRichContent,
   parseVisualPlanningContent,
   mergePlannedItems,
   compileVisualPlan,

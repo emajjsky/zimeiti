@@ -1,4 +1,4 @@
-import { CheckCircle2, CircleAlert, FileText, LoaderCircle, RefreshCw, Send, Sparkles } from 'lucide-react';
+import { CheckCircle2, CircleAlert, Edit3, FileText, LoaderCircle, RefreshCw, Send, Sparkles } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { webDrafts } from '../../data/webApi';
 import type { ContentDraft, ContentDraftVersion, DraftAdaptationRun, DraftPlatform } from '../../domain/content-drafts';
@@ -12,7 +12,7 @@ const runStatusNames: Record<DraftAdaptationRun['status'], string> = {
   DRAFT: '待确认', QUEUED: '已入队', RUNNING: '生成中', SUCCEEDED: '已完成', FAILED: '失败', CANCELLED: '已取消',
 };
 
-export function DraftResultWorkspace({ draft, version, derivedDrafts, activeDraftId, onActiveDraftChange, onDraftChange, onReloadDrafts, onPublish, onOpenModelSettings }: {
+export function DraftResultWorkspace({ draft, version, derivedDrafts, activeDraftId, onActiveDraftChange, onDraftChange, onReloadDrafts, onPublish, onOpenModelSettings, onEditCopy, onEditLayout }: {
   draft: ContentDraft;
   version: ContentDraftVersion | null;
   derivedDrafts: ContentDraft[];
@@ -22,6 +22,8 @@ export function DraftResultWorkspace({ draft, version, derivedDrafts, activeDraf
   onReloadDrafts: () => Promise<ContentDraft[]>;
   onPublish: () => void;
   onOpenModelSettings: () => void;
+  onEditCopy: () => void;
+  onEditLayout: () => void;
 }) {
   const [runs, setRuns] = useState<Partial<Record<SocialPlatform, DraftAdaptationRun>>>({});
   const [busyPlatform, setBusyPlatform] = useState<SocialPlatform | null>(null);
@@ -96,7 +98,7 @@ export function DraftResultWorkspace({ draft, version, derivedDrafts, activeDraf
   if (activeDraft) return <PlatformDraftEditor draft={activeDraft} currentSourceVersionId={currentVersionId} onDraftChange={onDraftChange} onBack={() => onActiveDraftChange('')} onOpenModelSettings={onOpenModelSettings}/>;
 
   return <section className="draft-result-workspace">
-    <header><CheckCircle2 size={22}/><div><h2>公众号草稿已完成</h2><p>公众号是唯一母稿。排版版本已冻结，其他平台只从当前版本明确派生。</p></div><button className="button primary" type="button" onClick={onPublish}><Send size={15}/>去发布</button></header>
+    <header><CheckCircle2 size={22}/><div><h2>公众号草稿已完成</h2><p>公众号是唯一母稿。排版版本已冻结，其他平台只从当前版本明确派生。</p></div><div className="draft-result-actions"><button className="button" type="button" onClick={onEditCopy}><Edit3 size={15}/>编辑正文</button><button className="button" type="button" onClick={onEditLayout}><Edit3 size={15}/>编辑排版</button><button className="button primary" type="button" onClick={onPublish}><Send size={15}/>去发布</button></div></header>
     {error && <div className="creative-stage-error" role="alert"><CircleAlert size={18}/><span>{error}</span></div>}
     <dl className="draft-result-summary">
       <div><dt>标题</dt><dd>{draft.title || '未命名草稿'}</dd></div>
@@ -104,7 +106,6 @@ export function DraftResultWorkspace({ draft, version, derivedDrafts, activeDraf
       <div><dt>图片</dt><dd>{draft.assets.length} 张</dd></div>
       <div><dt>状态</dt><dd><FileText size={15}/>公众号母稿</dd></div>
     </dl>
-
     <section className="draft-result-content">
       <div className="draft-result-preview">
         <header><div><span>WECHAT / MASTER</span><h3>公众号排版预览</h3></div><b>{version ? `冻结于 V${version.versionNumber}` : '读取版本中'}</b></header>

@@ -102,6 +102,14 @@ export function CopyWorkspace({ project, draft, brief, briefState, skills, accou
     return queued;
   };
 
+  const replaceDraftTitle = async (title: string) => {
+    const snapshot = { ...contentRef.current, title };
+    contentRef.current = snapshot;
+    setContent(snapshot);
+    setSaveState('dirty');
+    await persistDraft(snapshot);
+  };
+
   useEffect(() => {
     if (saveState !== 'dirty') return;
     const snapshot = content;
@@ -191,7 +199,7 @@ export function CopyWorkspace({ project, draft, brief, briefState, skills, accou
         {historyOpen && <section className="copy-version-panel" aria-label="文案版本记录"><header><b>版本记录</b><button className="icon-button" type="button" aria-label="关闭版本记录" onClick={() => setHistoryOpen(false)}><X size={15}/></button></header>{artifacts.length ? <div>{artifacts.map((artifact) => <button type="button" key={artifact.id} onClick={() => setCandidate(artifact)}><span>{artifactTitle(artifact)}</span><small>{artifactStatus(artifact.status)} · V{artifact.version}</small></button>)}</div> : <p>暂无候选版本</p>}</section>}
         <div className="copy-document"><label><span>标题</span><textarea ref={titleRef} rows={1} value={content.title} readOnly={copyRunActive} onChange={(event) => changeContent({ title: event.target.value })} onBlur={() => void persistDraft()}/></label><label><span>正文</span><textarea ref={bodyRef} value={content.body} readOnly={copyRunActive} onChange={(event) => changeContent({ body: event.target.value })} onSelect={captureSelection} onBlur={captureSelection} placeholder="输入公众号母稿，或在右侧告诉文案助手生成和修改要求。"/></label></div>
       </section>
-      <ProjectAgent projectId={project.id} stage="COPY" platform="WECHAT" selection={selection} hasAcceptedCopy={hasAcceptedCopy} blockedReason={copyActionBlockedReason} refreshToken={refreshToken} onClearSelection={() => setSelection(undefined)} onContextChange={setAgentContext} onArtifactOpen={setCandidate} onDraftGenerated={async () => { applyServerDraft(await onReloadDraft()); }} onOpenSettings={(target) => target === 'agent' ? onOpenAgentSettings() : onOpenModelSettings()}/>
+      <ProjectAgent projectId={project.id} stage="COPY" platform="WECHAT" selection={selection} hasAcceptedCopy={hasAcceptedCopy} blockedReason={copyActionBlockedReason} refreshToken={refreshToken} draftId={draftRef.current.id} draftRevision={draftRef.current.revision} draftBody={content.body} onDraftTitleChange={replaceDraftTitle} onClearSelection={() => setSelection(undefined)} onContextChange={setAgentContext} onArtifactOpen={setCandidate} onDraftGenerated={async () => { applyServerDraft(await onReloadDraft()); }} onOpenSettings={(target) => target === 'agent' ? onOpenAgentSettings() : onOpenModelSettings()}/>
     </div>
     {candidate && <CopyCandidateDialog artifact={candidate} current={content} busy={candidateBusy} onAccept={(title) => void acceptCandidate(title)} onReject={() => void rejectCandidate()} onClose={() => candidateBusy === 'idle' && setCandidate(null)}/>}
   </section>;

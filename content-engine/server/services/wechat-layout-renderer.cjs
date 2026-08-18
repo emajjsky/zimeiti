@@ -186,11 +186,15 @@ function normalizeLayoutAddon(value) {
   const label = trimText(value.label, 24);
   const title = trimText(value.title, 80);
   const body = trimText(value.body, 500);
+  const imageAssetId = typeof value.imageAssetId === 'string' && /^[0-9a-f-]{36}$/i.test(value.imageAssetId) ? value.imageAssetId : null;
+  const template = ['CARD', 'MINIMAL', 'BANNER'].includes(value.template) ? value.template : 'CARD';
   return {
-    enabled: Boolean(value.enabled) && Boolean(label || title || body),
+    enabled: Boolean(value.enabled) && Boolean(label || title || body || imageAssetId),
     label,
     title,
     body,
+    imageAssetId,
+    template,
   };
 }
 
@@ -208,10 +212,17 @@ function layoutAddonHtml(addon, position, rules) {
   const label = addon.label ? `<span style="display:inline-block;margin:0 0 9px;padding:3px 8px;border-radius:999px;background:${rules.heading.borderColor};color:${rules.canvas.background};font-size:11px;font-weight:800;line-height:1.45;">${escapeHtml(addon.label)}</span>` : '';
   const title = addon.title ? `<b style="display:block;margin:0 0 ${addon.body ? 8 : 0}px;color:${rules.title.color};font-size:${Math.max(17, rules.heading.fontSize - 2)}px;line-height:1.45;font-weight:800;letter-spacing:0;word-break:break-word;">${escapeHtml(addon.title)}</b>` : '';
   const body = addon.body ? `<p style="margin:0;color:${rules.canvas.textColor};font-size:${Math.max(13, rules.body.fontSize - 1)}px;line-height:${Math.max(1.55, Number((rules.body.lineHeight - 0.12).toFixed(2)))};letter-spacing:0;word-break:break-word;">${inlineHtml(addon.body, rules)}</p>` : '';
+  const image = addon.imageAssetId ? `<img data-asset-id="${addon.imageAssetId}" src="/api/v1/assets/${addon.imageAssetId}/content" alt="" style="display:block;width:100%;max-height:220px;object-fit:cover;border-radius:${rules.image.borderRadius}px;margin:0 0 12px;">` : '';
+  const templateStyle = addon.template === 'MINIMAL'
+    ? 'padding:12px 0;border:0;background:transparent;'
+    : addon.template === 'BANNER'
+      ? `padding:18px 20px;border:0;border-radius:0;background:${rules.heading.borderColor};color:${rules.canvas.background};`
+      : `padding:16px 18px;border:1px solid ${rules.divider.color};border-left:6px solid ${rules.heading.borderColor};background:${rules.quote.background};`;
+  const content = `${image}${label}${title}${body}`;
   if (isOutro) {
-    return `<section data-layout-addon="outro" style="margin:${rules.body.paragraphSpacing + 10}px 0 0;padding:18px 16px 0;border-top:2px solid ${rules.heading.borderColor};text-align:center;">${label}${title}${body}</section>`;
+    return `<section data-layout-addon="outro" style="margin:${rules.body.paragraphSpacing + 10}px 0 0;${templateStyle}text-align:center;">${content}</section>`;
   }
-  return `<section data-layout-addon="intro" style="margin:0 0 ${rules.body.paragraphSpacing + 8}px;padding:16px 18px;border:1px solid ${rules.divider.color};border-left:6px solid ${rules.heading.borderColor};background:${rules.quote.background};">${label}${title}${body}</section>`;
+  return `<section data-layout-addon="intro" style="margin:0 0 ${rules.body.paragraphSpacing + 8}px;${templateStyle}">${content}</section>`;
 }
 
 function contrastAccentColor(rules) {
@@ -501,13 +512,56 @@ function imageHtml(asset, rules) {
   return `<figure data-asset-id="${asset.assetId}" data-asset-role="${asset.role}" style="margin:${rules.image.spacing}px 0;">${img}</figure>`;
 }
 
-function interleaveContent(blocks, assets, rules) {
+function paragraphInsertionMap(body, assets, visualPlan) {
+  const plan = Array.isArray(visualPlan?.plan) ? visualPlan.plan : [];
+  const normalizeAnchorText = (value) => String(value ?? '').replace(/[#>*_`~\[\]]/g, ' ').replace(/\s+/g, '').trim();
+  const paragraphs = String(body ?? '').replace(/\r\n?/g, '\n').split(/\n\s*\n/).map((block) => block.trim()).filter(Boolean)
+    .filter((block) => !/^(?:---|\*\*\*)$/.test(block) && !/^#{1,3}\s+/.test(block) && !block.split('\n').every((line) => /^>\s?/.test(line)) && !block.split('\n').every((line) => /^[-*]\s+/.test(line)));
+  const result = new Map();
+  const unmatched = [];
+  for (const asset of assets) {
+    const item = plan.find((candidate) => candidate?.assetId === asset.assetId);
+    if (!item || asset.role === 'COVER' || asset.role === 'MAIN') continue;
+    const explicit = Number(item.insertion?.paragraphIndex ?? item.paragraphIndex);
+    if (Number.isInteger(explicit) && explicit >= 1) { result.set(asset.assetId, Math.min(explicit, Math.max(1, paragraphs.length))); continue; }
+    const excerpt = normalizeAnchorText(item.sourceExcerpt);
+    const placement = normalizeAnchorText(item.placement);
+    const index = paragraphs.findIndex((paragraph) => {
+      const normalized = normalizeAnchorText(paragraph);
+      return (excerpt.length >= 8 && normalized.includes(excerpt)) || (placement.length >= 8 && normalized.includes(placement));
+    });
+    if (index >= 0) result.set(asset.assetId, index + 1); else unmatched.push(asset);
+  }
+  // 旧数据没有可匹配的正文摘录时，也要把图片分布到正文中，不能全部追加到末尾。
+  unmatched.forEach((asset, index) => {
+    const paragraphIndex = paragraphs.length ? Math.max(1, Math.min(paragraphs.length, Math.ceil(((index + 1) * paragraphs.length) / (unmatched.length + 1)))) : 1;
+    result.set(asset.assetId, paragraphIndex);
+  });
+  return result;
+}
+
+function interleaveContent(blocks, assets, rules, body, visualPlan) {
   const coverIndex = assets.findIndex(({ role }) => role === 'COVER' || role === 'MAIN');
   const cover = coverIndex >= 0 ? assets[coverIndex] : assets[0];
   const remaining = assets.filter((_, index) => index !== (coverIndex >= 0 ? coverIndex : 0));
   const output = [];
   if (cover) output.push(imageHtml(cover, rules));
   if (!blocks.length) return output.concat(remaining.map((item) => imageHtml(item, rules)));
+  const insertionMap = paragraphInsertionMap(body, remaining, visualPlan);
+  if (insertionMap.size) {
+    const outputByParagraph = new Map();
+    remaining.forEach((asset, index) => {
+      const paragraph = insertionMap.get(asset.assetId) ?? (Number.MAX_SAFE_INTEGER - remaining.length + index);
+      const bucket = outputByParagraph.get(paragraph) ?? [];
+      bucket.push(asset);
+      outputByParagraph.set(paragraph, bucket);
+    });
+    let paragraphIndex = 0;
+    blocks.forEach((block) => { output.push(block); if (/^<p\b/i.test(block)) paragraphIndex += 1; const bucket = outputByParagraph.get(paragraphIndex) ?? []; bucket.forEach((asset) => output.push(imageHtml(asset, rules))); });
+    const inserted = new Set(output.filter((value) => typeof value === 'string' && value.includes('data-asset-id=')).map((value) => /data-asset-id="([^"]+)"/.exec(value)?.[1]).filter(Boolean));
+    remaining.filter((asset) => !inserted.has(asset.assetId)).forEach((asset) => output.push(imageHtml(asset, rules)));
+    return output;
+  }
   const interval = remaining.length ? Math.max(1, Math.ceil(blocks.length / remaining.length)) : Number.POSITIVE_INFINITY;
   let imageIndex = 0;
   blocks.forEach((block, index) => {
@@ -518,7 +572,7 @@ function interleaveContent(blocks, assets, rules) {
   return output;
 }
 
-function renderWechatDraft({ title, body, assets = [], templateRules, layoutAddons, layoutDesign }) {
+function renderWechatDraft({ title, body, assets = [], templateRules, layoutAddons, layoutDesign, visualPlan }) {
   const rules = normalizeWechatLayoutRules(templateRules);
   const normalizedAssets = normalizeAssets(assets);
   const normalizedLayoutDesign = normalizeLayoutDesign(layoutDesign);
@@ -526,7 +580,9 @@ function renderWechatDraft({ title, body, assets = [], templateRules, layoutAddo
   const headings = extractHeadings(body);
   const addons = normalizeLayoutAddons(layoutAddons);
   const prefix = `${tagHtml(headings, rules)}${tocHtml(headings, rules)}`;
-  const content = `${layoutAddonHtml(addons.intro, 'intro', rules)}${prefix}${interleaveContent(bodyBlocks(body, rules, normalizedLayoutDesign), normalizedAssets, rules).join('')}${layoutAddonHtml(addons.outro, 'outro', rules)}`;
+  const addonAssetIds = new Set([addons.intro.imageAssetId, addons.outro.imageAssetId].filter(Boolean));
+  const contentAssets = normalizedAssets.filter((asset) => !addonAssetIds.has(asset.assetId));
+  const content = `${layoutAddonHtml(addons.intro, 'intro', rules)}${prefix}${interleaveContent(bodyBlocks(body, rules, normalizedLayoutDesign), contentAssets, rules, body, visualPlan).join('')}${layoutAddonHtml(addons.outro, 'outro', rules)}`;
   const html = `<article data-layout-schema="1" style="box-sizing:border-box;width:100%;max-width:${rules.canvas.maxWidth}px;margin:0 auto;padding:24px 18px;background:${rules.canvas.background};color:${rules.canvas.textColor};letter-spacing:0;word-break:break-word;">${titleHtml(title, rules)}${content}</article>`;
   return { html, checks };
 }

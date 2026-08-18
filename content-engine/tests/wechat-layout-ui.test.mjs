@@ -9,7 +9,7 @@ test('公众号排版工作台只接收草稿并提供模板库与真实预览',
     read('../src/workspaces/create/LayoutWorkspace.tsx'),
     read('../src/workspaces/create/WechatLayoutTemplatePicker.tsx'),
   ]);
-  assert.match(workspace, /LayoutWorkspace\(\{ draft, onDraftChange, onComplete \}/);
+  assert.match(workspace, /LayoutWorkspace\(\{ draft, onDraftChange, onComplete(?:, onEditCopy, onEditVisual)? \}/);
   assert.doesNotMatch(workspace, /activePlatform|platformName|webCreative\.delivery/);
   assert.match(workspace, /WechatLayoutTemplatePicker/);
   assert.match(workspace, /<iframe/);
@@ -19,6 +19,8 @@ test('公众号排版工作台只接收草稿并提供模板库与真实预览',
   assert.match(workspace, /srcDoc=\{selectedPreview\.html\}/);
   assert.match(workspace, /保存公众号草稿/);
   assert.match(workspace, /selectedPreview\.templateVersionId/);
+  assert.match(workspace, /编辑正文/);
+  assert.match(workspace, /编辑配图/);
   assert.match(workspace, /webDrafts\.complete\(workingDraft\.id, workingDraft\.revision\)/);
   assert.match(workspace, /layoutAddonsFromDraft/);
   assert.match(workspace, /layoutAddonsDirty/);

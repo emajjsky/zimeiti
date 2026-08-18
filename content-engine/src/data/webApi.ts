@@ -6,6 +6,7 @@ import type { ChannelAccount, MetricSnapshot, PlatformDraftTask, PublishPackage,
 import type { WebSession, WorkspaceSession, WorkspaceSummary } from '../domain/workspace';
 import type { AssetFilters, AssetMetadataInput, AssetUpdateInput, ProjectAsset, ProjectAssetLinkInput, WorkspaceAsset } from '../domain/assets';
 import type { ContentDraft, ContentDraftVersion, DraftAdaptationRun, DraftPatchInput, DraftPreview, DraftPlatform, WechatLayoutDesignResult, WechatLayoutPreview, WechatLayoutRules, WechatLayoutTemplate } from '../domain/content-drafts';
+import type { ContentIngestion, ContentIngestionIntent } from '../domain/content-ingestion';
 import { sessionStore } from './sessionStore';
 
 const apiBase = import.meta.env.VITE_API_BASE ?? '/api/v1';
@@ -60,8 +61,8 @@ function wait(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
-async function retryTransient<T>(requestFn: () => Promise<T>) {
-  const delays = [0, 120, 240];
+export async function retryTransient<T>(requestFn: () => Promise<T>) {
+  const delays = [0, 250, 750, 1_500];
   let lastError: unknown;
   for (const [attemptIndex, delayMs] of delays.entries()) {
     if (delayMs) await wait(delayMs);
@@ -143,7 +144,7 @@ export const webAssets = {
     const suffix = params.size ? `?${params}` : '';
     return request<{ created: boolean; asset: WorkspaceAsset }>(`/assets${suffix}`, { method: 'POST', body });
   },
-  import(input: AssetMetadataInput & { url: string }) {
+  import(input: AssetMetadataInput & { url: string; fallbackUrl?: string }) {
     return request<{ created: boolean; asset: WorkspaceAsset }>('/assets/import', { method: 'POST', body: JSON.stringify(input) });
   },
   get: (assetId: string) => request<WorkspaceAsset>(`/assets/${encodeURIComponent(assetId)}`),
@@ -160,6 +161,7 @@ export const webDrafts = {
   list: (projectId: string) => request<{ drafts: ContentDraft[] }>(`/creative/projects/${encodeURIComponent(projectId)}/drafts`),
   upsertWechat: (projectId: string, input: { title: string; body: string }) => request<ContentDraft>(`/creative/projects/${encodeURIComponent(projectId)}/wechat-draft`, { method: 'POST', body: JSON.stringify(input) }),
   patch: (draftId: string, input: DraftPatchInput) => request<ContentDraft>(`/content-drafts/${encodeURIComponent(draftId)}`, { method: 'PATCH', body: JSON.stringify(input) }),
+  titleRecommendations: (draftId: string, revision: number) => request<{ draftId: string; revision: number; recommendations: Array<{ title: string; angle: string }>; policy: { scope: string; provider: string; model: string } }>(`/content-drafts/${encodeURIComponent(draftId)}/title-recommendations`, { method: 'POST', body: JSON.stringify({ revision }) }),
   replaceAssets: (draftId: string, input: { revision: number; assets: Array<{ assetId: string; role: 'COVER' | 'BODY' | 'CARD' | 'MAIN' }> }) => request<ContentDraft>(`/content-drafts/${encodeURIComponent(draftId)}/assets`, { method: 'PUT', body: JSON.stringify(input) }),
   complete: (draftId: string, revision: number) => request<{ draft: ContentDraft; version: ContentDraftVersion }>(`/content-drafts/${encodeURIComponent(draftId)}/complete`, { method: 'POST', body: JSON.stringify({ revision }) }),
   derive: (draftId: string, platform: Exclude<DraftPlatform, 'WECHAT'>) => request<DraftAdaptationRun>(`/content-drafts/${encodeURIComponent(draftId)}/derive`, { method: 'POST', body: JSON.stringify({ platform }) }),
@@ -173,6 +175,7 @@ export const webDrafts = {
 
 export const webChannelAccounts = {
   list: () => request<{ accounts: ChannelAccount[] }>('/channel-accounts'),
+  officialNetwork: () => request<{ network: { ipv4: string; checkedAt: string; sources: string[] } }>('/channel-accounts/official-network'),
   create: (input: { platform: 'WECHAT' | 'XIAOHONGSHU' | 'WEIBO'; name: string; externalAccountLabel?: string; mode?: 'MANUAL' | 'OFFICIAL' }) => request<{ account: ChannelAccount }>('/channel-accounts', { method: 'POST', body: JSON.stringify(input) }),
   saveOfficialCredential: (accountId: string, input: { appId: string; appSecret: string }) => request<{ account: ChannelAccount }>(`/channel-accounts/${encodeURIComponent(accountId)}/official-credential`, { method: 'PUT', body: JSON.stringify(input) }),
   testOfficialCredential: (accountId: string) => request<{ account: ChannelAccount }>(`/channel-accounts/${encodeURIComponent(accountId)}/official-credential/test`, { method: 'POST', body: '{}' }),
@@ -184,12 +187,42 @@ export const webPublishing = {
   packages: (input: { accountId: string; draftVersionId: string }) => request<{ task: PlatformDraftTask; package: PublishPackage }>('/publishing/packages', { method: 'POST', body: JSON.stringify(input) }),
   createOfficialDraft: (input: { accountId: string; draftVersionId: string }) => request<{ task: PlatformDraftTask; package: PublishPackage }>('/publishing/official-drafts', { method: 'POST', body: JSON.stringify(input) }),
   tasks: () => request<{ tasks: PlatformDraftTask[] }>('/publishing/tasks'),
+  registerPublication: (taskId: string, input: { url: string }) => request<{ task: PlatformDraftTask; publication: PublishedArticle }>(`/publishing/tasks/${encodeURIComponent(taskId)}/register-publication`, { method: 'POST', body: JSON.stringify(input) }),
+  registerStandalonePublication: (input: { url: string; accountId?: string }) => request<{ publication: PublishedArticle }>('/publishing/articles/register', { method: 'POST', body: JSON.stringify(input) }),
   manualConfirm: (taskId: string, input: { url?: string; note?: string; publishedAt?: string }) => request<{ task: PlatformDraftTask; publication: PublishedArticle }>(`/publishing/tasks/${encodeURIComponent(taskId)}/manual-confirm`, { method: 'POST', body: JSON.stringify(input) }),
   articles: () => request<{ articles: PublishedArticle[] }>('/publishing/articles'),
-  addMetrics: (articleId: string, input: { capturedAt?: string; readCount?: number; likeCount?: number; shareCount?: number; favoriteCount?: number; commentCount?: number; followerDelta?: number }) => request<{ metric: MetricSnapshot }>(`/publishing/articles/${encodeURIComponent(articleId)}/metrics`, { method: 'POST', body: JSON.stringify(input) }),
+  removeArticle: (articleId: string) => request<{ publicationId: string }>(`/publishing/articles/${encodeURIComponent(articleId)}`, { method: 'DELETE' }),
+  addMetrics: (articleId: string, input: { dataDate?: string; capturedAt?: string; checkpoint?: 'D1' | 'D3' | 'D7' | 'CUSTOM'; exposureCount?: number | null; readCount?: number | null; playCount?: number | null; likeCount?: number | null; shareCount?: number | null; favoriteCount?: number | null; commentCount?: number | null; followerDelta?: number | null }) => request<{ metric: MetricSnapshot }>(`/publishing/articles/${encodeURIComponent(articleId)}/metrics`, { method: 'POST', body: JSON.stringify(input) }),
   metrics: (articleId: string) => request<{ metrics: MetricSnapshot[] }>(`/publishing/articles/${encodeURIComponent(articleId)}/metrics`),
+  syncMetrics: (articleId: string, input: { dataDate?: string; checkpoint?: 'D1' | 'D3' | 'D7' | 'CUSTOM'; capturedAt?: string } = {}) => request<{ metric: MetricSnapshot }>(`/publishing/articles/${encodeURIComponent(articleId)}/metrics/sync`, { method: 'POST', body: JSON.stringify(input) }),
+  syncAllMetrics: (input: { dataDate?: string; checkpoint?: 'D1' | 'D3' | 'D7' | 'CUSTOM'; capturedAt?: string } = {}) => request<{ results: Array<{ articleId: string; title: string; accountName: string | null; status: 'SYNCED' | 'SKIPPED' | 'FAILED'; message?: string; code?: string | null; metric?: MetricSnapshot }>; syncedCount: number; skippedCount: number; failedCount: number }>('/publishing/articles/metrics/sync-all', { method: 'POST', body: JSON.stringify(input) }),
   saveRetrospective: (articleId: string, input: { summary?: string; highlights?: string[]; issues?: string[]; nextActions?: string[] }) => request<{ retrospective: Retrospective }>(`/publishing/articles/${encodeURIComponent(articleId)}/retrospective`, { method: 'PUT', body: JSON.stringify(input) }),
 };
+
+export const webIngestions = {
+  create(input: {
+    projectId?: string | null;
+    input: { kind: 'URL'; url: string } | { kind: 'TEXT'; text: string; maturity?: 'IDEA' | 'OUTLINE' | 'FRAGMENTS' | 'PARTIAL_DRAFT' | 'FULL_DRAFT' } | { kind: 'ASSET'; assetId: string } | { kind: 'COMPOSITE'; text?: string; maturity?: 'IDEA' | 'OUTLINE' | 'FRAGMENTS' | 'PARTIAL_DRAFT' | 'FULL_DRAFT'; assetIds: string[] };
+    intent: ContentIngestionIntent;
+    usage?: Array<'TOPIC' | 'ANGLE' | 'STRUCTURE' | 'STYLE' | 'FACT_LEADS' | 'VISUAL' | 'COMPREHENSIVE'>;
+  }) {
+    return request<{ ingestion: ContentIngestion; jobId: string }>('/content-ingestions', { method: 'POST', body: JSON.stringify(input) });
+  },
+  get: (id: string) => request<ContentIngestion>(`/content-ingestions/${encodeURIComponent(id)}`),
+  apply: (id: string, input: { originType?: 'DRAFT' | 'IMPORT'; title?: string; category?: string; targetPlatforms?: Platform[]; maturity?: 'IDEA' | 'OUTLINE' | 'FRAGMENTS' | 'PARTIAL_DRAFT' | 'FULL_DRAFT' }) => request<{ ingestion: ContentIngestion; project: ContentProject }>(`/content-ingestions/${encodeURIComponent(id)}/apply`, { method: 'POST', body: JSON.stringify(input) }),
+  cancel: (id: string) => request<ContentIngestion>(`/content-ingestions/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: '{}' }),
+  async waitUntilSettled(id: string, onUpdate?: (ingestion: ContentIngestion) => void) {
+    let current = await webIngestions.get(id);
+    onUpdate?.(current);
+    while (['PENDING', 'FETCHING', 'PARSING', 'DOWNLOADING_MEDIA', 'ANALYZING'].includes(current.stage)) {
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 900));
+      current = await webIngestions.get(id);
+      onUpdate?.(current);
+    }
+    return current;
+  },
+};
+
 
 export const webWechatTemplates = {
   list: () => request<{ templates: WechatLayoutTemplate[] }>('/wechat-layout-templates'),
@@ -230,6 +263,7 @@ export type CreateProjectInput = {
 export const webProjects = {
   list: () => request<{ projects: ContentProject[] }>('/creative/projects'),
   create: (input: CreateProjectInput) => request<{ project: ContentProject; created: boolean }>('/creative/projects', { method: 'POST', body: JSON.stringify(input) }),
+  remove: (projectId: string) => request<{ projectId: string; deleted: boolean }>(`/creative/projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' }),
   fromIntelligence: (itemId: string, input: { angleIndex?: number } = {}) => request<{ project: ContentProject; created: boolean }>(`/creative/projects/from-intelligence/${encodeURIComponent(itemId)}`, { method: 'POST', body: JSON.stringify(input) }),
   planning: (projectId: string) => request<{ project: ContentProject; planning: ProjectPlanning }>(`/creative/projects/${encodeURIComponent(projectId)}/planning`),
   savePlanning: (projectId: string, planning: ProjectPlanning) => request<{ project: ContentProject; planning: ProjectPlanning }>(`/creative/projects/${encodeURIComponent(projectId)}/planning`, { method: 'PUT', body: JSON.stringify(planning) }),
@@ -257,8 +291,11 @@ export const webCreative = {
       throw error instanceof Error ? error : new Error('图片搜索失败。');
     }
   },
-  planVisual: (projectId: string, input: { platform: 'WECHAT'; quantityMode: 'AUTO' | 'MANUAL'; bodyItemCount?: number; styleProfile: import('../domain/content').CreativeVisualStyleProfile; request?: string; currentItemId?: string; currentPlan?: CreativeVisualPlanItem[]; keepAssignedAssets?: boolean }) => request<{ plan: CreativeVisualPlanItem[]; bodyItemCount: number; quantityMode: 'AUTO' | 'MANUAL'; strategy: string; policy: { scope: string; provider: string; connectionId: string | null; model: string; promptVersion: string } }>(`/creative/projects/${encodeURIComponent(projectId)}/visual/plan`, { method: 'POST', body: JSON.stringify(input) }),
-  generateImage: (projectId: string, input: { platform: 'WECHAT'; visualItemId: string; assetIds?: string[] } | { platform: Exclude<DraftPlatform, 'WECHAT'>; prompt: string; size: '3:4' | '1:1'; assetIds?: string[] }) => request<{ asset: WorkspaceAsset; projectAsset: ProjectAsset; policy: { scope: 'TEXT_TO_IMAGE' | 'IMAGE_TO_IMAGE'; provider: string; model: string } }>(`/creative/projects/${encodeURIComponent(projectId)}/visual/generate`, { method: 'POST', body: JSON.stringify(input) }),
+  planVisual: (projectId: string, input: { platform: 'WECHAT'; quantityMode: 'AUTO' | 'MANUAL'; bodyItemCount?: number; styleProfile: import('../domain/content').CreativeVisualStyleProfile; request?: string; currentItemId?: string; currentPlan?: CreativeVisualPlanItem[]; keepAssignedAssets?: boolean }) => request<{ id: string; projectId: string; status: 'QUEUED'; policy: { scope: string; provider: string; connectionId: string | null; model: string; promptVersion: string } }>(`/creative/projects/${encodeURIComponent(projectId)}/visual/plan`, { method: 'POST', body: JSON.stringify(input) }),
+  latestVisualPlanRun: (projectId: string) => request<{ run: null | { id: string; projectId: string; status: 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED'; result: null | { plan: CreativeVisualPlanItem[]; bodyItemCount: number; quantityMode: 'AUTO' | 'MANUAL'; strategy: string }; error: string | null; createdAt: string; updatedAt: string } }>(`/creative/projects/${encodeURIComponent(projectId)}/visual/plan-runs/latest`),
+  startVideoAnalysis: (projectId: string, input: { assetId: string; targetPlatform: 'WECHAT' | 'XIAOHONGSHU' | 'ZHIHU' | 'WEIBO' }) => request<{ id: string; projectId: string; sourceAssetId: string; status: 'ANALYZING' | 'EXTRACTING_FRAMES' | 'SUCCEEDED' | 'FAILED' }>(`/creative/projects/${encodeURIComponent(projectId)}/video-analyses`, { method: 'POST', body: JSON.stringify(input) }),
+  videoAnalyses: (projectId: string) => request<{ analyses: Array<{ id: string; projectId: string; sourceAssetId: string; status: 'ANALYZING' | 'EXTRACTING_FRAMES' | 'SUCCEEDED' | 'FAILED'; progress: { phase: 'PROBING' | 'DETECTING_SCENES' | 'ANALYZING_SEGMENTS' | 'EXTRACTING_MATERIALS' | 'SUCCEEDED'; completedSegments: number; totalSegments: number; currentSegment?: number }; result: null | { summary: string; narrativeStructure: Array<{ startSeconds: number; endSeconds: number; segment: string; content: string; visual: string }>; reusableInsights: string[]; keyframes: Array<{ timestampSeconds: number; reason: string; caption: string; eventKey?: string; valueScore?: number }>; coverage?: { ratio: number; failedRanges: Array<{ startSeconds: number; endSeconds: number; error: string }> } }; keyframeAssetIds: string[]; error: string | null }> }>(`/creative/projects/${encodeURIComponent(projectId)}/video-analyses`),
+  generateImage: (projectId: string, input: { platform: 'WECHAT'; visualItemId: string; prompt?: string; assetIds?: string[] } | { platform: Exclude<DraftPlatform, 'WECHAT'>; prompt: string; size: '3:4' | '1:1'; assetIds?: string[] }) => request<{ asset: WorkspaceAsset; projectAsset: ProjectAsset; policy: { scope: 'TEXT_TO_IMAGE' | 'IMAGE_TO_IMAGE'; provider: string; model: string } }>(`/creative/projects/${encodeURIComponent(projectId)}/visual/generate`, { method: 'POST', body: JSON.stringify(input) }),
   updateReference: (id: string, input: ProjectReferenceMetadata) => request<ProjectReference>(`/creative/project-references/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(input) }),
   removeReference: (id: string) => request<void>(`/creative/project-references/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   research: (projectId: string) => request<ProjectResearchContext>(`/creative/projects/${encodeURIComponent(projectId)}/research`),
@@ -271,10 +308,10 @@ export const webCreative = {
   agentContext: (projectId: string, input: { stage: ProjectAgentContext['stage']; platform?: CreativePlatform; history: ProjectAgentHistory }) => {
     const params = new URLSearchParams({ stage: input.stage, history: input.history });
     if (input.platform) params.set('platform', input.platform);
-    return request<ProjectAgentContext>(`/creative/projects/${encodeURIComponent(projectId)}/agent?${params}`);
+    return retryTransient(() => request<ProjectAgentContext>(`/creative/projects/${encodeURIComponent(projectId)}/agent?${params}`));
   },
   prepareAgent: (projectId: string, input: ProjectAgentPrepareInput) => request<ProjectAgentPrepareResult>(`/creative/projects/${encodeURIComponent(projectId)}/agent/prepare`, { method: 'POST', body: JSON.stringify(input) }),
-  agentRun: (runId: string) => request<ProjectAgentRun>(`/creative/agent-runs/${encodeURIComponent(runId)}`),
+  agentRun: (runId: string) => retryTransient(() => request<ProjectAgentRun>(`/creative/agent-runs/${encodeURIComponent(runId)}`)),
   confirmAgentRun: (runId: string) => request<{ id: string; status: 'QUEUED'; jobId: string }>(`/creative/agent-runs/${encodeURIComponent(runId)}/confirm`, { method: 'POST', body: '{}' }),
   cancelAgentRun: (runId: string) => request<ProjectAgentRun>(`/creative/agent-runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST', body: '{}' }),
   prepareResearchSources: (projectId: string, planArtifactId: string) => request<ProjectAgentRun>(`/creative/projects/${encodeURIComponent(projectId)}/research/sources/prepare`, { method: 'POST', body: JSON.stringify({ planArtifactId }) }),

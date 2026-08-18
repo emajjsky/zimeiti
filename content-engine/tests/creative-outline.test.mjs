@@ -42,6 +42,20 @@ test('大纲提示词包含 Brief、平台和四项写作规则，不包含排�
   assert.doesNotMatch(prompt.message, /selectedSkills|platformSkills/);
 });
 
+test('大纲提示词接收链接正文、内容理解和视觉素材资料', () => {
+  const prompt = buildOutlinePrompt({
+    ...snapshot,
+    materials: [
+      { id: 'input-1', type: 'INPUT', kind: 'REFERENCE', title: '来源正文', content: '链接正文中的关键事实和案例。' },
+      { id: 'understanding-1', type: 'CONTENT_UNDERSTANDING', summary: '文章分析摘要', visualClues: ['配图展示四步流程'] },
+      { id: 'asset-1', type: 'ASSET', title: '流程配图', mimeType: 'image/jpeg', contentStatus: 'METADATA_ONLY' },
+    ],
+  });
+  assert.match(prompt.message, /链接正文中的关键事实和案例/);
+  assert.match(prompt.message, /文章分析摘要/);
+  assert.match(prompt.message, /配图展示四步流程/);
+});
+
 test('公众号和小红书使用独立大纲 Scope 与默认模板', () => {
   assert.equal(outlineTemplateScope('WECHAT'), 'CREATIVE_OUTLINE_WECHAT');
   assert.equal(outlineTemplateScope('XIAOHONGSHU'), 'CREATIVE_OUTLINE_XIAOHONGSHU');

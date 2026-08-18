@@ -5,4 +5,9 @@ function publicErrorMessage(error) {
   return error?.message || '请求失败。';
 }
 
-module.exports = { publicErrorMessage };
+function responseStatusCode(error) {
+  const status = Number(error?.statusCode);
+  return Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500;
+}
+
+module.exports = { publicErrorMessage, responseStatusCode };

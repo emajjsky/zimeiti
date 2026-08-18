@@ -1,32 +1,34 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { createRoot } from 'react-dom/client';
-import { animate, createScope, stagger } from 'animejs';
-import { ArrowLeft, Bell, BrainCircuit, CalendarDays, ChartColumn, CheckCircle2, ChevronRight, CircleAlert, CircleCheck, Compass, FilePenLine, FolderOpen, KeyRound, Lightbulb, LoaderCircle, Menu, PenLine, Pencil, Plus, RefreshCw, Search, Send, Settings, Trash2 } from 'lucide-react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { ArrowLeft, Bell, BrainCircuit, CalendarDays, ChartColumn, CheckCircle2, ChevronRight, CircleAlert, CircleCheck, Compass, ExternalLink, FilePenLine, FolderOpen, House, KeyRound, LoaderCircle, Menu, PenLine, Pencil, Plus, RefreshCw, Search, Send, Settings, Trash2 } from 'lucide-react';
 import { intelligenceKey, loadState, seedState, type FeishuLibraryTemplate, type LocalState, type WorkspaceProfile } from './data/localRepository';
-import { webAgent, webAssets, webAuth, webChannelAccounts, webCreative, webIntelligence, webModels, webProjects, webPublishing, webSettings, webState, webWorkspaces, type CreateProjectInput, type CredentialStatus, type WebSession } from './data/webApi';
+import { webAgent, webAssets, webAuth, webChannelAccounts, webIntelligence, webModels, webProjects, webPublishing, webSettings, webState, webWorkspaces, type CreateProjectInput, type CredentialStatus, type WebSession } from './data/webApi';
 import { platformName, projectStageName, type ContentProject, type IntelligenceSource, type Platform } from './domain/content';
 import { stageRouteForProjectStage } from './domain/creative-flow.mjs';
-import { completedProjects, formatTodayTitle, projectTaskEntries } from './domain/today.mjs';
+import { formatTodayTitle, projectTaskEntries } from './domain/today.mjs';
 import type { ApiUsageLog, ApiUsageSummary, ApiUsageTask, ModelCapability, ModelCatalogItem, ModelConnection, ModelConnectionInput, ModelOperation, ModelProvider, ModelTask, ModelTaskPolicy } from './domain/integrations';
 import { navigationGroups, readWorkspaceLocation, replaceWorkspaceLocation, resetViewport, type CreateStageRoute, type DiscoverSection, type ModelSection, type SearchPreset, type SettingsSection, type View } from './app/navigation.mjs';
 import { PageHeader } from './components/workspace/PageHeader';
 import { WorkspaceSwitcher } from './components/workspace/WorkspaceSwitcher';
-import { DiscoverWorkspace } from './workspaces/DiscoverWorkspace';
-import { SettingsWorkspace } from './workspaces/SettingsWorkspace';
-import { SourceSettings, type NewSourceInput } from './workspaces/settings/SourceSettings';
-import { NetworkSearchPanel } from './workspaces/discover/NetworkSearchPanel';
-import { LinkImportPanel } from './workspaces/discover/LinkImportPanel';
-import { IntelligenceInbox } from './workspaces/discover/IntelligenceInbox';
-import { WorkspaceProfileSettings } from './workspaces/settings/WorkspaceProfileSettings';
-import { WorkspaceManagementSettings } from './workspaces/settings/WorkspaceManagementSettings';
-import { AccountAuthorizationSettings } from './workspaces/settings/AccountAuthorizationSettings';
-import { AccountVoiceSettings } from './workspaces/settings/AccountVoiceSettings';
-import { PromptTemplateSettings } from './workspaces/settings/PromptTemplateSettings';
-import { CreateWorkspace } from './workspaces/create/CreateWorkspace';
-import { CreativeProjectCenter } from './workspaces/create/CreativeProjectCenter';
-import { AssetLibrary } from './workspaces/assets/AssetLibrary';
+import type { NewSourceInput } from './workspaces/settings/SourceSettings';
 import type { ChannelAccount, MetricSnapshot, PlatformDraftTask, PublishPackage, PublishReadyDraft, PublishedArticle } from './domain/publishing';
 import './styles.css';
+
+const DiscoverWorkspace = lazy(() => import('./workspaces/DiscoverWorkspace').then((module) => ({ default: module.DiscoverWorkspace })));
+const SettingsWorkspace = lazy(() => import('./workspaces/SettingsWorkspace').then((module) => ({ default: module.SettingsWorkspace })));
+const SourceSettings = lazy(() => import('./workspaces/settings/SourceSettings').then((module) => ({ default: module.SourceSettings })));
+const NetworkSearchPanel = lazy(() => import('./workspaces/discover/NetworkSearchPanel').then((module) => ({ default: module.NetworkSearchPanel })));
+const LinkImportPanel = lazy(() => import('./workspaces/discover/LinkImportPanel').then((module) => ({ default: module.LinkImportPanel })));
+const IntelligenceInbox = lazy(() => import('./workspaces/discover/IntelligenceInbox').then((module) => ({ default: module.IntelligenceInbox })));
+const WorkspaceProfileSettings = lazy(() => import('./workspaces/settings/WorkspaceProfileSettings').then((module) => ({ default: module.WorkspaceProfileSettings })));
+const WorkspaceManagementSettings = lazy(() => import('./workspaces/settings/WorkspaceManagementSettings').then((module) => ({ default: module.WorkspaceManagementSettings })));
+const AccountAuthorizationSettings = lazy(() => import('./workspaces/settings/AccountAuthorizationSettings').then((module) => ({ default: module.AccountAuthorizationSettings })));
+const AccountVoiceSettings = lazy(() => import('./workspaces/settings/AccountVoiceSettings').then((module) => ({ default: module.AccountVoiceSettings })));
+const PromptTemplateSettings = lazy(() => import('./workspaces/settings/PromptTemplateSettings').then((module) => ({ default: module.PromptTemplateSettings })));
+const CreateWorkspace = lazy(() => import('./workspaces/create/CreateWorkspace').then((module) => ({ default: module.CreateWorkspace })));
+const CreativeProjectCenter = lazy(() => import('./workspaces/create/CreativeProjectCenter').then((module) => ({ default: module.CreativeProjectCenter })));
+const HomeWorkspace = lazy(() => import('./workspaces/HomeWorkspace').then((module) => ({ default: module.HomeWorkspace })));
+const AssetLibrary = lazy(() => import('./workspaces/assets/AssetLibrary').then((module) => ({ default: module.AssetLibrary })));
 
 function displayError(error: unknown, fallback: string) {
   const message = error instanceof Error ? error.message : fallback;
@@ -42,6 +44,7 @@ function saveWebSearchKey(apiKey: string) { return webIntelligence.saveWebSearch
 function searchWeb(input: { query: string; category: string; domains: string[] }) { return webIntelligence.searchWeb(input); }
 
 const navigationIcons: Record<View, typeof CalendarDays> = {
+  home: House,
   today: CalendarDays,
   discover: Compass,
   create: PenLine,
@@ -63,6 +66,7 @@ function App({ session, onSessionChange }: { session: WebSession; onSessionChang
   const [selectedDerivedDraftId, setSelectedDerivedDraftId] = useState(initialRoute.draftId ?? '');
   const [creationRequested, setCreationRequested] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [refreshFeedback, setRefreshFeedback] = useState<{ status: 'idle' | 'running' | 'success' | 'empty' | 'error'; message: string }>({ status: 'idle', message: '' });
   const [searchPreset, setSearchPreset] = useState<SearchPreset | null>(null);
   const [discoverSection, setDiscoverSection] = useState<DiscoverSection>(initialRoute.discoverSection);
@@ -78,8 +82,10 @@ function App({ session, onSessionChange }: { session: WebSession; onSessionChang
     resetViewport();
   }, [view]);
 
-  useEffect(() => {
-    void loadState().then((loaded) => {
+  const loadWorkspace = () => {
+    setIsLoaded(false);
+    setLoadError('');
+    return loadState().then((loaded) => {
       setState(loaded);
       setSelectedIntelId((current) => loaded.intelligence.some((item) => item.id === current) ? current : loaded.intelligence[0]?.id ?? '');
       setSelectedProjectId((current) => {
@@ -89,7 +95,12 @@ function App({ session, onSessionChange }: { session: WebSession; onSessionChang
       });
     }).catch((error) => {
       console.error('加载本地工作空间失败', error);
+      setLoadError(displayError(error, '工作空间加载失败。'));
     }).finally(() => setIsLoaded(true));
+  };
+
+  useEffect(() => {
+    void loadWorkspace();
   }, []);
 
   useEffect(() => {
@@ -144,6 +155,15 @@ function App({ session, onSessionChange }: { session: WebSession; onSessionChang
     const result = await webProjects.create(input);
     setState((current) => ({ ...current, projects: [result.project, ...current.projects.filter((project) => project.id !== result.project.id)] }));
     return result.project;
+  };
+  const deleteProject = async (projectId: string) => {
+    await webProjects.remove(projectId);
+    setState((current) => ({ ...current, projects: current.projects.filter((project) => project.id !== projectId) }));
+    if (selectedProjectId === projectId) {
+      setSelectedProjectId('');
+      setCreateStage(null);
+      setSelectedDerivedDraftId('');
+    }
   };
   const addIntelligenceToCreative = async (itemId: string, _analysis?: LocalState['intelligence'][number]['analysis'], angleIndex = 0) => {
     const result = await webProjects.fromIntelligence(itemId, { angleIndex });
@@ -231,6 +251,7 @@ function App({ session, onSessionChange }: { session: WebSession; onSessionChang
     }));
   };
   if (!isLoaded) return <div className="boot-screen"><div className="boot-mark">内容引擎</div><p>正在准备你的编辑部……</p></div>;
+  if (loadError) return <div className="boot-screen"><div className="boot-mark">内容引擎</div><p>{loadError}</p><button className="button primary" type="button" onClick={() => void loadWorkspace()}><RefreshCw size={16} />重新加载</button></div>;
   if (!state.workspace.setupCompleted) return <Onboarding initial={state.workspace} onComplete={completeSetup} />;
 
   return <div className="app-shell">
@@ -246,14 +267,17 @@ function App({ session, onSessionChange }: { session: WebSession; onSessionChang
     </aside>
     {sidebarOpen && <button className="sidebar-backdrop" type="button" aria-label="关闭导航" onClick={() => setSidebarOpen(false)} />}
     <main className="main-content">
+      <Suspense fallback={<div className="workspace-route-loading"><LoaderCircle className="spin" size={20}/><span>正在加载工作区</span></div>}>
+      {view === 'home' && <HomeWorkspace state={state} onNavigate={setView} onOpenSettings={(section, modelSection) => openSettings(section, modelSection ?? null)} />}
       {view === 'today' && <Today onNavigate={setView} projects={state.projects} intelligence={state.intelligence} onOpenProject={(id) => { const project = state.projects.find((item) => item.id === id); if (project) openProject(project); }} />}
       {view === 'discover' && <DiscoverWorkspace section={discoverSection} onSectionChange={setDiscoverSection} inbox={<IntelligenceInbox item={selectedIntel} intelligence={state.intelligence} sources={state.sources} projects={state.projects} onSelect={setSelectedIntelId} onAddToCreative={(itemId, analysis, angleIndex) => void addIntelligenceToCreative(itemId, analysis, angleIndex)} onOpenProject={openIntelligenceProject} onSaveAnalysis={saveAnalysis} onRefresh={refreshRss} onOpenSources={() => openSettings('sources')} refreshFeedback={refreshFeedback} />} search={<NetworkSearchPanel preset={searchPreset} onSave={saveSearchCandidate} onOpenSearchSettings={() => openSettings('models', 'search')} checkStatus={webSearchStatus} searchWeb={searchWeb} />} linkImport={<LinkImportPanel onSave={saveClippedLink} onShowInbox={() => openDiscover('inbox')} previewLink={previewPublicLink} />} />}
-      {view === 'create' && (!selectedProjectId || !featuredProject) && <CreativeProjectCenter projects={state.projects} onOpenProject={openProject} onCreateProject={createProject} creationRequested={creationRequested} onCreationHandled={() => setCreationRequested(false)} />}
+      {view === 'create' && (!selectedProjectId || !featuredProject) && <CreativeProjectCenter projects={state.projects} onOpenProject={openProject} onCreateProject={createProject} onDeleteProject={deleteProject} onProjectCreated={(project) => setState((current) => ({ ...current, projects: [project, ...current.projects.filter((item) => item.id !== project.id)] }))} creationRequested={creationRequested} onCreationHandled={() => setCreationRequested(false)} />}
       {view === 'create' && selectedProjectId && featuredProject && <CreateWorkspace project={featuredProject} stage={createStage} onStage={(next) => { setCreateStage(next); if (next !== 'drafts') setSelectedDerivedDraftId(''); }} activeDerivedDraftId={selectedDerivedDraftId} onActiveDerivedDraftChange={setSelectedDerivedDraftId} onExitProject={() => { setSelectedProjectId(''); setCreateStage(null); setSelectedDerivedDraftId(''); }} onProjectAccepted={acceptProjectFromServer} onPublish={() => setView('publish')} onOpenModelSettings={() => openSettings('models', 'policies')} onOpenAgentSettings={() => openSettings('models', 'agent')} onOpenSearchSettings={() => openSettings('models', 'search')} onOpenVoiceSettings={() => openSettings('voices')} />}
       {view === 'publish' && <Publish onNavigate={setView} onOpenAccountSettings={() => openSettings('accounts')} />}
-      {view === 'review' && <Review projects={state.projects} onOpenProject={(project) => openProject(project)} />}
+      {view === 'review' && <Review onNavigate={setView} />}
       {view === 'assets' && <AssetLibrary/>}
       {view === 'settings' && <SettingsWorkspace section={settingsSection} onSectionChange={setSettingsSection} workspace={<div className="workspace-settings-stack"><WorkspaceManagementSettings session={session} onSessionChange={onSessionChange} onBeforeSwitch={flushPendingSaves} /><WorkspaceProfileSettings workspace={state.workspace} onChange={(workspace) => { setState((current) => ({ ...current, workspace })); savePreferences({ workspace }); }} /></div>} sources={<SourceSettings sources={state.sources} onAddSource={addSource} onAddSources={addSources} onUpdateSource={updateSource} onRemoveSource={removeSource} />} voices={<AccountVoiceSettings />} models={<ModelSettingsScreen initialSection={requestedModelSection} onSectionChange={setRequestedModelSection} />} feishu={<WorkspaceSettings template={state.feishuTemplate} onTemplateChange={saveFeishuTemplate} />} accounts={<AccountAuthorizationSettings />} />}
+      </Suspense>
     </main>
   </div>;
 }
@@ -314,8 +338,7 @@ function Publish({ onNavigate, onOpenAccountSettings }: { onNavigate: (view: Vie
   const [packageTaskId, setPackageTaskId] = useState('');
   const [busy, setBusy] = useState('');
   const [message, setMessage] = useState('');
-  const [confirmDraft, setConfirmDraft] = useState({ url: '', publishedAt: '', note: '' });
-  const [metricDraft, setMetricDraft] = useState({ readCount: 0, likeCount: 0, shareCount: 0, favoriteCount: 0, commentCount: 0, followerDelta: 0 });
+  const [metricDraft, setMetricDraft] = useState({ dataDate: new Date().toISOString().slice(0, 10), checkpoint: 'CUSTOM' as MetricSnapshot['checkpoint'], exposureCount: null as number | null, readCount: null as number | null, playCount: null as number | null, likeCount: null as number | null, shareCount: null as number | null, favoriteCount: null as number | null, commentCount: null as number | null, followerDelta: null as number | null });
   const [retrospectiveDraft, setRetrospectiveDraft] = useState({ summary: '', highlights: '', issues: '', nextActions: '' });
 
   async function loadPublishData(clearMessage = true) {
@@ -347,6 +370,10 @@ function Publish({ onNavigate, onOpenAccountSettings }: { onNavigate: (view: Vie
   const selectedAccount = accounts.find((item) => item.id === selectedAccountId) ?? accounts[0];
   const selectedDraft = readyDrafts.find((item) => item.version.id === selectedDraftVersionId) ?? readyDrafts[0];
   const selectedPublication = articles.find((article) => article.id === selectedArticleId) ?? articles[0] ?? null;
+  const selectedPublicationAccount = selectedPublication ? accounts.find((account) => account.id === selectedPublication.accountId) ?? null : null;
+  const selectedPublicationSchedule = selectedPublication?.metricSchedule ?? [];
+  const latestOfficialDraftTask = tasks.find((task) => task.mode === 'OFFICIAL_API' && task.status === 'SUCCEEDED') ?? null;
+  const taskStatusLabel = (task: PublishTaskView) => task.mode === 'OFFICIAL_API' && task.status === 'SUCCEEDED' ? '草稿已导入，待登记发布' : task.mode === 'MANUAL' && task.status === 'MANUAL_PENDING' ? '发布包待登记发布' : task.status === 'MANUAL_CONFIRMED' ? '已登记发布' : task.status;
   const canUseSelectedTarget = Boolean(selectedAccount && selectedDraft && selectedAccount.platform === selectedDraft.version.platform);
   const publishSteps = [
     { title: '添加公众号账号', detail: accounts.length ? `${accounts.length} 个账号可用` : '先建一个手动发布账号', done: accounts.length > 0 },
@@ -359,12 +386,16 @@ function Publish({ onNavigate, onOpenAccountSettings }: { onNavigate: (view: Vie
     if (!selectedPublication) return;
     const latest = selectedPublication.latestMetrics;
     setMetricDraft({
-      readCount: latest?.readCount ?? 0,
-      likeCount: latest?.likeCount ?? 0,
-      shareCount: latest?.shareCount ?? 0,
-      favoriteCount: latest?.favoriteCount ?? 0,
-      commentCount: latest?.commentCount ?? 0,
-      followerDelta: latest?.followerDelta ?? 0,
+      dataDate: latest?.dataDate ?? latest?.capturedAt?.slice(0, 10) ?? selectedPublication.publishedAt.slice(0, 10),
+      checkpoint: latest?.checkpoint ?? 'CUSTOM',
+      exposureCount: latest?.exposureCount ?? null,
+      readCount: latest?.readCount ?? null,
+      playCount: latest?.playCount ?? null,
+      likeCount: latest?.likeCount ?? null,
+      shareCount: latest?.shareCount ?? null,
+      favoriteCount: latest?.favoriteCount ?? null,
+      commentCount: latest?.commentCount ?? null,
+      followerDelta: latest?.followerDelta ?? null,
     });
     const retrospective = selectedPublication.retrospective;
     setRetrospectiveDraft({
@@ -400,12 +431,10 @@ function Publish({ onNavigate, onOpenAccountSettings }: { onNavigate: (view: Vie
       setTasks(taskResult.tasks as PublishTaskView[]);
       if (selectedAccount.mode === 'OFFICIAL') {
         setPackageResult(null);
-        setConfirmDraft({ url: '', publishedAt: '', note: '' });
         setMessage('一键导入公众号草稿箱成功，请到公众号后台草稿箱查看。');
         return;
       }
       setPackageResult(result.package);
-      setConfirmDraft({ url: '', publishedAt: new Date().toISOString().slice(0, 16), note: '' });
       setMessage('发布包已生成，当前仍是可复制的手动发布状态。');
     } catch (error) {
       setMessage(displayError(error, selectedAccount.mode === 'OFFICIAL' ? '一键导入公众号草稿箱失败' : '生成发布包失败'));
@@ -541,30 +570,6 @@ function Publish({ onNavigate, onOpenAccountSettings }: { onNavigate: (view: Vie
     }
   }
 
-  async function confirmManualPublish() {
-    if (!packageTaskId) {
-      setMessage('请先生成发布包。');
-      return;
-    }
-    setBusy('confirm');
-    setMessage('');
-    try {
-      await webPublishing.manualConfirm(packageTaskId, {
-        url: confirmDraft.url.trim(),
-        note: confirmDraft.note.trim() || '手动确认发布',
-        publishedAt: confirmDraft.publishedAt || undefined,
-      });
-      setMessage('已回填为发布完成，可以继续录入数据。');
-      setPackageResult(null);
-      setConfirmDraft({ url: '', publishedAt: '', note: '' });
-      await loadPublishData(false);
-    } catch (error) {
-      setMessage(displayError(error, '确认发布失败'));
-    } finally {
-      setBusy('');
-    }
-  }
-
   async function saveMetrics(articleId: string) {
     setBusy(`metric:${articleId}`);
     try {
@@ -575,6 +580,21 @@ function Publish({ onNavigate, onOpenAccountSettings }: { onNavigate: (view: Vie
       await loadPublishData(false);
     } catch (error) {
       setMessage(displayError(error, '保存指标失败'));
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function syncMetrics(articleId: string) {
+    setBusy(`sync-metric:${articleId}`);
+    try {
+      await webPublishing.syncMetrics(articleId);
+      setMessage('已从微信官方数据接口写入本次采集快照。');
+      const history = await webPublishing.metrics(articleId);
+      setMetricHistory(history.metrics);
+      await loadPublishData(false);
+    } catch (error) {
+      setMessage(displayError(error, '同步微信文章数据失败；请确认采集日期和标题匹配。'));
     } finally {
       setBusy('');
     }
@@ -598,9 +618,15 @@ function Publish({ onNavigate, onOpenAccountSettings }: { onNavigate: (view: Vie
     }
   }
 
+  function metricInput(name: keyof Pick<typeof metricDraft, 'exposureCount' | 'readCount' | 'playCount' | 'likeCount' | 'shareCount' | 'favoriteCount' | 'commentCount' | 'followerDelta'>, value: string) {
+    setMetricDraft((current) => ({ ...current, [name]: value.trim() === '' ? null : Number(value) }));
+  }
+
+  const dueMetricSchedule = selectedPublicationSchedule.find((item) => item.status === 'DUE');
+
   return <>
     <PageHeader eyebrow="PUBLISH / 发布中心" title="发布与复盘" subtitle="先生成发布包，再决定是手动发到公众号后台，还是接入官方草稿箱/发布接口。" />
-    {message && <div className={`refresh-feedback ${message.includes('失败') || message.includes('不支持') ? 'error' : 'success'}`}><span>i</span>{message}</div>}
+    {message && <div className={`refresh-feedback ${message.includes('失败') || message.includes('错误') || message.includes('拒绝') || message.includes('不支持') ? 'error' : 'success'}`}><span>i</span>{message}</div>}
     <section className="publish-guide" aria-label="发布流程">
       {publishSteps.map((step, index) => <article className={step.done ? 'done' : ''} key={step.title}><b>{index + 1}</b><div><strong>{step.title}</strong><small>{step.detail}</small></div></article>)}
     </section>
@@ -627,6 +653,7 @@ function Publish({ onNavigate, onOpenAccountSettings }: { onNavigate: (view: Vie
           {!readyDrafts.length && <div className="publish-action-hint"><div><b>还没有完成版本</b><p>发布包只读取“完成草稿”后的冻结版本。请回到创作页完成正文、配图和排版。</p></div><button className="button" type="button" onClick={() => onNavigate('create')}><PenLine size={16}/>回到创作</button></div>}
           {selectedAccount && selectedDraft && selectedAccount.platform !== selectedDraft.version.platform && <p className="publish-hint warning">账号平台和草稿平台不一致，请重新选择。</p>}
           {selectedAccount?.mode === 'OFFICIAL' && <div className="publish-action-hint official-api-hint"><div><b>官方接口账号</b><p>验证通过后可自动导入草稿箱，也可一键导入公众号草稿箱；如果提示 IP 白名单或 AppSecret 错误，请到账号设置里重新保存并测试连接。</p></div><button className="button" type="button" onClick={onOpenAccountSettings}><KeyRound size={16}/>配置官方接口账号</button></div>}
+          {latestOfficialDraftTask && <div className="publish-action-hint official-draft-shortcut"><div><b>草稿已导入公众号后台</b><p>请在公众号后台完成发布。发布后到内容复盘台账登记公开链接，系统才开始跟进文章数据。</p></div><a className="button" href={WECHAT_MP_DRAFTS_URL} target="_blank" rel="noreferrer">查看公众号草稿箱<ExternalLink size={16}/></a><button className="button primary" type="button" onClick={() => onNavigate('review')}><ChartColumn size={16}/>去复盘登记链接</button></div>}
         </div>
 
         <div className="panel publish-panel">
@@ -661,13 +688,8 @@ function Publish({ onNavigate, onOpenAccountSettings }: { onNavigate: (view: Vie
                 <summary>HTML 备份</summary>
                 <pre>{packageResult.html}</pre>
               </details>
-              <div className="manual-confirm-form">
-                <label><span>发布链接</span><input value={confirmDraft.url} onChange={(event) => setConfirmDraft((current) => ({ ...current, url: event.target.value }))} placeholder="发布后文章链接，可稍后补" /></label>
-                <label><span>发布时间</span><input type="datetime-local" value={confirmDraft.publishedAt} onChange={(event) => setConfirmDraft((current) => ({ ...current, publishedAt: event.target.value }))} /></label>
-                <label><span>备注</span><input value={confirmDraft.note} onChange={(event) => setConfirmDraft((current) => ({ ...current, note: event.target.value }))} placeholder="例如：已发送到草稿箱 / 已群发" /></label>
-              </div>
               <footer>
-                <button className="button" type="button" onClick={() => void confirmManualPublish()} disabled={busy === 'confirm' || packageResult.account.mode !== 'MANUAL'}>{busy === 'confirm' ? <LoaderCircle className="spin" size={16}/> : <CheckCircle2 size={16}/>}确认已发布</button>
+                <button className="button primary" type="button" onClick={() => onNavigate('review')}><ChartColumn size={16}/>去复盘登记已发布链接</button>
                 <button className="text-button" type="button" onClick={() => onNavigate('create')}>回到创作</button>
               </footer>
             </div>
@@ -696,7 +718,7 @@ function Publish({ onNavigate, onOpenAccountSettings }: { onNavigate: (view: Vie
           {tasks.length ? tasks.map((task) => (
             <article className="task-card" key={task.id}>
               <b>{task.projectTitle || task.draftTitle || task.id}</b>
-              <p>{task.accountName || '未命名账号'} · {task.mode === 'MANUAL' ? '手动发布包' : '官方接口'} · {task.status}</p>
+              <p>{task.accountName || '未命名账号'} · {task.mode === 'MANUAL' ? '手动发布包' : '官方接口'} · {taskStatusLabel(task)}</p>
             </article>
           )) : <p className="empty-note">暂无发布任务。</p>}
         </div>
@@ -708,21 +730,28 @@ function Publish({ onNavigate, onOpenAccountSettings }: { onNavigate: (view: Vie
               <div className="article-focus">
                 <b>{selectedPublication.title || selectedPublication.projectTitle || '未命名文章'}</b>
                 <small>{selectedPublication.url || '未填写发布链接'}</small>
-              </div>
-              <label><span>阅读</span><input type="number" value={metricDraft.readCount} onChange={(event) => setMetricDraft((current) => ({ ...current, readCount: Number(event.target.value) }))} /></label>
-              <label><span>点赞</span><input type="number" value={metricDraft.likeCount} onChange={(event) => setMetricDraft((current) => ({ ...current, likeCount: Number(event.target.value) }))} /></label>
-              <label><span>分享</span><input type="number" value={metricDraft.shareCount} onChange={(event) => setMetricDraft((current) => ({ ...current, shareCount: Number(event.target.value) }))} /></label>
-              <label><span>收藏</span><input type="number" value={metricDraft.favoriteCount} onChange={(event) => setMetricDraft((current) => ({ ...current, favoriteCount: Number(event.target.value) }))} /></label>
-              <label><span>评论</span><input type="number" value={metricDraft.commentCount} onChange={(event) => setMetricDraft((current) => ({ ...current, commentCount: Number(event.target.value) }))} /></label>
-              <label><span>新增关注</span><input type="number" value={metricDraft.followerDelta} onChange={(event) => setMetricDraft((current) => ({ ...current, followerDelta: Number(event.target.value) }))} /></label>
-              <button className="button" type="button" onClick={() => void saveMetrics(selectedPublication.id)} disabled={busy === `metric:${selectedPublication.id}`}>保存指标</button>
+               </div>
+               <label><span>{'\u6570\u636e\u65e5\u671f'}</span><input type="date" value={metricDraft.dataDate} onChange={(event) => setMetricDraft((current) => ({ ...current, dataDate: event.target.value }))} /></label>
+               <label><span>{'\u91c7\u96c6\u8282\u70b9'}</span><select value={metricDraft.checkpoint} onChange={(event) => setMetricDraft((current) => ({ ...current, checkpoint: event.target.value as MetricSnapshot['checkpoint'] }))}><option value="D1">D1 · 24h</option><option value="D3">D3 · 72h</option><option value="D7">D7 · 7d</option><option value="CUSTOM">{'\u81ea\u5b9a\u4e49\u8282\u70b9'}</option></select></label>
+               <label><span>{'\u66dd\u5149'}</span><input type="number" value={metricDraft.exposureCount ?? ''} onChange={(event) => metricInput('exposureCount', event.target.value)} /></label>
+               <label><span>{'\u9605\u8bfb'}</span><input type="number" value={metricDraft.readCount ?? ''} onChange={(event) => metricInput('readCount', event.target.value)} /></label>
+               <label><span>{'\u64ad\u653e'}</span><input type="number" value={metricDraft.playCount ?? ''} onChange={(event) => metricInput('playCount', event.target.value)} /></label>
+               <label><span>{'\u70b9\u8d5e'}</span><input type="number" value={metricDraft.likeCount ?? ''} onChange={(event) => metricInput('likeCount', event.target.value)} /></label>
+               <label><span>{'\u5206\u4eab'}</span><input type="number" value={metricDraft.shareCount ?? ''} onChange={(event) => metricInput('shareCount', event.target.value)} /></label>
+               <label><span>{'\u6536\u85cf'}</span><input type="number" value={metricDraft.favoriteCount ?? ''} onChange={(event) => metricInput('favoriteCount', event.target.value)} /></label>
+               <label><span>{'\u8bc4\u8bba'}</span><input type="number" value={metricDraft.commentCount ?? ''} onChange={(event) => metricInput('commentCount', event.target.value)} /></label>
+               <label><span>{'\u65b0\u589e\u5173\u6ce8'}</span><input type="number" value={metricDraft.followerDelta ?? ''} onChange={(event) => metricInput('followerDelta', event.target.value)} /></label>
+               <button className="button" type="button" onClick={() => void saveMetrics(selectedPublication.id)} disabled={busy === `metric:${selectedPublication.id}`}>{'\u4fdd\u5b58\u624b\u5de5\u5feb\u7167'}</button>
+                {selectedPublication.platform === 'WECHAT' && selectedPublicationAccount?.mode === 'OFFICIAL' && <button className="button primary" type="button" onClick={() => void syncMetrics(selectedPublication.id)} disabled={busy === `sync-metric:${selectedPublication.id}`}>{busy === `sync-metric:${selectedPublication.id}` ? <LoaderCircle className="spin" size={16}/> : <RefreshCw size={16}/>}从微信同步</button>}
+               {dueMetricSchedule && <p className="publish-hint warning">{dueMetricSchedule.label} 已到采集时间，请完成本节点快照。</p>}
+               <div className="metric-schedule">{selectedPublicationSchedule.map((item) => <span key={item.checkpoint} className={item.status.toLowerCase()}>{item.checkpoint} · {item.status}</span>)}</div>
               {selectedPublication.latestMetrics && <p className="publish-hint">最近阅读 {selectedPublication.latestMetrics.readCount}，点赞 {selectedPublication.latestMetrics.likeCount}，分享 {selectedPublication.latestMetrics.shareCount}。</p>}
               {metricHistory.length > 0 && <div className="metric-history">
                 {metricHistory.slice(0, 5).map((metric) => (
                   <div key={metric.id}>
                     <b>{metric.readCount}</b>
                     <span>阅读</span>
-                    <small>{metric.capturedAt}</small>
+                     <small>{metric.dataDate} · {metric.capturedAt}</small>
                   </div>
                 ))}
               </div>}
@@ -751,14 +780,213 @@ function Publish({ onNavigate, onOpenAccountSettings }: { onNavigate: (view: Vie
   </>;
 }
 
-function Review({ projects, onOpenProject }: { projects: ContentProject[]; onOpenProject: (project: ContentProject) => void }) {
-  const reviewable = completedProjects(projects);
+function Review({ onNavigate }: { onNavigate: (view: View) => void }) {
+  const [articles, setArticles] = useState<PublishedArticle[]>([]);
+  const [accounts, setAccounts] = useState<ChannelAccount[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [success, setSuccess] = useState('');
+  const [activeMetricArticleId, setActiveMetricArticleId] = useState<string | null>(null);
+  const [metricBusy, setMetricBusy] = useState('');
+  const [metricHistory, setMetricHistory] = useState<MetricSnapshot[]>([]);
+  const [metricDraft, setMetricDraft] = useState({
+    dataDate: new Date().toISOString().slice(0, 10), checkpoint: 'CUSTOM' as MetricSnapshot['checkpoint'],
+    exposureCount: null as number | null, readCount: null as number | null, playCount: null as number | null,
+    likeCount: null as number | null, shareCount: null as number | null, favoriteCount: null as number | null,
+    commentCount: null as number | null, followerDelta: null as number | null,
+  });
+  const [registration, setRegistration] = useState({ url: '', accountId: '' });
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [articleResult, accountResult] = await Promise.all([webPublishing.articles(), webChannelAccounts.list()]);
+      setArticles(articleResult.articles);
+      const wechatAccounts = accountResult.accounts.filter((account) => account.platform === 'WECHAT' && account.status !== 'DISCONNECTED');
+      setAccounts(wechatAccounts);
+      setRegistration((current) => ({ ...current, accountId: current.accountId || wechatAccounts[0]?.id || '' }));
+    } catch (reason) {
+      setError(displayError(reason, '读取复盘中心失败'));
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { void load(); }, []);
+  const latestMetrics = articles.map((article) => article.latestMetrics).filter(Boolean) as MetricSnapshot[];
+  const sum = (key: keyof MetricSnapshot) => latestMetrics.reduce((total, metric) => total + Number(metric[key] ?? 0), 0);
+  const pendingCheckpoints = articles.reduce((total, article) => total + (article.metricSchedule ?? []).filter((item) => item.status === 'DUE').length, 0);
+  async function register() {
+    if (!registration.url.trim()) { setError('请先粘贴已发布文章的公开链接'); return; }
+    if (!registration.accountId) { setError('请先在账号设置中添加公众号账号'); return; }
+    setBusy(true);
+    setError('');
+    setSuccess('');
+    try {
+      await webPublishing.registerStandalonePublication({ url: registration.url.trim(), accountId: registration.accountId });
+      setRegistration((current) => ({ ...current, url: '' }));
+      await load();
+    } catch (reason) {
+      setError(displayError(reason, '读取文章链接并登记失败'));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function removeArticle(article: PublishedArticle) {
+    if (!window.confirm(`确认删除“${article.title || '这篇文章'}”的复盘记录吗？文章原文不会被删除。`)) return;
+    setBusy(true);
+    setError('');
+    setSuccess('');
+    try {
+      await webPublishing.removeArticle(article.id);
+      await load();
+    } catch (reason) {
+      setError(displayError(reason, '删除复盘记录失败'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function metricInput(name: keyof Pick<typeof metricDraft, 'exposureCount' | 'readCount' | 'playCount' | 'likeCount' | 'shareCount' | 'favoriteCount' | 'commentCount' | 'followerDelta'>, value: string) {
+    setMetricDraft((current) => ({ ...current, [name]: value.trim() === '' ? null : Number(value) }));
+  }
+
+  async function openMetricPanel(article: PublishedArticle) {
+    if (activeMetricArticleId === article.id) {
+      setActiveMetricArticleId(null);
+      setMetricHistory([]);
+      return;
+    }
+    setError('');
+    setSuccess('');
+    setActiveMetricArticleId(article.id);
+    const latest = article.latestMetrics;
+    setMetricDraft({
+      dataDate: latest?.dataDate ?? latest?.capturedAt?.slice(0, 10) ?? article.publishedAt.slice(0, 10),
+      checkpoint: latest?.checkpoint ?? 'CUSTOM',
+      exposureCount: latest?.exposureCount ?? null,
+      readCount: latest?.readCount ?? null,
+      playCount: latest?.playCount ?? null,
+      likeCount: latest?.likeCount ?? null,
+      shareCount: latest?.shareCount ?? null,
+      favoriteCount: latest?.favoriteCount ?? null,
+      commentCount: latest?.commentCount ?? null,
+      followerDelta: latest?.followerDelta ?? null,
+    });
+    setMetricHistory([]);
+    setMetricBusy(`load:${article.id}`);
+    try {
+      const result = await webPublishing.metrics(article.id);
+      setMetricHistory(result.metrics);
+    } catch (reason) {
+      setMetricHistory([]);
+      setError(displayError(reason, '读取文章指标历史失败'));
+    } finally {
+      setMetricBusy('');
+    }
+  }
+
+  async function saveArticleMetrics(articleId: string) {
+    setMetricBusy(`save:${articleId}`);
+    setError('');
+    setSuccess('');
+    try {
+      await webPublishing.addMetrics(articleId, { ...metricDraft });
+      const history = await webPublishing.metrics(articleId);
+      setMetricHistory(history.metrics);
+      await load();
+    } catch (reason) {
+      setError(displayError(reason, '保存文章指标失败'));
+    } finally {
+      setMetricBusy('');
+    }
+  }
+
+  async function syncArticleMetrics(articleId: string) {
+    setMetricBusy(`sync:${articleId}`);
+    setError('');
+    setSuccess('');
+    try {
+      await webPublishing.syncMetrics(articleId, { dataDate: metricDraft.dataDate, checkpoint: metricDraft.checkpoint });
+      const history = await webPublishing.metrics(articleId);
+      setMetricHistory(history.metrics);
+      await load();
+    } catch (reason) {
+      setError(displayError(reason, '从微信公众号同步文章指标失败，请确认账号已完成官方接口配置'));
+    } finally {
+      setMetricBusy('');
+    }
+  }
+
+  async function syncAllArticleMetrics() {
+    setBatchBusy(true);
+    setError('');
+    setSuccess('');
+    try {
+      const result = await webPublishing.syncAllMetrics();
+      await load();
+      const detail = result.skippedCount > 0 ? `，${result.skippedCount} 篇文章所属账号已停用` : '';
+      const firstFailure = result.results.find((item) => item.status === 'FAILED');
+      if (result.failedCount > 0) {
+        setError(`批量刷新完成：文章已刷新 ${result.syncedCount} 篇，${result.failedCount} 篇失败${detail}${firstFailure?.message ? `。首个失败原因：${firstFailure.message}` : ''}`);
+      } else {
+        setSuccess(`已刷新 ${result.syncedCount} 篇文章${detail}`);
+      }
+    } catch (reason) {
+      setError(displayError(reason, '刷新全部文章数据失败'));
+    } finally {
+      setBatchBusy(false);
+    }
+  }
+
+
   return <>
-    <PageHeader title="内容复盘" subtitle={reviewable.length ? `${reviewable.length} 个已完成项目等待回填数据。` : undefined} />
-    {reviewable.length ? <section className="review-project-grid">{reviewable.map((project) => <article key={project.id}><header><span>{project.planning.category || '未分类'}</span><time>{project.updatedAt}</time></header><h2>{project.title}</h2><div>{[...new Set(project.versions.map((version) => version.platform))].map((platform) => <span key={platform}>{platformName[platform]}</span>)}</div><footer><button className="text-button" type="button" onClick={() => onOpenProject(project)}>查看项目</button></footer></article>)}</section> : <section className="review-empty-state"><ChartColumn size={28}/><h2>还没有可复盘的内容</h2><p>完成审核与发布后，项目会进入这里。</p></section>}
+    <PageHeader title="内容复盘中心" subtitle="真实发布文章以公开链接为准，系统自动读取标题和发布时间，再持续跟进数据" />
+    {error && <div className="refresh-feedback error"><span>!</span>{error}</div>}
+    {success && <div className="refresh-feedback success"><span>✓</span>{success}</div>}
+    {loading ? <section className="review-empty-state"><LoaderCircle className="spin" size={28}/><p>正在读取复盘中心…</p></section> : <>
+      <section className="review-dashboard" aria-label="复盘仪表盘">
+        <div className="review-kpi"><span>已登记文章</span><b>{articles.length}</b></div>
+        <div className="review-kpi"><span>累计阅读</span><b>{sum('readCount').toLocaleString()}</b></div>
+        <div className="review-kpi"><span>累计点赞 / 转发</span><b>{sum('likeCount').toLocaleString()} / {sum('shareCount').toLocaleString()}</b></div>
+        <div className="review-kpi"><span>待采集节点</span><b>{pendingCheckpoints}</b></div>
+      </section>
+      <section className="panel review-registration-panel">
+        <div className="panel-head"><div><h2>登记已发布文章</h2><p className="empty-note">在公众号后台发布完成后，把文章公开链接粘贴到这里。标题、发布时间和日期由系统从链接读取，不依赖草稿箱或本地发布任务。</p></div><button className="button" type="button" onClick={() => void load()}><RefreshCw size={15}/>刷新</button></div>
+        <div className="manual-confirm-form">
+          {accounts.length > 1 ? <label><span>公众号账号</span><select value={registration.accountId} onChange={(event) => setRegistration((current) => ({ ...current, accountId: event.target.value }))}><option value="">选择公众号账号</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}{account.externalAccountLabel ? ` · ${account.externalAccountLabel}` : ''}</option>)}</select></label> : <div className="review-account-context"><span>归属公众号</span><b>{accounts[0]?.name || '尚未配置公众号账号'}</b></div>}
+          <label><span>已发布文章公开链接</span><input value={registration.url} onChange={(event) => setRegistration((current) => ({ ...current, url: event.target.value }))} placeholder="https://mp.weixin.qq.com/s/..." /></label>
+          <button className="button primary" type="button" onClick={() => void register()} disabled={busy || !accounts.length}>{busy ? <LoaderCircle className="spin" size={16}/> : <CheckCircle2 size={16}/>}读取链接并登记</button>
+        </div>
+      </section>
+      {articles.length ? <section className="review-ledger"><div className="panel-head review-ledger-head"><div><h2>已发布文章台账</h2><span className="chip blue">以真实链接为准</span></div><div className="review-batch-toolbar"><label><span>数据日期</span><input type="date" value={metricDraft.dataDate} onChange={(event) => setMetricDraft((current) => ({ ...current, dataDate: event.target.value }))} /></label><label><span>采集节点</span><select value={metricDraft.checkpoint} onChange={(event) => setMetricDraft((current) => ({ ...current, checkpoint: event.target.value as MetricSnapshot['checkpoint'] }))}><option value="D1">D1 · 24h</option><option value="D3">D3 · 72h</option><option value="D7">D7 · 7d</option><option value="CUSTOM">自定义</option></select></label><button className="button primary" type="button" onClick={() => void syncAllArticleMetrics()} disabled={batchBusy || Boolean(metricBusy)}>{batchBusy ? <LoaderCircle className="spin" size={16}/> : <RefreshCw size={16}/>}刷新全部文章数据</button></div></div>{articles.map((article) => {
+        const metric = article.latestMetrics;
+        return <article className="review-ledger-row" key={article.id}>
+          <header><div><span className="chip blue">{article.platform}</span><h2>{article.title || '未命名文章'}</h2><small>{article.accountName || '未关联账号'} · {new Date(article.publishedAt).toLocaleString('zh-CN')}</small></div><div className="review-ledger-actions"><a className="text-button" href={article.url} target="_blank" rel="noreferrer">打开原文 <ExternalLink size={14}/></a><button className="text-button" type="button" onClick={() => void openMetricPanel(article)} disabled={Boolean(metricBusy)}>{activeMetricArticleId === article.id ? '收起编辑' : '编辑数据'} <ChartColumn size={14}/></button><button className="text-button danger" type="button" onClick={() => void removeArticle(article)} disabled={busy || Boolean(metricBusy)}>删除记录 <Trash2 size={14}/></button></div></header>
+          <div className="review-ledger-metrics"><span><b>{metric?.readCount ?? '—'}</b> 阅读</span><span><b>{metric?.likeCount ?? '—'}</b> 点赞</span><span><b>{metric?.shareCount ?? '—'}</b> 转发</span><span><b>{metric?.followerDelta ?? '—'}</b> 新增关注</span><span className={article.retrospective ? 'complete' : 'pending'}>{article.retrospective ? '已完成复盘' : '待复盘'}</span></div>
+          <div className="metric-schedule">{(article.metricSchedule ?? []).map((item) => <span key={item.checkpoint} className={item.status.toLowerCase()}>{item.checkpoint} · {item.status}</span>)}</div>
+          {activeMetricArticleId === article.id && <div className="review-metric-panel">
+            <div className="review-metric-panel-head"><div><h3>采集文章数据</h3><p>优先读取文章公开页面中的可见数据；页面没有公开指标时，再手工录入或使用公众号官方接口。</p></div>{metricBusy === `load:${article.id}` && <LoaderCircle className="spin" size={16}/>}</div>
+            <div className="metric-form review-metric-form">
+              <label><span>数据日期</span><input type="date" value={metricDraft.dataDate} onChange={(event) => setMetricDraft((current) => ({ ...current, dataDate: event.target.value }))} /></label>
+              <label><span>采集节点</span><select value={metricDraft.checkpoint} onChange={(event) => setMetricDraft((current) => ({ ...current, checkpoint: event.target.value as MetricSnapshot['checkpoint'] }))}><option value="D1">D1 · 24h</option><option value="D3">D3 · 72h</option><option value="D7">D7 · 7d</option><option value="CUSTOM">自定义节点</option></select></label>
+              <label><span>曝光</span><input type="number" min="0" value={metricDraft.exposureCount ?? ''} onChange={(event) => metricInput('exposureCount', event.target.value)} /></label>
+              <label><span>阅读</span><input type="number" min="0" value={metricDraft.readCount ?? ''} onChange={(event) => metricInput('readCount', event.target.value)} /></label>
+              <label><span>播放</span><input type="number" min="0" value={metricDraft.playCount ?? ''} onChange={(event) => metricInput('playCount', event.target.value)} /></label>
+              <label><span>点赞</span><input type="number" min="0" value={metricDraft.likeCount ?? ''} onChange={(event) => metricInput('likeCount', event.target.value)} /></label>
+              <label><span>转发</span><input type="number" min="0" value={metricDraft.shareCount ?? ''} onChange={(event) => metricInput('shareCount', event.target.value)} /></label>
+              <label><span>收藏</span><input type="number" min="0" value={metricDraft.favoriteCount ?? ''} onChange={(event) => metricInput('favoriteCount', event.target.value)} /></label>
+              <label><span>评论</span><input type="number" min="0" value={metricDraft.commentCount ?? ''} onChange={(event) => metricInput('commentCount', event.target.value)} /></label>
+              <label><span>新增关注</span><input type="number" value={metricDraft.followerDelta ?? ''} onChange={(event) => metricInput('followerDelta', event.target.value)} /></label>
+              <div className="review-metric-actions"><button className="button" type="button" onClick={() => void saveArticleMetrics(article.id)} disabled={Boolean(metricBusy)}>{metricBusy === `save:${article.id}` ? <LoaderCircle className="spin" size={16}/> : <CheckCircle2 size={16}/>}保存手工快照</button>{article.platform === 'WECHAT' ? <button className="button primary" type="button" onClick={() => void syncArticleMetrics(article.id)} disabled={Boolean(metricBusy)}>{metricBusy === `sync:${article.id}` ? <LoaderCircle className="spin" size={16}/> : <RefreshCw size={16}/>}从公开页面刷新</button> : <span className="review-metric-notice">当前平台暂不支持自动读取，请手工录入。</span>}</div>
+            </div>
+            {metricHistory.length > 0 && <div className="metric-history"><strong>历史快照</strong>{metricHistory.slice(0, 5).map((history) => <div key={history.id}><b>{history.checkpoint}</b><span>{history.dataDate} · 阅读 {history.readCount ?? '—'} · 点赞 {history.likeCount ?? '—'} · 转发 {history.shareCount ?? '—'}</span><small>{history.source === 'PUBLIC_PAGE' ? '公开页面' : history.source === 'OFFICIAL_API' ? '公众号接口' : '手工'}</small></div>)}</div>}
+          </div>}
+        </article>;
+      })}</section> : <section className="review-empty-state"><ChartColumn size={28}/><h2>还没有登记文章</h2><p>发布完成后粘贴公众号文章链接，系统会从真实文章建立复盘台账。</p><button className="button primary" type="button" onClick={() => onNavigate('publish')}>去发布中心</button></section>}
+    </>}
   </>;
 }
-
 const modelProviders: { provider: ModelProvider; label: string; detail: string; baseUrl: string; model: string }[] = [
   { provider: 'DASHSCOPE', label: '阿里云百炼', detail: '通义千问兼容接口', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus' },
   { provider: 'SILICONFLOW', label: '硅基流动', detail: '模型聚合与推理服务', baseUrl: 'https://api.siliconflow.cn/v1', model: 'Qwen/Qwen3-8B' },
@@ -790,7 +1018,7 @@ const providerLabels: Record<ModelProvider, string> = { DASHSCOPE: '阿里云百
 const modelTaskNames: Record<ModelTask, string> = {
   INTELLIGENCE_ANALYSIS: '热点分析',
   SOURCE_VERIFICATION: '事实核验',
-  TOPIC_RECOMMENDATION: '选题建议',
+  TITLE_RECOMMENDATION: '标题建议',
   VOICE_CALIBRATION: '账号声音提炼',
   WECHAT_COPY_GENERATION: '公众号正文生成',
   WECHAT_VISUAL_PLANNING: '公众号配图策划',
@@ -798,16 +1026,17 @@ const modelTaskNames: Record<ModelTask, string> = {
   WECHAT_LAYOUT_DESIGN: '公众号智能精排',
   XIAOHONGSHU_ADAPTATION: '小红书内容派生',
   WEIBO_ADAPTATION: '微博内容派生',
-  CONTENT_PREFLIGHT_REVIEW: '内容预检复核',
   TEXT_TO_IMAGE: '文生图',
   IMAGE_TO_IMAGE: '图生图 / 图片编辑',
   SPEECH_SYNTHESIS: '配音与口播',
   SPEECH_RECOGNITION: '语音识别',
+  CONTENT_UNDERSTANDING: '内容理解',
   TEXT_TO_VIDEO: '文生视频',
   IMAGE_TO_VIDEO: '首帧图生视频',
   FIRST_LAST_FRAME_TO_VIDEO: '首尾帧生视频',
   REFERENCE_TO_VIDEO: '参考图 / 视频生成',
   VIDEO_EDIT: '视频编辑',
+  VIDEO_ANALYSIS: '视频拉片',
 };
 const usageTaskNames: Record<ApiUsageTask, string> = { ...modelTaskNames, SOURCE_DISCOVERY: '研究资料检索' };
 
@@ -951,19 +1180,31 @@ function UsageOverview({ usage }: { usage: ApiUsageSummary }) {
 
 
 const taskRequirements: Record<ModelTask, { capability: ModelCapability; operation?: ModelOperation; flow: string }> = {
-  INTELLIGENCE_ANALYSIS: { capability: 'TEXT', flow: '资讯 → 分析结果' }, SOURCE_VERIFICATION: { capability: 'TEXT', flow: '研究来源 → 事实结论' }, TOPIC_RECOMMENDATION: { capability: 'TEXT', flow: '资讯 → 选题' }, VOICE_CALIBRATION: { capability: 'TEXT', flow: '授权文章 → 表达规则' }, WECHAT_COPY_GENERATION: { capability: 'TEXT', flow: '素材 → 公众号母稿' }, WECHAT_VISUAL_PLANNING: { capability: 'TEXT', flow: '公众号正文 → 配图方案' }, WECHAT_TEMPLATE_ANALYSIS: { capability: 'TEXT', flow: '授权链接 → 排版模板' }, WECHAT_LAYOUT_DESIGN: { capability: 'TEXT', flow: '公众号正文 + 配图 + 模板 → 智能排版标注' }, XIAOHONGSHU_ADAPTATION: { capability: 'TEXT', flow: '公众号版本 → 小红书草稿' }, WEIBO_ADAPTATION: { capability: 'TEXT', flow: '公众号版本 → 微博草稿' }, CONTENT_PREFLIGHT_REVIEW: { capability: 'TEXT', flow: '草稿 → 显式复核结果' },
-  TEXT_TO_IMAGE: { capability: 'IMAGE', operation: 'TEXT_TO_IMAGE', flow: '文本 → 图片' }, IMAGE_TO_IMAGE: { capability: 'IMAGE', operation: 'IMAGE_TO_IMAGE', flow: '图片 + 文本 → 图片' }, SPEECH_SYNTHESIS: { capability: 'AUDIO', flow: '文本 → 音频' }, SPEECH_RECOGNITION: { capability: 'ASR', flow: '音频 / 视频 → 文本' },
-  TEXT_TO_VIDEO: { capability: 'VIDEO', operation: 'TEXT_TO_VIDEO', flow: '文本 → 视频' }, IMAGE_TO_VIDEO: { capability: 'VIDEO', operation: 'IMAGE_TO_VIDEO', flow: '首帧 + 文本 → 视频' }, FIRST_LAST_FRAME_TO_VIDEO: { capability: 'VIDEO', operation: 'FIRST_LAST_FRAME_TO_VIDEO', flow: '首帧 + 尾帧 + 文本 → 视频' }, REFERENCE_TO_VIDEO: { capability: 'VIDEO', operation: 'REFERENCE_TO_VIDEO', flow: '参考图 / 视频 + 文本 → 视频' }, VIDEO_EDIT: { capability: 'VIDEO', operation: 'VIDEO_EDIT', flow: '视频 + 指令 → 视频' },
+  INTELLIGENCE_ANALYSIS: { capability: 'MULTIMODAL', flow: '资讯正文 + 图片/视频 → 分析结果' }, SOURCE_VERIFICATION: { capability: 'TEXT', flow: '研究来源 → 事实结论' }, TITLE_RECOMMENDATION: { capability: 'MULTIMODAL', flow: '当前成稿 + 配图 → 标题候选' }, VOICE_CALIBRATION: { capability: 'MULTIMODAL', flow: '授权文章 + 图片/视频 → 表达规则' }, WECHAT_COPY_GENERATION: { capability: 'TEXT', flow: '素材 → 公众号母稿' }, WECHAT_VISUAL_PLANNING: { capability: 'MULTIMODAL', flow: '公众号正文 + 已有素材 → 配图方案' }, WECHAT_TEMPLATE_ANALYSIS: { capability: 'MULTIMODAL', flow: '页面结构 + 完整截图 → 排版模板' }, WECHAT_LAYOUT_DESIGN: { capability: 'TEXT', flow: '公众号正文 + 配图 + 模板 → 智能排版标注' }, XIAOHONGSHU_ADAPTATION: { capability: 'TEXT', flow: '公众号版本 → 小红书草稿' }, WEIBO_ADAPTATION: { capability: 'TEXT', flow: '公众号版本 → 微博草稿' },
+  TEXT_TO_IMAGE: { capability: 'IMAGE', operation: 'TEXT_TO_IMAGE', flow: '文本 → 图片' }, IMAGE_TO_IMAGE: { capability: 'IMAGE', operation: 'IMAGE_TO_IMAGE', flow: '图片 + 文本 → 图片' }, SPEECH_SYNTHESIS: { capability: 'AUDIO', flow: '文本 → 音频' }, SPEECH_RECOGNITION: { capability: 'ASR', flow: '音频 / 视频 → 文本' }, CONTENT_UNDERSTANDING: { capability: 'MULTIMODAL', flow: '链接正文 + 图片/视频 + 上传素材 → 联合分析' },
+  TEXT_TO_VIDEO: { capability: 'VIDEO', operation: 'TEXT_TO_VIDEO', flow: '文本 → 视频' }, IMAGE_TO_VIDEO: { capability: 'VIDEO', operation: 'IMAGE_TO_VIDEO', flow: '首帧 + 文本 → 视频' }, FIRST_LAST_FRAME_TO_VIDEO: { capability: 'VIDEO', operation: 'FIRST_LAST_FRAME_TO_VIDEO', flow: '首帧 + 尾帧 + 文本 → 视频' }, REFERENCE_TO_VIDEO: { capability: 'VIDEO', operation: 'REFERENCE_TO_VIDEO', flow: '参考图 / 视频 + 文本 → 视频' }, VIDEO_EDIT: { capability: 'VIDEO', operation: 'VIDEO_EDIT', flow: '视频 + 指令 → 视频' }, VIDEO_ANALYSIS: { capability: 'MULTIMODAL', flow: '上传视频 → 拉片时间轴 + 关键帧' },
 };
+const richContentModelTasks = new Set<ModelTask>([
+  'INTELLIGENCE_ANALYSIS',
+  'TITLE_RECOMMENDATION',
+  'VOICE_CALIBRATION',
+  'WECHAT_VISUAL_PLANNING',
+  'WECHAT_TEMPLATE_ANALYSIS',
+  'CONTENT_UNDERSTANDING',
+  'VIDEO_ANALYSIS',
+]);
 const modelTaskGroups: { label: string; tasks: ModelTask[] }[] = [
-  { label: '情报与内容', tasks: ['INTELLIGENCE_ANALYSIS', 'SOURCE_VERIFICATION', 'TOPIC_RECOMMENDATION', 'VOICE_CALIBRATION', 'WECHAT_COPY_GENERATION', 'WECHAT_VISUAL_PLANNING', 'WECHAT_TEMPLATE_ANALYSIS', 'WECHAT_LAYOUT_DESIGN', 'XIAOHONGSHU_ADAPTATION', 'WEIBO_ADAPTATION', 'CONTENT_PREFLIGHT_REVIEW'] },
+  { label: '情报与内容', tasks: ['INTELLIGENCE_ANALYSIS', 'SOURCE_VERIFICATION', 'TITLE_RECOMMENDATION', 'VOICE_CALIBRATION', 'WECHAT_COPY_GENERATION', 'WECHAT_VISUAL_PLANNING', 'WECHAT_TEMPLATE_ANALYSIS', 'WECHAT_LAYOUT_DESIGN', 'XIAOHONGSHU_ADAPTATION', 'WEIBO_ADAPTATION'] },
   { label: '图片', tasks: ['TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE'] },
   { label: '音频', tasks: ['SPEECH_SYNTHESIS', 'SPEECH_RECOGNITION'] },
-  { label: '视频', tasks: ['TEXT_TO_VIDEO', 'IMAGE_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO', 'REFERENCE_TO_VIDEO', 'VIDEO_EDIT'] },
+  { label: '内容理解', tasks: ['CONTENT_UNDERSTANDING'] },
+  { label: '视频', tasks: ['VIDEO_ANALYSIS', 'TEXT_TO_VIDEO', 'IMAGE_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO', 'REFERENCE_TO_VIDEO', 'VIDEO_EDIT'] },
 ];
 
 function modelSupportsTask(item: ModelCatalogItem, task: ModelTask) {
   const requirement = taskRequirements[task];
+  if (richContentModelTasks.has(task) && item.provider !== 'BAILIAN_CLI') return false;
+  if (task === 'VIDEO_ANALYSIS') return /qwen3\.[6-8](?:[-_.]|$)/i.test(item.model) && !/(?:omni|embedding|rerank)/i.test(item.model);
   return requirement.operation ? (item.operations ?? inferModelOperations(item.model)).includes(requirement.operation) : item.capabilities.includes(requirement.capability);
 }
 
@@ -1099,8 +1340,6 @@ function CoreAgentSettings({ catalog, onSynced }: { catalog: ModelCatalogItem[];
 }
 
 
-function Utility({ title, description }: { title: string; description: string }) { return <><PageHeader eyebrow="UTILITY / 辅助能力" title={title}/><section className="utility"><Lightbulb size={24}/><h2>该模块已预留</h2><p>{description}</p></section></>; }
-
 function WebEntry() {
   const initialSession = useRef(webAuth.session()).current;
   const [session, setSession] = useState<WebSession | null>(initialSession);
@@ -1166,4 +1405,7 @@ function WebAuthScreen({ onAuthenticated }: { onAuthenticated: (session: WebSess
 }
 
 const rootElement = document.getElementById('root')!;
-createRoot(rootElement).render(<WebEntry />);
+const rootRegistry = globalThis as typeof globalThis & { __contentEngineRoot?: Root };
+const appRoot = rootRegistry.__contentEngineRoot ?? createRoot(rootElement);
+rootRegistry.__contentEngineRoot = appRoot;
+appRoot.render(<WebEntry />);

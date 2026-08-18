@@ -13,8 +13,6 @@ const {
   buildFinishedCopyPrompt,
   parseFinishedCopyBody,
   copyActionPersistenceMode,
-  buildCopyQualityReviewPrompt,
-  detectVoiceViolations,
   copyActionVersion,
   copyTemplateScope,
   defaultRevisionTemplate,
@@ -22,10 +20,7 @@ const {
   copyPromptTemplateScope,
   mergeFactsToVerify,
   reconcileFactsToVerify,
-  parseCopyOutput,
-  parseCopyQualityReview,
-  parseCopyQualityReviewSafely,
-  candidateQualityReview,
+  parseRevisionCopyBody,
   resolveCopyAction,
 } = copyActionModule;
 
@@ -47,24 +42,6 @@ test('已核验研究事实不会再次进入正文候选的发布前核验列�
   assert.deepEqual(reconcileFactsToVerify(candidateFacts, verifiedFacts), [
     '上交所官网显示，宇树科技股份有限公司科创板 IPO 审核状态已变更为注册生效',
   ]);
-});
-
-test('账号声音规则检测明确的 AI 套话、emoji 标题和强制互动', () => {
-  const issues = detectVoiceViolations('很多人会问：这意味着什么？\n\n✨ 总结\n\n建议点赞收藏，评论区聊聊。', {
-    bannedPhrases: ['很多人会问'],
-    bannedStructures: ['emoji 小标题', '强制互动结尾'],
-  });
-  assert.deepEqual(issues.map((item) => item.code), ['BANNED_PHRASE', 'EMOJI_HEADING', 'FORCED_CTA']);
-});
-
-test('历史账号声音审查结果仍可读取，但不参与新的正文生成执行链', () => {
-  assert.deepEqual(candidateQualityReview(
-    { approved: true, issues: [] },
-    [{ code: 'BANNED_PHRASE', excerpt: '这意味着', message: '避免使用套话：这意味着' }],
-  ), {
-    status: 'NEEDS_REVIEW',
-    issues: ['避免使用套话：这意味着'],
-  });
 });
 
 test('写作资料包只保留顶层已核验事实，不泄漏证据摘录和旧审稿信息', () => {
@@ -170,22 +147,6 @@ function routeSlice(source, start, end) {
   return source.slice(from, to);
 }
 
-function revisionText({ title = '调整后的标题', changeSummary = '本次修改完成。', body, factsToVerify = [] }) {
-  return [
-    '标题：',
-    title,
-    '',
-    '变更说明：',
-    changeSummary,
-    '',
-    '正文：',
-    body,
-    '',
-    '待核验：',
-    factsToVerify.length ? factsToVerify.map((fact) => `- ${fact}`).join('\n') : '无',
-  ].join('\n');
-}
-
 function outlineText() {
   return [
     '标题候选：',
@@ -246,16 +207,20 @@ test('无法唯一判断的请求要求澄清且不创建动作', () => {
   });
 });
 
-test('八个文案动作拥有稳定版本且模型输出保持待核验事实', () => {
+test('八个文案动作拥有稳定版本且修改正文只接受纯文本', () => {
   assert.equal(COPY_ACTIONS.length, 8);
   assert.equal(copyActionVersion('SHORTEN_DRAFT'), 'project-copy-shorten-draft:1.0.0');
-  const output = parseCopyOutput(revisionText({
-    body: '这是调整后的完整正文。'.repeat(12),
-    changeSummary: '压缩重复表达并保留核心观点。',
-    factsToVerify: ['核验公开数据的发布日期'],
-  }), 'SHORTEN_DRAFT');
-  assert.deepEqual(output.factsToVerify, ['核验公开数据的发布日期']);
-  assert.throws(() => parseCopyOutput(JSON.stringify(output), 'SHORTEN_DRAFT'), /纯文本|JSON|结构化对象/);
+  const output = parseRevisionCopyBody('这是调整后的完整正文。'.repeat(12), 'SHORTEN_DRAFT', {
+    lockedTitle: '锁定标题',
+    currentContent: { title: '原标题', body: '这是原始正文。'.repeat(12) },
+  });
+  assert.equal(output.title, '锁定标题');
+  assert.equal(output.changeSummary, '删除重复表达并压缩篇幅，保留核心判断和必要事实。');
+  assert.deepEqual(output.factsToVerify, []);
+  assert.throws(() => parseRevisionCopyBody(JSON.stringify(output), 'SHORTEN_DRAFT', {
+    lockedTitle: '锁定标题',
+    currentContent: { title: '原标题', body: '这是原始正文。'.repeat(12) },
+  }), /纯文本|JSON|结构化对象/);
 });
 
 test('四个平台拥有独立修订提示词 Scope 和规则', () => {
@@ -268,7 +233,8 @@ test('四个平台拥有独立修订提示词 Scope 和规则', () => {
   assert.match(defaultRevisionTemplate('WEIBO'), /微博|单条|串文/);
 });
 
-test('文案提示词冻结动作、平台规则并禁止洗掉待核验事实', () => {
+test('改写提示词以当前正文为事实基线，不重新注入研究拦截规则', () => {
+  const caution = '某产品已实现尚未核验的具体能力';
   const prompt = buildCopyPrompt({
     action: 'POLISH_EXISTING_DRAFT',
     request: '让表达更自然',
@@ -277,6 +243,7 @@ test('文案提示词冻结动作、平台规则并禁止洗掉待核验事实',
     project: { title: '项目标题', coreViewpoint: '核心观点', factChecks: ['核验价格'] },
     brief: { objective: '完成文章', targetAudience: '普通读者', coreMessage: '先说明边界', sourceRequirements: '使用公开来源', lengthTarget: '1500 字', notes: '' },
     currentContent: { title: '原标题', body: '原正文', factsToVerify: ['核验价格'] },
+    researchContext: { verifiedFacts: ['已确认的背景事实'], cautions: [{ claim: caution, status: 'NEEDS_REVIEW' }] },
     skills: [{ dimension: 'VOICE', name: '自然', version: { version: '1.0.0', instructions: '短句表达。' } }],
     materials: [],
   });
@@ -285,10 +252,35 @@ test('文案提示词冻结动作、平台规则并禁止洗掉待核验事实',
   assert.equal(prompt.enableThinking, true);
   assert.equal(prompt.tools, undefined);
   assert.equal(prompt.contentFormat, 'text');
-  assert.match(prompt.system, /factsToVerify/);
-  assert.match(prompt.system, /不得.*已确认事实/);
+  assert.match(prompt.system, /以当前正文为事实基线/);
+  assert.doesNotMatch(prompt.system, /待复核主张禁止写入区/);
   assert.match(prompt.message, /保留作者的个人表达/);
   assert.match(prompt.message, /核验价格/);
+  assert.doesNotMatch(prompt.message, new RegExp(caution));
+  const message = JSON.parse(prompt.message);
+  assert.deepEqual(message.researchContext, { verifiedFacts: [], cautions: [] });
+  assert.deepEqual(message.currentContent.factsToVerify, ['核验价格']);
+});
+
+test('重构提示词重新生成，不携带当前正文或旧内容母版', () => {
+  const prompt = buildCopyPrompt({
+    action: 'RESTRUCTURE_DRAFT',
+    request: '重构文章',
+    platform: 'WECHAT',
+    template: '重新生成公众号正文',
+    project: { title: '项目标题', coreViewpoint: '核心观点' },
+    brief: { objective: '完成文章', targetAudience: '普通读者', coreMessage: '先说明边界', lengthTarget: '1500 字' },
+    currentContent: { title: '原标题', body: '这是一段不应进入重构提示词的旧正文。'.repeat(20), factsToVerify: ['旧稿待核验事实'] },
+    contentMaster: { thesis: '旧母稿论点', facts: ['旧母稿事实'] },
+    researchContext: { verifiedFacts: ['已确认事实'], cautions: [{ claim: '新的待核验产品能力主张', status: 'NEEDS_REVIEW' }] },
+    materials: [],
+  });
+  const message = JSON.parse(prompt.message);
+  assert.equal(message.currentContent, null);
+  assert.equal(message.contentMaster, null);
+  assert.deepEqual(message.researchContext.verifiedFacts, [{ id: 'verified-claim-1', claim: '已确认事实', status: 'VERIFIED', sourceIds: [] }]);
+  assert.match(prompt.system, /重新生成一篇完整正文/);
+  assert.match(prompt.system, /cautions 不能改写成确定事实/);
 });
 
 test('文案大纲动作走纯文本 Skill 写作契约', () => {
@@ -342,11 +334,8 @@ test('公众号正文强制移动端文章结构，并拒绝把 Markdown 标记�
   assert.match(prompt.system, /公众号正文开篇先写一个读者熟悉的场景、疑问或反差/);
   assert.match(prompt.system, /不要写成百科词条、新闻通稿或教科书解释/);
   assert.match(prompt.system, /纯文本成稿：不得使用 Markdown 标记/);
-  assert.throws(() => parseCopyOutput(revisionText({
-    title: '标题',
-    body: `**一、这不是公众号小标题**\n\n${'这是一段错误示例，用来确保 Markdown 标记不能泄漏到正式文稿。'.repeat(3)}`,
-    changeSummary: '生成候选',
-  }), 'GENERATE_DRAFT'), /Markdown/);
+  const normalized = parseFinishedCopyBody(`**一、这不是公众号小标题**\n\n${'这是一段错误示例，用来确保 Markdown 标记不能泄漏到正式文稿。'.repeat(3)}`, { lockedTitle: '锁定标题' });
+  assert.doesNotMatch(normalized.body, /\*\*|__|(^|\n)\s*#{1,6}\s/m);
 });
 
 test('待复核主张不能作为项目核心观点注入生成上下文', () => {
@@ -371,84 +360,49 @@ test('待复核主张不能作为项目核心观点注入生成上下文', () =>
 
 test('公众号候选不得把待复核主张写成正文事实', () => {
   const claim = '该卫星主要用于为飞船、空间实验室、空间站等载人航天器提供数据中继和测控服务。';
-  assert.throws(() => parseCopyOutput(revisionText({
-    title: '这颗卫星上天意味着什么？',
-    body: `这是一段面向普通读者的完整公众号正文，用于解释一条航天新闻的阅读方法。\n\n这颗卫星为载人航天器提供数据中继和测控服务。\n\n${'正文还需要保持清晰、克制，并把未核验信息留在核验清单中。'.repeat(5)}`,
-    changeSummary: '生成候选',
-    factsToVerify: [claim],
-  }), 'GENERATE_DRAFT', { platform: 'WECHAT', researchContext: { cautions: [{ claim, status: 'NEEDS_REVIEW' }] } }), /待复核|正文/);
-});
-
-test('重构已有正文自动继承待复核事实，且拒绝新增待复核事实', () => {
-  const claim = '该卫星主要用于为飞船、空间实验室、空间站等载人航天器提供数据中继和测控服务。';
-  const body = `这是一篇正在重构的公众号文章，原稿已提到该卫星为载人航天器提供数据中继和测控服务。\n\n${'重构只改善结构与表达，不新增未经核验的用途、数据或影响推演。'.repeat(5)}`;
-  const revisedBody = `${'先换一个新的开头，把读者如何理解这条新闻放到最前面。'.repeat(8)}\n\n该卫星为载人航天器提供数据中继和测控服务。\n\n${'随后再用新的段落顺序说明边界：重构只改善结构与表达，不新增未经核验的用途、数据或影响推演。'.repeat(8)}`;
-  const output = parseCopyOutput(revisionText({ title: '这颗卫星上天意味着什么？', body: revisedBody, changeSummary: '重组原有叙事结构。' }), 'RESTRUCTURE_DRAFT', {
-    currentContent: { body },
-    researchContext: { cautions: [{ claim, status: 'NEEDS_REVIEW' }] },
+  const output = parseFinishedCopyBody(`这是一段面向普通读者的完整公众号正文，用于解释一条航天新闻的阅读方法。\n\n这颗卫星为载人航天器提供数据中继和测控服务。\n\n${'正文还需要保持清晰、克制，并把未核验信息留在核验清单中。'.repeat(5)}`, { lockedTitle: '这颗卫星上天意味着什么？' }, 'GENERATE_DRAFT', {
+    platform: 'WECHAT', researchContext: { cautions: [{ claim, status: 'NEEDS_REVIEW' }] },
   });
   assert.deepEqual(output.factsToVerify, [claim]);
-  assert.throws(() => parseCopyOutput(revisionText({ title: '标题', body, changeSummary: '错误示例' }), 'RESTRUCTURE_DRAFT', {
-    currentContent: { body: '不包含这条主张的原稿。' },
+});
+
+test('重构重新生成正文，执行生成安全门且不继承原稿待核验项', () => {
+  const claim = '该卫星主要用于为飞船、空间实验室、空间站等载人航天器提供数据中继和测控服务。';
+  const body = `这是一篇正在重构的公众号文章，原稿已提到该卫星为载人航天器提供数据中继和测控服务。\n\n${'重构只改善结构与表达，不新增未经核验的用途、数据或影响推演。'.repeat(5)}`;
+  const revisedBody = `${'先换一个新的开头，把读者如何理解这条新闻放到最前面。'.repeat(8)}\n\n${'随后再用新的段落顺序说明边界：重构只生成新的文章，不沿用旧稿表达。'.repeat(8)}`;
+  const output = parseRevisionCopyBody(revisedBody, 'RESTRUCTURE_DRAFT', {
+    lockedTitle: '这颗卫星上天意味着什么？',
+    currentContent: { body, factsToVerify: [claim] },
     researchContext: { cautions: [{ claim, status: 'NEEDS_REVIEW' }] },
-  }), /待复核|正文/);
+  });
+  assert.deepEqual(output.factsToVerify, []);
+  const flagged = parseRevisionCopyBody(`${revisedBody}\n\n${claim}`, 'RESTRUCTURE_DRAFT', {
+    lockedTitle: '标题',
+    currentContent: { body: '不包含这条主张的原稿。', factsToVerify: [claim] },
+    researchContext: { cautions: [{ claim, status: 'NEEDS_REVIEW' }] },
+  });
+  assert.deepEqual(flagged.factsToVerify, [claim]);
+});
+
+test('重构不读取原文作为改写底稿，并按生成逻辑审查新正文', () => {
+  const claim = 'Wan3.0首次支持doc、xls、ppt、pdf、md等文档格式作为视频生成输入源';
+  const current = '原文已经提到Wan3.0可以把docx、xlsx和pptx里的内容转成视频，但没有确认完整支持格式列表。';
+  const preserved = '原文已经提到Wan3.0可以把docx、xlsx和pptx里的内容转成视频，但没有确认完整支持格式列表。\n\n重构后只调整段落顺序，保留原有边界。'.repeat(4);
+  const output = parseRevisionCopyBody(`${preserved}\n\nWan3.0首次支持doc、xls、ppt、pdf、md等文档格式作为视频生成输入源。`, 'RESTRUCTURE_DRAFT', {
+    lockedTitle: '标题', currentContent: { body: current, factsToVerify: [claim] }, researchContext: { cautions: [{ claim, status: 'SINGLE_SOURCE' }] },
+  });
+  assert.ok(output.factsToVerify.includes(claim));
 });
 
 test('重构候选不能与当前正文几乎一致', () => {
   const current = `第一段先说明为什么要重构。\n\n第二段继续使用原有结构。\n\n${'第三段保持同样的论证路径。'.repeat(20)}`;
-  const same = revisionText({ title: '原题', body: current, changeSummary: '重构完成。' });
-  assert.throws(() => parseCopyOutput(same, 'RESTRUCTURE_DRAFT', { currentContent: { title: '原题', body: current } }), /重构|原文|一致/);
-  const changed = revisionText({
-    title: '新题',
-    body: `${'先换一个完全不同的开头，把读者问题放到前面。'.repeat(8)}\n\n${'再重新组织论证顺序，用新的分段推进。'.repeat(8)}\n\n${'最后收束到新的判断框架。'.repeat(8)}`,
-    changeSummary: '重新组织结构和叙事顺序。',
-  });
-  assert.equal(parseCopyOutput(changed, 'RESTRUCTURE_DRAFT', { currentContent: { title: '原题', body: current } }).title, '新题');
-});
-
-test('文案质量审稿只以已核验事实为准，并返回可执行的重写结论', () => {
-  const retainedClaim = '该卫星主要用于为飞船、空间实验室、空间站等载人航天器提供数据中继和测控服务。';
-  const review = parseCopyQualityReview(JSON.stringify({ approved: false, issues: ['正文把待复核用途写成了确定事实'] }));
-  assert.deepEqual(review, { approved: false, issues: ['正文把待复核用途写成了确定事实'] });
-  assert.deepEqual(candidateQualityReview(review), { status: 'NEEDS_REVIEW', issues: ['正文把待复核用途写成了确定事实'] });
-  assert.deepEqual(candidateQualityReview({ approved: true, issues: ['应被忽略'] }), { status: 'PASSED', issues: [] });
-  assert.throws(() => parseCopyQualityReview(JSON.stringify({ approved: 'false', issues: [] })), /boolean|expected/i);
-  const prompt = buildCopyQualityReviewPrompt({
-    action: 'RESTRUCTURE_DRAFT',
-    platform: 'WECHAT',
-    output: { title: '示例', body: '示例正文', changeSummary: '生成候选', factsToVerify: [] },
-    currentContent: { body: `原稿中已有：${retainedClaim}` },
-    researchContext: { verifiedFacts: [{ claim: '已核验事实' }], cautions: [{ claim: retainedClaim }] },
-  });
-  assert.match(prompt.system, /不得使用模型已有知识补全事实/);
-  assert.match(prompt.system, /issues 必须是字符串数组/);
-  const reviewInput = JSON.parse(prompt.message);
-  assert.deepEqual(reviewInput.allowedExistingCautions, [retainedClaim]);
-});
-
-test('历史质量审稿数据仍可兼容读取，但 Worker 不再调用审稿与自动重写', () => {
-  assert.deepEqual(parseCopyQualityReview(JSON.stringify({
-    approved: false,
-    issues: [
-      { problem: '资金用途缺少证据', suggestion: '删除具体用途推演' },
-      { message: '结尾存在主观扩展' },
-    ],
-  })), {
-    approved: false,
-    issues: ['资金用途缺少证据；删除具体用途推演', '结尾存在主观扩展'],
-  });
-
-  assert.deepEqual(parseCopyQualityReviewSafely('{不是有效 JSON'), {
-    approved: false,
-    issues: ['质量审稿返回格式异常，候选正文已保留，请人工检查。'],
-    malformed: true,
-  });
-
-  const worker = fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8');
-  const execute = routeSlice(worker, 'async function generateProjectCopyAction', 'async function generateAgentPlan');
-  assert.doesNotMatch(execute, /buildCopyQualityReviewPrompt|parseCopyQualityReviewSafely|candidateQualityReview|detectVoiceViolations/);
-  assert.match(execute, /prompt\.tools/);
-  assert.match(execute, /requiredToolName:\s*prompt\.requiredToolName/);
+  assert.throws(() => parseRevisionCopyBody(current, 'RESTRUCTURE_DRAFT', {
+    lockedTitle: '原题', currentContent: { title: '原题', body: current },
+  }), /重构|原文|一致/);
+  const changed = `${'先换一个完全不同的开头，把读者问题放到前面。'.repeat(8)}\n\n${'再重新组织论证顺序，用新的分段推进。'.repeat(8)}\n\n${'最后收束到新的判断框架。'.repeat(8)}`;
+  assert.equal(parseRevisionCopyBody(changed, 'RESTRUCTURE_DRAFT', {
+    lockedTitle: '原题', currentContent: { title: '原题', body: current },
+  }).title, '原题');
 });
 
 test('017 注册八个需要确认的受控文案动作', () => {
@@ -527,7 +481,25 @@ test('采用修改候选时根据项目母版历史递增版本号', () => {
   assert.match(accept, /loadContentMasterState\(client, workspace\.id, candidate\.project_id\)/);
   assert.match(accept, /masterState\.nextVersion/);
   assert.match(accept, /masterState\.parentVersionId/);
+  assert.match(accept, /content_drafts[\s\S]{0,220}FOR UPDATE/);
+  assert.match(accept, /draftStore\.patchWorkingCopy\([\s\S]{0,260}candidate\.content_title[\s\S]{0,120}candidate\.content_body/);
   assert.doesNotMatch(accept, /content_master_versions[\s\S]{0,250}VALUES \(\$1, \$2, \$3, 1,/);
+});
+
+test('正文写作包完整携带作者正文、拉片结果和视觉素材说明', () => {
+  const packet = buildWritingPacket({
+    projectId: 'project-1', platform: 'WECHAT', action: 'GENERATE_DRAFT',
+    project: { title: 'GoHome 家庭看护应用', planning: { title: 'GoHome 家庭看护应用' } },
+    brief: {}, currentContent: { title: '', body: '' },
+    materials: [
+      { id: 'draft-1', kind: 'DRAFT', title: '原始草稿', body: '这是用户提供的完整原始内容。' },
+      { id: 'video-note', kind: 'NOTE', title: '视频拉片结果', body: '0-30 秒展示隐私模式与跌倒检测。' },
+      { id: 'frame-1', kind: 'IMAGE', title: '骨架识别关键帧', notes: '人物骨架模式界面' },
+    ],
+  });
+  assert.match(JSON.stringify(packet), /完整原始内容/);
+  assert.match(JSON.stringify(packet), /隐私模式与跌倒检测/);
+  assert.match(JSON.stringify(packet), /骨架识别关键帧/);
 });
 
 test('首次正文不会把正文模型静默当作研究或核验模型', () => {

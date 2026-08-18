@@ -4,7 +4,7 @@ import test from 'node:test';
 import { z } from 'zod';
 
 const require = createRequire(import.meta.url);
-const { publicErrorMessage } = require('../server/services/http-errors.cjs');
+const { publicErrorMessage, responseStatusCode } = require('../server/services/http-errors.cjs');
 const { businessError, errorPayload } = require('../server/services/business-errors.cjs');
 
 test('结构化参数校验失败时不向页面暴露 Zod JSON', () => {
@@ -35,4 +35,12 @@ test('稳定业务错误只公开明确允许的错误码和详情', () => {
 
 test('普通异常响应不伪造业务错误码和详情', () => {
   assert.deepEqual(errorPayload(new Error('请求失败。')), { message: '请求失败。' });
+});
+
+test('HTTP 错误保留真实 5xx 状态，未知异常使用 500', () => {
+  assert.equal(responseStatusCode({ statusCode: 502 }), 502);
+  assert.equal(responseStatusCode({ statusCode: 503 }), 503);
+  assert.equal(responseStatusCode({ statusCode: 409 }), 409);
+  assert.equal(responseStatusCode(new Error('数据库连接失败')), 500);
+  assert.equal(responseStatusCode({ statusCode: 200 }), 500);
 });

@@ -1,5 +1,5 @@
 import { projectStageForLegacyStatus, type ContentProject, type IntelligenceItem, type IntelligenceSource, type Platform, type ProjectPlanning, type TopicCandidate } from '../domain/content';
-import { webIntelligence, webState } from './webApi';
+import { retryTransient, webIntelligence, webState } from './webApi';
 
 export interface LocalState {
   workspace: WorkspaceProfile;
@@ -48,8 +48,11 @@ export const seedState: LocalState = {
 };
 
 export async function loadState(): Promise<LocalState> {
-  const result = await webState.load();
-  const [sources, intelligence] = await Promise.all([webIntelligence.listSources(), webIntelligence.listItems()]);
+  const [result, sources, intelligence] = await Promise.all([
+    retryTransient(() => webState.load()),
+    retryTransient(() => webIntelligence.listSources()),
+    retryTransient(() => webIntelligence.listItems()),
+  ]);
   return normalizeState({ ...result.state, sources, intelligence });
 }
 

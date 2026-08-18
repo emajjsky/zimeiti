@@ -24,6 +24,7 @@ function registerWechatLayoutTemplateRoutes(app, {
   templateStore,
   resolveTaskRoute,
   analyzeTemplateSource,
+  runOmniTask,
   runTextTask,
   recordUsage,
   transaction,
@@ -79,6 +80,7 @@ function registerWechatLayoutTemplateRoutes(app, {
       templateRules: template.rules,
       layoutAddons: draft.visualPlan?.layoutAddons,
       layoutDesign: layoutDesignForTemplate(draft.visualPlan, template, draft),
+      visualPlan: draft.visualPlan,
     });
     return { templateId, templateVersionId: template.currentVersionId, draftId: draft.id, html: rendered.html, checks: rendered.checks };
   });
@@ -144,6 +146,7 @@ function registerWechatLayoutTemplateRoutes(app, {
       templateRules: template.rules,
       layoutAddons: saved.visualPlan?.layoutAddons,
       layoutDesign: layoutDesignForTemplate(saved.visualPlan, template, saved),
+      visualPlan: saved.visualPlan,
     });
     return {
       draft: saved,
@@ -172,7 +175,7 @@ function registerWechatLayoutTemplateRoutes(app, {
         url: input.url,
         confirmedRights: input.confirmedRights,
         route,
-        runTextTask: (task) => runTextTask({ ...task, workspaceId }),
+        runOmniTask: (task) => (runOmniTask ?? runTextTask)({ ...task, workspaceId }),
       });
     } catch (error) {
       try {

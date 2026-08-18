@@ -15,7 +15,7 @@ const decisionNames = { FOLLOW: '建议跟进', WATCH: '继续观察', SKIP: '�
 const timingNames = { TODAY: '建议今天发布', THREE_DAYS: '三天内有效', ONE_WEEK: '一周内有效', EVERGREEN: '可长期跟进' } as const;
 
 export function IntelligenceInbox({
-  item, intelligence, sources, projects, onSelect, onAddToCreative, onOpenProject, onSaveAnalysis, onRefresh, onOpenSources, refreshFeedback,
+  item, intelligence, projects, onSelect, onAddToCreative, onOpenProject, onSaveAnalysis, onRefresh, onOpenSources, refreshFeedback,
 }: {
   item?: LocalState['intelligence'][number];
   intelligence: LocalState['intelligence'];

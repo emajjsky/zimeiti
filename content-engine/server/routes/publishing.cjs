@@ -16,18 +16,35 @@ const officialCredentialInput = z.object({
   appSecret: z.string().trim().min(8).max(200),
 }).strict();
 const manualConfirmInput = z.object({
-  url: z.string().trim().max(2000).default(''),
+  url: z.string().trim().url().max(2000),
   note: z.string().trim().max(1000).default(''),
   publishedAt: z.string().trim().max(80).optional(),
 }).strict();
+const publicationRegistrationInput = z.object({
+  url: z.string().trim().url().max(2000),
+}).strict();
+const standalonePublicationInput = z.object({
+  url: z.string().trim().url().max(2000),
+  accountId: uuid.optional(),
+}).strict();
 const metricInput = z.object({
+  dataDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   capturedAt: z.string().trim().max(80).optional(),
-  readCount: z.number().int().min(0).max(999999999).default(0),
-  likeCount: z.number().int().min(0).max(999999999).default(0),
-  shareCount: z.number().int().min(0).max(999999999).default(0),
-  favoriteCount: z.number().int().min(0).max(999999999).default(0),
-  commentCount: z.number().int().min(0).max(999999999).default(0),
-  followerDelta: z.number().int().min(-999999999).max(999999999).default(0),
+  checkpoint: z.enum(['D1', 'D3', 'D7', 'CUSTOM']).default('CUSTOM'),
+  exposureCount: z.number().int().min(0).max(999999999).nullable().optional().default(null),
+  readCount: z.number().int().min(0).max(999999999).nullable().optional().default(null),
+  playCount: z.number().int().min(0).max(999999999).nullable().optional().default(null),
+  likeCount: z.number().int().min(0).max(999999999).nullable().optional().default(null),
+  shareCount: z.number().int().min(0).max(999999999).nullable().optional().default(null),
+  favoriteCount: z.number().int().min(0).max(999999999).nullable().optional().default(null),
+  commentCount: z.number().int().min(0).max(999999999).nullable().optional().default(null),
+  followerDelta: z.number().int().min(-999999999).max(999999999).nullable().optional().default(null),
+  raw: z.record(z.string(), z.unknown()).optional(),
+}).strict();
+const metricSyncInput = z.object({
+  dataDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  checkpoint: z.enum(['D1', 'D3', 'D7', 'CUSTOM']).optional(),
+  capturedAt: z.string().trim().max(80).optional(),
 }).strict();
 const retrospectiveInput = z.object({
   summary: z.string().trim().max(8000).default(''),
@@ -36,7 +53,7 @@ const retrospectiveInput = z.object({
   nextActions: z.array(z.string().trim().min(1).max(500)).max(12).default([]),
 }).strict();
 
-function registerPublishingRoutes(app, { workspaceAccess, publishingStore }) {
+function registerPublishingRoutes(app, { workspaceAccess, publishingStore, detectPublicIpv4 }) {
   app.get('/api/v1/channel-accounts', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
     return { accounts: await publishingStore.listAccounts(request.workspace.id) };
   });
@@ -61,6 +78,10 @@ function registerPublishingRoutes(app, { workspaceAccess, publishingStore }) {
     return { account };
   });
 
+  app.get('/api/v1/channel-accounts/official-network', { preHandler: workspaceAccess.forRole('OWNER') }, async () => {
+    return { network: await detectPublicIpv4() };
+  });
+
   app.get('/api/v1/publishing/ready-drafts', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
     return { drafts: await publishingStore.readyDrafts(request.workspace.id) };
   });
@@ -82,11 +103,25 @@ function registerPublishingRoutes(app, { workspaceAccess, publishingStore }) {
   });
 
   app.post('/api/v1/publishing/tasks/:taskId/manual-confirm', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
-    return publishingStore.manualConfirm(request.workspace.id, request.user.sub, uuid.parse(request.params.taskId), manualConfirmInput.parse(request.body ?? {}));
+    return publishingStore.registerPublication(request.workspace.id, request.user.sub, uuid.parse(request.params.taskId), manualConfirmInput.parse(request.body ?? {}));
+  });
+
+  app.post('/api/v1/publishing/tasks/:taskId/register-publication', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
+    return publishingStore.registerPublication(request.workspace.id, request.user.sub, uuid.parse(request.params.taskId), publicationRegistrationInput.parse(request.body ?? {}));
+  });
+
+  app.post('/api/v1/publishing/articles/register', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
+    const result = await publishingStore.registerStandalonePublication(request.workspace.id, request.user.sub, standalonePublicationInput.parse(request.body ?? {}));
+    reply.code(201);
+    return result;
   });
 
   app.get('/api/v1/publishing/articles', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
     return { articles: await publishingStore.listPublications(request.workspace.id) };
+  });
+
+  app.delete('/api/v1/publishing/articles/:articleId', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {
+    return publishingStore.deletePublication(request.workspace.id, uuid.parse(request.params.articleId));
   });
 
   app.post('/api/v1/publishing/articles/:articleId/metrics', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
@@ -97,6 +132,18 @@ function registerPublishingRoutes(app, { workspaceAccess, publishingStore }) {
 
   app.get('/api/v1/publishing/articles/:articleId/metrics', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
     return { metrics: await publishingStore.listMetricSnapshots(request.workspace.id, uuid.parse(request.params.articleId)) };
+  });
+
+  app.post('/api/v1/publishing/articles/:articleId/metrics/sync', { preHandler: workspaceAccess.forRole('OWNER') }, async (request, reply) => {
+    const metric = await publishingStore.syncMetrics(request.workspace.id, request.user.sub, uuid.parse(request.params.articleId), metricSyncInput.parse(request.body ?? {}));
+    reply.code(201);
+    return { metric };
+  });
+
+  app.post('/api/v1/publishing/articles/metrics/sync-all', { preHandler: workspaceAccess.forRole('OWNER') }, async (request, reply) => {
+    const result = await publishingStore.syncMetricsForAll(request.workspace.id, request.user.sub, metricSyncInput.parse(request.body ?? {}));
+    reply.code(200);
+    return result;
   });
 
   app.put('/api/v1/publishing/articles/:articleId/retrospective', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request) => {

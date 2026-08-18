@@ -1,4 +1,5 @@
 const { z } = require('zod');
+const { normalizeRichContentPackage } = require('./rich-content-understanding.cjs');
 
 const ANALYSIS_SCOPE = 'INTELLIGENCE_ANALYSIS';
 const MAX_TEMPLATE_LENGTH = 12_000;
@@ -89,6 +90,7 @@ function buildAnalysisPrompt({ template, item, profile, platforms }) {
     accountPositioning: profile.accountPositioning ?? '',
     targetAudience: profile.targetAudience ?? '',
     platforms,
+    ...(item.richContent ? { richContent: item.richContent } : {}),
   };
   const system = [
     '你是内容热点分析助手，只依据给定资讯和上下文提出建议，不得编造事实或来源。',
@@ -105,6 +107,18 @@ function buildAnalysisPrompt({ template, item, profile, platforms }) {
 
 function buildAnalysisRepairPrompt(system, validationError) {
   return `${system}\n上一次输出未通过结构校验。请只返回修正后的 JSON，不要解释。校验错误如下：${validationError}`;
+}
+
+function richContentForArticle(article) {
+  return normalizeRichContentPackage({
+    text: { title: article?.title, body: article?.text },
+    media: (article?.media ?? []).map((item) => ({
+      kind: item.mediaType,
+      source: item.resolvedUrl ?? item.sourceUrl,
+      label: item.alt ?? item.caption,
+      origin: 'WEB',
+    })),
+  });
 }
 
 function prepareAnalysisInput({ item, profile, platforms, template, route }) {
@@ -159,4 +173,4 @@ function createTemplateStore({ query }, additionalDefinitions = {}) {
   };
 }
 
-module.exports = { ANALYSIS_SCOPE, MAX_TEMPLATE_LENGTH, templateVariables, weights, calculateOverallScore, decisionForScore, validateAnalysisOutput, parseAnalysisContent, validateTemplate, defaultTemplate, buildAnalysisPrompt, buildAnalysisRepairPrompt, prepareAnalysisInput, createTemplateStore };
+module.exports = { ANALYSIS_SCOPE, MAX_TEMPLATE_LENGTH, templateVariables, weights, calculateOverallScore, decisionForScore, validateAnalysisOutput, parseAnalysisContent, validateTemplate, defaultTemplate, buildAnalysisPrompt, buildAnalysisRepairPrompt, richContentForArticle, prepareAnalysisInput, createTemplateStore };

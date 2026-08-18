@@ -47,6 +47,21 @@ test('初稿提示词冻结业务模板、已采用大纲和四项写作规则',
   assert.doesNotMatch(prompt.message, /LAYOUT|公众号长文|使用清晰小标题/);
 });
 
+test('初稿提示词同时携带已采用大纲和项目来源资料', () => {
+  const prompt = buildDraftPrompt({
+    ...snapshot,
+    materials: [
+      { id: 'input-1', type: 'INPUT', kind: 'REFERENCE', title: '来源正文', content: '链接正文中的完整事实描述。' },
+      { id: 'reference-1', type: 'LINK', title: '原始链接', url: 'https://example.com/article' },
+      { id: 'understanding-1', type: 'CONTENT_UNDERSTANDING', summary: '联合分析摘要', visualClues: ['截图体现产品操作路径'] },
+    ],
+  });
+  assert.match(prompt.message, /链接正文中的完整事实描述/);
+  assert.match(prompt.message, /https:\/\/example\.com\/article/);
+  assert.match(prompt.message, /截图体现产品操作路径/);
+  assert.match(prompt.message, /acceptedOutline/);
+});
+
 test('公众号和小红书使用独立初稿 Scope 与默认模板', () => {
   assert.equal(draftTemplateScope('WECHAT'), 'CREATIVE_DRAFT_WECHAT');
   assert.equal(draftTemplateScope('XIAOHONGSHU'), 'CREATIVE_DRAFT_XIAOHONGSHU');

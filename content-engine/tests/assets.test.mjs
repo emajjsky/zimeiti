@@ -5,7 +5,15 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import test from 'node:test';
 import { assetView, createAssetStore } from '../server/services/assets.cjs';
-import { detectFileType, saveUploadedAsset } from '../server/services/assetStorage.cjs';
+import assetStorage from '../server/services/assetStorage.cjs';
+
+const { detectFileType, maxUploadBytesForMime, saveRemoteImageAsset, saveUploadedAsset } = assetStorage;
+
+test('长视频使用独立上传上限，普通素材继续保持五十兆限制', () => {
+  assert.equal(maxUploadBytesForMime('video/mp4'), 1024 * 1024 * 1024);
+  assert.equal(maxUploadBytesForMime('video/webm'), 1024 * 1024 * 1024);
+  assert.equal(maxUploadBytesForMime('image/png'), 50 * 1024 * 1024);
+});
 
 const SHA = 'a'.repeat(64);
 
@@ -46,6 +54,49 @@ test('文件内容检测覆盖正式允许的图片、文档、音频和视频�
     [Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), 'video/webm', 'VIDEO'],
   ];
   for (const [buffer, mimeType, kind] of samples) assert.deepEqual(detectFileType(buffer, buffer, mimeType), { mimeType, kind, extension: mimeType === 'image/jpeg' ? '.jpg' : mimeType === 'image/png' ? '.png' : mimeType === 'application/pdf' ? '.pdf' : mimeType === 'audio/mpeg' ? '.mp3' : mimeType === 'audio/wav' ? '.wav' : '.webm' });
+});
+
+test('远程候选图原图不可达时使用同一候选的缩略图地址导入', async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'content-engine-remote-image-'));
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+  const requested = [];
+  try {
+    const stored = await saveRemoteImageAsset(root, 'workspace-a', 'https://images.example/original.jpg', {
+      fallbackUrl: 'https://images.example/thumb.jpg',
+      validateUrl: async (value) => new URL(value),
+      fetchImpl: async (url) => {
+        requested.push(url.toString());
+        if (url.pathname.endsWith('original.jpg')) throw new TypeError('fetch failed');
+        return new Response(png, { status: 200, headers: { 'content-type': 'image/png' } });
+      },
+    });
+    assert.equal(requested.length, 2);
+    assert.match(stored.storageKey, /\.png$/);
+    assert.equal(stored.mimeType, 'image/png');
+  } finally {
+    await fs.promises.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('服务端直连图片超时时使用受控浏览器下载通道', async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'content-engine-browser-image-'));
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xdb, 0x00]);
+  let browserCalls = 0;
+  try {
+    const stored = await saveRemoteImageAsset(root, 'workspace-a', 'https://images.example/photo.jpg', {
+      validateUrl: async (value) => new URL(value),
+      fetchImpl: async () => { throw new TypeError('fetch failed'); },
+      browserFetch: async (value, validateUrl) => {
+        browserCalls += 1;
+        return { buffer: jpeg, contentType: 'image/jpeg', url: await validateUrl(value) };
+      },
+    });
+    assert.equal(browserCalls, 1);
+    assert.equal(stored.mimeType, 'image/jpeg');
+    assert.equal(stored.sizeBytes, jpeg.length);
+  } finally {
+    await fs.promises.rm(root, { recursive: true, force: true });
+  }
 });
 
 test('素材 DTO 不暴露物理存储键', () => {

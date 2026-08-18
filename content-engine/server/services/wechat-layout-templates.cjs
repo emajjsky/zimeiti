@@ -1,4 +1,7 @@
 const { createHash } = require('node:crypto');
+const fs = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
 const cheerio = require('cheerio');
 const { businessError } = require('./business-errors.cjs');
 const { fetchPublicPage, assertWechatArticleUrl } = require('./public-web.cjs');
@@ -264,7 +267,7 @@ function extractWechatLayoutSignals(html) {
 function templateAnalysisPrompt(signals) {
   return {
     system: [
-      '你是公众号排版规则分析器。你只根据匿名结构统计和样式采样生成规则，不接触、不复述来源文章内容。',
+      '你是公众号排版规则分析器。你结合匿名结构统计、样式采样和页面视觉截图生成规则，不复述来源文章内容。',
       '只返回 JSON 对象。禁止返回 HTML、CSS、选择器、脚本、图片地址或额外字段。',
       '所有颜色必须是六位十六进制；数值超出合理范围时选择接近的安全值。',
       'layout.titleVariant can only be plain/bar/card/label/split/poster/news.',
@@ -313,15 +316,23 @@ function templateAnalysisPrompt(signals) {
   };
 }
 
-async function analyzeWechatTemplateSource({ url, confirmedRights, route, runTextTask, fetchPublicPage: fetchPage = fetchPublicPage }) {
+async function analyzeWechatTemplateSource({ url, confirmedRights, route, runOmniTask, runTextTask, capturePage, fetchPublicPage: fetchPage = fetchPublicPage }) {
   if (confirmedRights !== true) throw businessError(400, 'LAYOUT_TEMPLATE_RIGHTS_REQUIRED', '导入前必须确认你有权使用该公众号文章的排版作为参考。');
   const requestedUrl = assertWechatArticleUrl(url);
   if (!route || route.scope !== undefined && route.scope !== WECHAT_TEMPLATE_ANALYSIS_SCOPE) throw businessError(409, 'TASK_POLICY_REQUIRED', '请先为公众号模板分析配置任务策略。', { scope: WECHAT_TEMPLATE_ANALYSIS_SCOPE });
-  if (typeof runTextTask !== 'function') throw new TypeError('公众号模板分析需要 runTextTask。');
+  const executeTask = runOmniTask ?? runTextTask;
+  if (typeof executeTask !== 'function') throw new TypeError('公众号模板分析需要 runOmniTask。');
+  let temporaryDirectory;
   let page;
   try {
-    page = await fetchPage(requestedUrl.toString());
+    if (typeof capturePage === 'function') {
+      temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'wechat-layout-analysis-'));
+      page = await capturePage(requestedUrl.toString(), path.join(temporaryDirectory, 'page.png'));
+    } else {
+      page = await fetchPage(requestedUrl.toString());
+    }
   } catch (error) {
+    if (temporaryDirectory) await fs.rm(temporaryDirectory, { recursive: true, force: true }).catch(() => undefined);
     if (error?.code === 'LAYOUT_TEMPLATE_SOURCE_UNREADABLE') throw error;
     const unreadable = businessError(422, 'LAYOUT_TEMPLATE_SOURCE_UNREADABLE', '公众号文章链接暂时无法读取，请确认链接公开且仍然有效。');
     unreadable.cause = error;
@@ -330,7 +341,21 @@ async function analyzeWechatTemplateSource({ url, confirmedRights, route, runTex
   const finalUrl = assertWechatArticleUrl(page.url.toString());
   const signals = extractWechatLayoutSignals(page.html);
   const prompt = templateAnalysisPrompt(signals);
-  const result = await runTextTask({ route, ...prompt, maxTokens: 2_000, temperature: 0.1 });
+  let result;
+  try {
+    result = await executeTask({
+      route,
+      ...prompt,
+      maxTokens: 2_000,
+      temperature: 0.1,
+      richContent: {
+        text: { title: '公众号排版匿名视觉分析', body: JSON.stringify(signals) },
+        media: page.screenshotPath ? [{ kind: 'IMAGE', source: page.screenshotPath, label: '公众号文章完整页面截图', origin: 'WECHAT_TEMPLATE' }] : [],
+      },
+    });
+  } finally {
+    if (temporaryDirectory) await fs.rm(temporaryDirectory, { recursive: true, force: true }).catch(() => undefined);
+  }
   let rawRules;
   try { rawRules = JSON.parse(stripCodeFence(result.content)); }
   catch { throw businessError(400, 'LAYOUT_TEMPLATE_RULES_INVALID', '模型返回的模板规则不是有效 JSON。'); }

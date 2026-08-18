@@ -1,5 +1,5 @@
 import { ArrowDown, ArrowLeft, ArrowUp, CheckCircle2, CircleAlert, Crop, Eye, Image as ImageIcon, ImagePlus, LoaderCircle, RefreshCw, Save, Sparkles, Trash2 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AssetPickerDialog } from '../../components/assets/AssetPickerDialog';
 import { AssetPreviewDialog } from '../../components/assets/AssetPreviewDialog';
 import { webAssets, webCreative, webDrafts, webModels } from '../../data/webApi';

@@ -55,7 +55,7 @@ function defaultOutlineTemplate(platform) {
   return '为公众号图文设计大纲。标题需要准确具体；结构要有完整的叙事或论证推进，开篇交代问题与阅读价值，正文使用清晰层级展开解释、证据和案例，结尾形成总结或行动建议。不确定内容列入待核验事实。';
 }
 
-function buildOutlinePrompt({ project, brief, skills, platform, template }) {
+function buildOutlinePrompt({ project, brief, skills, platform, template, materials = [] }) {
   const businessTemplate = validateOutlineTemplate(template ?? defaultOutlineTemplate(platform));
   const example = {
     titleOptions: ['标题方案一', '标题方案二'],
@@ -87,6 +87,7 @@ function buildOutlinePrompt({ project, brief, skills, platform, template }) {
       notes: brief.notes,
     },
     skillRules: skills.map((skill) => ({ dimension: skill.dimension, name: skill.name, version: skill.version.version, instructions: skill.version.instructions })),
+    projectMaterials: materials,
     platform,
   });
   return { system, message };

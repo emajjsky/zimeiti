@@ -496,14 +496,28 @@ function infographicStyle(platform) {
   return '公众号正文横版视觉图解，主画面清楚，关系一眼可辨，少量标签辅助理解并保留充足留白';
 }
 
+function positiveStylePrompt(stylePreset, styleProfile) {
+  const raw = stylePrompt(stylePreset, styleProfile);
+  const [, ...details] = raw.split(/[；;]/);
+  const customRequirements = details.filter((detail) => detail.trim().startsWith('项目统一补充要求：'));
+  const positive = details.filter((detail) => !customRequirements.includes(detail) && !/(^|\s)avoid\b|不|避免/i.test(detail));
+  const compiled = [...positive, ...customRequirements];
+  return (compiled.length ? compiled.join('；') : (details.length ? details.join('；') : raw)).trim();
+}
+
+function positiveSeriesInstruction() {
+  return '系列画面保持统一的色彩关系、光线方向、材质质感、镜头语言和细节完成度';
+}
+
 export function buildVisualGenerationSpec(item, context, mode = item.generationMode ?? defaultGenerationMode(item.role, item.visualType), styleProfile = { preset: 'FRESH_EDITORIAL' }) {
   const platform = context.platform;
   const title = clean(context.title) || '未命名内容';
   const platformLabel = platformLabels[platform] ?? '图文平台';
   const roleLabel = item.role === 'COVER' ? '封面' : item.role === 'CARD' ? '图文卡片' : item.role === 'MAIN' ? '主图' : '正文插图';
-  const avoid = item.avoidConcepts.length ? `不要重复表现：${item.avoidConcepts.join('、')}。` : '';
-  const style = stylePrompt(item.stylePreset, styleProfile);
-  const continuity = projectContinuityPrompt(item.stylePreset, styleProfile);
+  const avoidConcepts = Array.isArray(item.avoidConcepts) ? item.avoidConcepts : [];
+  const avoid = avoidConcepts.length ? `明确避开：${avoidConcepts.join('、')}。` : '';
+  const style = positiveStylePrompt(item.stylePreset, styleProfile);
+  const continuity = positiveSeriesInstruction();
   const template = templateFor(item.visualType, item.templatePreset);
   const structure = structureInstruction(item);
   const reference = referenceInstruction(item.references);
@@ -513,12 +527,12 @@ export function buildVisualGenerationSpec(item, context, mode = item.generationM
     const labelText = labels.join('、');
     return {
       generationMode: mode,
-      prompt: `为${platformLabel}内容《${title}》制作一张${roleLabel}${visualTypeLabels[item.visualType]}。画面内容优先：${item.focus}。用图形、对象、空间关系、时间顺序或数据形态直接讲清楚“${item.purpose}”，不要做成文字型 PPT、课程卡片或大段文字海报。项目统一视觉方向：${style}。系列一致性：${continuity}。构图参考：${template.prompt}。${structure}图内文字必须极少：${item.role === 'COVER' || item.role === 'MAIN' || item.role === 'CARD' ? `只允许一个短标题“${headline}”` : '不要文章标题'}${labelText ? `，以及必要短标签“${labelText}”` : ''}；不生成正文段落、解释句、序号清单或装饰性文字。平台版式：${infographicStyle(platform)}。${reference}${avoid}不得出现错别字、乱码、文字变形、水印、Logo、二维码；不得自行添加数据、机构、人物引语或未经正文支持的结论。`,
+      prompt: `为${platformLabel}内容《${title}》制作一张${roleLabel}${visualTypeLabels[item.visualType]}。画面内容优先（可执行画面任务）：${item.focus}。只把任务中明确可见的主体、动作、最终状态、环境和空间关系转成画面；视觉目标是${item.purpose}，但不要把正文解释写进图里。用图形、对象、空间关系、时间顺序或数据形态直接表达，不要做成文字型 PPT、课程卡片或大段文字海报。项目统一视觉方向：${style}。系列一致性：${continuity}。构图参考：${template.prompt}。${structure}图内文字必须极少：${item.role === 'COVER' || item.role === 'MAIN' || item.role === 'CARD' ? `只允许一个短标题“${headline}”` : '不要文章标题'}${labelText ? `，以及必要短标签“${labelText}”` : ''}；不生成正文段落、解释句、序号清单或装饰性文字。平台版式：${infographicStyle(platform)}。${reference}${avoid}不得出现错别字、乱码、文字变形、水印、Logo、二维码；不得自行添加数据、机构、人物引语或未经正文支持的结论。`,
     };
   }
   return {
     generationMode: mode,
-    prompt: `为${platformLabel}内容《${title}》制作一张${roleLabel}${visualTypeLabels[item.visualType]}。画面主体：${item.focus}。先表现可见的主体、动作、环境和关键关系，让读者不看文字也能理解“${item.purpose}”。项目统一视觉方向：${style}。系列一致性：${continuity}。构图参考：${template.prompt}。${visualStyle(platform, item.role)}。${reference}${avoid}图片内容必须占主导，不做文字型 PPT、信息卡片或大段文字海报；只生成视觉素材，不在图片内生成文字、Logo、二维码或水印。画面真实、准确、干净，细节清晰；涉及新闻事件时采用概念视觉，不伪造新闻现场，不虚构具体机构标识。`,
+    prompt: `为${platformLabel}内容《${title}》制作一张${roleLabel}${visualTypeLabels[item.visualType]}。画面主体（可执行画面任务）：${item.focus}。优先呈现任务中明确的可见主体、动作、最终状态、环境和空间关系，让读者不看文字也能理解画面；视觉目标是${item.purpose}，不要把正文解释、抽象口号或否定句画成文字。项目统一视觉方向：${style}。系列一致性：${continuity}。构图参考：${template.prompt}。${visualStyle(platform, item.role)}。${reference}${avoid}图片内容必须占主导，不做文字型 PPT、信息卡片或大段文字海报；只生成视觉素材，不在图片内生成文字、Logo、二维码或水印。画面真实、准确、干净，细节清晰；涉及新闻事件时采用概念视觉，不伪造新闻现场，不虚构具体机构标识。`,
   };
 }
 
@@ -538,6 +552,16 @@ export function updateVisualPlanItem(item, patch, context, styleProfile = { pres
     size: visualImageSize(context.platform, item.role),
   };
   delete next.negativePrompt;
+  const paragraphs = String(context.body ?? '').replace(/\r\n?/g, '\n').split(/\n\s*\n/).map((block) => block.trim()).filter(Boolean)
+    .filter((block) => !/^(?:---|\*\*\*)$/.test(block) && !/^#{1,3}\s+/.test(block) && !block.split('\n').every((line) => /^>\s?/.test(line)) && !block.split('\n').every((line) => /^[-*]\s+/.test(line)));
+  if (next.role !== 'COVER' && next.role !== 'MAIN' && paragraphs.length) {
+    const explicit = Number(next.insertion?.paragraphIndex ?? next.paragraphIndex);
+    const excerpt = clean(next.sourceExcerpt);
+    const placement = clean(next.placement);
+    const matched = paragraphs.findIndex((paragraph) => (excerpt && paragraph.includes(excerpt)) || (placement && paragraph.includes(placement)));
+    const paragraphIndex = Number.isInteger(explicit) && explicit > 0 ? Math.min(explicit, paragraphs.length) : matched >= 0 ? matched + 1 : null;
+    if (paragraphIndex) next.insertion = { paragraphIndex, position: 'AFTER_PARAGRAPH' };
+  }
   return { ...next, ...buildVisualGenerationSpec(next, context, next.generationMode, styleProfile) };
 }
 

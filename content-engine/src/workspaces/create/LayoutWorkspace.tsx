@@ -1,7 +1,9 @@
-import { Check, FileText, LoaderCircle, RefreshCw, Sparkles } from 'lucide-react';
+import { Check, Edit3, FileText, LoaderCircle, RefreshCw, Sparkles } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { WebApiError, webAssets, webDrafts, webWechatTemplates } from '../../data/webApi';
 import type { ContentDraft, ContentDraftVersion, WechatLayoutPreview, WechatLayoutRules, WechatLayoutTemplate } from '../../domain/content-drafts';
+import type { ProjectAsset } from '../../domain/assets';
+import { AssetPickerDialog } from '../../components/assets/AssetPickerDialog';
 import { WechatLayoutTemplatePicker, type TemplateNotice } from './WechatLayoutTemplatePicker';
 
 function noticeFor(error: unknown, action: 'load' | 'import' | 'duplicate' | 'remove' | 'preview' | 'complete' | 'design'): TemplateNotice {
@@ -126,7 +128,7 @@ function thumbnailPreviewHtml(template: WechatLayoutTemplate) {
   const tags = layout.tagVariant === 'none' ? ''
     : `<div style="display:flex;gap:6px;margin:0 0 14px;${layout.tagVariant === 'rail' ? `padding-left:9px;border-left:3px solid ${rules.heading.borderColor};` : ''}">${[46, 58, 38].map((width) => `<span style="display:block;width:${width}px;height:14px;border-radius:${layout.tagVariant === 'mono' ? 0 : 999}px;border:1px solid ${rules.divider.color};background:${layout.tagVariant === 'chips' ? rules.quote.background : rules.canvas.background};"></span>`).join('')}</div>`;
   const toc = layout.tocVariant === 'none' ? ''
-    : `<nav style="margin:0 0 16px;padding:${layout.tocVariant === 'card' ? '12px' : '0'};background:${layout.tocVariant === 'card' ? rules.quote.background : 'transparent'};border:${layout.tocVariant === 'card' ? `1px solid ${rules.divider.color}` : '0'};"><i style="display:block;width:48px;height:11px;margin-bottom:8px;background:${rules.title.color};opacity:.75;"></i>${[72, 58, 66].map((width, index) => `<p style="display:grid;grid-template-columns:24px 1fr;gap:7px;margin:0 0 6px;"><b style="height:10px;background:${rules.heading.borderColor};opacity:.75;"></b><span style="height:10px;width:${width}%;border-radius:999px;background:${rules.canvas.textColor};opacity:.18;"></span></p>`).join('')}</nav>`;
+    : `<nav style="margin:0 0 16px;padding:${layout.tocVariant === 'card' ? '12px' : '0'};background:${layout.tocVariant === 'card' ? rules.quote.background : 'transparent'};border:${layout.tocVariant === 'card' ? `1px solid ${rules.divider.color}` : '0'};"><i style="display:block;width:48px;height:11px;margin-bottom:8px;background:${rules.title.color};opacity:.75;"></i>${[72, 58, 66].map((width) => `<p style="display:grid;grid-template-columns:24px 1fr;gap:7px;margin:0 0 6px;"><b style="height:10px;background:${rules.heading.borderColor};opacity:.75;"></b><span style="height:10px;width:${width}%;border-radius:999px;background:${rules.canvas.textColor};opacity:.18;"></span></p>`).join('')}</nav>`;
   const list = layout.listVariant === 'plain' ? ''
     : `<ul style="display:grid;gap:${layout.listVariant === 'spaced' ? 9 : 5}px;margin:0 0 14px;padding-left:${layout.listVariant === 'check' ? 0 : 18}px;list-style:${layout.listVariant === 'check' ? 'none' : 'disc'};">${[68, 78, 52].map((width) => `<li style="display:${layout.listVariant === 'check' ? 'grid' : 'list-item'};grid-template-columns:16px 1fr;gap:7px;"><i style="display:${layout.listVariant === 'check' ? 'block' : 'none'};width:16px;height:16px;border-radius:50%;background:${rules.heading.borderColor};"></i><span style="display:block;width:${width}%;height:10px;border-radius:999px;background:${rules.canvas.textColor};opacity:${layout.listVariant === 'bold' ? .34 : .18};"></span></li>`).join('')}</ul>`;
   const inlineAccent = layout.inlineVariant === 'dual' ? '#4f68a8' : layout.inlineVariant === 'mono' ? rules.canvas.textColor : rules.heading.borderColor;
@@ -156,16 +158,16 @@ function thumbnailPreviewHtml(template: WechatLayoutTemplate) {
 
 function hydratePreviewHtml(html: string, assetSources: Map<string, string>) {
   const parsed = previewDocument(html);
-  parsed.querySelectorAll<HTMLElement>('figure[data-asset-id]').forEach((figure) => {
-    const assetId = figure.dataset.assetId;
-    const image = figure.querySelector('img');
+  parsed.querySelectorAll<HTMLElement>('[data-asset-id]').forEach((node) => {
+    const assetId = node.dataset.assetId;
+    const image = node.matches('img') ? node as HTMLImageElement : node.querySelector('img');
     if (assetId && image && assetSources.has(assetId)) image.src = assetSources.get(assetId) as string;
   });
   return parsed.body.innerHTML;
 }
 
 type LayoutAddonPosition = 'intro' | 'outro';
-type LayoutAddon = { enabled: boolean; label: string; title: string; body: string };
+type LayoutAddon = { enabled: boolean; label: string; title: string; body: string; imageAssetId?: string | null; template?: 'CARD' | 'MINIMAL' | 'BANNER' };
 type LayoutAddons = Record<LayoutAddonPosition, LayoutAddon>;
 
 const emptyLayoutAddons: LayoutAddons = {
@@ -181,7 +183,23 @@ function normalizeLayoutAddon(value: unknown, fallback: LayoutAddon): LayoutAddo
     label: String(source.label ?? fallback.label).slice(0, 24),
     title: String(source.title ?? '').slice(0, 80),
     body: String(source.body ?? '').slice(0, 500),
+    imageAssetId: typeof source.imageAssetId === 'string' ? source.imageAssetId : null,
+    template: source.template === 'MINIMAL' || source.template === 'BANNER' ? source.template : fallback.template ?? 'CARD',
   };
+}
+
+function reanchorVisualPlan(visualPlan: Record<string, unknown>, body: string) {
+  const paragraphs = String(body ?? '').split(/\r?\n\s*\r?\n/).map((value) => value.trim()).filter(Boolean);
+  const plan = Array.isArray(visualPlan.plan) ? visualPlan.plan : [];
+  return { ...visualPlan, plan: plan.map((item) => {
+    if (!item || typeof item !== 'object') return item;
+    const value = item as Record<string, unknown>;
+    if (value.role === 'COVER' || value.role === 'MAIN') return value;
+    const excerpt = String(value.sourceExcerpt ?? '').trim();
+    const placement = String(value.placement ?? '').trim();
+    const index = paragraphs.findIndex((paragraph) => (excerpt && paragraph.includes(excerpt)) || (placement && paragraph.includes(placement)));
+    return index >= 0 ? { ...value, insertion: { paragraphIndex: index + 1, position: 'AFTER_PARAGRAPH' } } : value;
+  }) };
 }
 
 function layoutAddonsFromDraft(draft: ContentDraft): LayoutAddons {
@@ -192,10 +210,12 @@ function layoutAddonsFromDraft(draft: ContentDraft): LayoutAddons {
   };
 }
 
-export function LayoutWorkspace({ draft, onDraftChange, onComplete }: {
+export function LayoutWorkspace({ draft, onDraftChange, onComplete, onEditCopy, onEditVisual }: {
   draft: ContentDraft;
   onDraftChange: (draft: ContentDraft) => void;
   onComplete: (result: { draft: ContentDraft; version: ContentDraftVersion }) => void;
+  onEditCopy: () => void;
+  onEditVisual: () => void;
 }) {
   const [templates, setTemplates] = useState<WechatLayoutTemplate[]>([]);
   const [previews, setPreviews] = useState<Record<string, WechatLayoutPreview | undefined>>({});
@@ -208,6 +228,12 @@ export function LayoutWorkspace({ draft, onDraftChange, onComplete }: {
   const [designInstruction, setDesignInstruction] = useState('');
   const [designPolicy, setDesignPolicy] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [editingContent, setEditingContent] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(draft.title);
+  const [editingBody, setEditingBody] = useState(draft.body);
+  const [contentSaving, setContentSaving] = useState(false);
+  const [assetPickerPosition, setAssetPickerPosition] = useState<LayoutAddonPosition | null>(null);
+  const [addonImageSources, setAddonImageSources] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<TemplateNotice>(null);
   const assetSourcesRef = useRef(new Map<string, string>());
   const requestIdRef = useRef(0);
@@ -272,10 +298,63 @@ export function LayoutWorkspace({ draft, onDraftChange, onComplete }: {
 
   useEffect(() => {
     setLayoutAddons(layoutAddonsFromDraft(draft));
-  }, [draft.id, JSON.stringify((draft.visualPlan as { layoutAddons?: unknown }).layoutAddons ?? {})]);
+    setEditingTitle(draft.title);
+    setEditingBody(draft.body);
+  }, [draft.id, draft.title, draft.body, JSON.stringify((draft.visualPlan as { layoutAddons?: unknown }).layoutAddons ?? {})]);
+
+  useEffect(() => {
+    let active = true;
+    const urls: string[] = [];
+    const assetIds = [layoutAddons.intro.imageAssetId, layoutAddons.outro.imageAssetId].filter((id): id is string => Boolean(id));
+    setAddonImageSources({});
+    void Promise.all(assetIds.map(async (assetId) => {
+      const url = URL.createObjectURL(await webAssets.content(assetId));
+      if (!active) {
+        URL.revokeObjectURL(url);
+        return null;
+      }
+      urls.push(url);
+      return [assetId, url] as const;
+    })).then((entries) => {
+      if (active) setAddonImageSources(Object.fromEntries(entries.filter((entry): entry is readonly [string, string] => Boolean(entry))));
+    });
+    return () => {
+      active = false;
+      urls.forEach((url) => URL.revokeObjectURL(url));
+      setAddonImageSources({});
+    };
+  }, [layoutAddons.intro.imageAssetId, layoutAddons.outro.imageAssetId]);
+
+  const saveContentEdits = async () => {
+    if (!editingBody.trim()) return;
+    setContentSaving(true);
+    setNotice(null);
+    try {
+      const saved = await webDrafts.patch(draft.id, { revision: draft.revision, title: editingTitle.trim(), body: editingBody, visualPlan: reanchorVisualPlan(draft.visualPlan, editingBody) });
+      onDraftChange(saved);
+      setEditingContent(false);
+      if (selectedTemplate) await selectTemplate(selectedTemplate);
+      setNotice({ tone: 'success', message: '正文和标题已保存，排版预览已同步。' });
+    } catch (error) { setNotice(noticeFor(error, 'preview')); }
+    finally { setContentSaving(false); }
+  };
 
   const updateLayoutAddon = (position: LayoutAddonPosition, patch: Partial<LayoutAddon>) => {
     setLayoutAddons((current) => ({ ...current, [position]: { ...current[position], ...patch } }));
+  };
+
+  const chooseAddonImage = async (asset: ProjectAsset) => {
+    if (!assetPickerPosition) return;
+    let saved = draft;
+    if (!draft.assets.some(({ assetId }) => assetId === asset.id)) {
+      saved = await webDrafts.replaceAssets(draft.id, { revision: draft.revision, assets: [...draft.assets.map(({ assetId, role }) => ({ assetId, role })), { assetId: asset.id, role: 'CARD' }] });
+      onDraftChange(saved);
+    }
+    const nextAddons = { ...layoutAddons, [assetPickerPosition]: { ...layoutAddons[assetPickerPosition], imageAssetId: asset.id } };
+    setLayoutAddons(nextAddons);
+    const updated = await webDrafts.patch(saved.id, { revision: saved.revision, visualPlan: { ...(saved.visualPlan ?? {}), layoutAddons: nextAddons } });
+    onDraftChange(updated);
+    setAssetPickerPosition(null);
   };
 
   const saveLayoutAddons = async () => {
@@ -396,10 +475,16 @@ export function LayoutWorkspace({ draft, onDraftChange, onComplete }: {
     finally { setSaving(false); }
   };
 
-  return <section className="wechat-layout-workspace">
+  return <><section className="wechat-layout-workspace">
+    {editingContent && <section className="wechat-layout-inline-editor" aria-label="排版内容编辑"><label><span>标题</span><input value={editingTitle} maxLength={200} onChange={(event) => setEditingTitle(event.target.value)}/></label><label><span>正文</span><textarea value={editingBody} rows={12} onChange={(event) => setEditingBody(event.target.value)}/></label><div><button className="button" type="button" onClick={() => setEditingContent(false)}>取消</button><button className="button primary" type="button" disabled={contentSaving || !editingBody.trim()} onClick={() => void saveContentEdits()}>{contentSaving ? <LoaderCircle size={15}/> : <Check size={15}/>}保存并刷新排版</button></div></section>}
     <header className="delivery-workspace-head">
       <div><h2>公众号排版</h2><span className="chip blue">母稿</span></div>
-      <button className="button" type="button" disabled={busyTemplateId !== null} onClick={() => { setBusyTemplateId('load'); void loadTemplates(selectedTemplateId ?? undefined).catch((error) => setNotice(noticeFor(error, 'load'))).finally(() => setBusyTemplateId(null)); }}><RefreshCw size={15}/>刷新模板</button>
+      <div className="layout-edit-actions">
+        <button className="button" type="button" onClick={() => setEditingContent((value) => !value)}><Edit3 size={15}/>排版内编辑</button>
+        <button className="button" type="button" onClick={onEditCopy}><Edit3 size={15}/>编辑正文</button>
+        <button className="button" type="button" onClick={onEditVisual}><Edit3 size={15}/>编辑配图</button>
+        <button className="button" type="button" disabled={busyTemplateId !== null} onClick={() => { setBusyTemplateId('load'); void loadTemplates(selectedTemplateId ?? undefined).catch((error) => setNotice(noticeFor(error, 'load'))).finally(() => setBusyTemplateId(null)); }}><RefreshCw size={15}/>刷新模板</button>
+      </div>
     </header>
 
     <div className="wechat-layout-grid">
@@ -411,11 +496,20 @@ export function LayoutWorkspace({ draft, onDraftChange, onComplete }: {
             <label><span>本次精排要求（可选）</span><input value={designInstruction} maxLength={240} placeholder="只影响当前模板，例如：案例段落做卡片，关键词更醒目" onChange={(event) => setDesignInstruction(event.target.value)}/></label>
             <small>{designPolicy ?? (selectedTemplate ? `当前模板：${selectedTemplate.name}，切换模板不会自动套用本次精排` : '先选择模板，再对当前模板精排')}</small>
           </div>
+          <div className="layout-addon-image-previews" aria-label="个性图片预览">
+            {(['intro', 'outro'] as const).map((position) => {
+              const assetId = layoutAddons[position].imageAssetId;
+              const source = assetId ? addonImageSources[assetId] : undefined;
+              return source ? <figure key={position}><img src={source} alt={`${position === 'intro' ? '开头' : '结尾'}图片预览`} /><figcaption>{position === 'intro' ? '开头图片' : '结尾图片'}</figcaption></figure> : null;
+            })}
+          </div>
           {(['intro', 'outro'] as const).map((position) => {
             const addon = layoutAddons[position];
             return <fieldset key={position}>
               <legend><label><input type="checkbox" checked={addon.enabled} onChange={(event) => updateLayoutAddon(position, { enabled: event.target.checked })}/>{position === 'intro' ? '个性开头' : '个性结尾'}</label></legend>
               <div>
+                <label className="layout-addon-template"><span>模块模板</span><select value={addon.template ?? 'CARD'} onChange={(event) => updateLayoutAddon(position, { template: event.target.value as LayoutAddon['template'] })}><option value="CARD">卡片</option><option value="MINIMAL">简洁</option><option value="BANNER">横幅</option></select></label>
+                <div className="layout-addon-image-row"><span>配图</span><button className="text-button" type="button" onClick={() => setAssetPickerPosition(position)}>{addon.imageAssetId ? '更换图片' : '上传或从素材库选择'}</button>{addon.imageAssetId && <button className="text-button danger" type="button" onClick={() => updateLayoutAddon(position, { imageAssetId: null })}>移除</button>}</div>
                 <input aria-label={`${position === 'intro' ? '开头' : '结尾'}标签`} value={addon.label} maxLength={24} onChange={(event) => updateLayoutAddon(position, { label: event.target.value })}/>
                 <input aria-label={`${position === 'intro' ? '开头' : '结尾'}标题`} value={addon.title} maxLength={80} placeholder={position === 'intro' ? '一句个人化开场' : '一句收束或行动提醒'} onChange={(event) => updateLayoutAddon(position, { title: event.target.value })}/>
                 <textarea aria-label={`${position === 'intro' ? '开头' : '结尾'}正文`} value={addon.body} maxLength={500} placeholder={position === 'intro' ? '例如：今天这篇先把结论讲透，再给你可执行的判断框架。' : '例如：觉得有启发，可以收藏，下一篇继续拆一个实操案例。'} onChange={(event) => updateLayoutAddon(position, { body: event.target.value })}/>
@@ -432,5 +526,5 @@ export function LayoutWorkspace({ draft, onDraftChange, onComplete }: {
       <span>{selectedTemplate ? `当前模板：${selectedTemplate.name}` : '尚未选择模板'}</span>
       <button className="button primary" type="button" disabled={!selectedTemplate || !selectedPreview || saving || busyTemplateId !== null} onClick={() => void complete()}>{saving ? <LoaderCircle size={16}/> : <Check size={16}/>}保存公众号草稿</button>
     </footer>
-  </section>;
+  </section>{assetPickerPosition && <AssetPickerDialog projectId={draft.projectId} role="VISUAL" scope="PROJECT" platforms={['WECHAT']} allowUpload imageOnly onLinked={(asset) => void chooseAddonImage(asset)} onClose={() => setAssetPickerPosition(null)}/>}</>;
 }

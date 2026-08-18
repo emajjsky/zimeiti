@@ -28,6 +28,24 @@ function draftRow(overrides = {}) {
   };
 }
 
+test('patch preserves working assets', async () => {
+  const draft = draftRow({ revision: 4, assets_json: [{
+    id: 'asset-link-1', workspace_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', draft_id: '11111111-1111-4111-8111-111111111111',
+    draft_version_id: null, asset_id: 'asset-1', role: 'COVER', sort_order: 0, created_at: NOW,
+  }] });
+  const store = createContentDraftStore({
+    query: async (sql) => {
+      if (sql.includes('UPDATE content_drafts')) return { rows: [draft], rowCount: 1 };
+      if (sql.includes('FROM content_drafts draft')) return { rows: [draft], rowCount: 1 };
+      throw new Error(`Unhandled SQL: ${sql}`);
+    },
+    transaction: async () => { throw new Error('PATCH must not start a transaction'); },
+  });
+  const saved = await store.patchWorkingCopy(draft.workspace_id, draft.id, { revision: 3, body: 'updated body' });
+  assert.deepEqual(saved.assets.map(({ assetId, role }) => [assetId, role]), [['asset-1', 'COVER']]);
+  assert.equal(saved.revision, 4);
+});
+
 test('草稿 DTO 是账号无关资源且保持有序素材', () => {
   const draft = draftView(draftRow({
     account_id: '不应暴露',
@@ -207,4 +225,12 @@ test('草稿路由使用显式工作空间角色并注册规格中的资源接�
   assert.match(source, /content-drafts\/:draftId\/derive/);
   assert.match(source, /content-drafts\/:draftId\/versions/);
   assert.match(source, /content-drafts\/:draftId\/preview/);
+  assert.doesNotMatch(source, /runContentPreflight|completeDraftWithPreflight|CONTENT_PREFLIGHT_REVIEW/);
+});
+
+test('草稿版本不再保存内容预检字段', async () => {
+  const service = await readFile(new URL('../server/services/content-drafts.cjs', import.meta.url), 'utf8');
+  const domain = await readFile(new URL('../src/domain/content-drafts.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(service, /preflight_json|preflight\s*=/);
+  assert.doesNotMatch(domain, /ContentPreflightReport|preflight:/);
 });

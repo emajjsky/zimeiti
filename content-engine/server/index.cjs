@@ -17,20 +17,32 @@ const { listSources, createSources, updateSource, removeSource, listItems, saveI
 const { enqueue } = require('./queue.cjs');
 const { listAvailableSkills } = require('./agent/skillRegistry.cjs');
 const { runBailianCli } = require('./runner/bailian.cjs');
-const { ANALYSIS_SCOPE, createTemplateStore, prepareAnalysisInput } = require('./services/intelligence-analysis.cjs');
+const { ANALYSIS_SCOPE, createTemplateStore, prepareAnalysisInput, richContentForArticle } = require('./services/intelligence-analysis.cjs');
 const { createCreativeSkillStore } = require('./services/creativeSkills.cjs');
 const { writingBriefInput } = require('./services/writing-brief.cjs');
 const { businessError, errorPayload } = require('./services/business-errors.cjs');
+const { responseStatusCode } = require('./services/http-errors.cjs');
 const { createWorkspaceStore, workspaceView } = require('./services/workspaces.cjs');
 const { createWorkspaceAccess } = require('./services/workspace-context.cjs');
 const { accountVoiceInput, accountVoiceCalibrationInput, createAccountVoiceStore } = require('./services/accountVoices.cjs');
 const { accountVoiceCalibrationDraftInput, buildVoiceCalibrationPrompt, buildVoiceCalibrationRepairPrompt, parseVoiceCalibrationDraft, voiceCalibrationErrorMessage } = require('./services/voiceCalibration.cjs');
-const { createTextModelRunner, ModelToolCallError } = require('./services/text-model.cjs');
+const { createTextModelRunner } = require('./services/text-model.cjs');
+const { buildRichContentOmniArgs, extractOmniText } = require('./services/rich-content-understanding.cjs');
 const {
   VISUAL_PLANNING_SCOPE,
   VISUAL_PLANNING_OPERATION,
   VISUAL_PLANNING_PROMPT_VERSION,
-  buildVisualPlanningPrompt,
+  SEARCH_QUERY_MAX_LENGTH,
+  SEARCH_QUERY_MAX_COUNT,
+  INFORMATION_POINT_MAX_LENGTH,
+  INFORMATION_POINT_MAX_COUNT,
+  CONTENT_BLOCK_LABEL_MAX_LENGTH,
+  CONTENT_BLOCK_DETAIL_MAX_LENGTH,
+  CONTENT_BLOCK_MAX_COUNT,
+  AVOID_CONCEPT_MAX_LENGTH,
+  AVOID_CONCEPT_MAX_COUNT,
+  buildVisualPlanningOmniPrompt,
+  visualPlanningRichContent,
   parseVisualPlanningContent,
   mergePlannedItems,
   compileVisualPlan,
@@ -52,14 +64,20 @@ const { createProjectAgentStore, artifactView, runView } = require('./services/p
 const { loadContentMasterState } = require('./services/content-master.cjs');
 const { createAssetStore } = require('./services/assets.cjs');
 const { createContentDraftStore } = require('./services/content-drafts.cjs');
+const { TITLE_RECOMMENDATION_SCOPE, TITLE_RECOMMENDATION_OPERATION, buildTitleRecommendationPrompt, parseTitleRecommendations } = require('./services/title-recommendations.cjs');
 const { createDraftAdaptationService } = require('./services/draft-adaptation.cjs');
 const { registerContentDraftRoutes } = require('./routes/content-drafts.cjs');
 const { createPublishingStore } = require('./services/publishing.cjs');
 const { registerPublishingRoutes } = require('./routes/publishing.cjs');
 const { createWechatOfficialClient } = require('./services/wechat-official.cjs');
+const { detectPublicIpv4 } = require('./services/public-egress-ip.cjs');
 const { renderWechatDraft } = require('./services/wechat-layout-renderer.cjs');
+const { captureWeChatArticleWithBrowser } = require('./services/browser-reader.cjs');
 const { analyzeWechatTemplateSource, createWechatLayoutTemplateStore } = require('./services/wechat-layout-templates.cjs');
 const { registerWechatLayoutTemplateRoutes } = require('./routes/wechat-layout-templates.cjs');
+const { registerContentIngestionRoutes } = require('./routes/content-ingestions.cjs');
+const { registerVideoAnalysisRoutes } = require('./routes/video-analyses.cjs');
+const { createContentIngestionStore, projectMaterialForIngestion } = require('./services/content-ingestions.cjs');
 const { detectFileType, safePath, saveUploadedAsset, saveRemoteImageAsset, openAsset, readAssetText, removeAssetFile } = require('./services/assetStorage.cjs');
 const { PROJECT_RESEARCH_ACTION_VERSION, PROJECT_RESEARCH_SCOPE, researchRunView, researchPlanView } = require('./services/project-research.cjs');
 const { PROJECT_RESEARCH_SOURCES_VERSION, researchSourceActions } = require('./services/project-research-sources.cjs');
@@ -84,11 +102,12 @@ const {
 const app = Fastify({ logger: true, bodyLimit: 5 * 1024 * 1024 });
 const credentials = new Set(['TAVILY', 'BAILIAN']);
 const modelTasks = [
-  'INTELLIGENCE_ANALYSIS', 'SOURCE_VERIFICATION', 'TOPIC_RECOMMENDATION', 'VOICE_CALIBRATION',
+  'INTELLIGENCE_ANALYSIS', 'SOURCE_VERIFICATION', 'TITLE_RECOMMENDATION', 'VOICE_CALIBRATION',
   'WECHAT_COPY_GENERATION', 'WECHAT_VISUAL_PLANNING', 'WECHAT_TEMPLATE_ANALYSIS', 'WECHAT_LAYOUT_DESIGN',
-  'XIAOHONGSHU_ADAPTATION', 'WEIBO_ADAPTATION', 'CONTENT_PREFLIGHT_REVIEW',
-  'TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE', 'SPEECH_SYNTHESIS', 'SPEECH_RECOGNITION',
+  'XIAOHONGSHU_ADAPTATION', 'WEIBO_ADAPTATION',
+  'TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE', 'SPEECH_SYNTHESIS', 'SPEECH_RECOGNITION', 'CONTENT_UNDERSTANDING',
   'TEXT_TO_VIDEO', 'IMAGE_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO', 'REFERENCE_TO_VIDEO', 'VIDEO_EDIT',
+  'VIDEO_ANALYSIS',
 ];
 const externalProviders = new Set(['DASHSCOPE', 'SILICONFLOW', 'VOLCENGINE_ARK', 'KIMI', 'ZHIPU', 'OPENAI', 'OPENAI_COMPATIBLE']);
 const creativePlatform = z.enum(['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO']);
@@ -119,23 +138,24 @@ const visualReferenceUse = z.enum(['COLOR', 'COMPOSITION', 'LAYOUT', 'TEXTURE', 
 const visualPlanItemInput = z.object({
   id: z.string().trim().min(1).max(100),
   role: z.enum(['COVER', 'BODY', 'CARD', 'MAIN']),
-  title: z.string().trim().min(1).max(120),
-  placement: z.string().trim().min(1).max(200),
-  purpose: z.string().trim().min(1).max(500),
+  title: z.string().trim().min(1).max(200),
+  placement: z.string().trim().min(1).max(500),
+  purpose: z.string().trim().min(1).max(1_000),
   visualType: z.enum(['NEWS_PHOTO', 'HERO_VISUAL', 'CONCEPT_DIAGRAM', 'SCENE', 'MIND_MAP', 'FLOWCHART', 'TIMELINE', 'COMPARISON', 'DATA_CHART', 'QUOTE_CARD', 'INFO_CARD', 'CHECKLIST_CARD']),
-  focus: z.string().trim().min(1).max(500),
-  avoidConcepts: z.array(z.string().trim().min(1).max(100)).max(12).default([]),
-  searchQueries: z.array(z.string().trim().min(2).max(120)).min(1).max(5),
+  focus: z.string().trim().min(1).max(1_000),
+  avoidConcepts: z.array(z.string().trim().min(1).max(AVOID_CONCEPT_MAX_LENGTH)).max(AVOID_CONCEPT_MAX_COUNT).default([]),
+  searchQueries: z.array(z.string().trim().min(1).max(SEARCH_QUERY_MAX_LENGTH)).min(1).max(SEARCH_QUERY_MAX_COUNT),
   generationMode: z.enum(['ILLUSTRATION', 'INFOGRAPHIC']),
-  informationPoints: z.array(z.string().trim().min(1).max(160)).min(1).max(6),
+  informationPoints: z.array(z.string().trim().min(1).max(INFORMATION_POINT_MAX_LENGTH)).min(1).max(INFORMATION_POINT_MAX_COUNT),
   stylePreset: z.union([z.literal('INHERIT'), visualStylePreset]),
   templatePreset: z.string().trim().min(1).max(80),
-  sourceExcerpt: z.string().trim().max(4_000).default(''),
-  contentBlocks: z.array(z.object({ label: z.string().trim().min(1).max(80), detail: z.string().trim().min(1).max(300) })).max(8),
+  sourceExcerpt: z.string().trim().max(8_000).default(''),
+  contentBlocks: z.array(z.object({ label: z.string().trim().min(1).max(CONTENT_BLOCK_LABEL_MAX_LENGTH), detail: z.string().trim().min(1).max(CONTENT_BLOCK_DETAIL_MAX_LENGTH) })).max(CONTENT_BLOCK_MAX_COUNT),
   references: z.array(z.object({ assetId: z.string().uuid(), uses: z.array(visualReferenceUse).min(1).max(5) })).max(3).default([]),
   prompt: z.string().trim().min(4).max(8_000),
   size: z.enum(['1:1', '3:4', '4:3', '9:16', '16:9']),
   assetId: z.string().uuid().nullable(),
+  insertion: z.object({ paragraphIndex: z.number().int().positive(), position: z.literal('AFTER_PARAGRAPH') }).optional(),
 }).superRefine((item, context) => {
   if (item.generationMode === 'INFOGRAPHIC' && item.contentBlocks.length === 0) {
     context.addIssue({ code: 'custom', path: ['contentBlocks'], message: '信息图必须包含至少一个图内信息块' });
@@ -269,11 +289,10 @@ const simplifiedResearchStartInput = z.object({
 });
 app.register(cors, { origin: config.corsOrigin, credentials: false });
 app.register(jwt, { secret: config.jwtSecret });
-app.register(multipart, { limits: { files: 1, fileSize: 50 * 1024 * 1024, fields: 8 } });
+app.register(multipart, { limits: { files: 1, fileSize: 1024 * 1024 * 1024, fields: 8 } });
 
 app.setErrorHandler((error, _request, reply) => {
-  const status = error.statusCode && error.statusCode < 500 ? error.statusCode : 400;
-  reply.code(status).send({ error: errorPayload(error) });
+  reply.code(responseStatusCode(error)).send({ error: errorPayload(error) });
 });
 
 async function authenticate(request) { await request.jwtVerify(); }
@@ -305,10 +324,119 @@ const publishingStore = createPublishingStore({
   decryptSecret: decrypt,
   officialDraftClient: createWechatOfficialClient(),
   loadAsset: loadPublishingAsset,
+  clipPublicLink,
 });
 const wechatLayoutTemplateStore = createWechatLayoutTemplateStore({ query, transaction });
-registerContentDraftRoutes(app, { workspaceAccess, draftStore, assetStore, adaptationService: draftAdaptationService });
-registerPublishingRoutes(app, { workspaceAccess, publishingStore });
+const contentIngestionStore = createContentIngestionStore({ query, transaction });
+async function recommendDraftTitles({ workspaceId, draft }) {
+  const route = await textTaskRoute(workspaceId, TITLE_RECOMMENDATION_SCOPE, '标题建议');
+  if (route.provider !== 'BAILIAN_CLI') throw businessError(400, 'RICH_CONTENT_PROVIDER_REQUIRED', '标题建议需要使用支持富内容理解的百炼 CLI 模型。');
+  const connectionInput = await textConnectionInput(workspaceId, route);
+  const assetResult = await query(`SELECT asset.kind, asset.title, asset.storage_key
+    FROM content_draft_assets draft_asset
+    JOIN workspace_assets asset
+      ON asset.workspace_id = draft_asset.workspace_id AND asset.id = draft_asset.asset_id
+    WHERE draft_asset.workspace_id = $1 AND draft_asset.draft_id = $2
+      AND draft_asset.draft_version_id IS NULL AND asset.status = 'ACTIVE'
+      AND asset.kind IN ('IMAGE', 'VIDEO', 'AUDIO')
+    ORDER BY draft_asset.sort_order`, [workspaceId, draft.id]);
+  const assets = assetResult.rows.map((asset) => ({ ...asset, source: safePath(config.uploadRoot, asset.storage_key) }));
+  const prompt = buildTitleRecommendationPrompt({ draft, assets });
+  const richContent = {
+    text: { title: draft.title, body: draft.body },
+    media: assets.map((asset) => ({ kind: asset.kind, source: asset.source, label: asset.title, origin: 'DRAFT' })),
+  };
+  const startedAt = Date.now();
+  try {
+    const content = extractOmniText(await runBailianCli(
+      buildRichContentOmniArgs({ model: route.model, system: prompt.system, message: prompt.message, content: richContent, maxTokens: 2_500 }),
+      connectionInput.apiKey,
+      richContent.media.some((item) => item.kind === 'VIDEO') ? 180_000 : 120_000,
+    ));
+    const recommendations = parseTitleRecommendations(content);
+    await query(`INSERT INTO api_usage_logs (workspace_id, provider, model, operation, status, duration_ms)
+      VALUES ($1, $2, $3, $4, 'SUCCESS', $5)`, [workspaceId, route.provider, route.model, TITLE_RECOMMENDATION_OPERATION, Date.now() - startedAt]);
+    return { draftId: draft.id, revision: Number(draft.revision), recommendations, policy: { scope: TITLE_RECOMMENDATION_SCOPE, provider: route.provider, model: route.model } };
+  } catch (error) {
+    await query(`INSERT INTO api_usage_logs (workspace_id, provider, model, operation, status, duration_ms, error)
+      VALUES ($1, $2, $3, $4, 'ERROR', $5, $6)`, [workspaceId, route.provider, route.model, TITLE_RECOMMENDATION_OPERATION, Date.now() - startedAt, String(error instanceof Error ? error.message : '标题建议失败').slice(0, 2_000)]);
+    throw error;
+  }
+}
+registerContentDraftRoutes(app, {
+  workspaceAccess,
+  draftStore,
+  assetStore,
+  adaptationService: draftAdaptationService,
+  recommendTitles: recommendDraftTitles,
+});
+async function applyContentIngestion({ workspaceId, ingestionId, input }) {
+  let appliedProject;
+  await transaction(async (client) => {
+    const result = await client.query('SELECT * FROM content_ingestions WHERE workspace_id = $1 AND id = $2 FOR UPDATE', [workspaceId, ingestionId]);
+    if (!result.rowCount) throw businessError(404, 'INGESTION_NOT_FOUND', '未找到这次内容导入。');
+    const ingestion = result.rows[0];
+    if (!['READY', 'PARTIAL'].includes(ingestion.stage) || !ingestion.normalized_document_json?.plainText) throw businessError(409, 'INGESTION_NOT_READY', '内容尚未读取完成，暂时不能创建项目。');
+    if (ingestion.project_id) throw businessError(409, 'INGESTION_ALREADY_APPLIED', '这次导入已经创建过项目。');
+    const document = ingestion.normalized_document_json;
+    const originalInput = await client.query('SELECT input_text FROM content_ingestion_inputs WHERE workspace_id = $1 AND ingestion_id = $2', [workspaceId, ingestionId]);
+    const authorText = String(originalInput.rows[0]?.input_text ?? '').trim();
+    const originType = input.originType ?? (ingestion.intent === 'AUTHOR_CONTENT' ? 'DRAFT' : 'IMPORT');
+    const project = createBlankProject({ originType, title: input.title || document.title, category: input.category, targetPlatforms: input.targetPlatforms });
+    await updateCreativeProjects(client, workspaceId, (state) => ({ ...state, projects: [project, ...state.projects] }));
+    const maturity = input.maturity ?? (ingestion.intent === 'AUTHOR_CONTENT' ? 'FULL_DRAFT' : undefined);
+    if (ingestion.intent === 'AUTHOR_CONTENT') {
+      const kind = maturity === 'IDEA' ? 'IDEA' : maturity === 'FRAGMENTS' ? 'NOTE' : 'DRAFT';
+      const primaryBody = authorText || document.plainText;
+      await client.query(`INSERT INTO project_inputs (workspace_id, project_id, kind, title, body, scope, platforms_json) VALUES ($1,$2,$3,$4,$5,'WRITING',$6)`, [workspaceId, project.id, kind, document.title.slice(0, 160) || '未命名内容', primaryBody.slice(0, 50_000), JSON.stringify(input.targetPlatforms)]);
+      if (authorText && document.plainText !== authorText) {
+        await client.query(`INSERT INTO project_inputs (workspace_id, project_id, kind, title, body, scope, platforms_json) VALUES ($1,$2,'NOTE','素材理解结果',$3,'RESEARCH',$4)`, [workspaceId, project.id, document.plainText.slice(0, 50_000), JSON.stringify(input.targetPlatforms)]);
+      }
+    } else if (ingestion.source_url) {
+      const usage = Array.isArray(ingestion.usage_json) ? ingestion.usage_json : [];
+      const role = usage.includes('STYLE') ? 'VOICE' : usage.includes('VISUAL') ? 'VISUAL' : usage.includes('STRUCTURE') ? 'STRUCTURE' : 'FACT';
+      await client.query(`INSERT INTO project_references (workspace_id, project_id, source_type, role, title, notes, url, scope, platforms_json) VALUES ($1,$2,'LINK',$3,$4,$5,$6,'PROJECT',$7)`, [workspaceId, project.id, role, document.title.slice(0, 200) || '参考来源', `摄取来源：${ingestion.id}`, ingestion.canonical_url || ingestion.source_url, JSON.stringify(input.targetPlatforms)]);
+      const referenceMaterial = projectMaterialForIngestion({ intent: ingestion.intent, sourceUrl: ingestion.canonical_url || ingestion.source_url, title: document.title, plainText: document.plainText });
+      if (referenceMaterial) await client.query(`INSERT INTO project_inputs (workspace_id, project_id, kind, title, body, scope, platforms_json) VALUES ($1,$2,$3,$4,$5,$6,$7)`, [workspaceId, project.id, referenceMaterial.kind, referenceMaterial.title, referenceMaterial.body, referenceMaterial.scope, JSON.stringify(input.targetPlatforms)]);
+    } else {
+      await client.query(`INSERT INTO project_inputs (workspace_id, project_id, kind, title, body, scope, platforms_json) VALUES ($1,$2,'NOTE',$3,$4,'RESEARCH',$5)`, [workspaceId, project.id, document.title.slice(0, 160) || '粘贴的参考内容', document.plainText.slice(0, 50_000), JSON.stringify(input.targetPlatforms)]);
+    }
+    const sourceAssets = await client.query(`SELECT source.asset_id, source.position, asset.title, asset.kind
+      FROM content_ingestion_assets source
+      JOIN workspace_assets asset ON asset.workspace_id = source.workspace_id AND asset.id = source.asset_id
+      WHERE source.workspace_id = $1 AND source.ingestion_id = $2 ORDER BY source.position`, [workspaceId, ingestionId]);
+    for (const asset of sourceAssets.rows) {
+      await client.query(`INSERT INTO project_asset_links
+        (workspace_id, project_id, asset_id, role, scope, title, notes, platforms_json, sort_order)
+        VALUES ($1,$2,$3,$4,'PROJECT',$5,'继续已有内容时选入的素材',$6,$7)
+        ON CONFLICT (workspace_id, project_id, asset_id) DO NOTHING`, [workspaceId, project.id, asset.asset_id, ['IMAGE', 'VIDEO'].includes(asset.kind) ? 'VISUAL' : 'FACT', String(asset.title || '创作素材').slice(0, 200), JSON.stringify(input.targetPlatforms), asset.position]);
+    }
+    const importedMedia = await client.query(`SELECT media.asset_id, media.position, media.caption, media.alt_text, asset.title
+      FROM content_ingestion_media media
+      JOIN workspace_assets asset ON asset.workspace_id = media.workspace_id AND asset.id = media.asset_id
+      WHERE media.workspace_id = $1 AND media.ingestion_id = $2 AND media.asset_id IS NOT NULL
+      ORDER BY media.position NULLS LAST, media.id`, [workspaceId, ingestionId]);
+    for (const media of importedMedia.rows) {
+      await client.query(`INSERT INTO project_asset_links
+        (workspace_id, project_id, asset_id, role, scope, title, notes, platforms_json, sort_order)
+        VALUES ($1,$2,$3,'VISUAL','PROJECT',$4,'链接正文自动导入的图片素材',$5,$6)
+        ON CONFLICT (workspace_id, project_id, asset_id) DO NOTHING`, [workspaceId, project.id, media.asset_id, String(media.caption || media.alt_text || media.title || '链接正文配图').slice(0, 200), JSON.stringify(input.targetPlatforms), media.position ?? 0]);
+    }
+    let finalProject = project;
+    if (['OUTLINE', 'FRAGMENTS', 'PARTIAL_DRAFT', 'FULL_DRAFT'].includes(maturity)) {
+      if (maturity === 'PARTIAL_DRAFT' || maturity === 'FULL_DRAFT') await draftStore.upsertWechat(workspaceId, project.id, { title: input.title || document.title, body: authorText || document.plainText }, client);
+      const now = new Date().toISOString();
+      finalProject = { ...project, stage: 'MASTER_WRITING', status: 'WRITING', updatedAt: now };
+      await updateCreativeProjects(client, workspaceId, (state) => ({ ...state, projects: state.projects.map((item) => item.id === project.id ? finalProject : item) }), now);
+    }
+    await client.query('UPDATE content_ingestions SET project_id = $3, updated_at = now() WHERE workspace_id = $1 AND id = $2', [workspaceId, ingestionId, project.id]);
+    appliedProject = finalProject;
+  });
+  return { project: appliedProject, ingestion: await contentIngestionStore.get(workspaceId, ingestionId) };
+}
+registerContentIngestionRoutes(app, { workspaceAccess, store: contentIngestionStore, query, transaction, enqueue, applyIngestion: applyContentIngestion });
+registerVideoAnalysisRoutes(app, { workspaceAccess, query, transaction, enqueue, resolveTaskRoute: textTaskRoute });
+registerPublishingRoutes(app, { workspaceAccess, publishingStore, detectPublicIpv4 });
 registerWechatLayoutTemplateRoutes(app, {
   workspaceAccess,
   templateStore: wechatLayoutTemplateStore,
@@ -316,7 +444,18 @@ registerWechatLayoutTemplateRoutes(app, {
   draftStore,
   renderWechatDraft,
   resolveTaskRoute: textTaskRoute,
-  analyzeTemplateSource: (input) => analyzeWechatTemplateSource({ ...input, fetchPublicPage }),
+  analyzeTemplateSource: (input) => analyzeWechatTemplateSource({ ...input, capturePage: captureWeChatArticleWithBrowser }),
+  runOmniTask: async ({ workspaceId, route, system, message, maxTokens, richContent }) => {
+    if (route.provider !== 'BAILIAN_CLI') throw businessError(400, 'RICH_CONTENT_PROVIDER_REQUIRED', '公众号模板分析需要使用支持图片理解的百炼 CLI 模型。');
+    const connectionInput = await textConnectionInput(workspaceId, route);
+    const content = extractOmniText(await runBailianCli(
+      buildRichContentOmniArgs({ model: route.model, system, message, content: richContent, maxTokens }),
+      connectionInput.apiKey,
+      120_000,
+    ));
+    if (!content) throw new Error('公众号模板分析模型没有返回可用内容。');
+    return { content };
+  },
   runTextTask: async ({ workspaceId, route, system, message, maxTokens, temperature }) => {
     const connectionInput = await textConnectionInput(workspaceId, route);
     return textRunner.runText({
@@ -454,6 +593,7 @@ const assetMetadata = z.object({
 });
 const assetImportInput = assetMetadata.extend({
   url: z.string().url().max(2_000).refine((value) => /^https?:\/\//i.test(value), '只支持 HTTP(S) 公开图片。'),
+  fallbackUrl: z.string().url().max(2_000).refine((value) => /^https?:\/\//i.test(value), '只支持 HTTP(S) 公开图片。').optional(),
 });
 
 function parseAssetImportRequest(value) {
@@ -516,7 +656,7 @@ app.post('/api/v1/assets', { preHandler: workspaceAccess.forRole('EDITOR') }, as
 
 app.post('/api/v1/assets/import', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
   const input = parseAssetImportRequest(request.body);
-  const stored = await saveRemoteImageAsset(config.uploadRoot, request.workspace.id, input.url);
+  const stored = await saveRemoteImageAsset(config.uploadRoot, request.workspace.id, input.url, { fallbackUrl: input.fallbackUrl });
   const result = await persistStoredAsset(request.workspace, request.user.sub, stored, {
     origin: 'WEB_IMPORT',
     title: input.title,
@@ -693,7 +833,7 @@ app.delete('/api/v1/models/connections/:id', { preHandler: workspaceAccess.forRo
 app.get('/api/v1/models/catalog', { preHandler: workspaceAccess.forRole('OWNER') }, async (request) => {
   const workspace = request.workspace;
   const result = await query('SELECT item_json, updated_at FROM model_catalog WHERE workspace_id = $1 ORDER BY updated_at DESC, id', [workspace.id]);
-  return result.rows.map((row) => ({ ...row.item_json, syncedAt: row.updated_at }));
+  return result.rows.map((row) => ({ ...normalizeCatalogItem(row.item_json), syncedAt: row.updated_at }));
 });
 
 app.post('/api/v1/models/catalog/sync', { preHandler: workspaceAccess.forRole('OWNER') }, async (request) => {
@@ -826,8 +966,10 @@ app.post('/api/v1/intelligence/items/:id/analyses/prepare', { preHandler: worksp
   const workspace = request.workspace;
   const itemResult = await query('SELECT * FROM intelligence_items WHERE id = $1 AND workspace_id = $2', [request.params.id, workspace.id]);
   if (!itemResult.rowCount) { const error = new Error('未找到这条资讯。'); error.statusCode = 404; throw error; }
-  const [profile, route, template] = await Promise.all([analysisProfile(workspace.id), analysisRoute(workspace.id), templateStore.get(workspace.id, ANALYSIS_SCOPE)]);
-  const prepared = prepareAnalysisInput({ item: analysisItem(itemResult.rows[0]), profile, platforms: ['WECHAT'], template, route });
+  const item = analysisItem(itemResult.rows[0]);
+  const [profile, route, template, article] = await Promise.all([analysisProfile(workspace.id), analysisRoute(workspace.id), templateStore.get(workspace.id, ANALYSIS_SCOPE), readPublicArticle(item.url)]);
+  item.richContent = richContentForArticle(article);
+  const prepared = prepareAnalysisInput({ item, profile, platforms: ['WECHAT'], template, route });
   const run = await query(`INSERT INTO generation_runs (workspace_id, skill_version_id, status, source_snapshot_json, input_json, model, prompt_version, estimated_cost)
     VALUES ($1, 'intelligence-analysis:1.0.0', 'DRAFT', $2, $3, $4, $5, $6)
     RETURNING id, status, created_at`, [workspace.id, JSON.stringify(prepared.sourceSnapshot), JSON.stringify(prepared.input), route.model, String(template.version), JSON.stringify(null)]);
@@ -946,6 +1088,33 @@ app.post('/api/v1/creative/projects', { preHandler: workspaceAccess.forRole('EDI
   const project = createBlankProject(input);
   await transaction(async (client) => updateCreativeProjects(client, workspace.id, (state) => ({ ...state, projects: [project, ...state.projects] })));
   reply.code(201).send({ project, created: true });
+});
+
+app.delete('/api/v1/creative/projects/:projectId', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
+  const projectId = z.string().min(1).parse(request.params.projectId);
+  const workspace = request.workspace;
+  let deleted = false;
+  await transaction(async (client) => {
+    const result = await client.query(
+      'SELECT project_json FROM content_projects WHERE workspace_id = $1 AND project_id = $2 FOR UPDATE',
+      [workspace.id, projectId],
+    );
+    if (!result.rowCount) return;
+    if (result.rows[0].project_json?.archivedAt) return;
+    const archivedAt = new Date().toISOString();
+    const project = { ...result.rows[0].project_json, archivedAt, updatedAt: archivedAt };
+    await client.query(
+      'UPDATE content_projects SET project_json = $3, updated_at = $4 WHERE workspace_id = $1 AND project_id = $2',
+      [workspace.id, projectId, JSON.stringify(project), archivedAt],
+    );
+    deleted = true;
+  });
+  if (!deleted) {
+    const error = new Error('创作项目不存在或已删除。');
+    error.statusCode = 404;
+    throw error;
+  }
+  reply.send({ projectId, deleted: true });
 });
 
 app.post('/api/v1/creative/projects/from-intelligence/:itemId', { preHandler: workspaceAccess.forRole('EDITOR') }, async (request, reply) => {
@@ -1097,22 +1266,22 @@ app.post('/api/v1/account-voices/calibration-drafts', { preHandler: workspaceAcc
   let route;
   try {
     route = await textTaskRoute(workspace.id, 'VOICE_CALIBRATION', '账号声音提炼');
+    if (route.provider !== 'BAILIAN_CLI') throw new Error('账号声音提炼需要使用支持富内容理解的百炼 CLI 模型。');
     const article = await readPublicArticle(input.sourceUrl);
     const prompt = buildVoiceCalibrationPrompt(article);
     const connectionInput = await textConnectionInput(workspace.id, route);
-    const result = await textRunner.runText({ provider: route.provider, model: route.model, system: prompt.system, message: prompt.message, ...connectionInput });
+    const richContent = richContentForArticle(article);
+    const resultContent = extractOmniText(await runBailianCli(buildRichContentOmniArgs({ model: route.model, system: prompt.system, message: prompt.message, content: richContent, maxTokens: 4_000 }), connectionInput.apiKey, richContent.media.some((item) => item.kind === 'VIDEO') ? 180_000 : 120_000));
+    if (!resultContent) throw new Error('账号声音提炼模型没有返回可用内容。');
     let draft;
-    let inputTokens = result.inputTokens ?? 0;
-    let outputTokens = result.outputTokens ?? 0;
-    try { draft = parseVoiceCalibrationDraft(result.content); }
+    try { draft = parseVoiceCalibrationDraft(resultContent); }
     catch (validationError) {
-      const repaired = await textRunner.runText({ provider: route.provider, model: route.model, system: buildVoiceCalibrationRepairPrompt(prompt.system, validationError instanceof Error ? validationError.message : '输出结构不完整。'), message: result.content, ...connectionInput });
-      draft = parseVoiceCalibrationDraft(repaired.content);
-      inputTokens += repaired.inputTokens ?? 0;
-      outputTokens += repaired.outputTokens ?? 0;
+      const repairMessage = JSON.stringify({ invalidOutput: resultContent, article: JSON.parse(JSON.stringify(richContent.text)) });
+      const repairedContent = extractOmniText(await runBailianCli(buildRichContentOmniArgs({ model: route.model, system: buildVoiceCalibrationRepairPrompt(prompt.system, validationError instanceof Error ? validationError.message : '输出结构不完整。'), message: repairMessage, content: richContent, maxTokens: 4_000 }), connectionInput.apiKey, richContent.media.some((item) => item.kind === 'VIDEO') ? 180_000 : 120_000));
+      draft = parseVoiceCalibrationDraft(repairedContent);
     }
     await query(`INSERT INTO api_usage_logs (workspace_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens)
-      VALUES ($1, $2, $3, 'VOICE_CALIBRATION', 'SUCCESS', $4, $5, $6)`, [workspace.id, route.provider, route.model, Date.now() - startedAt, inputTokens || null, outputTokens || null]);
+      VALUES ($1, $2, $3, 'VOICE_CALIBRATION', 'SUCCESS', $4, $5, $6)`, [workspace.id, route.provider, route.model, Date.now() - startedAt, null, null]);
     return { article: { title: article.title, url: article.url, source: article.source }, draft };
   } catch (error) {
     const message = voiceCalibrationErrorMessage(error);
@@ -1177,7 +1346,7 @@ app.delete('/api/v1/creative/project-inputs/:id', { preHandler: workspaceAccess.
 });
 
 app.get('/api/v1/creative/image-search', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
-  const input = z.object({ q: z.string().trim().min(2).max(120) }).parse(request.query);
+  const input = z.object({ q: z.string().trim().min(2).max(SEARCH_QUERY_MAX_LENGTH) }).parse(request.query);
   const workspace = request.workspace;
   return searchImagesWithFallback(input.q, {
     searchPrimary: () => searchTavilyImages(workspace.id, input.q),
@@ -1202,77 +1371,46 @@ app.post('/api/v1/creative/projects/:projectId/visual/plan', { preHandler: works
 
   const scope = VISUAL_PLANNING_SCOPE;
   const route = await textTaskRoute(workspace.id, scope, '配图策划');
-  const connectionInput = await textConnectionInput(workspace.id, route);
-  const prompt = buildVisualPlanningPrompt({
-    project: {
-      ...project,
-      versionTitle: draft.title,
-      versionBody: draft.body,
-    },
-    platform: input.platform,
-    quantityMode: input.quantityMode,
-    bodyItemCount: input.bodyItemCount,
-    styleProfile: input.styleProfile,
-    request: input.request,
-    currentItem,
+  if (route.provider !== 'BAILIAN_CLI') throw businessError(400, 'RICH_CONTENT_PROVIDER_REQUIRED', '配图策划需要使用支持图片、视频和音频理解的百炼 CLI 模型。');
+  const prepared = await transaction(async (client) => {
+    const job = await client.query(`INSERT INTO jobs (workspace_id, job_type, payload_json)
+      VALUES ($1, 'VISUAL_PLANNING', '{}'::jsonb) RETURNING *`, [workspace.id]);
+    const runInput = { ...input, currentPlan, currentItem };
+    const run = await client.query(`INSERT INTO visual_planning_runs
+      (workspace_id, project_id, draft_id, job_id, input_json, provider, model, prompt_version, created_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`, [
+      workspace.id, projectId, draft.id, job.rows[0].id, JSON.stringify(runInput), route.provider,
+      route.model, VISUAL_PLANNING_PROMPT_VERSION, request.user.sub,
+    ]);
+    const payload = { visualPlanningRunId: run.rows[0].id };
+    await client.query('UPDATE jobs SET payload_json = $1 WHERE id = $2', [JSON.stringify(payload), job.rows[0].id]);
+    return { run: run.rows[0], job: { ...job.rows[0], payload_json: payload } };
   });
-  const startedAt = Date.now();
-  let inputTokens = 0;
-  let outputTokens = 0;
   try {
-    let result;
-    try {
-      result = await textRunner.runText({ provider: route.provider, model: route.model, system: prompt.system, message: prompt.message, tools: prompt.tools, requiredToolName: prompt.requiredToolName, maxTokens: 16_000, temperature: 0.15, ...connectionInput });
-    } catch (executionError) {
-      if (executionError instanceof ModelToolCallError) {
-        inputTokens += executionError.inputTokens ?? 0;
-        outputTokens += executionError.outputTokens ?? 0;
-        throw visualPlanningOutputError(executionError);
-      }
-      throw executionError;
-    }
-    inputTokens += result.inputTokens ?? 0;
-    outputTokens += result.outputTokens ?? 0;
-    let parsed;
-    try {
-      parsed = parseVisualPlanningContent(result.content, { platform: input.platform, quantityMode: input.quantityMode, bodyItemCount: input.bodyItemCount, singleItem: Boolean(input.currentItemId), expectedRole: currentItem?.role });
-    } catch (validationError) {
-      throw visualPlanningOutputError(validationError);
-    }
-    const mergedPlan = mergePlannedItems({
-      platform: input.platform,
-      plannedItems: parsed.items,
-      currentPlan,
-      currentItemId: input.currentItemId,
-      keepAssignedAssets: input.keepAssignedAssets,
-    });
-    const plan = await compileVisualPlan({
-      platform: input.platform,
-      title: draft.title,
-      items: mergedPlan,
-      styleProfile: input.styleProfile,
-    });
-    const bodyItemCount = plan.filter((item) => item.role === 'BODY').length;
-    await query(`INSERT INTO api_usage_logs (workspace_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens)
-      VALUES ($1, $2, $3, $4, 'SUCCESS', $5, $6, $7)`, [workspace.id, route.provider, route.model, VISUAL_PLANNING_OPERATION, Date.now() - startedAt, inputTokens || null, outputTokens || null]);
-    reply.code(201).send({
-      plan,
-      bodyItemCount,
-      quantityMode: input.quantityMode,
-      strategy: parsed.strategy,
-      policy: {
-        scope,
-        provider: route.provider,
-        connectionId: route.connectionId ?? null,
-        model: route.model,
-        promptVersion: VISUAL_PLANNING_PROMPT_VERSION,
-      },
-    });
+    await enqueue(prepared.job);
   } catch (error) {
-    await query(`INSERT INTO api_usage_logs (workspace_id, provider, model, operation, status, duration_ms, input_tokens, output_tokens, error)
-      VALUES ($1, $2, $3, $4, 'ERROR', $5, $6, $7, $8)`, [workspace.id, route.provider, route.model, VISUAL_PLANNING_OPERATION, Date.now() - startedAt, inputTokens || null, outputTokens || null, String(error?.logMessage ?? (error instanceof Error ? error.message : '配图策划失败')).slice(0, 2_000)]);
-    throw error;
+    const message = error instanceof Error ? error.message : '配图策划任务入队失败。';
+    await transaction(async (client) => {
+      await client.query("UPDATE visual_planning_runs SET status = 'FAILED', error = $3, completed_at = now(), updated_at = now() WHERE workspace_id = $1 AND id = $2", [workspace.id, prepared.run.id, message.slice(0, 2_000)]);
+      await client.query("UPDATE jobs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1", [prepared.job.id, message.slice(0, 2_000)]);
+    });
+    throw businessError(503, 'VISUAL_PLANNING_QUEUE_UNAVAILABLE', '配图策划任务暂时无法启动，请稍后再试。');
   }
+  reply.code(202).send({
+    id: prepared.run.id,
+    status: prepared.run.status,
+    projectId,
+    policy: { scope, provider: route.provider, connectionId: route.connectionId ?? null, model: route.model, promptVersion: VISUAL_PLANNING_PROMPT_VERSION },
+  });
+});
+
+app.get('/api/v1/creative/projects/:projectId/visual/plan-runs/latest', { preHandler: workspaceAccess.forRole('VIEWER') }, async (request) => {
+  const projectId = z.string().min(1).max(200).parse(request.params.projectId);
+  const result = await query(`SELECT * FROM visual_planning_runs
+    WHERE workspace_id = $1 AND project_id = $2 ORDER BY created_at DESC LIMIT 1`, [request.workspace.id, projectId]);
+  if (!result.rowCount) return { run: null };
+  const row = result.rows[0];
+  return { run: { id: row.id, projectId: row.project_id, status: row.status, result: row.result_json, error: row.error, createdAt: row.created_at, updatedAt: row.updated_at } };
 });
 
 function generatedImageMime(filename) {
@@ -1440,6 +1578,73 @@ async function projectResearchMaterialSnapshot(rows) {
   return [...inputs, ...references];
 }
 
+async function projectWritingMaterialSnapshot(workspaceId, projectId, platform) {
+  const [listed, ingestions] = await Promise.all([
+    projectMaterialStore.list(workspaceId, projectId),
+    query(`SELECT id, source_url, canonical_url, normalized_document_json
+      FROM content_ingestions
+      WHERE workspace_id = $1 AND project_id = $2 AND stage IN ('READY', 'PARTIAL')
+      ORDER BY updated_at DESC`, [workspaceId, projectId]),
+  ]);
+  const appliesToPlatform = (item) => !item.platforms?.length || item.platforms.includes(platform);
+  let remaining = 30_000;
+  const take = (value, maximum) => {
+    const source = String(value ?? '').trim();
+    const text = source.slice(0, Math.max(0, Math.min(maximum, remaining)));
+    remaining -= text.length;
+    return text;
+  };
+  const materials = listed.inputs.filter(appliesToPlatform).map((item) => ({
+    id: item.id, type: 'INPUT', kind: item.kind, title: item.title, scope: item.scope,
+    platforms: item.platforms, content: take(item.body, 20_000),
+  })).filter((item) => item.content);
+  for (const item of listed.references.filter(appliesToPlatform)) {
+    materials.push({ id: item.id, type: 'LINK', role: item.role, title: item.title, notes: take(item.notes, 1_000), url: item.url, scope: item.scope, platforms: item.platforms });
+  }
+  for (const item of listed.assets.filter(appliesToPlatform)) {
+    materials.push({ id: item.id, type: 'ASSET', role: item.role, title: item.title, notes: take(item.notes, 800), mimeType: item.mimeType, sourceUrl: item.sourceUrl, scope: item.scope, platforms: item.platforms, contentStatus: 'METADATA_ONLY' });
+  }
+  for (const row of ingestions.rows) {
+    const result = row.normalized_document_json?.understanding?.result;
+    if (!result) continue;
+    materials.push({
+      id: `content-understanding:${row.id}`,
+      type: 'CONTENT_UNDERSTANDING',
+      sourceUrl: row.canonical_url || row.source_url || null,
+      summary: take(result.summary, 2_000),
+      coreViewpoints: (result.coreViewpoints ?? []).map((item) => take(item, 500)).filter(Boolean),
+      structureOutline: (result.structureOutline ?? []).map((item) => take(item, 500)).filter(Boolean),
+      reusableElements: (result.reusableElements ?? []).map((item) => take(item, 500)).filter(Boolean),
+      visualClues: (result.visualClues ?? []).map((item) => take(item, 500)).filter(Boolean),
+    });
+  }
+  return materials;
+}
+
+async function projectVideoAnalysisMaterials(workspaceId, projectId) {
+  const result = await query(`SELECT analysis.id, analysis.result_json, analysis.keyframe_asset_ids,
+      asset.title AS source_title
+    FROM video_analyses analysis
+    JOIN workspace_assets asset ON asset.workspace_id = analysis.workspace_id AND asset.id = analysis.source_asset_id
+    WHERE analysis.workspace_id = $1 AND analysis.project_id = $2 AND analysis.status = 'SUCCEEDED'
+    ORDER BY analysis.updated_at DESC LIMIT 1`, [workspaceId, projectId]);
+  if (!result.rowCount) return [];
+  const row = result.rows[0];
+  const analysis = row.result_json ?? {};
+  const timeline = (Array.isArray(analysis.narrativeStructure) ? analysis.narrativeStructure : []).map((segment) =>
+    `${segment.startSeconds}-${segment.endSeconds}s ${segment.segment}：${segment.content}；画面：${segment.visual}`);
+  const body = [analysis.summary, ...timeline, ...(Array.isArray(analysis.reusableInsights) ? analysis.reusableInsights : [])].filter(Boolean).join('\n\n');
+  const materials = [{ id: `video-analysis:${row.id}`, type: 'INPUT', kind: 'NOTE', title: '视频拉片结果', scope: 'RESEARCH', platforms: ['WECHAT'], content: body.slice(0, 50_000) }];
+  const assetIds = Array.isArray(row.keyframe_asset_ids) ? row.keyframe_asset_ids : [];
+  if (!assetIds.length) return materials;
+  const frames = await query(`SELECT id, title, source_note FROM workspace_assets
+    WHERE workspace_id = $1 AND id = ANY($2::uuid[]) AND status = 'ACTIVE' ORDER BY created_at`, [workspaceId, assetIds]);
+  return materials.concat(frames.rows.map((frame) => ({
+    id: frame.id, type: 'ASSET', kind: 'IMAGE', role: 'VISUAL', title: frame.title,
+    notes: frame.source_note, scope: 'PROJECT', platforms: ['WECHAT'], contentStatus: 'METADATA_ONLY',
+  })));
+}
+
 async function researchMaterialIds(runId) {
   if (!runId) return { inputIds: [], referenceIds: [], assetIds: [] };
   const result = await query('SELECT input_id, reference_id, asset_link_id FROM project_research_materials WHERE generation_run_id = $1', [runId]);
@@ -1479,7 +1684,10 @@ app.post('/api/v1/creative/projects/:projectId/research/start', { preHandler: wo
   const referenceIds = listed.references.filter((item) => item.scope === 'PROJECT' || item.scope === 'RESEARCH').map((item) => item.id);
   const assetIds = listed.assets.filter((item) => item.scope === 'PROJECT' || item.scope === 'RESEARCH').map((item) => item.linkId);
   const materialRows = await projectMaterialStore.researchSnapshot(workspace.id, projectId, inputIds, referenceIds, assetIds);
-  const materials = await projectResearchMaterialSnapshot(materialRows);
+  const materials = [
+    ...await projectResearchMaterialSnapshot(materialRows),
+    ...await projectVideoAnalysisMaterials(workspace.id, projectId),
+  ].filter((item, index, items) => index === items.findIndex((other) => other.id === item.id));
   const route = { provider: 'BAILIAN_CLI', model: policy.rows[0].model };
   const verificationRoute = verificationPolicy.rowCount ? { provider: 'BAILIAN_CLI', model: verificationPolicy.rows[0].model } : null;
   const run = await transaction(async (client) => {
@@ -1657,10 +1865,11 @@ app.post('/api/v1/creative/projects/:projectId/agent/prepare', { preHandler: wor
   }
 
   if (input.platform !== 'WECHAT') throw businessError(400, 'WECHAT_MASTER_REQUIRED', '正文创作只支持公众号母稿。');
-  const [project, context, materialRows, summaries, masterResult, drafts, acceptedResearch] = await Promise.all([
+  const [project, context, materialRows, defaultMaterials, summaries, masterResult, drafts, acceptedResearch] = await Promise.all([
     creativeProject(workspace.id, projectId),
     creativeSkillStore.getContext(workspace.id, projectId, 'WECHAT'),
     projectMaterialStore.researchSnapshot(workspace.id, projectId, input.inputIds, input.referenceIds, input.assetIds),
+    projectWritingMaterialSnapshot(workspace.id, projectId, 'WECHAT'),
     query(`SELECT stage, platform, summary, version FROM project_stage_summaries
       WHERE workspace_id = $1 AND project_id = $2 AND (platform IS NULL OR platform = $3)
       ORDER BY created_at DESC LIMIT 10`, [workspace.id, projectId, 'WECHAT']),
@@ -1698,7 +1907,11 @@ app.post('/api/v1/creative/projects/:projectId/agent/prepare', { preHandler: wor
       WHERE p.workspace_id = $1 AND p.scope = $2 AND p.provider = 'BAILIAN_CLI'`, [workspace.id, SOURCE_VERIFICATION_SCOPE]) : Promise.resolve({ rowCount: 0, rows: [] }),
     action === 'GENERATE_DRAFT' ? templateStore.get(workspace.id, SOURCE_VERIFICATION_SCOPE) : Promise.resolve(null),
   ]);
-  const materials = await projectResearchMaterialSnapshot(materialRows);
+  const materials = [
+    ...defaultMaterials,
+    ...await projectResearchMaterialSnapshot(materialRows),
+    ...await projectVideoAnalysisMaterials(workspace.id, projectId),
+  ].filter((item, index, items) => index === items.findIndex((other) => other.id === item.id));
   const master = masterResult.rows[0];
   const acceptedResearchResult = acceptedResearch.rows[0]?.output_json ?? null;
   const researchContext = acceptedResearchResult ? {
@@ -2136,17 +2349,18 @@ app.post('/api/v1/creative/projects/:projectId/outline/prepare', { preHandler: w
   const input = z.object({ platform: creativePlatform }).parse(request.body);
   const workspace = request.workspace;
   const templateScope = outlineTemplateScope(input.platform);
-  const [project, context, route, template] = await Promise.all([
+  const [project, context, route, template, materials] = await Promise.all([
     creativeProject(workspace.id, projectId),
     creativeSkillStore.getContext(workspace.id, projectId, input.platform),
     textTaskRoute(workspace.id, OUTLINE_SCOPE, '文案生成'),
     templateStore.get(workspace.id, templateScope),
+    projectWritingMaterialSnapshot(workspace.id, projectId, input.platform),
   ]);
   if (!context) throw new Error('请先保存创作设定和写作策略。');
   if (!context.brief.selectedPlatforms.includes(input.platform)) throw new Error('目标平台不在已保存的创作设定中。');
   const platformVersion = project.versions?.find((version) => version.platform === input.platform);
   if (!platformVersion) throw new Error('项目没有对应的图文平台版本。');
-  const sourceSnapshot = { project, brief: context.brief, accountVoice: context.accountVoice, skills: context.skills, platform: input.platform };
+  const sourceSnapshot = { project, brief: context.brief, accountVoice: context.accountVoice, skills: context.skills, materials, platform: input.platform };
   const runInput = { template: { id: template.id, version: template.version, body: template.body }, route: { provider: route.provider, connectionId: route.connectionId ?? null, model: route.model } };
   const run = await query(`INSERT INTO generation_runs
     (workspace_id, action_version_id, status, source_snapshot_json, input_json, model, prompt_version, estimated_cost)
@@ -2248,7 +2462,7 @@ app.post('/api/v1/creative/projects/:projectId/draft/prepare', { preHandler: wor
   const input = z.object({ platform: creativePlatform }).parse(request.body);
   const workspace = request.workspace;
   const templateScope = draftTemplateScope(input.platform);
-  const [project, context, route, template, outlineResult] = await Promise.all([
+  const [project, context, route, template, outlineResult, materials] = await Promise.all([
     creativeProject(workspace.id, projectId),
     creativeSkillStore.getContext(workspace.id, projectId, input.platform),
     textTaskRoute(workspace.id, DRAFT_SCOPE, '文案生成'),
@@ -2256,6 +2470,7 @@ app.post('/api/v1/creative/projects/:projectId/draft/prepare', { preHandler: wor
     query(`SELECT * FROM creative_outline_candidates
       WHERE workspace_id = $1 AND project_id = $2 AND platform = $3 AND status = 'ACCEPTED'
       ORDER BY accepted_at DESC LIMIT 1`, [workspace.id, projectId, input.platform]),
+    projectWritingMaterialSnapshot(workspace.id, projectId, input.platform),
   ]);
   if (!context) throw new Error('请先保存创作设定和写作策略。');
   if (!context.brief.selectedPlatforms.includes(input.platform)) throw new Error('目标平台不在已保存的创作设定中。');
@@ -2264,7 +2479,7 @@ app.post('/api/v1/creative/projects/:projectId/draft/prepare', { preHandler: wor
   if (!platformVersion) throw new Error('项目没有对应的图文平台版本。');
   const outlineRow = outlineResult.rows[0];
   const outline = { id: outlineRow.id, selectedTitle: outlineRow.selected_title, ...outlineRow.output_json };
-  const sourceSnapshot = { project, brief: context.brief, skills: context.skills, platform: input.platform, outline };
+  const sourceSnapshot = { project, brief: context.brief, skills: context.skills, materials, platform: input.platform, outline };
   const runInput = { template: { id: template.id, version: template.version, body: template.body }, route: { provider: route.provider, connectionId: route.connectionId ?? null, model: route.model } };
   const run = await query(`INSERT INTO generation_runs
     (workspace_id, action_version_id, status, source_snapshot_json, input_json, model, prompt_version, estimated_cost)
@@ -2448,6 +2663,17 @@ app.post('/api/v1/creative/project-artifacts/:id/accept', { preHandler: workspac
         updatedAt,
       });
       project = applied.project;
+      if (candidate.platform === 'WECHAT') {
+        const draftResult = await client.query(`SELECT id, revision FROM content_drafts
+          WHERE workspace_id = $1 AND project_id = $2 AND platform = 'WECHAT'
+          FOR UPDATE`, [workspace.id, candidate.project_id]);
+        if (!draftResult.rowCount) throw new Error('公众号工作草稿不存在，无法同步已采用正文。');
+        await draftStore.patchWorkingCopy(workspace.id, draftResult.rows[0].id, {
+          revision: Number(draftResult.rows[0].revision),
+          title: candidate.content_title,
+          body: candidate.content_body,
+        }, client);
+      }
       summary = candidate.change_summary || `已采用${creativePlatformNames[candidate.platform]}文案候选。`;
       return applied.state;
     }, updatedAt);
@@ -2891,11 +3117,24 @@ async function fetchAvailableModels(baseUrl, apiKey) {
 }
 
 function modelCatalogItem({ provider, connectionId, connectionLabel, model, origin = 'ACCOUNT_CATALOG', capabilities, operations }) {
-  return { id: `${provider === 'BAILIAN_CLI' ? 'bailian' : `external:${connectionId}`}:${model}`, provider, ...(connectionId ? { connectionId } : {}), connectionLabel, model, capabilities: capabilities ?? classifyModelCapabilities(model), operations: operations ?? classifyModelOperations(model), origin };
+  const resolvedCapabilities = [...new Set([...(capabilities ?? []), ...classifyModelCapabilities(model)])];
+  return { id: `${provider === 'BAILIAN_CLI' ? 'bailian' : `external:${connectionId}`}:${model}`, provider, ...(connectionId ? { connectionId } : {}), connectionLabel, model, capabilities: resolvedCapabilities, operations: operations ?? classifyModelOperations(model), origin };
+}
+
+function normalizeCatalogItem(item) {
+  return modelCatalogItem({
+    provider: item.provider,
+    connectionId: item.connectionId,
+    connectionLabel: item.connectionLabel,
+    model: item.model,
+    origin: item.origin,
+    capabilities: item.capabilities,
+    operations: item.operations,
+  });
 }
 
 function bailianCliMediaCatalog() {
-  // 来源：当前安装的 bailian-cli 1.10.1 命令定义。媒体接口不是 OpenAI 兼容 /models 的一部分。
+  // 来源：项目锁定的 bailian-cli 1.14.2 命令定义。媒体接口不是 OpenAI 兼容 /models 的一部分。
   const entries = [
     ['qwen-image-2.0', ['TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE']], ['qwen-image-2.0-pro', ['TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE']], ['qwen-image-max', ['TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE']], ['wan2.7-image', ['TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE']], ['wan2.6-t2i', ['TEXT_TO_IMAGE']],
     ['happyhorse-1.1-t2v', ['TEXT_TO_VIDEO']], ['happyhorse-1.1-i2v', ['IMAGE_TO_VIDEO']], ['happyhorse-1.1-r2v', ['REFERENCE_TO_VIDEO']], ['happyhorse-1.0-video-edit', ['VIDEO_EDIT']], ['wan2.6-t2v', ['TEXT_TO_VIDEO']], ['wan2.6-r2v', ['REFERENCE_TO_VIDEO']],
@@ -2930,7 +3169,8 @@ function classifyModelCapabilities(model) {
   if (/embed|rerank/.test(value)) return ['EMBEDDING'];
   if (/asr|paraformer|fun-asr/.test(value)) return ['ASR'];
   if (/music/.test(value)) return ['MUSIC'];
-  if (/omni/.test(value)) return ['TEXT', 'VISION', 'MULTIMODAL'];
+  if (/qwen3\.[6-8](?:[-_.]|$)/.test(value)) return ['TEXT', 'IMAGE', 'VISION', 'VIDEO', 'MULTIMODAL'];
+  if (/omni/.test(value)) return ['TEXT', 'VISION', 'VIDEO', 'MULTIMODAL'];
   if (/\bvl\b|vision/.test(value)) return ['TEXT', 'VISION'];
   if (/tts|cosy|voice|speech/.test(value)) return ['AUDIO'];
   if (/video|wanx|wan\d+\.\d+-(t2v|i2v|r2v|videoedit)|hailuo|seedance|happyhorse/.test(value)) return ['VIDEO'];
@@ -2956,16 +3196,27 @@ function classifyModelOperations(model) {
 async function ensureCatalogModel(workspaceId, provider, connectionId, model) {
   const catalog = await query('SELECT item_json FROM model_catalog WHERE workspace_id = $1 AND item_json->>\'provider\' = $2 AND item_json->>\'model\' = $3 AND COALESCE(item_json->>\'connectionId\', \'\') = $4', [workspaceId, provider, model, connectionId ?? '']);
   if (!catalog.rowCount) { const error = new Error('模型不在已同步且可用的目录中。请先完成连接检测并同步模型。'); error.statusCode = 400; throw error; }
-  return catalog.rows[0].item_json;
+  return normalizeCatalogItem(catalog.rows[0].item_json);
 }
 
 function catalogSupportsTask(item, task) {
   const operations = Array.isArray(item?.operations) ? item.operations : classifyModelOperations(item?.model);
   const capabilities = Array.isArray(item?.capabilities) ? item.capabilities : classifyModelCapabilities(item?.model);
   const operationTasks = new Set(['TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE', 'TEXT_TO_VIDEO', 'IMAGE_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO', 'REFERENCE_TO_VIDEO', 'VIDEO_EDIT']);
+  const richContentTasks = new Set([
+    'INTELLIGENCE_ANALYSIS',
+    'TITLE_RECOMMENDATION',
+    'VOICE_CALIBRATION',
+    'WECHAT_VISUAL_PLANNING',
+    'WECHAT_TEMPLATE_ANALYSIS',
+    'CONTENT_UNDERSTANDING',
+    'VIDEO_ANALYSIS',
+  ]);
   if (operationTasks.has(task)) return operations.includes(task);
   if (task === 'SPEECH_SYNTHESIS') return capabilities.includes('AUDIO');
   if (task === 'SPEECH_RECOGNITION') return capabilities.includes('ASR');
+  if (task === 'VIDEO_ANALYSIS') return item?.provider === 'BAILIAN_CLI' && /qwen3\.[6-8](?:[-_.]|$)/i.test(String(item?.model ?? '')) && !/(?:omni|embedding|rerank)/i.test(String(item?.model ?? ''));
+  if (richContentTasks.has(task)) return item?.provider === 'BAILIAN_CLI' && capabilities.includes('MULTIMODAL');
   return capabilities.includes('TEXT');
 }
 

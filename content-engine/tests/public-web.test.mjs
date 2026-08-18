@@ -33,6 +33,29 @@ test('公众号文章使用浏览器请求环境并允许读取大于 1MB 的页
   assert.equal(result.html, articleHtml);
 });
 
+test('public article metrics are extracted for the review ledger', () => {
+  const preview = publicWeb.buildPublicPreviewFromHtml(
+    new URL(wechatUrl),
+    `<meta property="og:title" content="metric article" />
+      <meta property="article:published_time" content="2026-08-08T09:35:00+08:00" />
+      <div id="js_content"><p>article content for public metric extraction</p></div>
+      <script>var appmsgstat = {"read_num":1234,"like_num":247,"share_num":886,"add_to_fav_count":82,"comment_count":2};</script>`,
+  );
+
+  assert.deepEqual(preview.metrics, {
+    source: 'PUBLIC_PAGE',
+    readCount: 1234,
+    likeCount: 247,
+    shareCount: 886,
+    favoriteCount: 82,
+    commentCount: 2,
+    exposureCount: null,
+    playCount: null,
+    followerDelta: null,
+    raw: { parser: 'WECHAT_PUBLIC_PAGE', values: { readCount: 1234, likeCount: 247, shareCount: 886, favoriteCount: 82, commentCount: 2 } },
+  });
+});
+
 test('公众号文章重定向到人机验证页时立即停止读取', async () => {
   assert.equal(typeof publicWeb.fetchPublicPage, 'function');
   let fetchCount = 0;

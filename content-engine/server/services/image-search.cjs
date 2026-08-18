@@ -1,3 +1,5 @@
+const { externalFetch } = require('./network.cjs');
+
 function plainMetadata(value, maxLength = 300) {
   return String(value ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, maxLength);
 }
@@ -45,7 +47,7 @@ async function searchImagesWithFallback(queryText, { searchPrimary, searchFallba
   throw new Error(`图片搜索暂时不可用：${errors.join('；')}。`);
 }
 
-async function searchWikimediaImages(queryText, fetchImpl = fetch) {
+async function searchWikimediaImages(queryText, fetchImpl = externalFetch) {
   const params = new URLSearchParams({
     action: 'query', format: 'json', formatversion: '2', generator: 'search', gsrnamespace: '6',
     gsrsearch: queryText, gsrlimit: '12', prop: 'imageinfo', iiprop: 'url|extmetadata', iiurlwidth: '640', origin: '*',

@@ -21,6 +21,7 @@ export interface VisualPlanCountRange {
 export interface VisualGenerationContext {
   platform: Exclude<Platform, 'VIDEO_CHANNEL'>;
   title: string;
+  body?: string;
 }
 
 export interface VisualGenerationSpec {

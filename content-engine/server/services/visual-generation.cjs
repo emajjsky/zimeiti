@@ -6,6 +6,7 @@ const assetIds = z.array(z.string().uuid()).max(3).default([]);
 const wechatGenerationInput = z.object({
   platform: z.literal('WECHAT'),
   visualItemId: z.string().trim().min(1).max(100),
+  prompt: z.string().trim().min(4).max(8_000).optional(),
   assetIds,
 }).strict();
 const socialGenerationInput = z.object({
@@ -27,7 +28,7 @@ function parseVisualGenerationRequest(value) {
   const parsed = visualGenerationInput.safeParse(value);
   if (parsed.success) return parsed.data;
   const platform = value && typeof value === 'object' ? value.platform : null;
-  if (platform === 'WECHAT' && value && typeof value === 'object' && ('prompt' in value || 'size' in value)) {
+  if (platform === 'WECHAT' && value && typeof value === 'object' && 'size' in value) {
     throw inputError('公众号生图请求不能提交提示词或画幅，最终参数由服务端根据当前配图项编译。');
   }
   throw inputError('生图请求缺少必要参数或包含未允许的字段。');
@@ -46,10 +47,11 @@ async function resolveWechatVisualGenerationSpec({ input, draft, parseItem = (it
   const [compiled] = await compileVisualPlan({
     platform: 'WECHAT',
     title: draft.title,
+    body: draft.body,
     items: [item],
     styleProfile: draft.visualPlan?.styleProfile,
   });
-  return { prompt: compiled.prompt, size: compiled.size, assetIds: input.assetIds, item: compiled };
+  return { prompt: input.prompt ?? compiled.prompt, size: compiled.size, assetIds: input.assetIds, item: compiled };
 }
 
 function parseBailianCliErrorPayload(error) {

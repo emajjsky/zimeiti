@@ -3,6 +3,7 @@ export const navigationGroups = [
     id: 'work',
     label: '工作',
     items: [
+      { view: 'home', label: '首页' },
       { view: 'today', label: '今天' },
       { view: 'discover', label: '发现' },
       { view: 'create', label: '创作' },
@@ -66,7 +67,7 @@ export function readWorkspaceLocation(locationTarget = globalThis.location) {
   const requestedView = params.get('view');
   const isLegacyCreative = legacyCreativeViews.has(requestedView);
   return {
-    view: isLegacyCreative ? 'create' : allowed(requestedView, views, 'today'),
+    view: isLegacyCreative ? 'create' : allowed(requestedView, views, 'home'),
     discoverSection: allowed(params.get('discover'), discoverSections, 'inbox'),
     settingsSection: allowed(params.get('settings'), settingsSections, 'workspace'),
     modelSection: allowed(params.get('model'), modelSections),
@@ -82,7 +83,7 @@ export function workspaceLocationUrl(route, locationTarget = globalThis.location
   const url = new URL(locationTarget?.href ?? 'http://localhost/');
   const params = url.searchParams;
   ['discover', 'settings', 'model', 'intel', 'topic', 'project', 'stage', 'draft', 'platform'].forEach((key) => params.delete(key));
-  params.set('view', allowed(route.view, views, 'today'));
+  params.set('view', allowed(route.view, views, 'home'));
   if (route.view === 'discover') {
     params.set('discover', allowed(route.discoverSection, discoverSections, 'inbox'));
     if (route.intelligenceId) params.set('intel', route.intelligenceId);

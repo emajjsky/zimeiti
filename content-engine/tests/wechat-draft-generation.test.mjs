@@ -111,6 +111,6 @@ test('前端模型任务契约没有 fallback 字段并公开新任务 Scope', a
   assert.match(integrations, /'WECHAT_LAYOUT_DESIGN'/);
   assert.match(integrations, /'XIAOHONGSHU_ADAPTATION'/);
   assert.match(integrations, /'WEIBO_ADAPTATION'/);
-  assert.match(integrations, /'CONTENT_PREFLIGHT_REVIEW'/);
+  assert.doesNotMatch(integrations, /'CONTENT_PREFLIGHT_REVIEW'/);
   assert.doesNotMatch(integrations, /fallbackProvider|fallbackConnectionId|fallbackModel/);
 });

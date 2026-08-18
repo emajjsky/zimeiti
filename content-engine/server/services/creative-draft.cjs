@@ -50,7 +50,7 @@ function parseDraftContent(content) {
   return draftSchema.parse(value);
 }
 
-function buildDraftPrompt({ project, brief, skills, platform, outline, template }) {
+function buildDraftPrompt({ project, brief, skills, platform, outline, template, materials = [] }) {
   const businessTemplate = validateDraftTemplate(template ?? defaultDraftTemplate(platform));
   const example = { title: '采用后的文章标题', body: '完整正文纯文本，使用自然段落和必要的小标题。', factsToVerify: ['发布前仍需核验的事实'] };
   const system = [
@@ -78,6 +78,7 @@ function buildDraftPrompt({ project, brief, skills, platform, outline, template 
       sections: outline.sections,
       factsToVerify: outline.factsToVerify,
     },
+    projectMaterials: materials,
     skillRules: skills.map((skill) => ({ dimension: skill.dimension, name: skill.name, version: skill.version.version, instructions: skill.version.instructions })),
     platform,
   });

@@ -214,11 +214,13 @@ test('项目风格默认继承且单张图片可以独立覆盖', () => {
 
   const inherited = updateVisualPlanItem(item, { visualType: 'MIND_MAP', templatePreset: 'RADIAL_BRANCH' }, { platform: 'WECHAT', title: article.title }, { preset: 'RETRO_POP' });
   assert.equal(inherited.stylePreset, 'INHERIT');
-  assert.match(inherited.prompt, /波普怀旧/);
+  assert.doesNotMatch(inherited.prompt, /波普怀旧/);
+  assert.match(inherited.prompt, /薄荷绿、婴儿蓝、珊瑚粉/);
   assert.match(inherited.prompt, /向四周展开一级分支/);
 
   const overridden = updateVisualPlanItem(inherited, { stylePreset: 'TECH_MEDIA' }, { platform: 'WECHAT', title: article.title }, { preset: 'RETRO_POP' });
-  assert.match(overridden.prompt, /科技媒体/);
+  assert.doesNotMatch(overridden.prompt, /科技媒体/);
+  assert.match(overridden.prompt, /cobalt blue, teal green and deep graphite/);
   assert.doesNotMatch(overridden.prompt, /波普怀旧/);
 });
 
@@ -315,7 +317,8 @@ test('重新规划默认保留已选图片，用户明确取消时只解除正�
   });
   assert.deepEqual(kept.map((item) => item.assetId), current.map((item) => item.assetId));
   assert.notEqual(kept[1].prompt, current[1].prompt);
-  assert.match(kept[1].prompt, /清新波普怀旧/);
+  assert.doesNotMatch(kept[1].prompt, /清新波普怀旧/);
+  assert.match(kept[1].prompt, /薄荷绿、婴儿蓝、珊瑚粉/);
   assert.match(kept[1].prompt, /统一使用薄荷绿边框/);
 
   const cleared = replanVisualPlan(article, 'WECHAT', current, { bodyItemCount: 3, keepAssignedAssets: false });

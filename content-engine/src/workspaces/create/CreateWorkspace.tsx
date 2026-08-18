@@ -1,4 +1,4 @@
-import { ArrowLeft, CircleAlert, LoaderCircle } from 'lucide-react';
+import { ArrowLeft, CircleAlert, Film, LoaderCircle } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CreateStageRoute } from '../../app/navigation.mjs';
 import { webAccountVoices, webCreative, webDrafts } from '../../data/webApi';
@@ -110,6 +110,17 @@ export function CreateWorkspace({ project, stage, activeDerivedDraftId, onStage,
   const [completedVersion, setCompletedVersion] = useState<ContentDraftVersion | null>(null);
   const [loadingDraft, setLoadingDraft] = useState(true);
   const [error, setError] = useState('');
+  const [videoAnalyses, setVideoAnalyses] = useState<Awaited<ReturnType<typeof webCreative.videoAnalyses>>['analyses']>([]);
+  const [videoAnalysisState, setVideoAnalysisState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [videoAnalysisError, setVideoAnalysisError] = useState('');
+  const videoProgressLabel = (analysis: typeof videoAnalyses[number]) => {
+    if (analysis.status === 'SUCCEEDED') return analysis.result?.coverage && analysis.result.coverage.ratio < 1 ? `拉片部分完成，已提取 ${analysis.keyframeAssetIds.length} 张素材，覆盖 ${Math.round(analysis.result.coverage.ratio * 100)}%` : `已提取 ${analysis.keyframeAssetIds.length} 张内容关键帧素材`;
+    if (analysis.status === 'FAILED') return '拉片失败';
+    if (analysis.progress.phase === 'DETECTING_SCENES') return '正在检测镜头和场景变化';
+    if (analysis.progress.phase === 'ANALYZING_SEGMENTS') return `正在分段理解视频 ${analysis.progress.completedSegments}/${analysis.progress.totalSegments}`;
+    if (analysis.progress.phase === 'EXTRACTING_MATERIALS' || analysis.status === 'EXTRACTING_FRAMES') return '正在整理时间轴并提取可复用素材';
+    return '正在解析视频信息';
+  };
 
   const loadProjectDrafts = useCallback(async () => {
     if (!project) throw new Error('没有可读取的内容项目。');
@@ -153,9 +164,37 @@ export function CreateWorkspace({ project, stage, activeDerivedDraftId, onStage,
     return () => { cancelled = true; };
   }, [loadProjectDrafts, project?.id]);
 
+  useEffect(() => {
+    if (!project) return;
+    let cancelled = false;
+    let timer = 0;
+    const load = async () => {
+      if (!videoAnalyses.length) setVideoAnalysisState('loading');
+      try {
+        const result = await webCreative.videoAnalyses(project.id);
+        if (cancelled) return;
+        setVideoAnalyses(result.analyses);
+        setVideoAnalysisState('ready');
+        setVideoAnalysisError('');
+        if (result.analyses.some((item) => ['ANALYZING', 'EXTRACTING_FRAMES'].includes(item.status))) timer = window.setTimeout(() => void load(), 1_500);
+      } catch (reason) {
+        if (!cancelled) {
+          setVideoAnalysisState('error');
+          setVideoAnalysisError(reason instanceof Error ? reason.message : '读取拉片状态失败。');
+          timer = window.setTimeout(() => void load(), 3_000);
+        }
+      }
+    };
+    void load();
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [project?.id]);
+
   const currentRoute = useMemo(() => project ? draftRoute(project, wechatDraft) : 'preparation', [project, wechatDraft]);
   const visibleStage = loadingDraft && stage ? stage : stage && routeOrder.indexOf(stage) <= routeOrder.indexOf(currentRoute) ? stage : currentRoute;
   const hasActiveDerivedDraft = projectDrafts.some(({ id, platform }) => id === activeDerivedDraftId && platform !== 'WECHAT');
+  const videoAnalysisInProgress = videoAnalysisState === 'loading'
+    || videoAnalyses.some((analysis) => ['ANALYZING', 'EXTRACTING_FRAMES'].includes(analysis.status));
+  const showVideoAnalysis = videoAnalysisInProgress || visibleStage === 'preparation';
   useEffect(() => { if (project && stage !== visibleStage) onStage(visibleStage); }, [onStage, project?.id, stage, visibleStage]);
 
   useEffect(() => {
@@ -196,17 +235,36 @@ export function CreateWorkspace({ project, stage, activeDerivedDraftId, onStage,
   if (!project) return <section className="empty-workbench"><h1>还没有内容项目</h1></section>;
   return <section className="creative-workspace">
     <header className="creative-workspace-head"><button className="text-button" type="button" onClick={onExitProject}><ArrowLeft size={16}/>项目中心</button><div><h1>{project.title}</h1><span>{projectStageName[project.stage]}</span></div></header>
-    {!hasActiveDerivedDraft && <nav className="creative-stage-nav" aria-label="公众号母稿流程">{creativeStages.map((item) => { const enabled = canOpenCreateStage(project.stage, item.id) || routeOrder.indexOf(item.id) <= routeOrder.indexOf(currentRoute); return <button type="button" key={item.id} className={visibleStage === item.id ? 'active' : ''} disabled={!enabled} onClick={() => enabled && onStage(item.id)}><span>{item.label}</span></button>; })}</nav>}
+    {!videoAnalysisInProgress && !hasActiveDerivedDraft && <nav className="creative-stage-nav" aria-label="公众号母稿流程">{creativeStages.map((item) => { const enabled = canOpenCreateStage(project.stage, item.id) || routeOrder.indexOf(item.id) <= routeOrder.indexOf(currentRoute); return <button type="button" key={item.id} className={visibleStage === item.id ? 'active' : ''} disabled={!enabled} onClick={() => enabled && onStage(item.id)}><span>{item.label}</span></button>; })}</nav>}
     {error && <div className="creative-stage-error" role="alert"><CircleAlert size={18}/><span>{error}</span></div>}
+    {videoAnalysisState === 'loading' && <section className="video-analysis-workspace"><header><div><LoaderCircle className="spin" size={18}/><div><b>视频拉片</b><span>正在读取拉片任务</span></div></div></header></section>}
+    {videoAnalysisState === 'error' && <section className="video-analysis-workspace status-failed" role="alert"><header><div><CircleAlert size={18}/><div><b>拉片状态暂时无法读取</b><span>{videoAnalysisError}，页面会自动重新连接。</span></div></div></header></section>}
+    {showVideoAnalysis && videoAnalyses[0] && <section className={`video-analysis-workspace status-${videoAnalyses[0].status.toLowerCase()}`}><header><div><Film size={18}/><div><b>视频拉片</b><span>{videoProgressLabel(videoAnalyses[0])}</span></div></div>{['ANALYZING', 'EXTRACTING_FRAMES'].includes(videoAnalyses[0].status) && <LoaderCircle className="spin" size={18}/>}</header>{videoAnalyses[0].error && <p>{videoAnalyses[0].error}</p>}{videoAnalyses[0].result && <><p>{videoAnalyses[0].result.summary}</p><div className="video-analysis-timeline">{videoAnalyses[0].result.narrativeStructure.map((segment) => <article key={`${segment.startSeconds}-${segment.segment}`}><time>{Math.round(segment.startSeconds)}s–{Math.round(segment.endSeconds)}s</time><div><b>{segment.segment}</b><span>{segment.content}</span><small>{segment.visual}</small></div></article>)}</div></>}</section>}
     {loadingDraft && visibleStage !== 'preparation' && <div className="creative-stage-loading"><LoaderCircle size={20}/><span>正在读取公众号母稿</span></div>}
-    {visibleStage === 'preparation' && <PreparationWorkspace project={project} onProjectChange={onProjectAccepted} onContinue={() => onStage('copy')} onOpenAgentSettings={onOpenAgentSettings} onOpenSearchSettings={onOpenSearchSettings}/>}
+    {!videoAnalysisInProgress && visibleStage === 'preparation' && <PreparationWorkspace project={project} onProjectChange={onProjectAccepted} onContinue={() => onStage('copy')} onOpenAgentSettings={onOpenAgentSettings} onOpenSearchSettings={onOpenSearchSettings}/>} 
     {visibleStage === 'copy' && wechatDraft && <CopyWorkspace project={project} draft={wechatDraft} brief={brief} briefState={briefState} skills={skills} accountVoices={accountVoices} onProjectChange={onProjectAccepted} onDraftChange={updateProjectDraft} onReloadDraft={loadWechatDraft} onSaveBrief={saveBrief} onContinue={() => onStage('visual')} onOpenModelSettings={onOpenModelSettings} onOpenAgentSettings={onOpenAgentSettings} onOpenVoiceSettings={onOpenVoiceSettings}/>}
     {visibleStage === 'visual' && wechatDraft && <VisualWorkspace project={project} draft={wechatDraft} onDraftChange={updateProjectDraft} onContinue={() => onStage('layout')} onOpenModelSettings={onOpenModelSettings}/>}
     {visibleStage === 'layout' && wechatDraft && <LayoutWorkspace
       draft={wechatDraft}
       onDraftChange={updateProjectDraft}
       onComplete={({ draft, version }) => { updateProjectDraft(draft); setCompletedVersion(version); onStage('drafts'); }}
+      onEditCopy={() => onStage('copy')}
+      onEditVisual={() => onStage('visual')}
     />}
-    {visibleStage === 'drafts' && wechatDraft && <DraftResultWorkspace draft={wechatDraft} version={completedVersion} derivedDrafts={projectDrafts.filter((item) => item.platform !== 'WECHAT')} activeDraftId={activeDerivedDraftId} onActiveDraftChange={onActiveDerivedDraftChange} onDraftChange={updateProjectDraft} onReloadDrafts={loadProjectDrafts} onPublish={onPublish} onOpenModelSettings={onOpenModelSettings}/>}
+    {visibleStage === 'drafts' && wechatDraft && (
+      <DraftResultWorkspace
+        draft={wechatDraft}
+        version={completedVersion}
+        derivedDrafts={projectDrafts.filter((item) => item.platform !== 'WECHAT')}
+        activeDraftId={activeDerivedDraftId}
+        onActiveDraftChange={onActiveDerivedDraftChange}
+        onDraftChange={updateProjectDraft}
+        onReloadDrafts={loadProjectDrafts}
+        onPublish={onPublish}
+        onOpenModelSettings={onOpenModelSettings}
+        onEditCopy={() => onStage('copy')}
+        onEditLayout={() => onStage('layout')}
+      />
+    )}
   </section>;
 }

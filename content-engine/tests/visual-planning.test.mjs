@@ -1,9 +1,59 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createRequire } from 'node:module';
+import fs from 'node:fs';
 
 const require = createRequire(import.meta.url);
-const { buildVisualPlanningPrompt, parseVisualPlanningContent, mergePlannedItems, compileVisualPlan, validateVisualPlanImageCount, VISUAL_PLANNING_TOOL_NAME } = require('../server/services/visual-planning.cjs');
+const { buildVisualPlanningPrompt, buildVisualPlanningOmniPrompt, visualPlanningRichContent, parseVisualPlanningContent, mergePlannedItems, compileVisualPlan, validateVisualPlanImageCount, VISUAL_PLANNING_TOOL_NAME } = require('../server/services/visual-planning.cjs');
+
+test('配图策划 Worker 使用同一次 Omni 富内容调用，不再走文本工具调用', () => {
+  const source = fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8');
+  const start = source.indexOf('async function executeVisualPlanning');
+  const end = source.indexOf('\nasync function updateSimplifiedResearchPhase', start);
+  const workerSource = source.slice(start, end);
+
+  assert.ok(start >= 0 && end > start);
+  assert.match(workerSource, /buildVisualPlanningOmniPrompt/);
+  assert.match(workerSource, /visualPlanningRichContent/);
+  assert.match(workerSource, /buildRichContentOmniArgs/);
+  assert.equal((workerSource.match(/runBailianCli/g) ?? []).length, 1);
+  assert.doesNotMatch(workerSource, /textRunner\.runText/);
+});
+
+test('配图策划通过持久化任务异步执行，请求入口不直接等待百炼 CLI', () => {
+  const source = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
+  const routeStart = source.indexOf("app.post('/api/v1/creative/projects/:projectId/visual/plan'");
+  const routeEnd = source.indexOf('\nfunction generatedImageMime', routeStart);
+  const routeSource = source.slice(routeStart, routeEnd);
+
+  assert.match(routeSource, /visual_planning_runs/);
+  assert.match(routeSource, /VISUAL_PLANNING/);
+  assert.match(routeSource, /reply\.code\(202\)/);
+  assert.doesNotMatch(routeSource, /runBailianCli/);
+});
+
+test('配图策划归一化模型常见的视觉类型和结构字段', () => {
+  const parsed = parseVisualPlanningContent(JSON.stringify({
+    strategy: '以封面建立主题识别，用正文图片解释信息关系。',
+    items: [{
+      role: 'cover',
+      title: '主题封面',
+      placement: '文章开头',
+      purpose: '建立主题识别并交代核心场景',
+      visualType: 'editorial illustration',
+      focus: '编辑视角的真实工作台场景，突出内容创作过程',
+      searchQueries: ['内容创作者 工作台 编辑场景'],
+      generationMode: 'illustration',
+      informationPoints: ['内容创作者正在组织文章素材'],
+      sourceExcerpt: '创作者把文字、图片和资料组织为完整文章。',
+      contentBlocks: [],
+    }],
+  }), { platform: 'WECHAT', quantityMode: 'AUTO', singleItem: true, expectedRole: 'COVER' });
+
+  assert.equal(parsed.items[0].role, 'COVER');
+  assert.equal(parsed.items[0].visualType, 'HERO_VISUAL');
+  assert.equal(parsed.items[0].generationMode, 'ILLUSTRATION');
+});
 
 const item = (role, title, placement) => ({
   role,
@@ -42,10 +92,49 @@ test('配图策划提示词读取完整正文并禁止空泛占位词', () => {
   assert.equal(prompt.requiredToolName, VISUAL_PLANNING_TOOL_NAME);
   assert.equal(prompt.tools[0].function.name, VISUAL_PLANNING_TOOL_NAME);
   const toolItem = prompt.tools[0].function.parameters.properties.items.items;
+  assert.equal(prompt.tools[0].function.parameters.properties.items.minItems, 3);
+  assert.equal(prompt.tools[0].function.parameters.properties.items.maxItems, 3);
   assert.ok(!toolItem.required.includes('prompt') && !toolItem.required.includes('size'));
+  assert.ok(toolItem.properties.avoidConcepts);
   assert.equal(toolItem.properties.prompt, undefined);
   assert.equal(toolItem.properties.size, undefined);
   assert.match(prompt.system, /必须调用且只能调用一次 submit_visual_plan/);
+});
+
+test('多模态配图策划直接返回严格 JSON，不要求 Omni 调用工具', () => {
+  const prompt = buildVisualPlanningOmniPrompt({
+    project: { title: '标题', planning: {}, versionTitle: '文章标题', versionBody: '完整正文' },
+    platform: 'WECHAT', quantityMode: 'MANUAL', bodyItemCount: 2, styleProfile: { preset: 'FRESH_EDITORIAL' }, request: '',
+  });
+  assert.match(prompt.system, /只返回符合结构的 JSON/);
+  assert.doesNotMatch(prompt.system, /必须调用且只能调用一次/);
+  assert.equal(prompt.tools, undefined);
+});
+
+test('配图策划富内容包包含当前正文、正文图片和项目参考素材', () => {
+  const content = visualPlanningRichContent({
+    draft: { title: '文章标题', body: '完整正文' },
+    assets: [
+      { kind: 'IMAGE', source: 'C:/uploads/body.png', title: '正文图' },
+      { kind: 'VIDEO', source: 'C:/uploads/reference.mp4', title: '参考视频' },
+    ],
+  });
+  assert.equal(content.text.body, '完整正文');
+  assert.deepEqual(content.media.map(({ kind, source }) => [kind, source]), [
+    ['IMAGE', 'C:/uploads/body.png'],
+    ['VIDEO', 'C:/uploads/reference.mp4'],
+  ]);
+});
+
+test('手动配图数量直接固化在当次工具 Schema，模型无法返回少于契约的项目数', () => {
+  const prompt = buildVisualPlanningPrompt({
+    project: { title: '数量契约', planning: {}, versionTitle: '数量契约', versionBody: '正文内容足够用于配图策划。' },
+    platform: 'WECHAT', quantityMode: 'MANUAL', bodyItemCount: 8, styleProfile: { preset: 'FRESH_EDITORIAL' }, request: '',
+  });
+  const items = prompt.tools[0].function.parameters.properties.items;
+  assert.equal(items.minItems, 9);
+  assert.equal(items.maxItems, 9);
+  assert.match(prompt.system, /恰好包含 9 项/);
 });
 
 test('母稿配图只接受公众号并限制为十二张', () => {
@@ -104,6 +193,15 @@ test('模型方案必须返回平台所需数量和具体内容', () => {
   }), { platform: 'WECHAT', bodyItemCount: 2 });
   assert.equal(parsed.items.length, 3);
   assert.equal(parsed.items[1].focus, '中继卫星位于航天器与地面站之间，转发测控指令和业务数据');
+});
+
+test('配图方案适配较长搜索上下文和简短图内信息', () => {
+  const adaptable = item('BODY', '通信关系图', '正文第一段后');
+  adaptable.searchQueries = ['中继卫星与航天器地面站之间的数据中继和测控通信关系真实场景'];
+  adaptable.contentBlocks = [{ label: '关系', detail: '图' }];
+  assert.doesNotThrow(() => parseVisualPlanningContent(JSON.stringify({ strategy: '保留必要上下文，适配图片搜索和图内标注。', items: [adaptable] }), {
+    platform: 'WECHAT', bodyItemCount: 2, singleItem: true,
+  }));
 });
 
 test('照片和场景图不强制生成图内文字块，信息图必须提供结构化信息', () => {
@@ -195,7 +293,7 @@ test('系统统一编译公众号画幅和整套艺术方向，忽略模型自�
   });
   assert.deepEqual(compiled.map((entry) => entry.size), ['16:9', '4:3']);
   assert.ok(compiled.every((entry) => /项目统一视觉方向/.test(entry.prompt)));
-  assert.ok(compiled.every((entry) => /清透赛博/.test(entry.prompt) && /低饱和青色光线/.test(entry.prompt)));
+  assert.ok(compiled.every((entry) => !/清透赛博/.test(entry.prompt) && /低饱和青色光线/.test(entry.prompt)));
   assert.ok(compiled.every((entry) => /系列一致性/.test(entry.prompt)));
   assert.ok(compiled.every((entry) => !/模型自行提交/.test(entry.prompt)));
 });

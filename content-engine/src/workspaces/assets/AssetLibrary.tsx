@@ -54,11 +54,46 @@ export function AssetLibrary() {
     {error && <div className="asset-inline-error" role="alert">{error}</div>}
     <div className="asset-library-summary"><b>{visible.length}</b><span>份素材</span><i/><span>{visible.reduce((sum, asset) => sum + asset.projectCount, 0)} 次项目引用</span></div>
     {loading ? <div className="asset-preview-state"><LoaderCircle size={26}/><span>正在读取素材库</span></div> : visible.length ? <div className="asset-library-grid">{visible.map((asset) => <article className="asset-card" key={asset.id}>
-      <button className="asset-card-preview" type="button" aria-label={`预览 ${asset.title}`} onClick={() => setPreview(asset)}>{asset.kind === 'IMAGE' ? <Image size={28}/> : <File size={28}/>}<span>{kindNames[asset.kind]}</span></button>
+      <AssetThumbnail asset={asset} onOpen={() => setPreview(asset)} />
       <div className="asset-card-body"><div><b>{asset.title}</b><span className="asset-card-actions"><button className="icon-button" type="button" aria-label={`编辑 ${asset.title}`} onClick={() => setEditing(asset)}><Pencil size={15}/></button><button className="icon-button danger-icon" type="button" aria-label={`删除 ${asset.title}`} title={asset.projectCount ? '请先解除项目引用' : '永久删除'} disabled={asset.projectCount > 0} onClick={() => void remove(asset)}><Trash2 size={15}/></button></span></div><small>{asset.originalFilename} · {formatBytes(asset.sizeBytes)}</small><p>{asset.sourceNote || originNames[asset.origin]}</p><footer><span>{copyrightNames[asset.copyrightStatus]}</span><b>{asset.projectCount} 个项目</b></footer></div>
     </article>)}</div> : <div className="asset-library-empty"><Archive size={32}/><b>当前筛选下没有素材</b><span>上传文件后即可在项目资料和配图中复用。</span></div>}
     {preview && <AssetPreviewDialog asset={preview} onClose={() => setPreview(null)}/>} {editing && <AssetEditDialog asset={editing} onClose={() => setEditing(null)} onSaved={(asset) => { setAssets((current) => current.map((item) => item.id === asset.id ? asset : item)); setEditing(null); }}/>} 
   </section>;
+}
+
+function AssetThumbnail({ asset, onOpen }: { asset: WorkspaceAsset; onOpen: () => void }) {
+  const hostRef = useRef<HTMLButtonElement>(null);
+  const [src, setSrc] = useState('');
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (asset.kind !== 'IMAGE' || !hostRef.current) return undefined;
+    let active = true;
+    let objectUrl = '';
+    const load = () => {
+      void webAssets.content(asset.id).then((blob) => {
+        if (!active) return;
+        objectUrl = URL.createObjectURL(blob);
+        setSrc(objectUrl);
+      }).catch(() => { if (active) setFailed(true); });
+    };
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        observer.disconnect();
+        load();
+      }
+    }, { rootMargin: '240px' });
+    observer.observe(hostRef.current);
+    return () => {
+      active = false;
+      observer.disconnect();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [asset.id, asset.kind]);
+
+  return <button ref={hostRef} className="asset-card-preview" type="button" aria-label={`预览 ${asset.title}`} onClick={onOpen}>
+    {src ? <img src={src} alt="" loading="lazy"/> : asset.kind === 'IMAGE' ? <><Image size={28}/><span>{failed ? '预览失败' : '加载预览'}</span></> : <><File size={28}/><span>{kindNames[asset.kind]}</span></>}
+  </button>;
 }
 
 function AssetEditDialog({ asset, onClose, onSaved }: { asset: WorkspaceAsset; onClose: () => void; onSaved: (asset: WorkspaceAsset) => void }) {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { KeyRound, LoaderCircle, Plus, Trash2 } from 'lucide-react';
+import { Copy, ExternalLink, KeyRound, LoaderCircle, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { PageHeader } from '../../components/workspace/PageHeader';
-import { webChannelAccounts } from '../../data/webApi';
+import { WebApiError, webChannelAccounts } from '../../data/webApi';
 import type { ChannelAccount } from '../../domain/publishing';
 
 const platformLabels: Record<ChannelAccount['platform'], string> = {
@@ -22,6 +22,9 @@ export function AccountAuthorizationSettings() {
   const [notice, setNotice] = useState('');
   const [draft, setDraft] = useState({ platform: 'WECHAT' as ChannelAccount['platform'], name: '', externalAccountLabel: '', mode: 'MANUAL' as ChannelAccount['mode'] });
   const [officialDrafts, setOfficialDrafts] = useState<Record<string, { appId: string; appSecret: string }>>({});
+  const [officialNetwork, setOfficialNetwork] = useState<{ ipv4: string; checkedAt: string; sources: string[] } | null>(null);
+  const [networkLoading, setNetworkLoading] = useState(false);
+  const [networkError, setNetworkError] = useState('');
 
   function syncOfficialDrafts(nextAccounts: ChannelAccount[]) {
     setOfficialDrafts((current) => {
@@ -39,6 +42,7 @@ export function AccountAuthorizationSettings() {
   async function loadAccounts() {
     setError('');
     setLoading(true);
+    void loadOfficialNetwork();
     try {
       const result = await webChannelAccounts.list();
       setAccounts(result.accounts);
@@ -51,6 +55,30 @@ export function AccountAuthorizationSettings() {
   }
 
   useEffect(() => { void loadAccounts(); }, []);
+
+  async function loadOfficialNetwork() {
+    setNetworkLoading(true);
+    setNetworkError('');
+    try {
+      const result = await webChannelAccounts.officialNetwork();
+      setOfficialNetwork(result.network);
+    } catch (loadError) {
+      setOfficialNetwork(null);
+      setNetworkError(errorMessage(loadError, '无法检测服务器公网 IP。'));
+    } finally {
+      setNetworkLoading(false);
+    }
+  }
+
+  async function copyOfficialNetworkIp() {
+    if (!officialNetwork) return;
+    try {
+      await navigator.clipboard.writeText(officialNetwork.ipv4);
+      setNotice(`已复制服务器出口 IP：${officialNetwork.ipv4}`);
+    } catch (copyError) {
+      setError(errorMessage(copyError, '复制服务器出口 IP 失败。'));
+    }
+  }
 
   function updateOfficialDraft(accountId: string, patch: Partial<{ appId: string; appSecret: string }>) {
     setOfficialDrafts((current) => ({
@@ -132,6 +160,10 @@ export function AccountAuthorizationSettings() {
       setAccounts((current) => current.map((item) => item.id === result.account.id ? result.account : item));
       setNotice('测试连接成功。现在发布页可以一键导入公众号草稿箱。');
     } catch (testError) {
+      const failedAccount = testError instanceof WebApiError && testError.details && typeof testError.details === 'object' && 'account' in testError.details
+        ? (testError.details as { account?: ChannelAccount }).account
+        : undefined;
+      if (failedAccount) setAccounts((current) => current.map((item) => item.id === failedAccount.id ? failedAccount : item));
       setError(errorMessage(testError, '测试连接失败'));
     } finally {
       setBusy('');
@@ -172,6 +204,25 @@ export function AccountAuthorizationSettings() {
           <span className="chip mint">官方 {summary.official}</span>
           <span className="chip blue">已连接 {summary.connected}</span>
           <span className="chip">手动 {summary.manual}</span>
+        </div>
+      </section>
+      <section className="official-network-guide" aria-label="微信 API IP 白名单配置">
+        <div className="official-network-guide-copy">
+          <div className="eyebrow">WECHAT OFFICIAL / NETWORK</div>
+          <h2>配置服务器 IP 白名单</h2>
+          <p>自动导入草稿箱由服务端直接调用微信接口。将下方检测到的 IPv4 添加到当前公众号 AppID 的 API IP 白名单。</p>
+          <ol>
+            <li>打开微信开发者平台，进入当前公众号。</li>
+            <li>打开“基础信息”，在“开发密钥”中找到“API IP 白名单”。</li>
+            <li>点击编辑，粘贴服务器出口 IP 并保存。</li>
+            <li>回到这里点击“测试连接”。</li>
+          </ol>
+        </div>
+        <div className="official-network-guide-actions">
+          <span>服务器出口 IPv4</span>
+          {networkLoading ? <div className="official-network-value loading"><LoaderCircle className="spin" size={16}/>正在检测</div> : officialNetwork ? <div className="official-network-value"><code>{officialNetwork.ipv4}</code><button className="icon-button" type="button" title="复制服务器出口 IP" aria-label="复制服务器出口 IP" onClick={() => void copyOfficialNetworkIp()}><Copy size={16}/></button><button className="icon-button" type="button" title="重新检测服务器出口 IP" aria-label="重新检测服务器出口 IP" onClick={() => void loadOfficialNetwork()}><RefreshCw size={16}/></button></div> : <div className="official-network-error">{networkError || '尚未检测到服务器出口 IP。'}<button className="icon-button" type="button" title="重新检测服务器出口 IP" aria-label="重新检测服务器出口 IP" onClick={() => void loadOfficialNetwork()}><RefreshCw size={16}/></button></div>}
+          {officialNetwork && <small>检测于 {new Date(officialNetwork.checkedAt).toLocaleString('zh-CN', { hour12: false })}</small>}
+          <a className="button primary" href="https://developers.weixin.qq.com/" target="_blank" rel="noreferrer">打开微信开发者平台<ExternalLink size={15}/></a>
         </div>
       </section>
       <div className="account-settings-layout">

@@ -103,6 +103,7 @@ function parseVoiceCalibrationDraft(content) {
 function buildVoiceCalibrationPrompt(article) {
   const text = String(article.text || '').trim().slice(0, MAX_ARTICLE_CHARS);
   if (text.length < 120) throw new Error('没有读取到足够的正文，暂时无法提炼账号声音。');
+  const media = (article.media ?? []).map((item, index) => ({ index: index + 1, kind: item.mediaType, source: item.resolvedUrl ?? item.sourceUrl, label: item.alt ?? item.caption ?? '' })).filter((item) => item.kind && item.source);
   return {
     system: [
       '你是内容编辑，任务是把用户本人或已授权的公开文章提炼成可编辑的“账号表达规则”。',
@@ -115,7 +116,7 @@ function buildVoiceCalibrationPrompt(article) {
       '只输出 JSON，不要 Markdown。必须返回完整对象，不得只返回局部补丁。diagnostics.dimension 只能使用：标题、开篇钩子、论证推进、证据方式、段落节奏、语言颗粒、读者关系、收束方式。',
       'JSON 形状：{"name":"...","archetypeSlug":"say-it-through","identityText":"...","audienceText":"...","readerTakeawayText":"...","editedRules":{"opening":"...","reasoning":"...","rhythm":"...","ending":"...","identityBoundary":"...","audience":"...","readerTakeaway":"...","allowedPhrases":[],"bannedPhrases":["..."],"bannedStructures":["..."],"hookPatterns":["...","..."],"argumentPattern":"...","evidenceStyle":"...","paragraphPattern":"...","languageTexture":"...","readerRelationship":"...","titlePatterns":["...","..."],"closingStyle":"..."},"ruleSummary":"...","analysis":{"confidence":"LOW","voiceFingerprint":"...","diagnostics":[{"dimension":"标题","finding":"...","evidence":"..."},{"dimension":"开篇钩子","finding":"...","evidence":"..."},{"dimension":"论证推进","finding":"...","evidence":"..."},{"dimension":"证据方式","finding":"...","evidence":"..."},{"dimension":"段落节奏","finding":"...","evidence":"..."},{"dimension":"读者关系","finding":"...","evidence":"..."}]}}',
     ].join('\n'),
-    message: `文章标题：${article.title}\n来源：${article.source}\n链接：${article.url}\n\n文章正文（仅本次提炼使用，不要在结果中复写）：\n${text}`,
+    message: `文章标题：${article.title}\n来源：${article.source}\n链接：${article.url}\n\n文章正文（仅本次提炼使用，不要在结果中复写）：\n${text}\n\n关联媒体：${JSON.stringify(media)}`,
   };
 }
 

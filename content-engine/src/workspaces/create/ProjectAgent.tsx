@@ -1,6 +1,6 @@
 import { Bot, Check, CircleAlert, FileCheck2, LoaderCircle, Search, Settings2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { WebApiError, webCreative } from '../../data/webApi';
+import { WebApiError, webCreative, webDrafts } from '../../data/webApi';
 import { copyActionPanelState, copyActionRequest, type CopyPanelAction } from '../../domain/copy-action-panel.mjs';
 import { copyRunCompletion } from '../../domain/copy-run-lifecycle.mjs';
 import { platformName, type ContentProject } from '../../domain/content';
@@ -29,6 +29,10 @@ type CopyProjectAgentProps = ProjectAgentBaseProps & {
   onClearSelection?: () => void;
   onArtifactOpen?: (artifact: ProjectArtifact) => void;
   onDraftGenerated: () => Promise<void>;
+  draftId?: string;
+  draftRevision?: number;
+  draftBody?: string;
+  onDraftTitleChange?: (title: string) => Promise<void>;
 };
 
 type ProjectAgentProps = ResearchProjectAgentProps | CopyProjectAgentProps;
@@ -204,14 +208,18 @@ function projectAgentErrorMessage(reason: unknown, fallback: string) {
   return reason instanceof Error ? reason.message : fallback;
 }
 
-function CopyProjectAgent({ projectId, stage, platform, selectedMaterials, selection, hasAcceptedCopy = false, blockedReason, refreshToken = 0, onClearSelection, onContextChange, onArtifactOpen, onDraftGenerated, onOpenSettings }: CopyProjectAgentProps) {
+function CopyProjectAgent({ projectId, stage, platform, selectedMaterials, selection, hasAcceptedCopy = false, blockedReason, refreshToken = 0, onClearSelection, onContextChange, onArtifactOpen, onDraftGenerated, onOpenSettings, draftId, draftRevision, draftBody, onDraftTitleChange }: CopyProjectAgentProps) {
   const [context, setContext] = useState<ProjectAgentContext | null>(null);
   const [note, setNote] = useState('');
   const [selectedAction, setSelectedAction] = useState<CopyPanelAction>('POLISH_EXISTING_DRAFT');
   const [busy, setBusy] = useState<'idle' | 'loading' | 'starting' | 'cancelling'>('loading');
   const [error, setError] = useState('');
+  const [titleBusy, setTitleBusy] = useState(false);
+  const [titleRecommendations, setTitleRecommendations] = useState<Array<{ title: string; angle: string }>>([]);
   const watchedRun = useRef<{ id: string; action: string } | null>(null);
   const reloadPromise = useRef<Promise<ProjectAgentContext> | null>(null);
+
+  useEffect(() => { setTitleRecommendations([]); }, [draftRevision, draftBody]);
 
   const reload = () => {
     if (reloadPromise.current) return reloadPromise.current;
@@ -305,12 +313,31 @@ function CopyProjectAgent({ projectId, stage, platform, selectedMaterials, selec
     finally { setBusy('idle'); }
   };
 
+  const recommendTitles = async () => {
+    if (!draftId || !draftRevision || !String(draftBody ?? '').trim() || titleBusy) return;
+    setTitleBusy(true); setError('');
+    try {
+      const result = await webDrafts.titleRecommendations(draftId, draftRevision);
+      setTitleRecommendations(result.recommendations);
+    } catch (reason) { setError(projectAgentErrorMessage(reason, '标题建议生成失败。')); }
+    finally { setTitleBusy(false); }
+  };
+
+  const replaceTitle = async (title: string) => {
+    if (!onDraftTitleChange || !title.trim()) return;
+    setTitleBusy(true); setError('');
+    try { await onDraftTitleChange(title); setTitleRecommendations([]); }
+    catch (reason) { setError(projectAgentErrorMessage(reason, '标题替换失败。')); }
+    finally { setTitleBusy(false); }
+  };
+
   return <aside className="copy-action-panel" aria-label="文案助手">
     <header className="copy-action-panel-head"><div><Bot size={19}/><div><h2>文案助手</h2><span>{platform ? platformName[platform] : '当前平台'}</span></div></div></header>
     {busy === 'loading' && <div className="copy-action-loading" aria-label="正在读取文案状态"><i/><i/></div>}
     {busy !== 'loading' && candidate && <section className="copy-action-candidate"><div><b>{candidate.type === 'OUTLINE' ? '大纲候选已生成' : '修改版本已生成'}</b><span>当前正文保持不变</span></div><button className="button" type="button" onClick={openCandidate}>查看修改</button></section>}
     {busy !== 'loading' && activeRun && ['DRAFT', 'QUEUED', 'RUNNING'].includes(activeRun.status) && <section className="copy-action-running" aria-live="polite"><LoaderCircle size={18}/><div><b>{activeRun.status === 'RUNNING' ? (activeRun.action === 'GENERATE_DRAFT' ? '正在生成正文' : '正在生成修改版本') : '任务已排队'}</b><span>{activeRun.action === 'GENERATE_DRAFT' ? 'Agent 正在准备资料并生成最终成稿' : '完成后可查看修改差异'}</span></div>{['DRAFT', 'QUEUED'].includes(activeRun.status) && <button className="text-button" type="button" disabled={busy !== 'idle'} onClick={() => void cancel()}>{busy === 'cancelling' ? '取消中' : '取消'}</button>}</section>}
     {busy !== 'loading' && !candidate && !runIsActive && <div className="copy-action-body">
+      {platform === 'WECHAT' && <section className="title-recommendation-panel" aria-label="标题建议"><header><div><b>标题建议</b><small>基于当前正文和配图</small></div><button className="text-button" type="button" disabled={disabled || titleBusy || !String(draftBody ?? '').trim()} onClick={() => void recommendTitles()}>{titleBusy ? <LoaderCircle size={14}/> : '生成'}</button></header>{titleRecommendations.length > 0 && <div className="title-recommendation-list">{titleRecommendations.map((item) => <button type="button" key={`${item.title}-${item.angle}`} disabled={titleBusy} onClick={() => void replaceTitle(item.title)}><b>{item.title}</b><span>{item.angle}</span><em>替换当前标题</em></button>)}<button className="text-button" type="button" disabled={titleBusy} onClick={() => setTitleRecommendations([])}>放弃候选</button></div>}</section>}
       {panel.quickActions.length > 0 && <div className="copy-action-quick" aria-label="快捷修改">{panel.quickActions.map((item) => <button key={item.action} type="button" className={`text-button ${selectedAction === item.action ? 'active' : ''}`} aria-pressed={selectedAction === item.action} disabled={disabled} onClick={() => setSelectedAction(item.action)}>{item.label}</button>)}</div>}
       {(hasAcceptedCopy || Boolean(selection?.text)) && <label className="copy-action-note"><span>{selection?.text ? `修改选中 ${selection.text.length} 字` : '补充要求（可选）'}</span><textarea rows={3} value={note} maxLength={2_000} placeholder={selection?.text ? '例如：语气更有说服力，保留事实' : '例如：更口语化，保留已有案例'} onChange={(event) => setNote(event.target.value)}/>{selection?.text && onClearSelection && <button className="text-button" type="button" onClick={onClearSelection}>取消选区</button>}</label>}
       <button className="button primary copy-action-primary" type="button" disabled={disabled || (!executableAction && panel.primary.action !== 'REVIEW_CANDIDATE')} onClick={() => panel.primary.action === 'REVIEW_CANDIDATE' ? openCandidate() : executableAction && void startAction(executableAction)}>{busy === 'starting' ? <LoaderCircle size={16}/> : <Check size={16}/>}{panel.primary.action === 'REVIEW_CANDIDATE' ? panel.primary.label : panel.quickActions.length ? '生成' : panel.primary.label}</button>

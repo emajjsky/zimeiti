@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const analysis = await import('../server/services/intelligence-analysis.cjs');
+const workerSource = await readFile(new URL('../server/worker.cjs', import.meta.url), 'utf8');
 
 const dimensions = {
   timeliness: { score: 80, reason: '仍处于讨论窗口。' },
@@ -67,6 +69,49 @@ test('分析提示词对本次勾选平台给出精确代码和等长示例', ()
   });
   assert.match(prompt.system, /本次必须返回的平台代码：WECHAT、XIAOHONGSHU、VIDEO_CHANNEL/);
   assert.match(prompt.system, /"platform":"WECHAT".*"platform":"XIAOHONGSHU".*"platform":"VIDEO_CHANNEL"/);
+});
+
+test('热点分析提示词包含冻结的正文和多媒体内容包', () => {
+  const prompt = analysis.buildAnalysisPrompt({
+    template: '分析 {{title}}',
+    item: {
+      title: '标题', summary: '摘要', source: '来源', publishedAt: '2026-07-26T00:00:00.000Z', category: 'AI', keywords: [],
+      richContent: {
+        text: { title: '完整标题', body: '完整正文' },
+        media: [{ kind: 'IMAGE', source: 'https://example.com/a.jpg' }, { kind: 'VIDEO', source: 'https://example.com/b.mp4' }],
+      },
+    },
+    profile: { primaryTopics: ['AI'], accountPositioning: '科技账号', targetAudience: '读者' },
+    platforms: ['WECHAT'],
+  });
+  assert.match(prompt.message, /完整正文/);
+  assert.match(prompt.message, /a\.jpg/);
+  assert.match(prompt.message, /b\.mp4/);
+});
+
+test('热点来源快照保留完整正文、图片和视频', () => {
+  const richContent = analysis.richContentForArticle({
+    title: '完整标题',
+    text: '完整正文',
+    media: [
+      { mediaType: 'IMAGE', resolvedUrl: 'https://example.com/a.jpg', alt: '配图' },
+      { mediaType: 'VIDEO', resolvedUrl: 'https://example.com/b.mp4' },
+    ],
+  });
+  assert.equal(richContent.text.body, '完整正文');
+  assert.deepEqual(richContent.media.map(({ kind, source }) => [kind, source]), [
+    ['IMAGE', 'https://example.com/a.jpg'],
+    ['VIDEO', 'https://example.com/b.mp4'],
+  ]);
+});
+
+test('热点分析通过 Omni 联合理解冻结正文和媒体', () => {
+  const start = workerSource.indexOf('async function generateIntelligenceAnalysis(');
+  const end = workerSource.indexOf('async function generateCreativeOutline(', start);
+  const source = workerSource.slice(start, end);
+  assert.match(source, /buildRichContentOmniArgs/);
+  assert.match(source, /snapshot\.item\.richContent/);
+  assert.doesNotMatch(source, /textRunner\.runText/);
 });
 
 test('准备分析时要求题材、原文、平台和模型路由完整', () => {

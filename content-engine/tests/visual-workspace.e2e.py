@@ -145,7 +145,7 @@ with sync_playwright() as playwright:
     def project_asset(asset_id, link_id, title, origin="UPLOAD", filename="image.gif", mime_type="image/gif", notes=""):
         return {"id": asset_id, "linkId": link_id, "projectId": PROJECT_ID, "kind": "IMAGE", "origin": origin, "status": "ACTIVE", "title": title, "originalFilename": filename, "mimeType": mime_type, "sizeBytes": 35, "sha256": asset_id.replace("-", "") * 2, "sourceUrl": None, "sourceNote": notes, "copyrightStatus": "OWNED", "projectCount": 1, "role": "VISUAL", "scope": "IMAGING", "platforms": ["WECHAT"], "notes": notes, "createdAt": NOW, "updatedAt": NOW}
 
-    state = {"project": project(), "draft": wechat_draft(), "searches": [], "imports": [], "links": [], "planning_calls": [], "visual_writes": 0, "generations": 0, "generation_payloads": [], "unexpected": [], "console_errors": [], "assets": [
+    state = {"project": project(), "draft": wechat_draft(), "searches": [], "imports": [], "links": [], "planning_calls": [], "visual_run": None, "visual_run_polls": 0, "visual_writes": 0, "generations": 0, "generation_payloads": [], "unexpected": [], "console_errors": [], "assets": [
         project_asset(COVER_ID, "44444444-4444-4444-8444-444444444444", "旧封面"),
         project_asset(BODY_ID, "55555555-5555-4555-8555-555555555555", "旧正文火箭图"),
     ]}
@@ -176,9 +176,15 @@ with sync_playwright() as playwright:
             return respond(route, {"voices": []})
         if path == f"/api/v1/creative/projects/{PROJECT_ID}/materials":
             return respond(route, {"inputs": [], "references": [], "assets": state["assets"]})
+        if path == f"/api/v1/creative/projects/{PROJECT_ID}/video-analyses" and method == "GET":
+            return respond(route, {"analyses": []})
+        if path == "/api/v1/assets" and method == "GET":
+            workspace_assets = [{key: value for key, value in item.items() if key not in ("linkId", "projectId", "role", "scope", "platforms", "notes")} for item in state["assets"]]
+            return respond(route, {"assets": workspace_assets})
         if path == f"/api/v1/creative/projects/{PROJECT_ID}/visual/plan" and method == "POST":
             payload = json.loads(request.post_data or "{}")
             state["planning_calls"].append(payload)
+            run_id = f"visual-run-{len(state['planning_calls'])}"
             if payload.get("currentItemId"):
                 plan = payload.get("currentPlan", [])
                 for item in plan:
@@ -187,10 +193,22 @@ with sync_playwright() as playwright:
                         item["focus"] = "用航天器、中继卫星、地面站三层关系解释双向数据链路"
                         item["purpose"] = "按用户意见突出三方通信关系"
                         item["prompt"] += " 用户要求：" + payload.get("request", "")
-                return respond(route, {"plan": plan, "bodyItemCount": len([item for item in plan if item["role"] == "BODY"]), "quantityMode": payload["quantityMode"], "strategy": "逐图解释文章。", "policy": {"scope": "WECHAT_VISUAL_PLANNING", "model": "qwen-plus", "provider": "BAILIAN_CLI", "connectionId": None, "promptVersion": "1.2.0"}}, status=201)
-            body_item_count = 4 if payload["quantityMode"] == "AUTO" else payload["bodyItemCount"]
-            plan = planned_items(body_item_count, payload.get("currentPlan"), payload.get("styleProfile", {}).get("customPrompt", ""))
-            return respond(route, {"plan": plan, "bodyItemCount": body_item_count, "quantityMode": payload["quantityMode"], "strategy": "封面建立识别，正文图解释通信关系。", "policy": {"scope": "WECHAT_VISUAL_PLANNING", "model": "qwen-plus", "provider": "BAILIAN_CLI", "connectionId": None, "promptVersion": "2.0.0"}}, status=201)
+                result = {"plan": plan, "bodyItemCount": len([item for item in plan if item["role"] == "BODY"]), "quantityMode": payload["quantityMode"], "strategy": "逐图解释文章。"}
+            else:
+                body_item_count = 4 if payload["quantityMode"] == "AUTO" else payload["bodyItemCount"]
+                result = {"plan": planned_items(body_item_count, payload.get("currentPlan"), payload.get("styleProfile", {}).get("customPrompt", "")), "bodyItemCount": body_item_count, "quantityMode": payload["quantityMode"], "strategy": "封面建立识别，正文图解释通信关系。"}
+            policy = {"scope": "WECHAT_VISUAL_PLANNING", "model": "qwen-plus", "provider": "BAILIAN_CLI", "connectionId": None, "promptVersion": "2.2.0"}
+            state["visual_run"] = {"id": run_id, "projectId": PROJECT_ID, "status": "QUEUED", "result": result, "error": None, "createdAt": NOW, "updatedAt": NOW}
+            state["visual_run_polls"] = 0
+            return respond(route, {"id": run_id, "status": "QUEUED", "projectId": PROJECT_ID, "policy": policy}, status=202)
+        if path == f"/api/v1/creative/projects/{PROJECT_ID}/visual/plan-runs/latest" and method == "GET":
+            run = state["visual_run"]
+            if not run:
+                return respond(route, {"run": None})
+            state["visual_run_polls"] += 1
+            if state["visual_run_polls"] == 1:
+                return respond(route, {"run": {**run, "status": "RUNNING", "result": None}})
+            return respond(route, {"run": {**run, "status": "SUCCEEDED"}})
         if path == f"/api/v1/creative/projects/{PROJECT_ID}/visual/generate" and method == "POST":
             state["generations"] += 1
             state["generation_payloads"].append(json.loads(request.post_data or "{}"))
@@ -226,6 +244,10 @@ with sync_playwright() as playwright:
             linked_asset["sourceUrl"] = state["imports"][-1]["url"]
             linked_asset["copyrightStatus"] = state["imports"][-1]["copyrightStatus"]
             state["assets"] = [linked_asset, *[item for item in state["assets"] if item["id"] != IMPORTED_ID]]
+            return respond(route, linked_asset, status=201)
+        if re.fullmatch(rf"/api/v1/projects/{PROJECT_ID}/assets/[0-9a-f-]+", path) and method == "POST":
+            asset_id = path.rsplit("/", 1)[-1]
+            linked_asset = next(item for item in state["assets"] if item["id"] == asset_id)
             return respond(route, linked_asset, status=201)
         if path == f"/api/v1/content-drafts/{DRAFT_ID}" and method == "PATCH":
             payload = json.loads(request.post_data or "{}")
@@ -269,6 +291,7 @@ with sync_playwright() as playwright:
     page.get_by_role("button", name="生成配图方案", exact=True).click()
     page.get_by_role("button", name=re.compile(r"文章封面")).wait_for()
     page.get_by_role("button", name=re.compile(r"正文插图 4")).wait_for()
+    page.get_by_text("正在生成配图方案，Agent 正在读取正文并安排图片位置。").wait_for(state="hidden")
     assert len(state["planning_calls"]) == 1
     assert state["planning_calls"][0]["quantityMode"] == "AUTO"
     assert "bodyItemCount" not in state["planning_calls"][0]
@@ -289,6 +312,7 @@ with sync_playwright() as playwright:
     assert page.get_by_role("button", name="确认素材，进入排版", exact=True).is_disabled()
     page.get_by_role("button", name="更新方案", exact=True).click()
     page.get_by_role("button", name=re.compile(r"正文插图 3")).wait_for()
+    page.get_by_text("正在生成配图方案，Agent 正在读取正文并安排图片位置。").wait_for(state="hidden")
     assert len(state["planning_calls"]) == 2
     assert state["planning_calls"][1]["quantityMode"] == "MANUAL"
     assert state["planning_calls"][1]["bodyItemCount"] == 3
@@ -302,12 +326,13 @@ with sync_playwright() as playwright:
     page.get_by_role("article").filter(has_text="Satellite launch").get_by_role("button", name="用于此处", exact=True).click()
     page.get_by_text("图片已绑定到当前配图位置。", exact=True).wait_for()
     page.get_by_label("当前选中图片预览", exact=True).locator("img").wait_for()
-    assert state["imports"] == [{
-        "title": "Satellite launch",
-        "url": "https://upload.wikimedia.org/satellite.jpg",
-        "sourceNote": "Test｜许可：CC BY-SA｜来源：https://commons.wikimedia.org/wiki/File:Satellite.jpg",
-        "copyrightStatus": "OPEN_LICENSE",
-    }]
+    assert len(state["imports"]) == 1
+    imported_payload = state["imports"][0]
+    assert imported_payload["title"] == "Satellite launch"
+    assert imported_payload["url"] == "https://upload.wikimedia.org/satellite.jpg"
+    assert imported_payload["fallbackUrl"].startswith("data:image/gif;base64,")
+    assert imported_payload["sourceNote"] == "Test｜许可：CC BY-SA｜来源：https://commons.wikimedia.org/wiki/File:Satellite.jpg"
+    assert imported_payload["copyrightStatus"] == "OPEN_LICENSE"
     assert state["links"] == [{
         "role": "VISUAL",
         "scope": "IMAGING",
@@ -319,7 +344,7 @@ with sync_playwright() as playwright:
         if state["draft"]["visualPlan"]["plan"][0]["assetId"] == IMPORTED_ID:
             break
         page.wait_for_timeout(100)
-    assert state["draft"]["visualPlan"]["plan"][0]["assetId"] == IMPORTED_ID
+    assert state["draft"]["visualPlan"]["plan"][0]["assetId"] == IMPORTED_ID, state["draft"]["visualPlan"]
     page.get_by_role("button", name=re.compile(r"正文插图 1")).click()
     assert len(state["searches"]) == 2, "切换配图项时不应自动产生新的图片检索请求"
     page.get_by_role("button", name="AI 生图", exact=True).click()
@@ -331,8 +356,8 @@ with sync_playwright() as playwright:
     assert page.get_by_text("版式模板", exact=True).count() == 0
     assert page.get_by_text("单图风格", exact=True).count() == 0
     assert page.get_by_text("高级设置", exact=True).count() == 0
-    page.get_by_label("修改这张图", exact=True).fill("改成三方通信关系图，突出双向数据链路")
-    page.locator(".visual-item-replan").get_by_role("button", name="重新策划", exact=True).click()
+    page.get_by_label("调整当前任务", exact=True).fill("改成三方通信关系图，突出双向数据链路")
+    page.get_by_title("重新策划当前图片", exact=True).click()
     page.get_by_role("heading", name="三方通信关系图", exact=True).wait_for()
     assert len(state["planning_calls"]) == 3 and state["planning_calls"][-1]["currentItemId"] == "wechat-body-1"
 
@@ -351,10 +376,10 @@ with sync_playwright() as playwright:
     assert "统一使用薄荷绿边框" in state["planning_calls"][-1]["styleProfile"]["customPrompt"]
     page.get_by_role("button", name=re.compile(r"正文插图 1")).click()
     page.get_by_role("button", name="AI 生图", exact=True).click()
-    page.get_by_role("button", name="添加参考图", exact=True).click()
-    page.get_by_role("button", name=re.compile(r"旧正文火箭图")).click()
+    page.get_by_title("添加参考图", exact=True).click()
+    page.get_by_role("button", name="选择图片 旧正文火箭图", exact=True).click()
     page.get_by_label("参考方式", exact=True).select_option("COLOR_LAYOUT")
-    assert page.locator(".visual-prompt-field").count() == 0, "原始提示词不应暴露给普通用户"
+    assert page.get_by_label("正向提示词", exact=True).count() == 1
     page.get_by_role("button", name="生成这一张", exact=True).click()
     page.locator(".visual-generated-preview img").wait_for()
     preview = page.locator(".visual-generated-preview").bounding_box()
@@ -362,7 +387,7 @@ with sync_playwright() as playwright:
     assert state["generations"] == 1
     assert state["generation_payloads"][0]["assetIds"] == [BODY_ID]
     assert state["generation_payloads"][0]["visualItemId"] == "wechat-body-1"
-    assert "prompt" not in state["generation_payloads"][0]
+    assert state["generation_payloads"][0]["prompt"]
     assert "size" not in state["generation_payloads"][0]
     page.get_by_role("button", name="搜图", exact=True).click()
     page.get_by_label("当前选中图片预览", exact=True).locator("img").wait_for()

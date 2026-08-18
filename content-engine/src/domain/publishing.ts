@@ -34,14 +34,18 @@ export interface MetricSnapshot {
   id: string;
   workspaceId: string;
   publicationId: string;
+  dataDate: string;
   capturedAt: string;
-  source: 'MANUAL' | 'OFFICIAL_API';
-  readCount: number;
-  likeCount: number;
-  shareCount: number;
-  favoriteCount: number;
-  commentCount: number;
-  followerDelta: number;
+  source: 'MANUAL' | 'OFFICIAL_API' | 'PUBLIC_PAGE';
+  checkpoint: 'D1' | 'D3' | 'D7' | 'CUSTOM';
+  exposureCount: number | null;
+  readCount: number | null;
+  playCount: number | null;
+  likeCount: number | null;
+  shareCount: number | null;
+  favoriteCount: number | null;
+  commentCount: number | null;
+  followerDelta: number | null;
   createdAt: string;
 }
 
@@ -62,7 +66,7 @@ export interface PublishedArticle {
   workspaceId: string;
   taskId: string | null;
   accountId: string;
-  draftVersionId: string;
+  draftVersionId: string | null;
   platform: DraftPlatform;
   title: string;
   url: string;
@@ -74,6 +78,7 @@ export interface PublishedArticle {
   projectTitle: string | null;
   latestMetrics: MetricSnapshot | null;
   retrospective: Retrospective | null;
+  metricSchedule: Array<{ checkpoint: 'D1' | 'D3' | 'D7'; label: string; dueAt: string; status: 'CAPTURED' | 'DUE' | 'UPCOMING' }>;
 }
 
 export type { ChannelAccount, PlatformDraftTask };

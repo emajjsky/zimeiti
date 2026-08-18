@@ -175,6 +175,7 @@ export interface CreativeVisualPlanItem {
   prompt: string;
   size: CreativeVisualSize;
   assetId: string | null;
+  insertion?: { paragraphIndex: number; position: 'AFTER_PARAGRAPH' };
 }
 
 export interface CreativeVisualDelivery {
@@ -222,6 +223,7 @@ export interface ContentProject {
   factChecks: string[];
   versions: ContentVersion[];
   sourceSnapshot: Record<string, unknown>;
+  archivedAt?: string;
   delivery?: CreativeDelivery;
   createdAt: string;
   updatedAt: string;

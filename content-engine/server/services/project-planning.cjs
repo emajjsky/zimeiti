@@ -192,17 +192,13 @@ function createBlankProject(input = {}, now = new Date().toISOString()) {
     planning: planningDraft({
       title,
       category: input.category,
-      coreMessage: originType === 'DRAFT' ? input.draftText : '',
       targetPlatforms: input.targetPlatforms,
     }),
     planningVersion: 0,
     coreViewpoint: '',
     factChecks: [],
     versions: [],
-    sourceSnapshot: {
-      ...(input.draftText ? { draftText: String(input.draftText) } : {}),
-      ...(input.importUrl ? { importUrl: String(input.importUrl) } : {}),
-    },
+    sourceSnapshot: {},
     createdAt: timestamp,
     updatedAt: timestamp,
   }, timestamp);
@@ -249,7 +245,7 @@ async function loadCreativeState(client, workspaceId, now = new Date().toISOStri
     [workspaceId],
   );
   const base = migrateLegacyCreativeState(snapshot.rows[0]?.state_json ?? {}, now);
-  return { ...base, projects: projectRows.rows.map((row) => normalizeProject(row.project_json, now)) };
+  return { ...base, projects: projectRows.rows.filter((row) => !row.project_json?.archivedAt).map((row) => normalizeProject(row.project_json, now)) };
 }
 
 async function lockedCreativeState(client, workspaceId, now) {
@@ -264,8 +260,8 @@ async function lockedCreativeState(client, workspaceId, now) {
   );
   const base = migrateLegacyCreativeState(snapshot.rows[0].state_json ?? {}, now);
   return {
-    state: { ...base, projects: projectRows.rows.map((row) => normalizeProject(row.project_json, now)) },
-    positions: new Map(projectRows.rows.map((row) => [String(row.project_json.id), Number(row.position)])),
+    state: { ...base, projects: projectRows.rows.filter((row) => !row.project_json?.archivedAt).map((row) => normalizeProject(row.project_json, now)) },
+    positions: new Map(projectRows.rows.filter((row) => !row.project_json?.archivedAt).map((row) => [String(row.project_json.id), Number(row.position)])),
   };
 }
 
@@ -377,6 +373,12 @@ function confirmProjectPlanning(project, input, now = new Date().toISOString()) 
   const timestamp = stableTimestamp(now, new Date().toISOString());
   const saved = saveProjectPlanning(project, input, timestamp);
   validatePlanningForConfirmation(saved.planning);
+  const titleText = saved.planning.title.replace(/[\s\p{P}\p{S}]/gu, '');
+  const unsafeTitle = saved.factChecks.some((fact) => {
+    const claim = String(fact ?? '').replace(/[\s\p{P}\p{S}]/gu, '');
+    return titleText.length >= 12 && claim.length >= 12 && (titleText.includes(claim) || claim.includes(titleText));
+  });
+  if (unsafeTitle) throw new Error('规划标题包含待核验主张，请先改成问题导向或完成事实核验。');
   const versions = [...saved.versions];
   for (const platform of saved.planning.targetPlatforms) {
     if (versions.some((version) => version.platform === platform)) continue;

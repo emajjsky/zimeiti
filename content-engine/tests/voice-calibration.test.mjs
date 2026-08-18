@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
   accountVoiceCalibrationDraftInput,
@@ -7,6 +8,8 @@ import {
   parseVoiceCalibrationDraft,
   voiceCalibrationErrorMessage,
 } from '../server/services/voiceCalibration.cjs';
+
+const serverSource = await readFile(new URL('../server/index.cjs', import.meta.url), 'utf8');
 
 const article = {
   title: '一篇属于我的旧文章',
@@ -140,4 +143,26 @@ test('蒸馏诊断维度允许带描述后缀并归一为标准标签', () => {
 
 test('蒸馏结构仍无法修复时返回可行动的用户提示', () => {
   assert.equal(voiceCalibrationErrorMessage({ issues: [{ path: ['analysis'] }] }), '模型返回的账号声音结构不完整，已尝试修复，请重新提炼。');
+});
+test('声音提炼提示词保留参考文章的图片、视频和音频线索', () => {
+  const prompt = buildVoiceCalibrationPrompt({
+    ...article,
+    media: [
+      { mediaType: 'IMAGE', resolvedUrl: 'https://example.com/voice.jpg', alt: '配图' },
+      { mediaType: 'VIDEO', resolvedUrl: 'https://example.com/voice.mp4' },
+      { mediaType: 'AUDIO', resolvedUrl: 'https://example.com/voice.wav' },
+    ],
+  });
+  assert.match(prompt.message, /voice\.jpg/);
+  assert.match(prompt.message, /voice\.mp4/);
+  assert.match(prompt.message, /voice\.wav/);
+});
+
+test('声音提炼通过 Omni 联合理解文章正文和媒体', () => {
+  const start = serverSource.indexOf("app.post('/api/v1/account-voices/calibration-drafts'");
+  const end = serverSource.indexOf("app.get('/api/v1/creative/skills'", start);
+  const source = serverSource.slice(start, end);
+  assert.match(source, /buildRichContentOmniArgs/);
+  assert.match(source, /richContentForArticle/);
+  assert.doesNotMatch(source, /textRunner\.runText/);
 });

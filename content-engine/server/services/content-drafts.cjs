@@ -152,7 +152,11 @@ function createContentDraftStore({ query, transaction, renderWechatDraft } = {})
       Object.hasOwn(input, 'layoutTemplateVersionId'),
       input.layoutTemplateVersionId ?? null,
     ]);
-    if (result.rows.length) return draftView(result.rows[0]);
+    if (result.rows.length) {
+      // PATCH 只更新草稿字段，工作态图片关系保存在 content_draft_assets 中。
+      // 返回完整草稿 DTO，确保前端状态继续携带已绑定的图片。
+      return draftView(await loadDraft(client, workspaceId, draftId));
+    }
     const existing = await client.query('SELECT id FROM content_drafts WHERE workspace_id = $1 AND id = $2', [workspaceId, draftId]);
     if (!existing.rows.length) throw businessError(404, 'DRAFT_NOT_FOUND', '没有找到这份草稿。');
     throw businessError(409, 'DRAFT_REVISION_CONFLICT', '草稿已在其他页面更新，请刷新后继续。');
@@ -262,6 +266,7 @@ function createContentDraftStore({ query, transaction, renderWechatDraft } = {})
       templateRules: template.rows[0].rules_json,
       layoutAddons: draft.visual_plan_json?.layoutAddons,
       layoutDesign: layoutDesignForTemplateVersion(draft.visual_plan_json, template.rows[0].id, template.rows[0].template_id),
+      visualPlan: draft.visual_plan_json,
     });
     if (rendered.checks?.some(({ level }) => level === 'ERROR')) throw businessError(400, 'DRAFT_PREFLIGHT_FAILED', '草稿存在必须修正的问题。', { checks: rendered.checks });
     return rendered;
@@ -282,8 +287,8 @@ function createContentDraftStore({ query, transaction, renderWechatDraft } = {})
         FROM content_draft_versions WHERE workspace_id = $1 AND draft_id = $2`, [workspaceId, draftId]);
       const inserted = await client.query(`INSERT INTO content_draft_versions
         (workspace_id, draft_id, platform, version_number, title, body, visual_plan_json,
-          rendered_html, layout_template_version_id, source_draft_version_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+              rendered_html, layout_template_version_id, source_draft_version_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING *`, [
         workspaceId,
         draftId,
@@ -294,7 +299,7 @@ function createContentDraftStore({ query, transaction, renderWechatDraft } = {})
         JSON.stringify(draft.visual_plan_json ?? {}),
         rendered.html,
         draft.layout_template_version_id,
-        draft.source_draft_version_id,
+            draft.source_draft_version_id,
       ]);
       const version = inserted.rows[0];
       for (const asset of assetResult.rows) {
