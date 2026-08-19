@@ -1129,7 +1129,9 @@ async function generateProjectCopyAction({ jobId, workspaceId, runId }) {
     });
     inputTokens += first.inputTokens ?? 0;
     outputTokens += first.outputTokens ?? 0;
-    const output = isInitialDraft
+    const output = isOutlineAction
+      ? parseOutlineContent(first.content)
+      : isInitialDraft
       ? { ...parseFinishedCopyBody(first.content, writingPacket, snapshot.action, preparedSnapshot), changeSummary: '已生成正式正文。' }
       : parseRevisionCopyBody(first.content, snapshot.action, { ...preparedSnapshot, lockedTitle: writingPacket.lockedTitle });
     const saved = await transaction(async (client) => {

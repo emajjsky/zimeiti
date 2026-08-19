@@ -330,17 +330,26 @@ function evidenceSourceIds(fact) {
 
 function authorMaterialView(material) {
   const rawKind = String(material?.kind ?? '').toUpperCase();
-  const kind = ['DRAFT', 'OPINION', 'EXPERIENCE', 'REFERENCE'].includes(rawKind) ? rawKind : null;
+  const kind = ['IDEA', 'DRAFT', 'NOTE', 'OPINION', 'EXPERIENCE', 'REFERENCE', 'TRANSCRIPT'].includes(rawKind) ? rawKind : null;
   const content = String(material?.body ?? material?.content ?? '').trim();
   if (!kind || !content) return null;
   return { id: String(material.id), kind, content };
 }
 
 function supportingMaterialView(material) {
-  const kind = String(material?.kind ?? '').toUpperCase();
+  const kind = String(material?.kind ?? material?.type ?? '').toUpperCase();
   const title = String(material?.title ?? '').trim();
-  const content = String(material?.body ?? material?.content ?? material?.notes ?? '').trim();
-  if (!['NOTE', 'TRANSCRIPT', 'IMAGE', 'VIDEO', 'AUDIO'].includes(kind) || (!title && !content)) return null;
+  const content = [
+    material?.body,
+    material?.content,
+    material?.summary,
+    ...(Array.isArray(material?.coreViewpoints) ? material.coreViewpoints : []),
+    ...(Array.isArray(material?.structureOutline) ? material.structureOutline : []),
+    ...(Array.isArray(material?.reusableElements) ? material.reusableElements : []),
+    ...(Array.isArray(material?.visualClues) ? material.visualClues : []),
+    material?.notes,
+  ].map((value) => String(value ?? '').trim()).filter(Boolean).join('\n');
+  if (!['CONTENT_UNDERSTANDING', 'NOTE', 'TRANSCRIPT', 'IMAGE', 'VIDEO', 'AUDIO'].includes(kind) || (!title && !content)) return null;
   return { id: String(material.id), kind, title, content };
 }
 
@@ -588,7 +597,11 @@ function buildCopyPrompt(snapshot) {
       '如果没有待核验事项，写“无”。',
     ] : [];
   const effectiveOutputFormat = snapshot.action === 'GENERATE_OUTLINE'
-    ? outputFormat
+    ? [
+      '只返回一个 JSON 对象，不返回 Markdown、代码围栏或说明文字。标题候选和章节必须放在 JSON 字段中。',
+      'JSON 必须包含 titleOptions（1-5 个标题字符串）、summary（摘要字符串）、sections（3-10 个章节对象）和 factsToVerify（待核验事实数组）。',
+      'sections 的每项必须包含 heading、purpose、keyPoints，keyPoints 至少一项。没有待核验事实时 factsToVerify 返回空数组。',
+    ]
     : [
       '只输出最终正文纯文本，不输出标题、变更说明、待核验列表、JSON、字段名或解释。',
       '服务端会锁定标题并根据正文实际内容计算变更说明与待核验项。',
@@ -621,6 +634,9 @@ function buildCopyPrompt(snapshot) {
       'factsToVerify 只列本次候选正文仍直接涉及的待核验事实；不得回填项目历史核验池中的无关条目。保留的待核验事实不得被删掉、弱化或改写为已确认事实。',
     ];
   const system = [
+    ...(snapshot.action === 'GENERATE_OUTLINE' ? [
+      '本次大纲动作只返回一个 JSON 对象，不返回 Markdown 或说明文字。字段必须为 titleOptions、summary、sections、factsToVerify；sections 的每项必须包含 heading、purpose、keyPoints。',
+    ] : []),
     '你是内容项目的文案编辑，只执行已经确认的单一动作。',
     `本次动作是 ${snapshot.action}，目标平台是 ${snapshot.platform}。`,
     actionRevisionRule(snapshot.action),

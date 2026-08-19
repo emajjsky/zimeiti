@@ -146,3 +146,30 @@ test('正文任务单次调用失败后立即结束，不自动重试', () => {
   assert.match(worker, /if \(isFinalQueueAttempt\(queueJob\)\)[\s\S]*generation_runs SET status = 'FAILED'/);
   assert.match(worker, /status IN \('RUNNING', 'FAILED'\)/);
 });
+
+test('统一大纲动作使用结构化输出契约并由同一解析器保存', () => {
+  const worker = fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8');
+  const copyAction = fs.readFileSync(new URL('../server/services/project-copy-action.cjs', import.meta.url), 'utf8');
+  const execute = worker.slice(worker.indexOf('async function generateProjectCopyAction'), worker.indexOf('async function generateAgentPlan'));
+  assert.match(execute, /const output = isOutlineAction[\s\S]*parseOutlineContent\(first\.content\)/);
+  assert.match(execute, /parseRevisionCopyBody\(first\.content/);
+  assert.match(copyAction, /GENERATE_OUTLINE[\s\S]*titleOptions/);
+  assert.match(copyAction, /GENERATE_OUTLINE[\s\S]*JSON/);
+});
+
+test('正文写作包完整携带作者想法和链接多模态理解结果', () => {
+  const packet = buildWritingPacket({
+    projectId: 'project-1',
+    platform: 'WECHAT',
+    action: 'GENERATE_DRAFT',
+    project: { id: 'project-1', title: '项目标题', planning: { title: '项目标题' } },
+    materials: [
+      { id: 'idea-1', kind: 'IDEA', title: '作者想法', body: '这是作者自己补充的创作方向。' },
+      { id: 'understanding-1', type: 'CONTENT_UNDERSTANDING', sourceUrl: 'https://example.com', summary: '链接正文的核心摘要', coreViewpoints: ['链接中的主要观点'], structureOutline: ['先提出问题，再给出判断'] },
+    ],
+    researchContext: { verifiedFacts: [], cautions: [] },
+  });
+  assert.match(JSON.stringify(packet.authorMaterials), /作者自己补充的创作方向/);
+  assert.match(JSON.stringify(packet.supportingMaterials), /链接正文的核心摘要/);
+  assert.match(JSON.stringify(packet.supportingMaterials), /链接中的主要观点/);
+});
