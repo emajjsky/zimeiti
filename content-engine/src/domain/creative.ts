@@ -217,6 +217,7 @@ export interface ProjectAgentContext {
   messages: ProjectAgentMessage[];
   summaries: ProjectStageSummary[];
   activeRun: ProjectAgentRun | null;
+  latestRun: ProjectAgentRun | null;
   artifacts: ProjectArtifact[];
   usedMaterialIds: { inputIds: string[]; referenceIds: string[]; assetIds: string[] };
 }

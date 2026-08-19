@@ -199,6 +199,22 @@ test('研究与文案复用同一个 ProjectAgent 入口并按阶段分流', () 
   assert.match(copy, /stage="COPY"/);
 });
 
+test('研究上下文同时返回最近终态任务，失败后页面可以停止并展示错误', () => {
+  const store = fs.readFileSync(new URL('../server/services/project-agent.cjs', import.meta.url), 'utf8');
+  const domain = fs.readFileSync(new URL('../src/domain/creative.ts', import.meta.url), 'utf8');
+  const agent = fs.readFileSync(new URL('../src/workspaces/create/ProjectAgent.tsx', import.meta.url), 'utf8');
+  assert.match(store, /latestRun/);
+  assert.match(store, /status IN \('DRAFT', 'QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'\)/);
+  assert.match(domain, /latestRun: ProjectAgentRun \| null/);
+  assert.match(agent, /latestRun/);
+});
+
+test('研究轮询不会让旧请求覆盖较新的终态响应', () => {
+  const agent = fs.readFileSync(new URL('../src/workspaces/create/ProjectAgent.tsx', import.meta.url), 'utf8');
+  assert.match(agent, /reloadSequenceRef/);
+  assert.match(agent, /sequence === reloadSequenceRef\.current/);
+});
+
 test('研究页只保留开始、补充、采用和跳过的主路径', () => {
   const materials = fs.readFileSync(new URL('../src/workspaces/create/ProjectMaterials.tsx', import.meta.url), 'utf8');
   const agent = fs.readFileSync(new URL('../src/workspaces/create/ProjectAgent.tsx', import.meta.url), 'utf8');

@@ -49,28 +49,33 @@ function SimplifiedResearchAgent({ projectId, refreshToken = 0, onContextChange,
   const [busy, setBusy] = useState<'idle' | 'loading' | 'starting' | 'accepting' | 'skipping' | 'cancelling'>('loading');
   const [error, setError] = useState('');
   const acceptingRef = useRef(false);
+  const reloadSequenceRef = useRef(0);
   const reload = async () => {
+    const sequence = ++reloadSequenceRef.current;
     const result = await webCreative.agentContext(projectId, { stage: 'RESEARCH', history: 'CURRENT' });
+    if (sequence !== reloadSequenceRef.current) return context;
     setContext(result); setError(''); onContextChange?.(result);
     return result;
   };
 
   useEffect(() => {
     let cancelled = false;
+    const sequence = ++reloadSequenceRef.current;
     setBusy('loading'); setError('');
     void webCreative.agentContext(projectId, { stage: 'RESEARCH', history: 'CURRENT' })
-      .then((result) => { if (!cancelled) { setContext(result); onContextChange?.(result); } })
+      .then((result) => { if (!cancelled && sequence === reloadSequenceRef.current) { setContext(result); onContextChange?.(result); } })
       .catch((reason) => { if (!cancelled) setError(reason instanceof Error ? reason.message : '读取研究状态失败。'); })
-      .finally(() => { if (!cancelled) setBusy('idle'); });
-    return () => { cancelled = true; };
+      .finally(() => { if (!cancelled && sequence === reloadSequenceRef.current) setBusy('idle'); });
+    return () => { cancelled = true; reloadSequenceRef.current += 1; };
   }, [projectId, refreshToken]);
 
   const activeRun = context?.activeRun;
+  const latestRun = context?.latestRun;
   const isRunning = Boolean(activeRun && ['QUEUED', 'RUNNING'].includes(activeRun.status));
   useEffect(() => {
     if (!isRunning) return;
     const timer = window.setInterval(() => { void reload().catch((reason) => setError(reason instanceof Error ? reason.message : '研究状态更新失败。')); }, 1_500);
-    return () => window.clearInterval(timer);
+    return () => { window.clearInterval(timer); reloadSequenceRef.current += 1; };
   }, [isRunning, projectId]);
 
   const resultArtifact = useMemo(() => selectCurrentResearchArtifact(context?.artifacts ?? []), [context?.artifacts]);
@@ -123,6 +128,7 @@ function SimplifiedResearchAgent({ projectId, refreshToken = 0, onContextChange,
     {busy !== 'loading' && !isRunning && resultArtifact && result && <ResearchResultPreview result={result} accepted={resultArtifact.status === 'ACCEPTED'} busy={busy !== 'idle'} onAccept={() => void acceptResearchResult()}/>}
     {busy !== 'loading' && !isRunning && !resultArtifact && <div className="simplified-research-empty"><FileCheck2 size={22}/><b>还没有研究结果</b><span>可直接开始，项目资料会自动带入。</span></div>}
     {error && <div className="simplified-research-error" role="alert"><CircleAlert size={16}/><span>{error}</span>{/(模型|核心 Agent|Key)/.test(error) && <button className="text-button" type="button" onClick={() => onOpenSettings('agent')}><Settings2 size={14}/>去配置</button>}</div>}
+    {!isRunning && latestRun?.status === 'FAILED' && latestRun.error && <div className="simplified-research-error" role="alert"><CircleAlert size={16}/><span>{latestRun.error}</span></div>}
     {!isRunning && <footer className="simplified-research-actions">
       {(!resultArtifact || showResearchSupplement) && <label><span>{resultArtifact ? '补充方向（可选）' : '研究重点（可选）'}</span><textarea rows={resultArtifact ? 1 : 2} value={request} maxLength={2_000} placeholder="不填则沿用当前项目上下文" onChange={(event) => setRequest(event.target.value)}/></label>}
       <div>{!resultArtifact && <button className="text-button" type="button" disabled={busy !== 'idle'} onClick={() => void skipResearch()}>无需研究，直接进入正文</button>}{resultArtifact && !showResearchSupplement && <button className="text-button" type="button" disabled={busy !== 'idle'} onClick={() => setShowResearchSupplement(true)}>补充研究</button>}{(!resultArtifact || showResearchSupplement) && <button className="button primary" type="button" disabled={busy !== 'idle'} onClick={() => void startResearch()}>{busy === 'starting' ? <LoaderCircle size={16}/> : <Search size={16}/>}{showResearchSupplement ? '开始补充' : '开始研究'}</button>}</div>

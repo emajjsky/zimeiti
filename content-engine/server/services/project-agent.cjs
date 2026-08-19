@@ -97,7 +97,7 @@ function createProjectAgentStore({ query, transaction }) {
         ) recent ORDER BY created_at ASC`;
     const messageParams = history === 'ALL' ? [workspaceId, projectId] : [workspaceId, projectId, stage, platform];
 
-    const [messages, summaries, activeRun, artifacts, materials] = await Promise.all([
+    const [messages, summaries, activeRun, latestRun, artifacts, materials] = await Promise.all([
       query(messageQuery, messageParams),
       query(`SELECT DISTINCT ON (stage, platform)
           id, stage, platform, summary, version, created_at
@@ -113,6 +113,14 @@ function createProjectAgentStore({ query, transaction }) {
             OR ($3 = 'COPY' AND r.action_version_id LIKE 'project-copy-%'))
           AND ($4::text IS NULL OR r.source_snapshot_json->>'platform' = $4)
           AND r.status IN ('DRAFT', 'QUEUED', 'RUNNING')
+        ORDER BY r.created_at DESC LIMIT 1`, [workspaceId, projectId, stage, platform]),
+      query(`SELECT r.*
+        FROM generation_runs r
+        WHERE r.workspace_id = $1 AND r.source_snapshot_json->>'projectId' = $2
+          AND (($3 = 'RESEARCH' AND (r.action_version_id LIKE 'project-research-workflow:%' OR r.action_version_id LIKE 'project-research-plan:%' OR r.action_version_id LIKE 'project-research-sources:%' OR r.action_version_id LIKE 'source-verification:%'))
+            OR ($3 = 'COPY' AND r.action_version_id LIKE 'project-copy-%'))
+          AND ($4::text IS NULL OR r.source_snapshot_json->>'platform' = $4)
+          AND r.status IN ('DRAFT', 'QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED')
         ORDER BY r.created_at DESC LIMIT 1`, [workspaceId, projectId, stage, platform]),
       query(`SELECT a.*,
           COALESCE(rp.output_json, cm.payload_json, pc.payload_json, a.metadata_json->'payload', '{}'::jsonb) AS payload_json,
@@ -167,6 +175,7 @@ function createProjectAgentStore({ query, transaction }) {
       messages: messages.rows.map(messageView),
       summaries: summaries.rows.map(summaryView),
       activeRun: runView(activeRun.rows[0]),
+      latestRun: runView(latestRun.rows[0]),
       artifacts: artifacts.rows.map(artifactView),
       usedMaterialIds: {
         inputIds: materials.rows.flatMap((row) => row.input_id ? [row.input_id] : []),

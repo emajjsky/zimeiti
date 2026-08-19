@@ -135,6 +135,9 @@ test('正文任务单次调用失败后立即结束，不自动重试', () => {
     jobId: 'job-2', removeOnComplete: 100, removeOnFail: 200,
   });
   assert.equal(queueJobOptions({ id: 'job-3', job_type: 'BAILIAN_TEXT' }).attempts, 3);
+  assert.deepEqual(queueJobOptions({ id: 'research-1', job_type: 'PROJECT_RESEARCH_WORKFLOW' }), {
+    jobId: 'research-1', removeOnComplete: 100, removeOnFail: 200,
+  });
   assert.equal(isFinalQueueAttempt({ attemptsMade: 0, opts: { attempts: 3 } }), false);
   assert.equal(isFinalQueueAttempt({ attemptsMade: 2, opts: { attempts: 3 } }), true);
 
