@@ -32,6 +32,40 @@ const researchPlanSchema = z.object({
   })).min(1).max(8),
 });
 
+const RESEARCH_PLAN_TOOL_NAME = 'submit_research_plan';
+const researchPlanTool = {
+  type: 'function',
+  function: {
+    name: RESEARCH_PLAN_TOOL_NAME,
+    description: '提交结构化项目研究计划。',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['title', 'summary', 'researchBrief', 'questions', 'claims', 'nextActions'],
+      properties: {
+        title: { type: 'string', minLength: 1, maxLength: 120 },
+        summary: { type: 'string', minLength: 1, maxLength: 800 },
+        researchBrief: { type: 'object', additionalProperties: false, required: ['subject', 'directions', 'keywords', 'preferredChannels', 'searchQueries'], properties: {
+          subject: { type: 'string', minLength: 2, maxLength: 160 },
+          directions: { type: 'array', minItems: 2, maxItems: 5, items: { type: 'string', minLength: 2, maxLength: 200 } },
+          keywords: { type: 'array', minItems: 3, maxItems: 12, items: { type: 'string', minLength: 1, maxLength: 80 } },
+          preferredChannels: { type: 'array', minItems: 2, maxItems: 6, items: { type: 'string', minLength: 2, maxLength: 120 } },
+          searchQueries: { type: 'array', minItems: 1, maxItems: 5, items: { type: 'string', minLength: 2, maxLength: 160 } },
+        } },
+        questions: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'object', additionalProperties: false, required: ['question', 'why', 'preferredSources'], properties: {
+          question: { type: 'string', minLength: 1, maxLength: 300 }, why: { type: 'string', minLength: 1, maxLength: 300 }, preferredSources: { type: 'array', minItems: 1, maxItems: 5, items: { type: 'string', minLength: 1, maxLength: 160 } },
+        } } },
+        claims: { type: 'array', maxItems: 10, items: { type: 'object', additionalProperties: false, required: ['claim', 'priority', 'reason'], properties: {
+          claim: { type: 'string', minLength: 1, maxLength: 300 }, priority: { type: 'string', enum: ['HIGH', 'MEDIUM', 'LOW'] }, reason: { type: 'string', minLength: 1, maxLength: 300 },
+        } } },
+        nextActions: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'object', additionalProperties: false, required: ['action', 'purpose', 'target'], properties: {
+          action: { type: 'string', enum: ['SEARCH_WEB', 'READ_LINK', 'ASK_USER'] }, purpose: { type: 'string', minLength: 1, maxLength: 300 }, target: { type: 'string', minLength: 1, maxLength: 500 },
+        } } },
+      },
+    },
+  },
+};
+
 function parseResearchPlan(content) {
   if (typeof content !== 'string') throw new Error('核心 Agent 没有返回研究计划。');
   const normalized = content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
@@ -123,6 +157,8 @@ function researchPlanView(row) {
 module.exports = {
   PROJECT_RESEARCH_ACTION_VERSION,
   PROJECT_RESEARCH_SCOPE,
+  RESEARCH_PLAN_TOOL_NAME,
+  researchPlanTool,
   researchBriefSchema,
   researchPlanSchema,
   parseResearchPlan,

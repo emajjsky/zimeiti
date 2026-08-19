@@ -3,9 +3,17 @@ import fs from 'node:fs';
 import test from 'node:test';
 import copyActionModule from '../server/services/project-copy-action.cjs';
 import queueModule from '../server/queue.cjs';
+import researchModule from '../server/services/project-research.cjs';
 
 const { buildWritingPacket, parseFinishedCopyBody, parseRevisionCopyBody, copyMaxTokensForLength, buildCopyPrompt } = copyActionModule;
 const { queueJobOptions, isFinalQueueAttempt } = queueModule;
+const { RESEARCH_PLAN_TOOL_NAME, researchPlanTool } = researchModule;
+
+test('研究计划使用严格工具契约而不是自由文本 JSON', () => {
+  assert.equal(RESEARCH_PLAN_TOOL_NAME, 'submit_research_plan');
+  assert.equal(researchPlanTool.function.name, RESEARCH_PLAN_TOOL_NAME);
+  assert.deepEqual(researchPlanTool.function.parameters.required, ['title', 'summary', 'researchBrief', 'questions', 'claims', 'nextActions']);
+});
 
 test('未核验主张不能同时作为正文核心表达继续传递', () => {
   const claim = 'Wan3.0 首次支持 doc、xls、ppt、pdf、md 等文档格式作为视频生成输入源';
@@ -155,6 +163,16 @@ test('统一大纲动作使用结构化输出契约并由同一解析器保存',
   assert.match(execute, /parseRevisionCopyBody\(first\.content/);
   assert.match(copyAction, /GENERATE_OUTLINE[\s\S]*titleOptions/);
   assert.match(copyAction, /GENERATE_OUTLINE[\s\S]*JSON/);
+});
+
+test('研究计划执行路径强制使用严格工具输出', () => {
+  const worker = fs.readFileSync(new URL('../server/worker.cjs', import.meta.url), 'utf8');
+  const planRunner = worker.slice(worker.indexOf('async function runWorkflowResearchPlan'), worker.indexOf('async function captureWorkflowSources'));
+  const legacyRunner = worker.slice(worker.indexOf('async function generateProjectResearchPlan'), worker.indexOf('async function textConnectionInput'));
+  for (const source of [planRunner, legacyRunner]) {
+    assert.match(source, /tools: \[researchPlanTool\]/);
+    assert.match(source, /requiredToolName: RESEARCH_PLAN_TOOL_NAME/);
+  }
 });
 
 test('正文写作包完整携带作者想法和链接多模态理解结果', () => {

@@ -13,7 +13,7 @@ const { createTextModelRunner } = require('./services/text-model.cjs');
 const { buildAnalysisPrompt, buildAnalysisRepairPrompt, calculateOverallScore, decisionForScore, parseAnalysisContent } = require('./services/intelligence-analysis.cjs');
 const { buildOutlinePrompt, buildOutlineRepairPrompt, parseOutlineContent } = require('./services/creative-outline.cjs');
 const { DRAFT_ACTION_VERSION, buildDraftPrompt, buildDraftRepairPrompt, parseDraftContent } = require('./services/creative-draft.cjs');
-const { PROJECT_RESEARCH_ACTION_VERSION, buildResearchPlanPrompt, buildResearchPlanRepairPrompt, parseResearchPlan } = require('./services/project-research.cjs');
+const { PROJECT_RESEARCH_ACTION_VERSION, RESEARCH_PLAN_TOOL_NAME, researchPlanTool, buildResearchPlanPrompt, buildResearchPlanRepairPrompt, parseResearchPlan } = require('./services/project-research.cjs');
 const { searchTavily } = require('./services/tavily.cjs');
 const { clipPublicLink, readPublicArticle } = require('./services/public-web.cjs');
 const { createPublishingStore } = require('./services/publishing.cjs');
@@ -397,12 +397,12 @@ async function updateSimplifiedResearchPhase(workspaceId, runId, phase, progress
 async function runWorkflowResearchPlan(workspaceId, snapshot, route) {
   const connectionInput = await textConnectionInput(workspaceId, route);
   const prompt = buildResearchPlanPrompt(snapshot);
-  const first = await textRunner.runText({ provider: route.provider, model: route.model, system: prompt.system, message: prompt.message, ...connectionInput });
+  const first = await textRunner.runText({ provider: route.provider, model: route.model, system: prompt.system, message: prompt.message, tools: [researchPlanTool], requiredToolName: RESEARCH_PLAN_TOOL_NAME, timeoutMs: 300_000, ...connectionInput });
   try {
     return { output: parseResearchPlan(first.content), inputTokens: first.inputTokens ?? 0, outputTokens: first.outputTokens ?? 0 };
   } catch (error) {
     const validationError = error instanceof Error ? error.message : '研究计划输出不符合 JSON 契约。';
-    const repaired = await textRunner.runText({ provider: route.provider, model: route.model, system: buildResearchPlanRepairPrompt(prompt.system, validationError), message: first.content, ...connectionInput });
+    const repaired = await textRunner.runText({ provider: route.provider, model: route.model, system: buildResearchPlanRepairPrompt(prompt.system, validationError), message: first.content, tools: [researchPlanTool], requiredToolName: RESEARCH_PLAN_TOOL_NAME, timeoutMs: 300_000, ...connectionInput });
     return {
       output: parseResearchPlan(repaired.content),
       inputTokens: (first.inputTokens ?? 0) + (repaired.inputTokens ?? 0),
@@ -807,14 +807,14 @@ async function generateProjectResearchPlan({ jobId, workspaceId, runId }) {
     route = runResult.rows[0].input_json.route;
     const connectionInput = await textConnectionInput(workspaceId, route);
     const prompt = buildResearchPlanPrompt(snapshot);
-    const first = await textRunner.runText({ provider: route.provider, model: route.model, system: prompt.system, message: prompt.message, ...connectionInput });
+    const first = await textRunner.runText({ provider: route.provider, model: route.model, system: prompt.system, message: prompt.message, tools: [researchPlanTool], requiredToolName: RESEARCH_PLAN_TOOL_NAME, timeoutMs: 300_000, ...connectionInput });
     inputTokens = first.inputTokens;
     outputTokens = first.outputTokens;
     let output;
     try { output = parseResearchPlan(first.content); }
     catch (error) {
       const validationError = error instanceof Error ? error.message : '输出不符合研究计划 JSON 契约。';
-      const repaired = await textRunner.runText({ provider: route.provider, model: route.model, system: buildResearchPlanRepairPrompt(prompt.system, validationError), message: first.content, ...connectionInput });
+      const repaired = await textRunner.runText({ provider: route.provider, model: route.model, system: buildResearchPlanRepairPrompt(prompt.system, validationError), message: first.content, tools: [researchPlanTool], requiredToolName: RESEARCH_PLAN_TOOL_NAME, timeoutMs: 300_000, ...connectionInput });
       inputTokens = (inputTokens ?? 0) + (repaired.inputTokens ?? 0);
       outputTokens = (outputTokens ?? 0) + (repaired.outputTokens ?? 0);
       output = parseResearchPlan(repaired.content);
