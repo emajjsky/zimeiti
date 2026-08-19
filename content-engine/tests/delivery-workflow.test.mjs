@@ -174,6 +174,16 @@ test('配图异步任务在入队失败和 Worker 恢复时保持运行记录与
   assert.match(route, /UPDATE jobs SET status = 'FAILED'/);
   assert.match(worker, /payload\.visualPlanningRunId/);
   assert.match(worker, /UPDATE visual_planning_runs SET status = 'QUEUED'/);
+  assert.match(worker, /payload\.visualPlanningRunId[\s\S]*UPDATE visual_planning_runs SET status = 'FAILED'/);
+});
+
+test('配图工作台展示明确的异步任务状态而不是只有转圈图标', () => {
+  const visual = fs.readFileSync(new URL('../src/workspaces/create/VisualWorkspace.tsx', import.meta.url), 'utf8');
+  assert.match(visual, /planningStatusLabel/);
+  assert.match(visual, /任务已提交，等待 Worker 执行/);
+  assert.match(visual, /任务执行中，正在读取正文和素材并生成配图方案/);
+  assert.match(visual, /配图方案任务失败/);
+  assert.match(visual, /最近更新/);
 });
 
 test('配图工作台固定展示方案、候选素材和当前任务三栏', () => {

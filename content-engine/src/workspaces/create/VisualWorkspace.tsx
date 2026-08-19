@@ -14,6 +14,7 @@ type SourceView = 'search' | 'generate' | 'library';
 type PlanningRoute = { scope: string; provider: string; model: string };
 type QuantityMode = 'AUTO' | 'MANUAL';
 type VisualSnapshot = { plan: CreativeVisualPlanItem[]; styleProfile: CreativeVisualStyleProfile; quantityMode: QuantityMode; bodyItemCount: number };
+type PlanningRunStatus = 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED';
 
 function usableVisualReference(item: ProjectAsset) {
   return item.kind === 'IMAGE' && item.mimeType.startsWith('image/');
@@ -105,6 +106,8 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
   const [styleDialogOpen, setStyleDialogOpen] = useState(false);
   const [activeStyleGroup, setActiveStyleGroup] = useState<VisualStyleGroupId>('EDITORIAL');
   const [planBusy, setPlanBusy] = useState(false);
+  const [planningStatus, setPlanningStatus] = useState<PlanningRunStatus | null>(null);
+  const [planningUpdatedAt, setPlanningUpdatedAt] = useState('');
   const [planNeedsRefresh, setPlanNeedsRefresh] = useState(false);
   const [itemRequest, setItemRequest] = useState('');
   const [planningRoute, setPlanningRoute] = useState<PlanningRoute | null>(null);
@@ -200,6 +203,8 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
       try {
         const { run } = await webCreative.latestVisualPlanRun(project.id);
         if (!active || !run) return;
+        setPlanningStatus(run.status);
+        setPlanningUpdatedAt(run.updatedAt ?? '');
         if (run.status === 'QUEUED' || run.status === 'RUNNING') {
           followedPendingRun = true;
           setPlanBusy(true);
@@ -226,6 +231,16 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
     void loadLatestRun();
     return () => { active = false; window.clearTimeout(timer); };
   }, [project.id, draft.id, draft.updatedAt]);
+
+  const planningStatusLabel = planningStatus === 'QUEUED'
+    ? '任务已提交，等待 Worker 执行'
+    : planningStatus === 'RUNNING'
+      ? '正在生成配图方案：任务执行中，正在读取正文和素材并生成配图方案'
+      : planningStatus === 'SUCCEEDED'
+        ? '配图方案已完成'
+        : planningStatus === 'FAILED'
+          ? '配图方案任务失败'
+          : '';
 
   useEffect(() => { draftRef.current = draft; }, [draft]);
 
@@ -472,7 +487,7 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
 
   const planWithAI = async (currentItemId?: string, request = '') => {
     if (!hasCopy || planBusy) return;
-    setPlanBusy(true); setError(''); setNotice('');
+    setPlanBusy(true); setPlanningStatus('QUEUED'); setPlanningUpdatedAt(new Date().toISOString()); setError(''); setNotice('');
     try {
       const queued = await webCreative.planVisual(project.id, {
         platform: 'WECHAT',
@@ -486,9 +501,12 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
       });
       let run = await webCreative.latestVisualPlanRun(project.id).then((response) => response.run);
       while (run && (run.status === 'QUEUED' || run.status === 'RUNNING')) {
+        setPlanningStatus(run.status);
+        setPlanningUpdatedAt(run.updatedAt ?? '');
         await new Promise((resolve) => window.setTimeout(resolve, 900));
         run = (await webCreative.latestVisualPlanRun(project.id)).run;
       }
+      if (run) { setPlanningStatus(run.status); setPlanningUpdatedAt(run.updatedAt ?? ''); }
       if (!run || run.id !== queued.id) throw new Error('配图任务状态没有正常返回。');
       if (run.status === 'FAILED') throw new Error(run.error || '配图策划失败。');
       if (!run.result) throw new Error('配图任务没有返回方案。');
@@ -552,7 +570,8 @@ export function VisualWorkspace({ project, draft, onDraftChange, onContinue, onO
     </header>
     {error && <div className="delivery-error" role="alert">{error}</div>}
     {notice && <div className="visual-workspace-notice" role="status">{notice}</div>}
-    {planBusy && <div className="visual-generation-status running" role="status"><LoaderCircle size={17}/><span>正在生成配图方案，Agent 正在读取正文并安排图片位置。</span></div>}
+    {planBusy && <div className="visual-generation-status running" role="status"><LoaderCircle size={17}/><span><b>{planningStatusLabel || '配图方案任务已提交'}</b>{planningUpdatedAt ? `｜最近更新 ${new Date(planningUpdatedAt).toLocaleTimeString()}` : ''}</span></div>}
+    {!planBusy && planningStatus === 'FAILED' && <div className="visual-generation-status error" role="status"><X size={17}/><span>{error || '配图方案任务失败，请查看错误信息后重新提交。'}</span></div>}
 
     {!plan.length ? <section className="visual-plan-empty">
       <div className="visual-plan-empty-mark"><Sparkles size={24}/></div>

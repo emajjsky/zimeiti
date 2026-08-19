@@ -307,6 +307,7 @@ async function processJob(queueJob) {
     if (isFinalQueueAttempt(queueJob)) {
       await transaction(async (client) => {
         if (payload.runId) await client.query("UPDATE generation_runs SET status = 'FAILED', error = $2, completed_at = now() WHERE id = $1 AND workspace_id = $3 AND status IN ('QUEUED', 'RUNNING', 'FAILED')", [payload.runId, message.slice(0, 2_000), workspaceId]);
+        if (payload.visualPlanningRunId) await client.query("UPDATE visual_planning_runs SET status = 'FAILED', error = $2, completed_at = now(), updated_at = now() WHERE id = $1 AND workspace_id = $3 AND status IN ('QUEUED', 'RUNNING')", [payload.visualPlanningRunId, message.slice(0, 2_000), workspaceId]);
         if (queueJob.name === 'AGENT_PLAN' && payload.planId) await client.query('UPDATE agent_plans SET status = $1, error = $2, updated_at = now() WHERE id = $3 AND workspace_id = $4', ['FAILED', message.slice(0, 2_000), payload.planId, workspaceId]);
         await client.query("UPDATE jobs SET status = $1, error = $2, completed_at = now() WHERE id = $3 AND status <> 'CANCELLED'", ['FAILED', message.slice(0, 2_000), jobId]);
       });
