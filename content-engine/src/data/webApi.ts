@@ -3,7 +3,7 @@ import type { ApiUsageLog, ApiUsageSummary, ModelCatalogItem, ModelConnection, M
 import type { ContentProject, CreativeDelivery, CreativeVisualPlanItem, IntelligenceAnalysis, Platform, ProjectOriginType, ProjectPlanning } from '../domain/content';
 import type { AccountVoiceCalibrationDraft, AccountVoiceInput, AccountVoiceProfile, CreativeDraftCandidate, CreativeDraftPreparation, CreativeDraftRun, CreativeOutlineCandidate, CreativeOutlinePreparation, CreativeOutlineRun, CreativePlatform, CreativeSkillDefinition, ProjectAgentContext, ProjectAgentHistory, ProjectAgentPrepareInput, ProjectAgentPrepareResult, ProjectAgentRun, ProjectArtifact, ProjectInput, ProjectInputPayload, ProjectReference, ProjectReferenceMetadata, ProjectResearchContext, ProjectResearchRun, WritingBrief, WritingBriefInput } from '../domain/creative';
 import type { ChannelAccount, MetricSnapshot, PlatformDraftTask, PublishPackage, PublishedArticle, PublishReadyDraft, Retrospective } from '../domain/publishing';
-import type { WebSession, WorkspaceSession, WorkspaceSummary } from '../domain/workspace';
+import type { ManagedUser, RegistrationInvite, WebSession, WorkspaceSession, WorkspaceSummary } from '../domain/workspace';
 import type { AssetFilters, AssetMetadataInput, AssetUpdateInput, ProjectAsset, ProjectAssetLinkInput, WorkspaceAsset } from '../domain/assets';
 import type { ContentDraft, ContentDraftVersion, DraftAdaptationRun, DraftPatchInput, DraftPreview, DraftPlatform, WechatLayoutDesignResult, WechatLayoutPreview, WechatLayoutRules, WechatLayoutTemplate } from '../domain/content-drafts';
 import type { ContentIngestion, ContentIngestionIntent } from '../domain/content-ingestion';
@@ -79,7 +79,7 @@ export async function retryTransient<T>(requestFn: () => Promise<T>) {
 export const webAuth = {
   session: sessionStore.read,
   clear: sessionStore.clear,
-  async register(input: { email: string; password: string; displayName: string; workspaceName: string }) {
+  async register(input: { email: string; password: string; displayName: string; workspaceName: string; inviteCode: string }) {
     const result = await request<WebSession>('/auth/register', { method: 'POST', body: JSON.stringify(input), authenticated: false, workspaceScoped: false });
     return sessionStore.write(result);
   },
@@ -91,6 +91,21 @@ export const webAuth = {
     const result = await request<WebSession>('/auth/me', { workspaceScoped: false });
     return sessionStore.write(result);
   },
+  async logout() {
+    try { await request<void>('/auth/logout', { method: 'POST', body: '{}' }); } finally { sessionStore.clear(); }
+  },
+  changePassword: (input: { currentPassword: string; newPassword: string }) => request<void>('/auth/password', { method: 'PUT', body: JSON.stringify(input) }),
+};
+
+export const webAdmin = {
+  users: () => request<{ users: ManagedUser[] }>('/admin/users', { workspaceScoped: false }),
+  createUser: (input: { email: string; password: string; displayName: string; workspaceName: string; platformRole: 'SUPER_ADMIN' | 'USER' }) => request<{ user: ManagedUser }>('/admin/users', { method: 'POST', body: JSON.stringify(input), workspaceScoped: false }),
+  updateUser: (userId: string, input: { displayName?: string; status?: 'ACTIVE' | 'DISABLED'; platformRole?: 'SUPER_ADMIN' | 'USER' }) => request<{ user: ManagedUser }>(`/admin/users/${encodeURIComponent(userId)}`, { method: 'PATCH', body: JSON.stringify(input), workspaceScoped: false }),
+  resetPassword: (userId: string, password: string) => request<void>(`/admin/users/${encodeURIComponent(userId)}/password`, { method: 'PUT', body: JSON.stringify({ password }), workspaceScoped: false }),
+  removeUser: (userId: string) => request<void>(`/admin/users/${encodeURIComponent(userId)}`, { method: 'DELETE', workspaceScoped: false }),
+  invites: () => request<{ invites: RegistrationInvite[] }>('/admin/invites', { workspaceScoped: false }),
+  createInvite: (input: { label: string; maxUses: number; expiresAt: string | null }) => request<{ invite: RegistrationInvite; code: string }>('/admin/invites', { method: 'POST', body: JSON.stringify(input), workspaceScoped: false }),
+  updateInvite: (inviteId: string, status: 'ACTIVE' | 'DISABLED') => request<{ invite: RegistrationInvite }>(`/admin/invites/${encodeURIComponent(inviteId)}`, { method: 'PATCH', body: JSON.stringify({ status }), workspaceScoped: false }),
 };
 
 function updateWorkspaceSession(result: WorkspaceSession) {

@@ -73,9 +73,9 @@ test('创建空间在同一事务写入主体、成员、快照、系统模板�
 });
 
 test('注册事务也会为首个工作空间播种系统模板', () => {
-  const source = fs.readFileSync(new URL('../server/index.cjs', import.meta.url), 'utf8');
-  const registration = source.slice(source.indexOf("app.post('/api/v1/auth/register'"), source.indexOf("app.post('/api/v1/auth/login'"));
-  assert.match(registration, /initializeWorkspace\(client, createdWorkspace\.rows\[0\]\.id\)/);
+  const source = fs.readFileSync(new URL('../server/services/platform-auth.cjs', import.meta.url), 'utf8');
+  assert.match(source, /async function createOwnedWorkspace/);
+  assert.match(source, /initializeWorkspace\(client, workspace\.rows\[0\]\.id\)/);
 });
 
 test('选择空间先校验成员关系再保存最后选择', async () => {

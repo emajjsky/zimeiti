@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { ArrowLeft, Bell, BrainCircuit, CalendarDays, ChartColumn, CheckCircle2, ChevronRight, CircleAlert, CircleCheck, Compass, ExternalLink, FilePenLine, FolderOpen, House, KeyRound, LoaderCircle, LogOut, Menu, PenLine, Pencil, Plus, RefreshCw, Search, Send, Settings, Trash2 } from 'lucide-react';
+import { ArrowLeft, Bell, BrainCircuit, CalendarDays, ChartColumn, CheckCircle2, ChevronRight, CircleAlert, CircleCheck, Compass, ExternalLink, FilePenLine, FolderOpen, House, KeyRound, LoaderCircle, LogOut, Menu, PenLine, Pencil, Plus, RefreshCw, Search, Send, Settings, ShieldCheck, Trash2 } from 'lucide-react';
 import { intelligenceKey, loadState, seedState, type FeishuLibraryTemplate, type LocalState, type WorkspaceProfile } from './data/localRepository';
 import { webAgent, webAssets, webAuth, webChannelAccounts, webIntelligence, webModels, webProjects, webPublishing, webSettings, webState, webWorkspaces, type CreateProjectInput, type CredentialStatus, type WebSession } from './data/webApi';
 import { platformName, projectStageName, type ContentProject, type IntelligenceSource, type Platform } from './domain/content';
@@ -29,6 +29,7 @@ const CreateWorkspace = lazy(() => import('./workspaces/create/CreateWorkspace')
 const CreativeProjectCenter = lazy(() => import('./workspaces/create/CreativeProjectCenter').then((module) => ({ default: module.CreativeProjectCenter })));
 const HomeWorkspace = lazy(() => import('./workspaces/HomeWorkspace').then((module) => ({ default: module.HomeWorkspace })));
 const AssetLibrary = lazy(() => import('./workspaces/assets/AssetLibrary').then((module) => ({ default: module.AssetLibrary })));
+const AdminWorkspace = lazy(() => import('./workspaces/admin/AdminWorkspace').then((module) => ({ default: module.AdminWorkspace })));
 
 function displayError(error: unknown, fallback: string) {
   const message = error instanceof Error ? error.message : fallback;
@@ -68,9 +69,18 @@ function App({ session, onSessionChange }: { session: WebSession; onSessionChang
   const [isLoaded, setIsLoaded] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [refreshFeedback, setRefreshFeedback] = useState<{ status: 'idle' | 'running' | 'success' | 'empty' | 'error'; message: string }>({ status: 'idle', message: '' });
-  const logout = () => {
-    webAuth.clear();
+  const [adminOpen, setAdminOpen] = useState(false);
+  const logout = async () => {
+    await webAuth.logout();
     window.location.assign(window.location.pathname);
+  };
+  const changePassword = async () => {
+    const currentPassword = window.prompt('请输入当前密码');
+    if (!currentPassword) return;
+    const newPassword = window.prompt('请输入新密码（至少 8 位）');
+    if (!newPassword) return;
+    try { await webAuth.changePassword({ currentPassword, newPassword }); window.alert('密码已修改，其他设备的登录状态已失效。'); }
+    catch (error) { window.alert(displayError(error, '修改密码失败。')); }
   };
   const [searchPreset, setSearchPreset] = useState<SearchPreset | null>(null);
   const [discoverSection, setDiscoverSection] = useState<DiscoverSection>(initialRoute.discoverSection);
@@ -257,6 +267,7 @@ function App({ session, onSessionChange }: { session: WebSession; onSessionChang
   if (!isLoaded) return <div className="boot-screen"><div className="boot-mark">内容引擎</div><p>正在准备你的编辑部……</p></div>;
   if (loadError) return <div className="boot-screen"><div className="boot-mark">内容引擎</div><p>{loadError}</p><button className="button primary" type="button" onClick={() => void loadWorkspace()}><RefreshCw size={16} />重新加载</button></div>;
   if (!state.workspace.setupCompleted) return <Onboarding initial={state.workspace} onComplete={completeSetup} />;
+  if (adminOpen && session.user.platformRole === 'SUPER_ADMIN') return <Suspense fallback={<div className="web-entry-loading">正在打开管理后台</div>}><AdminWorkspace session={session} onClose={() => setAdminOpen(false)}/></Suspense>;
 
   return <div className="app-shell">
     <header className="topbar">
@@ -264,7 +275,7 @@ function App({ session, onSessionChange }: { session: WebSession; onSessionChang
       <div className="wordmark">百炼<span>公众号</span>百宝箱</div>
       <WorkspaceSwitcher session={session} onSessionChange={onSessionChange} onBeforeSwitch={flushPendingSaves} onManage={() => openSettings('workspace')} />
       <label className="global-search"><Search size={17}/><input placeholder="搜索热点、项目、内容、素材" /></label>
-      <div className="top-actions"><button className="button primary" onClick={requestNewCreation}><Plus size={16}/>新建创作</button><button className="icon-button" aria-label="通知"><Bell size={20}/></button><button className="icon-button" aria-label="同步"><RefreshCw size={20}/></button><button className="icon-button" type="button" aria-label="退出登录" title="退出登录" onClick={logout}><LogOut size={18}/></button><span className="avatar" aria-hidden="true" /></div>
+      <div className="top-actions"><button className="button primary" onClick={requestNewCreation}><Plus size={16}/>新建创作</button>{session.user.platformRole === 'SUPER_ADMIN' && <button className="icon-button" type="button" aria-label="用户管理后台" title="用户管理后台" onClick={() => setAdminOpen(true)}><ShieldCheck size={19}/></button>}<button className="icon-button" type="button" aria-label="修改密码" title="修改密码" onClick={() => void changePassword()}><KeyRound size={18}/></button><button className="icon-button" type="button" aria-label="退出登录" title="退出登录" onClick={() => void logout()}><LogOut size={18}/></button><span className="avatar" aria-hidden="true" /></div>
     </header>
     <aside className={sidebarOpen ? 'sidebar open' : 'sidebar'}>
       <nav className="primary-navigation" aria-label="主导航">{navigationGroups.map((group) => <section className="nav-group" key={group.id}><div className="nav-group-label">{group.label}</div>{group.items.map(({ view: target, label }) => { const Icon = navigationIcons[target]; return <button key={target} className={`nav-item ${view === target ? 'active' : ''}`} aria-current={view === target ? 'page' : undefined} onClick={() => { if (target === 'create') { setSelectedProjectId(''); setCreateStage(null); setSelectedDerivedDraftId(''); } setView(target); setSidebarOpen(false); }}><Icon size={19}/><span>{label}</span></button>; })}</section>)}</nav>
@@ -1403,9 +1414,9 @@ function WorkspaceGate({ session, onSessionChange }: { session: WebSession; onSe
 }
 
 function WebAuthScreen({ onAuthenticated }: { onAuthenticated: (session: WebSession) => void }) {
-  const [mode, setMode] = useState<'login' | 'register'>('login'); const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [displayName, setDisplayName] = useState(''); const [workspaceName, setWorkspaceName] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
-  const submit = async (event: React.FormEvent) => { event.preventDefault(); setBusy(true); setError(''); try { const session = mode === 'login' ? await webAuth.login({ email, password }) : await webAuth.register({ email, password, displayName: displayName || email.split('@')[0] || '创作者', workspaceName: workspaceName || '我的内容工作室' }); onAuthenticated(session); } catch (reason) { setError(displayError(reason, '登录失败。')); } finally { setBusy(false); } };
-  return <main className="web-auth"><section className="web-auth-panel"><div className="eyebrow">CONTENT ENGINE / WEB</div><h1>{mode === 'login' ? '进入内容工作室' : '创建内容工作室'}</h1><form onSubmit={submit}>{mode === 'register' && <><label>你的名称<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoFocus /></label><label>工作室名称<input value={workspaceName} onChange={(event) => setWorkspaceName(event.target.value)} /></label></>}<label>邮箱<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required autoFocus={mode === 'login'} /></label><label>密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={8} required /></label>{error && <p className="form-error">{error}</p>}<button className="button primary wide" disabled={busy} type="submit">{busy ? '处理中' : mode === 'login' ? '登录' : '创建并进入'}</button></form><button className="text-button" type="button" onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(''); }}>{mode === 'login' ? '创建新工作室' : '已有账号，去登录'}</button></section></main>;
+  const [mode, setMode] = useState<'login' | 'register'>('login'); const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [displayName, setDisplayName] = useState(''); const [workspaceName, setWorkspaceName] = useState(''); const [inviteCode, setInviteCode] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
+  const submit = async (event: React.FormEvent) => { event.preventDefault(); setBusy(true); setError(''); try { const session = mode === 'login' ? await webAuth.login({ email, password }) : await webAuth.register({ email, password, displayName: displayName || email.split('@')[0] || '创作者', workspaceName: workspaceName || '我的内容工作室', inviteCode }); onAuthenticated(session); } catch (reason) { setError(displayError(reason, mode === 'login' ? '登录失败。' : '注册失败。')); } finally { setBusy(false); } };
+  return <main className="web-auth"><section className="web-auth-panel"><div className="eyebrow">CONTENT ENGINE / WEB</div><h1>{mode === 'login' ? '进入内容工作室' : '使用邀请码注册'}</h1><form onSubmit={submit}>{mode === 'register' && <><label>邀请码<input value={inviteCode} onChange={(event) => setInviteCode(event.target.value)} required autoFocus /></label><label>你的名称<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} required /></label><label>工作室名称<input value={workspaceName} onChange={(event) => setWorkspaceName(event.target.value)} required /></label></>}<label>邮箱<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required autoFocus={mode === 'login'} /></label><label>密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={8} required /></label>{error && <p className="form-error">{error}</p>}<button className="button primary wide" disabled={busy} type="submit">{busy ? '处理中' : mode === 'login' ? '登录' : '注册并进入'}</button></form><button className="text-button" type="button" onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(''); }}>{mode === 'login' ? '使用邀请码注册' : '已有账号，去登录'}</button></section></main>;
 }
 
 const rootElement = document.getElementById('root')!;

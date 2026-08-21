@@ -22,8 +22,10 @@ const { createCreativeSkillStore } = require('./services/creativeSkills.cjs');
 const { writingBriefInput } = require('./services/writing-brief.cjs');
 const { businessError, errorPayload } = require('./services/business-errors.cjs');
 const { responseStatusCode } = require('./services/http-errors.cjs');
-const { createWorkspaceStore, workspaceView } = require('./services/workspaces.cjs');
+const { createWorkspaceStore } = require('./services/workspaces.cjs');
 const { createWorkspaceAccess } = require('./services/workspace-context.cjs');
+const { createPlatformAuth } = require('./services/platform-auth.cjs');
+const { registerPlatformAuthRoutes } = require('./routes/platform-auth.cjs');
 const { accountVoiceInput, accountVoiceCalibrationInput, createAccountVoiceStore } = require('./services/accountVoices.cjs');
 const { accountVoiceCalibrationDraftInput, buildVoiceCalibrationPrompt, buildVoiceCalibrationRepairPrompt, parseVoiceCalibrationDraft, voiceCalibrationErrorMessage } = require('./services/voiceCalibration.cjs');
 const { createTextModelRunner } = require('./services/text-model.cjs');
@@ -295,14 +297,14 @@ app.setErrorHandler((error, _request, reply) => {
   reply.code(responseStatusCode(error)).send({ error: errorPayload(error) });
 });
 
-async function authenticate(request) { await request.jwtVerify(); }
-
 function defaultState(name) {
   return { workspace: { primaryTopics: [], enabledPlatforms: ['WECHAT', 'XIAOHONGSHU', 'ZHIHU', 'WEIBO', 'VIDEO_CHANNEL'], setupCompleted: false }, feishuTemplate: { name: `${name}内容库`, topicStorage: 'ONE_TABLE', includeSchedule: true, includeReview: false, status: 'DRAFT' }, sources: [], intelligence: [], projects: [] };
 }
 
 const initializeWorkspace = (client, workspaceId) => client.query('SELECT seed_wechat_layout_templates($1)', [workspaceId]);
 const workspaceStore = createWorkspaceStore({ query, transaction, defaultState, initializeWorkspace });
+const platformAuth = createPlatformAuth({ app, query, transaction, hashPassword, verifyPassword, workspaceStore, defaultState, initializeWorkspace });
+const authenticate = platformAuth.authenticate;
 const workspaceAccess = createWorkspaceAccess({ query, authenticate });
 const assetStore = createAssetStore({ query, transaction, removeStoredFile: (storageKey) => removeAssetFile(config.uploadRoot, storageKey) });
 const draftStore = createContentDraftStore({ query, transaction, renderWechatDraft });
@@ -473,42 +475,8 @@ registerWechatLayoutTemplateRoutes(app, {
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, [workspaceId, provider, model, operation, status, durationMs, inputTokens ?? null, outputTokens ?? null, error ?? null]),
 });
 
-const authInput = z.object({ email: z.string().email().max(320), password: z.string().min(8).max(200), displayName: z.string().min(1).max(80).optional(), workspaceName: z.string().min(1).max(80).optional() });
-
 app.get('/health', async () => ({ ok: true, service: 'content-engine-api' }));
-
-app.post('/api/v1/auth/register', async (request, reply) => {
-  const input = authInput.parse(request.body);
-  const email = input.email.trim().toLowerCase();
-  const user = await transaction(async (client) => {
-    const existing = await client.query('SELECT 1 FROM users WHERE email = $1', [email]);
-    if (existing.rowCount) { const error = new Error('该邮箱已注册，请直接登录。'); error.statusCode = 409; throw error; }
-    const createdUser = await client.query('INSERT INTO users (email, password_hash, display_name) VALUES ($1, $2, $3) RETURNING id, email, display_name', [email, hashPassword(input.password), input.displayName?.trim() || email.split('@')[0]]);
-    const createdWorkspace = await client.query('INSERT INTO workspaces (name, owner_id) VALUES ($1, $2) RETURNING id, name, status', [input.workspaceName?.trim() || `${createdUser.rows[0].display_name}的内容工作室`, createdUser.rows[0].id]);
-    await client.query('INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ($1, $2, $3)', [createdWorkspace.rows[0].id, createdUser.rows[0].id, 'OWNER']);
-    await client.query('INSERT INTO workspace_snapshots (workspace_id, state_json) VALUES ($1, $2)', [createdWorkspace.rows[0].id, JSON.stringify(defaultState(createdWorkspace.rows[0].name))]);
-    await initializeWorkspace(client, createdWorkspace.rows[0].id);
-    await client.query('INSERT INTO user_workspace_preferences (user_id, active_workspace_id) VALUES ($1, $2)', [createdUser.rows[0].id, createdWorkspace.rows[0].id]);
-    return { user: createdUser.rows[0], workspace: workspaceView({ ...createdWorkspace.rows[0], role: 'OWNER' }) };
-  });
-  const accessToken = app.jwt.sign({ sub: user.user.id, email: user.user.email });
-  reply.code(201).send({ user: user.user, workspaces: [user.workspace], activeWorkspaceId: user.workspace.id, accessToken });
-});
-
-app.post('/api/v1/auth/login', async (request) => {
-  const input = authInput.pick({ email: true, password: true }).parse(request.body);
-  const result = await query('SELECT id, email, display_name, password_hash FROM users WHERE email = $1', [input.email.trim().toLowerCase()]);
-  if (!result.rowCount || !verifyPassword(input.password, result.rows[0].password_hash)) { const error = new Error('邮箱或密码错误。'); error.statusCode = 401; throw error; }
-  const user = result.rows[0];
-  return { user: { id: user.id, email: user.email, display_name: user.display_name }, ...await workspaceStore.sessionForUser(user.id), accessToken: app.jwt.sign({ sub: user.id, email: user.email }) };
-});
-
-app.get('/api/v1/auth/me', { preHandler: authenticate }, async (request) => {
-  const result = await query('SELECT id, email, display_name FROM users WHERE id = $1', [request.user.sub]);
-  if (!result.rows.length) throw businessError(401, 'AUTH_INVALID', '登录状态已失效，请重新登录。');
-  const user = result.rows[0];
-  return { user, ...await workspaceStore.sessionForUser(user.id), accessToken: app.jwt.sign({ sub: user.id, email: user.email }) };
-});
+registerPlatformAuthRoutes(app, { query, transaction, hashPassword, verifyPassword, platformAuth });
 
 app.get('/api/v1/workspaces', { preHandler: authenticate }, async (request) => workspaceStore.sessionForUser(request.user.sub));
 
