@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { ArrowLeft, Bell, BrainCircuit, CalendarDays, ChartColumn, CheckCircle2, ChevronRight, CircleAlert, CircleCheck, Compass, ExternalLink, FilePenLine, FolderOpen, House, KeyRound, LoaderCircle, Menu, PenLine, Pencil, Plus, RefreshCw, Search, Send, Settings, Trash2 } from 'lucide-react';
+import { ArrowLeft, Bell, BrainCircuit, CalendarDays, ChartColumn, CheckCircle2, ChevronRight, CircleAlert, CircleCheck, Compass, ExternalLink, FilePenLine, FolderOpen, House, KeyRound, LoaderCircle, LogOut, Menu, PenLine, Pencil, Plus, RefreshCw, Search, Send, Settings, Trash2 } from 'lucide-react';
 import { intelligenceKey, loadState, seedState, type FeishuLibraryTemplate, type LocalState, type WorkspaceProfile } from './data/localRepository';
 import { webAgent, webAssets, webAuth, webChannelAccounts, webIntelligence, webModels, webProjects, webPublishing, webSettings, webState, webWorkspaces, type CreateProjectInput, type CredentialStatus, type WebSession } from './data/webApi';
 import { platformName, projectStageName, type ContentProject, type IntelligenceSource, type Platform } from './domain/content';
@@ -68,6 +68,10 @@ function App({ session, onSessionChange }: { session: WebSession; onSessionChang
   const [isLoaded, setIsLoaded] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [refreshFeedback, setRefreshFeedback] = useState<{ status: 'idle' | 'running' | 'success' | 'empty' | 'error'; message: string }>({ status: 'idle', message: '' });
+  const logout = () => {
+    webAuth.clear();
+    window.location.assign(window.location.pathname);
+  };
   const [searchPreset, setSearchPreset] = useState<SearchPreset | null>(null);
   const [discoverSection, setDiscoverSection] = useState<DiscoverSection>(initialRoute.discoverSection);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>(initialRoute.settingsSection);
@@ -260,7 +264,7 @@ function App({ session, onSessionChange }: { session: WebSession; onSessionChang
       <div className="wordmark">百炼<span>公众号</span>百宝箱</div>
       <WorkspaceSwitcher session={session} onSessionChange={onSessionChange} onBeforeSwitch={flushPendingSaves} onManage={() => openSettings('workspace')} />
       <label className="global-search"><Search size={17}/><input placeholder="搜索热点、项目、内容、素材" /></label>
-      <div className="top-actions"><button className="button primary" onClick={requestNewCreation}><Plus size={16}/>新建创作</button><button className="icon-button" aria-label="通知"><Bell size={20}/></button><button className="icon-button" aria-label="同步"><RefreshCw size={20}/></button><span className="avatar" /></div>
+      <div className="top-actions"><button className="button primary" onClick={requestNewCreation}><Plus size={16}/>新建创作</button><button className="icon-button" aria-label="通知"><Bell size={20}/></button><button className="icon-button" aria-label="同步"><RefreshCw size={20}/></button><button className="icon-button" type="button" aria-label="退出登录" title="退出登录" onClick={logout}><LogOut size={18}/></button><span className="avatar" aria-hidden="true" /></div>
     </header>
     <aside className={sidebarOpen ? 'sidebar open' : 'sidebar'}>
       <nav className="primary-navigation" aria-label="主导航">{navigationGroups.map((group) => <section className="nav-group" key={group.id}><div className="nav-group-label">{group.label}</div>{group.items.map(({ view: target, label }) => { const Icon = navigationIcons[target]; return <button key={target} className={`nav-item ${view === target ? 'active' : ''}`} aria-current={view === target ? 'page' : undefined} onClick={() => { if (target === 'create') { setSelectedProjectId(''); setCreateStage(null); setSelectedDerivedDraftId(''); } setView(target); setSidebarOpen(false); }}><Icon size={19}/><span>{label}</span></button>; })}</section>)}</nav>
