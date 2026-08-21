@@ -22,7 +22,7 @@ async function bootstrap() {
     const workspaceName = `${displayName}工作室`;
     const workspace = await client.query('INSERT INTO workspaces (name, owner_id) VALUES ($1, $2) RETURNING id', [workspaceName, user.rows[0].id]);
     await client.query("INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ($1, $2, 'OWNER')", [workspace.rows[0].id, user.rows[0].id]);
-    await client.query('INSERT INTO workspace_snapshots (workspace_id, state_json) VALUES ($1, $2)', [workspace.rows[0].id, JSON.stringify({ workspace: { primaryTopics: [], enabledPlatforms: ['WECHAT'], setupCompleted: false }, feishuTemplate: { name: `${workspaceName}内容库`, topicStorage: 'ONE_TABLE', includeSchedule: true, includeReview: false, status: 'DRAFT' }, sources: [], intelligence: [], projects: [] })]);
+    await client.query('INSERT INTO workspace_snapshots (workspace_id, state_json) VALUES ($1, $2)', [workspace.rows[0].id, JSON.stringify({ workspace: { primaryTopics: [], enabledPlatforms: ['WECHAT'], setupCompleted: true }, feishuTemplate: { name: `${workspaceName}内容库`, topicStorage: 'ONE_TABLE', includeSchedule: true, includeReview: false, status: 'DRAFT' }, sources: [], intelligence: [], projects: [] })]);
     await client.query('SELECT seed_wechat_layout_templates($1)', [workspace.rows[0].id]);
     await client.query('INSERT INTO user_workspace_preferences (user_id, active_workspace_id) VALUES ($1, $2)', [user.rows[0].id, workspace.rows[0].id]);
     return { id: user.rows[0].id, created: true };
@@ -31,4 +31,3 @@ async function bootstrap() {
 }
 
 bootstrap().finally(close).catch((error) => { console.error(error); process.exitCode = 1; });
-
