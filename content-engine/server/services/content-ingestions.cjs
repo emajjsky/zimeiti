@@ -102,8 +102,22 @@ function normalizedArticleDocument(page, sourceType) {
   const plainText = String(page.text ?? '').trim();
   if (!plainText) throw businessError(422, 'INGESTION_EMPTY_CONTENT', '没有读取到可用于创作的正文内容。');
   const sourceMedia = Array.isArray(page.media) ? page.media : [];
-  const media = sourceMedia.map((item) => ({ ...item, id: randomUUID() }));
-  const mediaIds = new Map(sourceMedia.map((item, index) => [item.id, media[index].id]));
+  const media = [];
+  const mediaIds = new Map();
+  const mediaBySourceUrl = new Map();
+  for (const item of sourceMedia) {
+    const sourceUrl = String(item?.sourceUrl ?? '').trim();
+    if (!sourceUrl) continue;
+    const existingId = mediaBySourceUrl.get(sourceUrl);
+    if (existingId) {
+      mediaIds.set(item.id, existingId);
+      continue;
+    }
+    const id = randomUUID();
+    mediaBySourceUrl.set(sourceUrl, id);
+    mediaIds.set(item.id, id);
+    media.push({ ...item, id, sourceUrl });
+  }
   const blocks = (Array.isArray(page.blocks) && page.blocks.length ? page.blocks : splitTextBlocks(plainText)).map((block) => block.mediaCandidateId ? { ...block, mediaCandidateId: mediaIds.get(block.mediaCandidateId) } : block);
   const document = { schemaVersion: 1, title: readableContentTitle(page.title, blocks.find((block) => block.text)?.text || plainText), author: page.author || undefined, publishedAt: page.publishedAt || null, canonicalUrl: page.url || null, language: 'unknown', blocks, plainText, mediaCandidateIds: media.map((item) => item.id), extraction: { adapter: `${sourceType}_ARTICLE`, adapterVersion: '2.0.0', fetchedAt: new Date().toISOString(), contentHash: hashText(plainText), completeness: 'FULL', warnings: [] } };
   return { document, media };

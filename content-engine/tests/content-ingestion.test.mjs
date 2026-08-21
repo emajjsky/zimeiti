@@ -157,6 +157,22 @@ test('公开网页保留标题层级、引用、列表和正文图片候选', ()
   assert.equal(normalized.document.mediaCandidateIds[0], normalized.media[0].id);
 });
 
+test('normalizes duplicate media URLs to one record and preserves block references', () => {
+  const duplicateMedia = [
+    { id: 'media-1', mediaType: 'IMAGE', sourceUrl: 'https://example.com/image.jpg', resolvedUrl: 'https://example.com/image.jpg', classification: 'CONTENT' },
+    { id: 'media-2', mediaType: 'IMAGE', sourceUrl: 'https://example.com/image.jpg', resolvedUrl: 'https://example.com/image.jpg', classification: 'CONTENT' },
+  ];
+  const normalized = normalizedArticleDocument({
+    title: 'Duplicate media',
+    text: 'Body',
+    url: 'https://example.com/article',
+    media: duplicateMedia,
+    blocks: duplicateMedia.map((item, index) => ({ id: `image-${index + 1}`, type: 'image', mediaCandidateId: item.id, sourcePosition: index })),
+  }, 'GENERIC_WEB');
+  assert.equal(normalized.media.length, 1);
+  assert.deepEqual(normalized.document.blocks.map((block) => block.mediaCandidateId), [normalized.media[0].id, normalized.media[0].id]);
+});
+
 test('公开网页把正文视频作为内容理解媒体，而不是丢弃', () => {
   const pageUrl = new URL('https://example.com/article');
   const extracted = publicWeb.extractPublicArticleContent(pageUrl, '<main><p>正文内容足够用于解析。</p><video controls src="/media/demo.mp4"></video></main>');
